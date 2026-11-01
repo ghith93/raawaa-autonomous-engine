@@ -30,7 +30,8 @@ class ProviderProfileConfigTests(unittest.TestCase):
         self.assertEqual(entry.profile.input_cost_per_million_usd, 0.0)
         self.assertEqual(entry.profile.input_cost_per_million_usd, 0.0)
         self.assertEqual(entry.profile.output_cost_per_million_usd, 0.0)
-        self.assertFalse(entry.profile.commercial_use_allowed)
+        self.assertTrue(entry.profile.commercial_use_allowed)
+        self.assertFalse(entry.profile.production_use_allowed)
 
     def test_registry_rejects_enabled_mode_or_route(self):
         data = json.loads(self.source.read_text(encoding="utf-8"))
