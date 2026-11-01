@@ -44,7 +44,9 @@ class CliTests(unittest.TestCase):
         self.assertEqual(profile["api_key_env_configured_by_name_only"], "GROQ_API_KEY")
         self.assertFalse(profile["enabled"])
         self.assertFalse(profile["ready_for_routing"])
-        self.assertFalse(profile["commercial_use_allowed"])
+        self.assertTrue(profile["commercial_use_allowed"])
+        self.assertEqual(profile["model_stage"], "preview")
+        self.assertFalse(profile["production_use_allowed"])
         self.assertNotIn("gsk_", output.getvalue())
 
 
