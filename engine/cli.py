@@ -7,7 +7,7 @@ from pathlib import Path
 from engine.task_store import TaskStore
 from engine.memory import MemoryStore
 from engine.model_gateway import ModelGateway, UsageLedger
-from engine.worker import run_once
+from engine.worker import run_once\nfrom engine.batch_runner import run_batch
 from engine.free_provider_discovery import discover, discover_all, DiscoveryError
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -76,7 +76,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     listing = sub.add_parser("list")
     listing.add_argument("--limit", type=int, default=50)
-    sub.add_parser("run-once")
+    sub.add_parser("run-once")\n\n    batch = sub.add_parser("run-batch", help="Run a bounded batch of dry-run tasks")\n    batch.add_argument("--max-tasks", type=int, default=5)\n    batch.add_argument("--max-seconds", type=int, default=60)
 
     log = sub.add_parser("audit-log")
     log.add_argument("--limit", type=int, default=100)
