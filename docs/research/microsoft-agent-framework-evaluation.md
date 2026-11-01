@@ -1,4 +1,4 @@
-# Microsoft Agent Framework — isolated evaluation (2026-11-01)
+# Microsoft Agent Framework — isolated evaluation (2026-11-02)
 
 ## Candidate
 
@@ -29,16 +29,39 @@ The CI evaluation installs only pinned core/OpenAI packages and runs a determini
 
 ## Observed result
 
-The isolated evaluation passed on the exact PR head (GitHub Actions run 41352457283):
-
+The isolated evaluation passed on exact PR head [run 41352457283](https://github.com/ghith93/raawaa-autonomous-engine/actions/runs/41352457283):
 - Two research branches executed in parallel and fed a reviewer step.
 - Checkpoint replay returned the same output without re-running any completed step.
-- The OpenAI Chat Completions client exposes the `base_url` parameter needed to target Groq-compatible endpoints.
+- The OpenAI Chat Completions client exposes the base_url parameter needed to target Groq-compatible endpoints.
 - Provider requests sent: 0. Paid services used: 0.
 
-## Decision
+## Checkpoint persistence boundary prototype
 
-Do not replace the current runtime or add these dependencies to the default engine requirements yet. The experiment is isolated and optional. The two missing production adapters are material: D1-backed checkpoint storage and a QuotaAwareLiveGateway-compatible client adapter. Only after both work under the existing policy/data gates should we consider integrating the framework as an orchestration layer.
+The isolated experiment adds `experiments/microsoft_agent_framework/checkpoint_envelope.py` and unit tests.
+
+The prototype defines a deterministic JSON transport envelope with:
+- Explicit schema version, workflow/checkpoint identifiers, parent lineage, and sequence metadata.
+- A 256 KiB encoded-envelope limit, maximum JSON nesting depth of 64, and maximum 20,000 payload values.
+- Canonical UTF-8 JSON encoding, duplicate-key rejection, and finite-number validation.
+- SHA-256 checksum verification to detect accidental corruption or an un-recomputed payload change.
+
+**Security limitation:** SHA-256 here is an unkeyed checksum, not authentication. Anyone able to rewrite the stored payload can also recompute the checksum. It does not prevent a malicious storage writer from forging a checkpoint. A production adapter must add authenticated integrity (for example, a keyed MAC with separately managed secret material or a trusted authenticated storage boundary), plus authorization and lineage checks.
+
+**Serialization limitation:** this is not a Microsoft Agent Framework serializer and does not prove that nested executor state can be represented as JSON. The framework's supported checkpoint encoder/decoder must produce and consume a JSON-safe payload before this envelope can be used. Do not serialize framework objects with raw pickle, and do not deserialize untrusted pickle content.
+
+The prototype is not connected to D1, does not create a migration, does not call the Worker, and does not perform a production write. It is a contract test only. D1 storage still requires authenticated bounded CRUD, per-workflow lineage/order enforcement, tamper rejection, restart/resume tests, retention/cleanup policy, and explicit production approval.
+
+## Next evaluation gates
+
+1. Verify the framework-supported checkpoint encoding API against the pinned package versions; do not infer compatibility from WorkflowCheckpoint.to_dict() alone.
+2. Build a fake/in-memory adapter against the exact framework CheckpointStorage protocol and run save/load/latest/list/delete/restart tests.
+3. Prove malformed, oversized, tampered, cross-workflow, stale-sequence, and replayed records are rejected, including authenticated integrity.
+4. Verify every agent/provider execution path reuses engine.operating_policy.load_operating_policy() and the existing quota/data-classification gateway.
+5. Only then design a D1 adapter. Any migration/deployment remains behind the existing production approval gate.
+
+## Decision and safety
+
+Do not replace the current runtime or add these dependencies to default engine requirements yet. The experiment remains isolated and optional. The evaluation sends zero provider requests, uses zero paid services, requires no credentials, and does not change production data or deployment state.
 
 ## References
 
