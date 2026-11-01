@@ -57,3 +57,10 @@ With both values present, `enqueue`, `list`, `run-once`, and `run-batch` use the
 The Worker runs a bounded stale-lease recovery pass every 15 minutes using a Cloudflare Cron Trigger. Each invocation inspects at most 100 expired leases and requeues only tasks that have attempts remaining; exhausted tasks become failed. This is maintenance, not an AI agent loop: it does not execute task handlers, call models, or perform external writes.
 
 The schedule is designed for the Cloudflare Workers Free limits published at implementation time: up to five Cron Triggers per account and 10 ms CPU per Cron invocation. See [Workers limits](https://developers.cloudflare.com/workers/platform/limits/) and [Cron Triggers](https://developers.cloudflare.com/workers/configuration/cron-triggers/). Cloudflare documents that trigger changes can take up to 15 minutes to propagate.
+
+
+## Scheduled Python task consumer
+
+GitHub Actions invokes the Python runner every 15 minutes and can also be started manually from the Actions tab. It uses the repository Actions secret `ENGINE_API_TOKEN`, the deployed Worker URL, and a strict batch limit of five tasks / 60 seconds. No additional secret is required if the existing `ENGINE_API_TOKEN` Actions secret remains configured.
+
+The runner currently supports only the safe dry-run handlers listed in `engine/worker.py`. Unsupported task types are marked blocked. It does not call Gemini, Groq, OpenRouter, or other model providers, and it cannot perform external writes. Scheduled GitHub Actions jobs may be delayed; this is periodic batch processing, not real-time or always-on execution.
