@@ -93,7 +93,11 @@ class WorkerExecutionTests(unittest.TestCase):
         gateway.generate.assert_not_called()
         saved = self.store.list_tasks(1)[0]
         self.assertEqual(saved["status"], "succeeded")
-        self.assertEqual(json.loads(saved["result_json"])["provider_calls"], 0)
+        stored = json.loads(saved["result_json"])
+        self.assertEqual(stored["provider_calls"], 0)
+        self.assertIn("operating_policy", stored)
+        self.assertIn("docs/master-autonomous-execution-directive.ar.md", stored["operating_policy"]["documents"])
+        self.assertEqual(len(stored["operating_policy"]["sha256"]), 5)
 
     def test_live_path_reserves_quota_and_persists_result_under_lease(self):
         adapter = FakeAdapter()
@@ -115,6 +119,8 @@ class WorkerExecutionTests(unittest.TestCase):
         stored = json.loads(saved["result_json"])
         self.assertEqual(stored["output"], "A bounded specialist result.")
         self.assertEqual(stored["external_writes"], 0)
+        self.assertIn("operating_policy", stored)
+        self.assertIn("docs/operations.md", stored["operating_policy"]["sha256"])
 
     def test_live_path_blocks_unclassified_payload_before_provider_call(self):
         root = Path(self.temp.name)

@@ -136,6 +136,10 @@ def run_once(store: TaskStore, live_gateway=None, environ=None) -> dict | None:
             # Default path is deterministic, zero-network dry run.
             result = contract
 
+        result["operating_policy"] = {
+            "documents": operating_policy["documents_loaded"],
+            "sha256": operating_policy["fingerprints"],
+        }
         heartbeat.stop()
         heartbeat.check()
         store.finish(task["id"], "succeeded", result=result, lease_token=task["lease_token"])
