@@ -12,7 +12,8 @@ from engine.worker import run_once
 from engine.batch_runner import run_batch
 from engine.free_provider_discovery import discover, discover_all, DiscoveryError
 from engine.quota_config import load_provider_profile_registry
-from engine.quota_manager import QuotaLedger, QuotaManager
+from engine.quota_ledger_factory import build_quota_ledger
+from engine.quota_manager import QuotaManager
 from engine.live_runtime import build_live_gateway
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -234,7 +235,7 @@ def main() -> int:
         print(json.dumps({"archived": memory_store().archive(args.id)}))
     elif args.command == "quota-status":
         entries = load_provider_profile_registry(ROOT / "config" / "provider_profiles.json")
-        manager = QuotaManager([entry.profile for entry in entries], QuotaLedger(db_path()))
+        manager = QuotaManager([entry.profile for entry in entries], build_quota_ledger(db_path(), os.environ))
         snapshot = manager.snapshot()
         print(json.dumps({
             "network_calls_performed": 0,
