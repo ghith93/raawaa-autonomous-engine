@@ -67,8 +67,15 @@ class ModelGateway:
         adapter=self.adapters.get(model.provider)
         if adapter is None: raise ProviderUnavailable(f"No adapter registered for provider: {model.provider}")
         usage=self.ledger.totals()
-        if usage["daily_usd"] >= self.daily_budget_usd or usage["monthly_usd"] >= self.monthly_budget_usd:
-            raise BudgetExceeded("Configured model budget is exhausted.")
+        estimated_tokens = max(1, len(request.prompt.split())) + request.max_output_tokens
+        estimated_cost = (estimated_tokens / 1000.0) * model.estimated_cost_per_1k_tokens_usd
+        if estimated_cost > 0 and (
+            estimated_cost > self.daily_budget_usd - usage["daily_usd"]
+            or estimated_cost > self.monthly_budget_usd - usage["monthly_usd"]
+        ):
+            raise BudgetExceeded("Estimated request cost exceeds the remaining budget.")
+        if estimated_cost > 0 and not self.allow_paid_calls:
+            raise BudgetExceeded("Paid model calls are disabled.")
         response=adapter.generate(model.model,request)
         if response.cost_usd > self.daily_budget_usd-usage["daily_usd"] or response.cost_usd > self.monthly_budget_usd-usage["monthly_usd"]:
             raise BudgetExceeded("Response cost exceeds remaining budget; usage was not recorded.")
