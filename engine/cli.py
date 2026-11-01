@@ -12,6 +12,7 @@ from engine.worker import run_once
 from engine.batch_runner import run_batch
 from engine.free_provider_discovery import discover, discover_all, DiscoveryError
 from engine.quota_config import load_provider_profile_registry
+from engine.quota_manager import QuotaLedger, QuotaManager
 from engine.live_runtime import build_live_gateway
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -76,6 +77,42 @@ def audit() -> int:
     return 0
 
 
+
+def quota_alerts(snapshot: list[dict], threshold: float = 0.8) -> list[dict]:
+    """Return local threshold alerts for configured request/token windows."""
+    alerts = []
+    windows = (
+        ("minute", "minute_requests_used", "minute_request_limit", "requests"),
+        ("minute", "minute_tokens_used", "minute_token_limit", "tokens"),
+        ("daily", "daily_requests_used", "daily_request_limit", "requests"),
+        ("daily", "daily_tokens_used", "daily_token_limit", "tokens"),
+        ("monthly", "monthly_requests_used", "monthly_request_limit", "requests"),
+        ("monthly", "monthly_tokens_used", "monthly_token_limit", "tokens"),
+    )
+    for route in snapshot:
+        for window, used_key, limit_key, unit in windows:
+            used, limit = route.get(used_key), route.get(limit_key)
+            if (type(used) is not int or type(limit) is not int or limit < 1
+                    or used < 0):
+                continue
+            ratio = used / limit
+            if ratio >= 1:
+                level = "critical"
+            elif ratio >= threshold:
+                level = "warning"
+            else:
+                continue
+            alerts.append({
+                "route_id": route["route_id"],
+                "window": window,
+                "unit": unit,
+                "used": used,
+                "limit": limit,
+                "level": level,
+            })
+    return alerts
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Raawaa Autonomous Engine")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -126,7 +163,8 @@ def build_parser() -> argparse.ArgumentParser:
     archive.add_argument("--id", required=True)
 
     sub.add_parser("model-status")
-    sub.add_parser("provider-profile-status", help="Inspect staged provider quota profiles; never enables inference")
+    sub.add_parser("provider-profile-status", help="Inspect provider profiles; never enables inference")
+    sub.add_parser("quota-status", help="Inspect local provider quota usage and threshold alerts; no network calls")
     return parser
 
 
@@ -194,6 +232,17 @@ def main() -> int:
         print(json.dumps(memory_store().list_recent(args.limit), indent=2, ensure_ascii=False))
     elif args.command == "memory-archive":
         print(json.dumps({"archived": memory_store().archive(args.id)}))
+    elif args.command == "quota-status":
+        entries = load_provider_profile_registry(ROOT / "config" / "provider_profiles.json")
+        manager = QuotaManager([entry.profile for entry in entries], QuotaLedger(db_path()))
+        snapshot = manager.snapshot()
+        print(json.dumps({
+            "network_calls_performed": 0,
+            "route_count": len(snapshot),
+            "eligible_routes": sum(bool(route["eligible"]) for route in snapshot),
+            "alerts": quota_alerts(snapshot),
+            "routes": snapshot,
+        }, indent=2))
     elif args.command == "provider-profile-status":
         entries = load_provider_profile_registry(ROOT / "config" / "provider_profiles.json")
         result = [{
