@@ -108,6 +108,7 @@ class QuotaLedger:
             if "task_id" not in columns:
                 db.execute("ALTER TABLE quota_usage ADD COLUMN task_id TEXT")
             db.execute("CREATE INDEX IF NOT EXISTS idx_quota_usage_task ON quota_usage(task_id, occurred_at)")
+            db.execute("CREATE INDEX IF NOT EXISTS idx_quota_usage_route_time ON quota_usage(route_id, occurred_at)")
 
     def _connect(self):
         db = sqlite3.connect(self.db_path, timeout=10)
@@ -409,12 +410,13 @@ class QuotaManager:
         for profile in self.profiles:
             usage = self.ledger.usage_today(profile.route_id, now)
             monthly = self.ledger.usage_month(profile.route_id, now)
+            minute = self.ledger.usage_minute(profile.route_id, now)
             rows.append({
                 "route_id": profile.route_id,
                 "free_verified": profile.free_verified,
                 "commercial_use_allowed": profile.commercial_use_allowed,
-                "minute_requests_used": self.ledger.usage_minute(profile.route_id, now)["requests"],
-                "minute_tokens_used": self.ledger.usage_minute(profile.route_id, now)["tokens"],
+                "minute_requests_used": minute["requests"],
+                "minute_tokens_used": minute["tokens"],
                 "minute_request_limit": profile.minute_request_limit,
                 "minute_token_limit": profile.minute_token_limit,
                 "daily_requests_used": usage["requests"],
