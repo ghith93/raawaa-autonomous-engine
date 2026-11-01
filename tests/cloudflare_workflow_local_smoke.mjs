@@ -40,7 +40,7 @@ async function waitForStatus(id, predicate, timeoutMs = 20_000) {
 }
 
 const child = spawn("npx", [
-  "--yes", "wrangler@4.79.0", "dev",
+  "--yes", "wrangler@4.156.0", "dev",
   "--config", CONFIG,
   "--ip", "127.0.0.1",
   "--port", String(PORT),
