@@ -82,8 +82,9 @@ async function listResearchCandidates(url, env) {
   const status = url.searchParams.get("status") || "all";
   const allowed = ["all", "unreviewed", "accepted", "rejected", "deferred"];
   const metadataFlag = url.searchParams.get("include_metadata") || "false";
-  if (!Number.isInteger(rawLimit) || rawLimit < 1 || rawLimit > 100 || !allowed.includes(status) || !["true", "false"].includes(metadataFlag)) return json({ error: "invalid_query" }, 400);
-  const columns = metadataFlag === "true"
+  const keysOnlyFlag = url.searchParams.get("keys_only") || "false";
+  if (!Number.isInteger(rawLimit) || rawLimit < 1 || rawLimit > 100 || !allowed.includes(status) || !["true", "false"].includes(metadataFlag) || !["true", "false"].includes(keysOnlyFlag) || (metadataFlag === "true" && keysOnlyFlag === "true")) return json({ error: "invalid_query" }, 400);
+  const columns = keysOnlyFlag === "true" ? "source_key" : metadataFlag === "true"
     ? "source_key,source,title,url,metadata_json,review_status,review_note,first_seen_at,last_seen_at,reviewed_at,discovery_count,updated_at"
     : "source_key,source,title,url,review_status,review_note,first_seen_at,last_seen_at,reviewed_at,discovery_count,updated_at";
   try {
