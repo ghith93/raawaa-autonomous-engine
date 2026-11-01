@@ -27,7 +27,9 @@ class QuotaManagerTests(unittest.TestCase):
                       quota_source_url="https://console.groq.com/docs/rate-limits",
                       terms_source_url="https://groq.com/terms",
                       verified_at=datetime(2026, 11, 1, 0, tzinfo=timezone.utc),
-                      max_output_tokens=512)
+                      max_output_tokens=512,
+                      input_cost_per_million_usd=0.0,
+                      output_cost_per_million_usd=0.0)
         values.update(changes)
         return QuotaProfile(**values)
 
@@ -39,6 +41,22 @@ class QuotaManagerTests(unittest.TestCase):
         unknown = self.profile(monthly_token_limit=None)
         unverified = self.profile(account="other", free_verified=False)
         self.assertIsNone(QuotaManager([unknown, unverified], self.ledger).select(10, self.now))
+
+    def test_unknown_or_nonzero_prices_are_rejected_before_selection(self):
+        profiles = [
+            self.profile(input_cost_per_million_usd=None),
+            self.profile(output_cost_per_million_usd=None),
+            self.profile(input_cost_per_million_usd=0.01),
+            self.profile(output_cost_per_million_usd=0.01),
+            self.profile(input_cost_per_million_usd=float("nan")),
+        ]
+        manager = QuotaManager(profiles, self.ledger)
+        for route in manager.profiles:
+            with self.subTest(route=route.route_id, prices=(
+                route.input_cost_per_million_usd, route.output_cost_per_million_usd
+            )):
+                self.assertFalse(manager.eligible(route, 1, self.now))
+        self.assertIsNone(manager.select(1, self.now))
 
     def test_commercial_restriction_blocks_route(self):
         route = self.profile(commercial_use_allowed=False)
