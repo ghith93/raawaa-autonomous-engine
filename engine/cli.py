@@ -8,6 +8,7 @@ from engine.task_store import TaskStore
 from engine.memory import MemoryStore
 from engine.model_gateway import ModelGateway, UsageLedger
 from engine.worker import run_once
+from engine.batch_runner import run_batch
 from engine.free_provider_discovery import discover, discover_all, DiscoveryError
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -78,6 +79,10 @@ def build_parser() -> argparse.ArgumentParser:
     listing.add_argument("--limit", type=int, default=50)
     sub.add_parser("run-once")
 
+    batch = sub.add_parser("run-batch", help="Run a bounded batch of dry-run tasks")
+    batch.add_argument("--max-tasks", type=int, default=5)
+    batch.add_argument("--max-seconds", type=int, default=60)
+
     log = sub.add_parser("audit-log")
     log.add_argument("--limit", type=int, default=100)
 
@@ -138,6 +143,9 @@ def main() -> int:
         print(json.dumps(store().list_tasks(args.limit), indent=2, ensure_ascii=False))
     elif args.command == "run-once":
         print(json.dumps(run_once(store()), indent=2, ensure_ascii=False))
+    elif args.command == "run-batch":
+        print(json.dumps(run_batch(store(), args.max_tasks, args.max_seconds),
+                         indent=2, ensure_ascii=False))
     elif args.command == "audit-log":
         print(json.dumps(store().audit_events(args.limit), indent=2, ensure_ascii=False))
     elif args.command == "memory-add":
