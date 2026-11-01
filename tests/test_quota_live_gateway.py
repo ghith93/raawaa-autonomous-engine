@@ -54,6 +54,7 @@ class QuotaAwareGatewayTests(unittest.TestCase):
         endpoint, pricing, quota, terms = hosts.get(provider, hosts["groq"])
         values = dict(provider=provider, account=account, model="model-x",
                       free_verified=True, commercial_use_allowed=True,
+                      minute_request_limit=30, minute_token_limit=8000,
                       daily_request_limit=10, daily_token_limit=1000,
                       monthly_request_limit=100, monthly_token_limit=10000,
                       per_task_request_limit=5, per_task_token_limit=5000, priority=10,
@@ -354,6 +355,32 @@ class QuotaAwareGatewayTests(unittest.TestCase):
         self.assertEqual(event["details"], {"reason": "safe"})
         self.assertNotIn("private prompt", str(event))
         self.assertNotIn("private output", str(event))
+
+
+    def test_minute_quota_blocks_provider_before_network_call(self):
+        adapter = FakeAdapter("groq")
+        profile = self.profile(minute_request_limit=1, minute_token_limit=8000)
+        self.quota.record(profile.route_id, 1)
+        manager = QuotaManager([profile], self.quota)
+        gateway = QuotaAwareLiveGateway(
+            manager, {"groq": adapter}, self.usage, True,
+            environ={"RAAWAA_ENGINE_LIVE_INFERENCE": "enabled"},
+        )
+        with self.assertRaises(ProviderUnavailable):
+            gateway.generate(self.request)
+        self.assertEqual(adapter.calls, 0)
+
+    def test_minute_token_quota_blocks_oversized_estimate_before_network_call(self):
+        adapter = FakeAdapter("groq")
+        profile = self.profile(minute_request_limit=30, minute_token_limit=10)
+        manager = QuotaManager([profile], self.quota)
+        gateway = QuotaAwareLiveGateway(
+            manager, {"groq": adapter}, self.usage, True,
+            environ={"RAAWAA_ENGINE_LIVE_INFERENCE": "enabled"},
+        )
+        with self.assertRaises(ProviderUnavailable):
+            gateway.generate(self.request)
+        self.assertEqual(adapter.calls, 0)
 
     def test_no_paid_or_unknown_quota_fallback(self):
         adapter = FakeAdapter("groq")

@@ -84,6 +84,8 @@ class QuotaAwareLiveGateway:
                     task_id=request.task_id,
                     per_task_request_limit=profile.per_task_request_limit,
                     per_task_token_limit=profile.per_task_token_limit,
+                    minute_request_limit=profile.minute_request_limit,
+                    minute_token_limit=profile.minute_token_limit,
                 )
             except RuntimeError:
                 # Another worker may have reserved the remaining capacity.

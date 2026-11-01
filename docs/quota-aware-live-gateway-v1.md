@@ -4,8 +4,8 @@ This phase connects the provider adapters to the quota ledger through an explici
 
 ## Enforcement
 - Network execution is disabled unless the caller explicitly sets `network_calls_enabled=True`.
-- Only quota profiles with verified free eligibility, explicit commercial-use permission, and known daily request/token limits are eligible.
-- The gateway atomically reserves one request and estimated tokens before network I/O. It settles the reservation to actual provider-reported token usage afterward.
+- Only quota profiles with verified free eligibility, explicit commercial-use permission, and known rolling-minute, daily, monthly, and per-task request/token limits are eligible.
+- The gateway atomically reserves one request and estimated tokens across rolling 60-second, daily, monthly, and per-task windows before network I/O. It settles the reservation to actual provider-reported token usage afterward.
 - HTTP 429 responses place that exact provider/account/model route into cooldown; the gateway can continue to another independently configured eligible provider.
 - Unknown quotas, unverified free claims, and commercial-use restrictions fail closed.
 - There is no paid fallback, automatic billing, account pooling, or retry loop.
@@ -28,3 +28,8 @@ Live adapters are not wired into the CLI, worker, or scheduled workflows. This l
 ## Provider response validation
 
 The gateway verifies that the returned provider and model match the reserved route, response text is a string, token counts are non-negative integers, and reported cost is finite and non-negative. Invalid adapter responses stop route rotation and are not recorded as successful usage. The quota reservation is settled to zero tokens while the request itself remains counted.
+
+
+## Rolling-minute enforcement
+
+Each profile must provide positive integer `minute_request_limit` and `minute_token_limit` values verified from the exact account/model quota. The ledger checks the preceding 60 seconds and reserves minute capacity in the same SQLite immediate transaction as daily, monthly, and task capacity. Unsettled reservations count against all windows. This is a rolling 60-second window, not a calendar-minute counter. Missing, boolean, zero, negative, or non-integer limits fail closed.
