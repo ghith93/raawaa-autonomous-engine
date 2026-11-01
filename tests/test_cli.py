@@ -38,8 +38,8 @@ class CliTests(unittest.TestCase):
                 self.assertEqual(cli.main(), 0)
         result = json.loads(output.getvalue())
         self.assertFalse(result["network_calls_enabled"])
-        self.assertEqual(len(result["profiles"]), 1)
-        profile = result["profiles"][0]
+        self.assertEqual(len(result["profiles"]), 3)
+        profile = next(item for item in result["profiles"] if item["model"] == "openai/gpt-oss-20b")
         self.assertEqual(profile["model"], "qwen/qwen3.8-27b")
         self.assertEqual(profile["api_key_env_configured_by_name_only"], "GROQ_API_KEY")
         self.assertFalse(profile["enabled"])
