@@ -12,6 +12,8 @@ class QuotaAwareLiveGateway:
 
     def __init__(self, quota_manager: QuotaManager, adapters: dict, usage_ledger: UsageLedger,
                  network_calls_enabled: bool = False, cooldown_seconds: int = 900):
+        if cooldown_seconds < 1:
+            raise ValueError("cooldown_seconds must be positive")
         self.quota_manager = quota_manager
         self.adapters = adapters
         self.usage_ledger = usage_ledger
@@ -23,11 +25,19 @@ class QuotaAwareLiveGateway:
             raise ProviderUnavailable("Live network execution is disabled by policy.")
         if not request.prompt.strip():
             raise ValueError("prompt is required")
-        estimated_tokens = max(1, len(request.prompt.split())) + request.max_output_tokens
+        if not 1 <= request.max_output_tokens <= 4096:
+            raise ValueError("max_output_tokens must be between 1 and 4096")
 
-        # Try eligible profiles in priority order. Reservation is atomic across workers.
-        candidates = sorted(self.quota_manager.profiles,
-                            key=lambda p: (p.priority, p.provider, p.account, p.model))
+        # Character-based estimate is more conservative than whitespace word count.
+        estimated_input_tokens = max(1, (len(request.prompt) + 2) // 3)
+        estimated_tokens = estimated_input_tokens + request.max_output_tokens
+
+        candidates = sorted(
+            self.quota_manager.profiles,
+            key=lambda profile: (
+                profile.priority, profile.provider, profile.account, profile.model
+            ),
+        )
         last_error = None
         for profile in candidates:
             if not self.quota_manager.eligible(profile, estimated_tokens):
@@ -37,30 +47,49 @@ class QuotaAwareLiveGateway:
                 continue
             try:
                 reservation_id = self.quota_manager.ledger.reserve(
-                    profile.route_id, estimated_tokens,
-                    profile.daily_request_limit, profile.daily_token_limit
+                    profile.route_id,
+                    estimated_tokens,
+                    profile.daily_request_limit,
+                    profile.daily_token_limit,
                 )
             except RuntimeError:
+                # Another worker may have reserved the remaining capacity.
                 continue
+
             try:
                 response = adapter.generate(profile.model, request)
             except LiveAdapterError as exc:
                 last_error = exc
+                self.quota_manager.ledger.settle(reservation_id, 0)
                 if exc.status_code == 429:
                     self.quota_manager.ledger.cool_down(
                         profile.route_id, self.cooldown_seconds, "http_429"
                     )
-                # Failed requests consume the reserved request; release estimated tokens.
-                self.quota_manager.ledger.settle(reservation_id, 0)
+                # Only known provider errors are eligible for route rotation.
                 continue
+            except Exception as exc:
+                # Do not silently rotate after an unknown adapter/programming error.
+                self.quota_manager.ledger.settle(reservation_id, 0)
+                raise ProviderUnavailable(
+                    "Live adapter failed unexpectedly; route rotation was stopped."
+                ) from exc
+
             actual_tokens = max(0, response.input_tokens) + max(0, response.output_tokens)
             self.quota_manager.ledger.settle(reservation_id, actual_tokens)
-            self.usage_ledger.record(response.provider, response.model, request.task_kind,
-                                     response.input_tokens, response.output_tokens, 0.0)
+            self.usage_ledger.record(
+                response.provider,
+                response.model,
+                request.task_kind,
+                response.input_tokens,
+                response.output_tokens,
+                response.cost_usd,
+            )
             return response
 
         if last_error is not None:
-            raise ProviderUnavailable("All eligible free routes failed or were rate-limited.") from last_error
+            raise ProviderUnavailable(
+                "All eligible free routes failed or were rate-limited."
+            ) from last_error
         raise ProviderUnavailable("No verified free route has sufficient remaining quota.")
 
     def status(self):
@@ -69,4 +98,7 @@ class QuotaAwareLiveGateway:
             "paid_fallback_enabled": False,
             "quota_routes": self.quota_manager.snapshot(),
             "registered_adapters": sorted(self.adapters),
+            "cost_accounting_note": (
+                "Adapter cost_usd is a placeholder until provider pricing is verified."
+            ),
         }
