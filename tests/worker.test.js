@@ -25,10 +25,19 @@ function dbMock() {
         async first() {
           calls.push({ kind: "first", sql, values: this.values });
           if (sql.includes("SELECT 1")) return { ok: 1 };
+          if (sql.includes("UPDATE tasks SET status='running'")) return null;
+          if (sql.includes("SELECT id,status,attempts")) return {
+            id: "task-1", status: "running", attempts: 1, max_attempts: 2,
+            lease_token: "lease-1", lease_expires_at: "2999-01-01T00:00:00.000Z",
+          };
           if (sql.includes("WHERE idempotency_key")) {
             return { id: insertedId || "existing-id" };
           }
           return null;
+        },
+        async run() {
+          calls.push({ kind: "run", sql, values: this.values });
+          return { meta: { changes: 1 } };
         },
         async all() {
           calls.push({ kind: "all", sql, values: this.values });
@@ -85,4 +94,39 @@ test("enqueue rejects malformed task payload", async () => {
 test("unknown routes are not exposed", async () => {
   const response = await worker.fetch(request("/admin"), { DB: dbMock(), ENGINE_API_TOKEN: TOKEN });
   assert.equal(response.status, 404);
+});
+
+
+test("claim endpoint is authenticated and returns an empty queue safely", async () => {
+  const DB = dbMock();
+  const response = await worker.fetch(request("/v1/tasks/claim", { method: "POST", body: {} }), {
+    DB, ENGINE_API_TOKEN: TOKEN,
+  });
+  assert.equal(response.status, 200);
+  assert.deepEqual(await response.json(), { task: null });
+});
+
+test("claim endpoint rejects unauthenticated callers", async () => {
+  const response = await worker.fetch(request("/v1/tasks/claim", { method: "POST", token: null, body: {} }), {
+    DB: dbMock(), ENGINE_API_TOKEN: TOKEN,
+  });
+  assert.equal(response.status, 401);
+});
+
+test("heartbeat requires the current lease and records a bounded extension", async () => {
+  const DB = dbMock();
+  const response = await worker.fetch(request("/v1/tasks/task-1/heartbeat", {
+    method: "POST", body: { lease_token: "lease-1" },
+  }), { DB, ENGINE_API_TOKEN: TOKEN });
+  assert.equal(response.status, 200);
+  assert.equal((await response.json()).ok, true);
+  assert.ok(DB.calls.some(x => x.kind === "run" && x.sql.startsWith("UPDATE tasks")));
+});
+
+test("finish rejects unsupported terminal states", async () => {
+  const response = await worker.fetch(request("/v1/tasks/task-1/finish", {
+    method: "POST", body: { lease_token: "lease-1", status: "pending" },
+  }), { DB: dbMock(), ENGINE_API_TOKEN: TOKEN });
+  assert.equal(response.status, 400);
+  assert.deepEqual(await response.json(), { error: "invalid_status" });
 });
