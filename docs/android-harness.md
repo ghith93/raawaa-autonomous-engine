@@ -75,6 +75,45 @@ Every call must carry a task ID, workspace boundary, timeout, output limit, and 
 
 Until this adapter exists, this document is an integration specification and capability register—not proof that the autonomous engine can remotely invoke AndroidHarness.
 
+## GitHub-mediated AndroidHarness task bridge
+
+A narrow issue-polling bridge is implemented in `scripts/androidharness_issue_bridge.py`. It is not an MCP server and does not expose general remote shell or direct UI control. ChatGPT can enqueue a bounded task by opening a GitHub issue with title prefix `[AndroidHarness Task]` and the required task marker/JSON body. The AndroidHarness process polls the repository through the existing authenticated GitHub CLI session, claims only issues authored by `ghith93`, and posts structured results back to the issue.
+
+Allowed operations are fixed in code:
+- `inspect_environment`: report tool versions, architecture, free disk, and available memory.
+- `git_status`: report branch, HEAD, and clean/dirty status without listing changed paths.
+- `run_python_tests`: fetch `origin/main`, require the requested full SHA to equal that exact fetched main commit, create a clean temporary archive, and run the standard Python unit tests.
+
+The bridge never accepts shell commands, arbitrary paths, package installation, root, SSH, provider calls, Cloudflare access, production writes, or deployments. Test execution uses a minimal environment that excludes provider and Cloudflare secrets. It verifies all five mandatory policy documents before claiming each task. Task output and runtime are bounded. A private local audit log is written under `~/.cache/raawaa-autonomous-engine/`; a file lock prevents multiple pollers. Successful tasks are closed after their result is posted; failed tasks remain open with a failed title. A task interrupted after claim remains marked Running and must be inspected/requeued manually to avoid accidental duplicate execution.
+
+### One-time activation on the tablet
+
+The supplied AndroidHarness clone is at `/workspace/raawaa-autonomous-engine`. After the bridge is merged, the operator only needs to start one long-running foreground terminal session in AndroidHarness:
+
+```bash
+cd /workspace/raawaa-autonomous-engine
+git status --short
+git pull --ff-only origin main
+python3 scripts/androidharness_issue_bridge.py --poll --poll-interval 30
+```
+
+Run the pull only when the working tree is clean. The script requires the already-authenticated GitHub CLI session with repository issue read/write access; it never reads or prints the stored token. No new token scope, Cloudflare secret, SSH, Java, Shizuku, or root permission is required. Keep the AndroidHarness foreground session alive; Android may still stop background work, so this is not an always-on guarantee.
+
+The bridge becomes operational only after the first successful device-side task result is visible in its GitHub issue. Until then, the runtime backend remains implemented-but-not-activated. ChatGPT must not claim a tablet task ran without that result.
+
+### Task body format
+
+The issue must be authored by `ghith93`, use the exact title prefix above, and include:
+
+```text
+<!-- RAawaa-AndroidHarness-Task:v1 -->
+```json
+{"schema_version":1,"operation":"inspect_environment","timeout_seconds":60,"max_output_bytes":8000}
+```
+```
+
+For `run_python_tests`, include `"commit_sha":"<full 40-character current main SHA>"`. Never put secrets or arbitrary commands in task bodies.
+
 ## Initial enablement sequence
 
 1. Re-probe the environment and confirm local repository HEAD is synchronized with GitHub `main`.
