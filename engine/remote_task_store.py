@@ -43,6 +43,7 @@ class RemoteTaskStore:
         headers = {
             "Authorization": "Bearer " + self.token,
             "Accept": "application/json",
+            "User-Agent": "RaawaaAutonomousEngine/1.0 (+https://github.com/ghith93/raawaa-autonomous-engine)",
             **({"Content-Type": "application/json"} if body is not None else {}),
         }
         if self.access_client_id and self.access_client_secret:
