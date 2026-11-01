@@ -87,7 +87,7 @@ class InMemoryEnvelopeCheckpointStorage:
             restored = decode_checkpoint_value(framework_payload, allowed_types=self._allowed_types)
             if not isinstance(restored, dict) or restored.get("checkpoint_id") != checkpoint.checkpoint_id:
                 raise FrameworkCheckpointStorageError("framework codec round-trip changed checkpoint identity")
-        except (WorkflowCheckpointException, FrameworkCheckpointStorageError):
+        except FrameworkCheckpointStorageError:
             raise
         except Exception as exc:
             raise FrameworkCheckpointStorageError("framework checkpoint cannot be safely encoded and restored") from exc
