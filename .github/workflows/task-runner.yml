@@ -7,6 +7,7 @@ on:
 
 permissions:
   contents: read
+  issues: write
 
 concurrency:
   group: d1-task-runner
@@ -31,6 +32,7 @@ jobs:
       - name: Validate safe execution policy
         run: python -m engine.cli audit
       - name: Diagnose public Worker health path
+        id: health
         env:
           ENGINE_API_URL: https://raawaa-autonomous-engine-control.ghith-shikhkhaled.workers.dev
           CF_ACCESS_CLIENT_ID: ${{ secrets.CF_ACCESS_CLIENT_ID }}
@@ -45,6 +47,8 @@ jobs:
               "Accept": "application/json",
               "User-Agent": "RaawaaAutonomousEngine/1.0 (+https://github.com/ghith93/raawaa-autonomous-engine)",
           }
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
+              output.write("status=unknown\nray=not_supplied\n")
           client_id = os.environ.get("CF_ACCESS_CLIENT_ID", "")
           client_secret = os.environ.get("CF_ACCESS_CLIENT_SECRET", "")
           if bool(client_id) != bool(client_secret):
@@ -57,12 +61,18 @@ jobs:
           try:
               with urlopen(request, timeout=15) as response:
                   print(f"Public Worker health returned HTTP {response.status}.")
+                  with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
+                      output.write(f"status={response.status}\nray={response.headers.get('CF-Ray', 'not_supplied')}\n")
                   headers = response.headers
           except HTTPError as error:
               print(f"Public Worker health returned HTTP {error.code}.")
+              with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
+                  output.write(f"status={error.code}\nray={error.headers.get('CF-Ray', 'not_supplied')}\n")
               headers = error.headers
           except (URLError, TimeoutError, OSError) as error:
               print(f"Public Worker health failed: {type(error).__name__}.")
+              with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
+                  output.write(f"status=request_failed\nray=not_supplied\n")
               headers = None
 
           # Emit only non-secret response metadata; never print response bodies.
@@ -72,6 +82,7 @@ jobs:
                   print(f"{name}: {value}")
           PY
       - name: Verify authenticated POST path before task operations
+        id: auth
         env:
           ENGINE_API_URL: https://raawaa-autonomous-engine-control.ghith-shikhkhaled.workers.dev
           ENGINE_API_TOKEN: ${{ secrets.ENGINE_API_TOKEN }}
@@ -83,6 +94,8 @@ jobs:
           from urllib.error import HTTPError, URLError
           from urllib.request import Request, urlopen
 
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
+              output.write("status=unknown\nray=not_supplied\n")
           headers = {
               "Authorization": "Bearer " + os.environ["ENGINE_API_TOKEN"],
               "Content-Type": "application/json",
@@ -107,8 +120,12 @@ jobs:
                   if response.status != 200:
                       raise SystemExit(f"Authenticated POST preflight returned HTTP {response.status}")
                   print("Authenticated POST preflight passed.")
+                  with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
+                      output.write(f"status={response.status}\nray={response.headers.get('CF-Ray', 'not_supplied')}\n")
           except HTTPError as error:
               print(f"Authenticated POST preflight returned HTTP {error.code}.")
+              with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
+                  output.write(f"status={error.code}\nray={error.headers.get('CF-Ray', 'not_supplied')}\n")
               for name in ("CF-Ray", "cf-mitigated"):
                   value = error.headers.get(name) if error.headers else None
                   if value:
@@ -116,7 +133,78 @@ jobs:
               raise SystemExit(1)
           except (URLError, TimeoutError, OSError) as error:
               print(f"Authenticated POST preflight failed: {type(error).__name__}")
+              with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
+                  output.write(f"status=request_failed\nray=not_supplied\n")
               raise SystemExit(1)
           PY
       - name: Process bounded D1 task batch
-        run: python -m engine.cli run-batch --max-tasks 5 --max-seconds 60
+        id: batch
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          import subprocess
+          import sys
+
+          command = [sys.executable, "-m", "engine.cli", "run-batch",
+                     "--max-tasks", "5", "--max-seconds", "60"]
+          result = subprocess.run(command, capture_output=True, text=True, check=False)
+          if result.stdout:
+              print(result.stdout, end="")
+          if result.stderr:
+              print(result.stderr, file=sys.stderr, end="")
+          tasks_processed = "unknown"
+          stop_reason = "unknown"
+          try:
+              payload = json.loads(result.stdout)
+              tasks_processed = int(payload.get("tasks_processed", 0))
+              stop_reason = str(payload.get("stop_reason", "unknown"))
+          except (ValueError, TypeError):
+              pass
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
+              output.write(f"tasks_processed={tasks_processed}\nstop_reason={stop_reason}\n")
+          raise SystemExit(result.returncode)
+      - name: Publish bounded Task Runner status
+        if: always()
+        uses: actions/github-script@v7
+        env:
+          HEALTH_STATUS: ${{ steps.health.outputs.status }}
+          HEALTH_RAY: ${{ steps.health.outputs.ray }}
+          AUTH_STATUS: ${{ steps.auth.outputs.status }}
+          AUTH_RAY: ${{ steps.auth.outputs.ray }}
+          BATCH_OUTCOME: ${{ steps.batch.outcome }}
+          TASKS_PROCESSED: ${{ steps.batch.outputs.tasks_processed }}
+          STOP_REASON: ${{ steps.batch.outputs.stop_reason }}
+          JOB_STATUS: ${{ job.status }}
+        with:
+          script: |
+            const marker = "<!-- raawaa-task-runner-status -->";
+            const body = [
+              marker,
+              "## Latest bounded Task Runner status",
+              "",
+              "Run: " + context.serverUrl + "/" + context.repo.owner + "/" + context.repo.repo + "/actions/runs/" + context.runId,
+              "Job result: " + (process.env.JOB_STATUS || "unknown"),
+              "Health GET: " + (process.env.HEALTH_STATUS || "unknown") + " (Ray " + (process.env.HEALTH_RAY || "not supplied") + ")",
+              "Authenticated POST: " + (process.env.AUTH_STATUS || "unknown") + " (Ray " + (process.env.AUTH_RAY || "not supplied") + ")",
+              "Batch step: " + (process.env.BATCH_OUTCOME || "not run"),
+              "Tasks processed: " + (process.env.TASKS_PROCESSED || "unknown"),
+              "Stop reason: " + (process.env.STOP_REASON || "unknown"),
+              "",
+              "The batch remains bounded; live inference and external writes remain governed by repository policy."
+            ].join("\n");
+            const comments = await github.rest.issues.listComments({
+              owner: context.repo.owner, repo: context.repo.repo, issue_number: 34, per_page: 100
+            });
+            const existing = comments.data.find(comment =>
+              comment.body && comment.body.includes(marker)
+            );
+            if (existing) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner, repo: context.repo.repo, comment_id: existing.id, body
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner, repo: context.repo.repo, issue_number: 34, body
+              });
+            }
