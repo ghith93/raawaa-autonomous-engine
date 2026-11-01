@@ -24,6 +24,10 @@ class OperationStoreTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "different operation input"):
             self.store.prepare("send_message", "msg-123", {"to": "other"})
 
+    def test_rejects_non_finite_json_payload(self):
+        with self.assertRaisesRegex(ValueError, "finite JSON"):
+            self.store.prepare("send_message", "msg-nan", {"amount": float("nan")})
+
     def test_only_one_claim_can_start_execution(self):
         operation = self.store.prepare("send_message", "msg-123", {"to": "customer"})
         claim = self.store.claim(operation["id"])
@@ -41,6 +45,14 @@ class OperationStoreTests(unittest.TestCase):
         saved = self.store.get(operation["id"])
         self.assertEqual(saved["status"], "succeeded")
         self.assertEqual(saved["external_ref"], "provider-456")
+
+    def test_reconciliation_cannot_release_live_executing_claim(self):
+        operation = self.store.prepare("send_message", "msg-live", {"to": "customer"})
+        claim = self.store.claim(operation["id"])
+        with self.assertRaisesRegex(ValueError, "marked unknown"):
+            self.store.reconcile(operation["id"], "not_performed")
+        self.assertIsNone(self.store.claim(operation["id"]))
+        self.assertEqual(self.store.get(operation["id"])["claim_token"], claim["claim_token"])
 
     def test_ambiguous_outcome_blocks_replay_until_reconciled(self):
         operation = self.store.prepare("send_message", "msg-123", {"to": "customer"})
