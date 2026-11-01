@@ -27,3 +27,17 @@ python -m engine.cli audit-log
 ```
 
 The default database path is `data/engine.db`. Set `RAAWAA_ENGINE_DB` to override it.
+
+
+## Failure recovery update
+
+The SQLite task store now supports bounded retry and stale-running recovery:
+
+- A worker exception moves a task back to `pending` while `attempts < max_attempts`.
+- Once the attempt budget is exhausted, the task becomes `failed`.
+- A worker invocation checks for stale `running` records (default lease age: 15 minutes) before claiming new work.
+- Recovery decisions are written to the audit log.
+- Only the exception class is persisted by the worker; exception text is intentionally omitted because it may contain prompts, credentials, or customer data.
+- Unsupported task types remain `blocked` and are not retried.
+
+**Important limitation:** the current worker only creates dry-run tickets and has no external side effects. Stale lease recovery must not be used for long-running external actions until lease heartbeats, ownership tokens, and idempotent side-effect handling are implemented. A timeout alone cannot prove that an old worker has stopped.
