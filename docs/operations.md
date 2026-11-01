@@ -94,11 +94,12 @@ Agents may research and propose changes. Policy gates must control execution. Ke
 ## Known limitations and next steps
 
 - No persistent scheduler or always-on service; GitHub Actions and the Cloudflare cron are bounded scheduled jobs.
-- No unattended live-agent loop: the scheduled worker defaults to dry-run. The Groq API key is configured and its read-only model-catalog check succeeded, but no inference profile is enabled and no inference request has been made.
+- No unattended live-agent loop: the scheduled worker defaults to dry-run. The Groq API key is configured and its read-only model-catalog check succeeded. GPT-OSS 20B/120B production candidates and Qwen 3.8-27B preview profile are staged in the registry, but every route remains disabled and no inference request has been made.
 - No notification channel.
 - The Cloudflare control Worker and D1 binding are deployed. The latest Task Runner passed health GET and authenticated POST preflights (HTTP 200) and completed a one-time D1 smoke task successfully in dry-run mode. Live inference remains disabled.
 - Lease-token fencing and periodic heartbeat renewal are implemented and covered by tests. External side effects still require handler-specific idempotency before activation.
 - Local SQLite memory and model-usage state need an explicit backup/retention strategy for production.
+- Groq Free model profiles are staged only: GPT-OSS 20B is preferred, GPT-OSS 120B is the fallback, and Qwen 3.8-27B is preview-only. Check `python -m engine.cli provider-profile-status`; this command is local/read-only. Rolling-minute, daily, monthly, and per-task quota controls are implemented, but live inference remains off pending explicit operator opt-in and data-classification controls.
 - The former `workers.dev` HTTP 403 was Cloudflare Error 1010 / Browser Integrity Check: Cloudflare rejects Python's default `urllib` User-Agent on `workers.dev`. The remote task client and both Task Runner probes now send a descriptive `RaawaaAutonomousEngine/1.0` User-Agent. Do not disable Browser Integrity Check, Access, or WAF to solve this class of issue. The separate Access inventory API error says Access is not enabled; it was not the cause of the Worker 403.
 
 Recommended next work: wire the disabled production GPT-OSS 20B/120B profiles through the existing quota gateway only after the operator explicitly authorizes live inference and data-classification controls are in place; implement monetary accounting before any non-zero-cost route; then continue with side-effect idempotency and a genuinely free persistent host assessment.
