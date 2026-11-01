@@ -19,6 +19,8 @@ jobs:
     env:
       RAAWAA_ENGINE_API_URL: https://raawaa-autonomous-engine-control.ghith-shikhkhaled.workers.dev
       RAAWAA_ENGINE_API_TOKEN: ${{ secrets.ENGINE_API_TOKEN }}
+      RAAWAA_ENGINE_CF_ACCESS_CLIENT_ID: ${{ secrets.CF_ACCESS_CLIENT_ID }}
+      RAAWAA_ENGINE_CF_ACCESS_CLIENT_SECRET: ${{ secrets.CF_ACCESS_CLIENT_SECRET }}
     steps:
       - name: Check out reviewed main
         uses: actions/checkout@v4
@@ -31,14 +33,24 @@ jobs:
       - name: Diagnose public Worker health path
         env:
           ENGINE_API_URL: https://raawaa-autonomous-engine-control.ghith-shikhkhaled.workers.dev
+          CF_ACCESS_CLIENT_ID: ${{ secrets.CF_ACCESS_CLIENT_ID }}
+          CF_ACCESS_CLIENT_SECRET: ${{ secrets.CF_ACCESS_CLIENT_SECRET }}
         run: |
           python - <<'PY'
           import os
           from urllib.error import HTTPError, URLError
           from urllib.request import Request, urlopen
 
+          headers = {"Accept": "application/json"}
+          client_id = os.environ.get("CF_ACCESS_CLIENT_ID", "")
+          client_secret = os.environ.get("CF_ACCESS_CLIENT_SECRET", "")
+          if bool(client_id) != bool(client_secret):
+              raise SystemExit("Cloudflare Access service-token secrets must be configured as a pair.")
+          if client_id and client_secret:
+              headers["CF-Access-Client-Id"] = client_id
+              headers["CF-Access-Client-Secret"] = client_secret
           url = os.environ["ENGINE_API_URL"].rstrip("/") + "/health"
-          request = Request(url, headers={"Accept": "application/json"}, method="GET")
+          request = Request(url, headers=headers, method="GET")
           try:
               with urlopen(request, timeout=15) as response:
                   print(f"Public Worker health returned HTTP {response.status}.")
@@ -50,8 +62,7 @@ jobs:
               print(f"Public Worker health failed: {type(error).__name__}.")
               headers = None
 
-          # Emit only non-secret response metadata to help distinguish edge,
-          # method-specific, and Worker/D1 failures. Never print response bodies.
+          # Emit only non-secret response metadata; never print response bodies.
           for name in ("CF-Ray", "cf-mitigated", "server", "content-type"):
               value = headers.get(name) if headers else None
               if value:
@@ -61,20 +72,30 @@ jobs:
         env:
           ENGINE_API_URL: https://raawaa-autonomous-engine-control.ghith-shikhkhaled.workers.dev
           ENGINE_API_TOKEN: ${{ secrets.ENGINE_API_TOKEN }}
+          CF_ACCESS_CLIENT_ID: ${{ secrets.CF_ACCESS_CLIENT_ID }}
+          CF_ACCESS_CLIENT_SECRET: ${{ secrets.CF_ACCESS_CLIENT_SECRET }}
         run: |
           python - <<'PY'
           import os
           from urllib.error import HTTPError, URLError
           from urllib.request import Request, urlopen
 
+          headers = {
+              "Authorization": "Bearer " + os.environ["ENGINE_API_TOKEN"],
+              "Content-Type": "application/json",
+              "Accept": "application/json",
+          }
+          client_id = os.environ.get("CF_ACCESS_CLIENT_ID", "")
+          client_secret = os.environ.get("CF_ACCESS_CLIENT_SECRET", "")
+          if bool(client_id) != bool(client_secret):
+              raise SystemExit("Cloudflare Access service-token secrets must be configured as a pair.")
+          if client_id and client_secret:
+              headers["CF-Access-Client-Id"] = client_id
+              headers["CF-Access-Client-Secret"] = client_secret
           request = Request(
               os.environ["ENGINE_API_URL"].rstrip("/") + "/v1/diagnostics/auth",
               data=b"{}",
-              headers={
-                  "Authorization": "Bearer " + os.environ["ENGINE_API_TOKEN"],
-                  "Content-Type": "application/json",
-                  "Accept": "application/json",
-              },
+              headers=headers,
               method="POST",
           )
           try:
