@@ -46,49 +46,73 @@ jobs:
               "Accept": "application/json",
           }
 
+          def safe_text(value):
+              text = str(value or "")
+              text = text.replace(token, "[REDACTED]").replace(account, "[ACCOUNT]")
+              return text[:300]
+
+          failures = []
+
           def fetch_all(label, path):
               collected = []
               page = 1
               while page <= 20:
-                  url = base + path + ("&" if "?" in path else "?") + f"per_page=100&page={page}"
+                  url = base + path + ( "&" if "?" in path else "?") + f"per_page=100&page={page}"
                   request = urllib.request.Request(url, headers=headers, method="GET")
                   try:
                       with urllib.request.urlopen(request, timeout=25) as response:
                           payload = json.loads(response.read().decode("utf-8"))
                           status = response.status
+                          ray = response.headers.get("CF-RAY", "not supplied")
                   except urllib.error.HTTPError as error:
-                      print(f"{label}: HTTP {error.code}.")
-                      if error.code == 403:
-                          print("The audit token is valid only if it has the required Account Access read permissions.")
-                      sys.exit(1)
+                      raw = error.read(8192).decode("utf-8", errors="replace")
+                      try:
+                          body = json.loads(raw)
+                      except ValueError:
+                          body = {}
+                      details = body.get("errors") or []
+                      print(f"{label}: HTTP {error.code}; CF-RAY={safe_text(error.headers.get('CF-RAY', 'not supplied'))}.")
+                      if details:
+                          for item in details[:5]:
+                              print(f"  Cloudflare error {safe_text(item.get('code', 'unknown'))}: {safe_text(item.get('message', 'No message supplied'))}")
+                      else:
+                          print(f"  Response body was not a structured Cloudflare error (first 300 chars): {safe_text(raw)}")
+                      failures.append(label)
+                      return None
                   except (urllib.error.URLError, TimeoutError, OSError, ValueError) as error:
-                      print(f"{label}: request failed ({type(error).__name__}).")
-                      sys.exit(1)
+                      print(f"{label}: request failed ({type(error).__name__}: {safe_text(error)}).")
+                      failures.append(label)
+                      return None
 
                   if not payload.get("success"):
-                      codes = [str(item.get("code", "unknown")) for item in payload.get("errors", [])]
-                      print(f"{label}: API success=false; error codes: " + (", ".join(codes) or "not supplied"))
-                      sys.exit(1)
+                      details = payload.get("errors") or []
+                      print(f"{label}: HTTP {status}; API success=false; CF-RAY={safe_text(ray)}.")
+                      for item in details[:5]:
+                          print(f"  Cloudflare error {safe_text(item.get('code', 'unknown'))}: {safe_text(item.get('message', 'No message supplied'))}")
+                      failures.append(label)
+                      return None
 
                   batch = payload.get("result") or []
                   collected.extend(batch)
                   info = payload.get("result_info") or {}
                   total_pages = int(info.get("total_pages") or page)
                   if page >= total_pages or not batch:
-                      print(f"{label}: HTTP {status}; records={len(collected)}; pages_checked={page}.")
+                      print(f"{label}: HTTP {status}; records={len(collected)}; pages_checked={page}; CF-RAY={safe_text(ray)}.")
                       return collected
                   page += 1
 
-              print(f"{label}: stopped at safety limit of 20 pages; inspect account inventory manually.")
-              sys.exit(1)
+              print(f"{label}: stopped at safety limit of 20 pages; inventory is incomplete.")
+              failures.append(label)
+              return None
 
+          print("--- Independent endpoint checks ---")
           apps = fetch_all("Access applications", "/access/apps")
           service_tokens = fetch_all("Access service tokens", "/access/service_tokens")
 
           print("\n--- Access application summary ---")
           if not apps:
               print("No Access applications returned for this account.")
-          for app in apps:
+          for app in apps or []:
               name = app.get("name") or "unnamed"
               domain = app.get("domain") or ""
               domains = app.get("self_hosted_domains") or []
@@ -107,7 +131,7 @@ jobs:
           print("\n--- Access service-token summary ---")
           if not service_tokens:
               print("No Access service tokens returned for this account.")
-          for item in service_tokens:
+          for item in service_tokens or []:
               name = item.get("name") or "unnamed"
               if "raawaa" in name.lower() or "engine" in name.lower():
                   print(f"Related service token: {name}")
@@ -115,4 +139,7 @@ jobs:
                   print(f"  expires_at: {item.get('expires_at') or 'not reported'}")
                   print(f"  revoked_at: {item.get('revoked_at') or 'not reported'}")
           print("\nAudit completed. No Cloudflare configuration was changed.")
+          if failures:
+              print("Failed checks: " + ", ".join(failures))
+              raise SystemExit(1)
           PY
