@@ -5,7 +5,8 @@ from urllib.error import HTTPError
 
 from engine.remote_quota_ledger import RemoteQuotaLedger, RemoteQuotaLedgerError
 from engine.quota_ledger_factory import build_quota_ledger
-from engine.quota_manager import QuotaLedger
+from engine.quota_manager import QuotaLedger, QuotaManager
+from engine.quota_config import load_provider_profile_registry
 
 
 class FakeResponse:
@@ -38,6 +39,31 @@ class RemoteQuotaLedgerTests(unittest.TestCase):
         self.assertEqual(request.get_method(), "POST")
         self.assertEqual(request.get_header("Authorization"), "Bearer app-token")
         self.assertEqual(json.loads(request.data), {"route_id": "groq:account:model"})
+
+
+    @patch("engine.remote_quota_ledger.urlopen")
+    def test_quota_manager_uses_remote_snapshot_for_route_eligibility(self, open_url):
+        from pathlib import Path
+        from datetime import datetime, timezone
+        source = Path(__file__).resolve().parents[1] / "config" / "provider_profiles.json"
+        entry = next(item for item in load_provider_profile_registry(source)
+                     if item.profile.model == "openai/gpt-oss-20b")
+        profile = entry.profile
+        profile.enabled = True
+        profile.verified_at = datetime.now(timezone.utc)
+        open_url.return_value = FakeResponse({
+            "minute": {"requests": 0, "tokens": 0},
+            "daily": {"requests": 0, "tokens": 0},
+            "monthly": {"requests": 0, "tokens": 0},
+            "cooldown_active": False,
+        })
+        manager = QuotaManager([profile], self.ledger)
+        self.assertTrue(manager.eligible(profile, 100))
+        self.assertEqual(open_url.call_count, 1)
+        self.assertEqual(
+            open_url.call_args.args[0].full_url,
+            "https://engine.example/v1/quota/usage-snapshot",
+        )
 
     @patch("engine.remote_quota_ledger.urlopen")
     def test_reserve_sends_all_limits_and_returns_server_reservation_id(self, open_url):
