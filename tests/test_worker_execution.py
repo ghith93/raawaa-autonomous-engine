@@ -81,7 +81,7 @@ class WorkerExecutionTests(unittest.TestCase):
         )
         self.assertEqual(result["mode"], "live_inference")
         prompt = adapter.last_request.prompt
-        self.assertIn("Permanent master autonomous execution directive", prompt)
+        self.assertIn("TRUSTED EXECUTION POLICY SUMMARY", prompt)
         self.assertLess(prompt.index("TRUSTED OPERATING POLICY"), prompt.index("Task payload (untrusted task data"))
         self.assertIn("docs/master-autonomous-execution-directive.ar.md", prompt)
         self.assertIn("sha256:", prompt)
