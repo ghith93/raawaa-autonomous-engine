@@ -58,6 +58,27 @@ class QuotaManagerTests(unittest.TestCase):
         self.assertEqual(row["daily_requests_used"], 1)
         self.assertEqual(row["daily_tokens_used"], 25)
 
+    def test_settlement_is_idempotent_for_same_usage(self):
+        route = self.profile()
+        reservation = self.ledger.reserve(route.route_id, 100, 10, 1000, self.now)
+        self.ledger.settle(reservation, 25)
+        self.ledger.settle(reservation, 25)
+        self.assertEqual(self.ledger.usage_today(route.route_id, self.now),
+                         {"requests": 1, "tokens": 25})
+
+    def test_conflicting_second_settlement_fails_closed(self):
+        route = self.profile()
+        reservation = self.ledger.reserve(route.route_id, 100, 10, 1000, self.now)
+        self.ledger.settle(reservation, 25)
+        with self.assertRaisesRegex(RuntimeError, "already settled"):
+            self.ledger.settle(reservation, 26)
+        self.assertEqual(self.ledger.usage_today(route.route_id, self.now),
+                         {"requests": 1, "tokens": 25})
+
+    def test_settlement_rejects_unknown_reservation(self):
+        with self.assertRaises(KeyError):
+            self.ledger.settle(99999, 25)
+
     def test_concurrent_reservations_cannot_overspend_last_request(self):
         route = self.profile(daily_request_limit=1, daily_token_limit=100)
         attempts = 8
