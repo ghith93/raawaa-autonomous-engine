@@ -49,7 +49,14 @@ The Python CLI uses local SQLite by default. To use D1 as the shared task queue,
 - `RAAWAA_ENGINE_API_URL=https://raawaa-autonomous-engine-control.ghith-shikhkhaled.workers.dev`
 - `RAAWAA_ENGINE_API_TOKEN`: the same application bearer token configured as the Worker secret; never commit or print it.
 
-With both values present, `enqueue`, `list`, `run-once`, and `run-batch` use the authenticated D1 API. The local SQLite database continues to hold memory and model-usage records. Without the URL, the CLI uses SQLite for tasks. Remote audit-log listing is not exposed. The runner remains dry-run only and does not call models or external services.
+If the Worker is protected by Cloudflare Access, the runner can additionally use a narrowly scoped Access service token:
+
+- `RAAWAA_ENGINE_CF_ACCESS_CLIENT_ID`: service-token Client ID.
+- `RAAWAA_ENGINE_CF_ACCESS_CLIENT_SECRET`: service-token Client Secret.
+
+For GitHub Actions, save these as repository secrets named `CF_ACCESS_CLIENT_ID` and `CF_ACCESS_CLIENT_SECRET`. Both are optional, but must be configured together. Create a service token in Zero Trust → Access controls → Service credentials → Service Tokens, then add it to the Access policy for this Worker. Do not disable Access or create a public bypass to make the runner work. The existing application Bearer token remains required after Access admits the request.
+
+With `RAAWAA_ENGINE_API_URL` and `RAAWAA_ENGINE_API_TOKEN` present, `enqueue`, `list`, `run-once`, and `run-batch` use the authenticated D1 API. The local SQLite database continues to hold memory and model-usage records. Without the URL, the CLI uses SQLite for tasks. Remote audit-log listing is not exposed. The runner remains dry-run only and does not call models or external services.
 
 
 ## Scheduled lease maintenance
@@ -61,6 +68,6 @@ The schedule is designed for the Cloudflare Workers Free limits published at imp
 
 ## Scheduled Python task consumer
 
-GitHub Actions invokes the Python runner every 15 minutes and can also be started manually from the Actions tab. It uses the repository Actions secret `ENGINE_API_TOKEN`, the deployed Worker URL, and a strict batch limit of five tasks / 60 seconds. No additional secret is required if the existing `ENGINE_API_TOKEN` Actions secret remains configured.
+GitHub Actions invokes the Python runner every 15 minutes and can also be started manually from the Actions tab. It uses the repository Actions secret `ENGINE_API_TOKEN`, the deployed Worker URL, and a strict batch limit of five tasks / 60 seconds. If Cloudflare Access is enabled for the Worker, it can additionally use the optional service-token secrets described above.
 
 The runner currently supports only the safe dry-run handlers listed in `engine/worker.py`. Unsupported task types are marked blocked. It does not call Gemini, Groq, OpenRouter, or other model providers, and it cannot perform external writes. Scheduled GitHub Actions jobs may be delayed; this is periodic batch processing, not real-time or always-on execution.

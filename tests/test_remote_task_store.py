@@ -1,4 +1,5 @@
 import json
+import os
 import unittest
 from unittest.mock import patch
 
@@ -32,6 +33,28 @@ class RemoteTaskStoreTests(unittest.TestCase):
         self.assertEqual(request.full_url, "https://engine.example/v1/tasks/claim")
         self.assertEqual(request.get_method(), "POST")
         self.assertEqual(request.get_header("Authorization"), "Bearer secret-test-token")
+        self.assertIsNone(request.get_header("Cf-access-client-id"))
+
+    @patch("engine.remote_task_store.urlopen")
+    def test_optional_cloudflare_access_service_token_headers(self, open_url):
+        open_url.return_value = FakeResponse({"task": None})
+        store = RemoteTaskStore(
+            "https://engine.example", "app-bearer",
+            access_client_id="access-client-id",
+            access_client_secret="access-client-secret",
+        )
+        self.assertIsNone(store.claim_next())
+        request = open_url.call_args.args[0]
+        self.assertEqual(request.get_header("Cf-access-client-id"), "access-client-id")
+        self.assertEqual(request.get_header("Cf-access-client-secret"), "access-client-secret")
+        self.assertEqual(request.get_header("Authorization"), "Bearer app-bearer")
+
+    def test_cloudflare_access_credentials_must_be_paired(self):
+        with self.assertRaisesRegex(ValueError, "both service-token credentials"):
+            RemoteTaskStore(
+                "https://engine.example", "app-bearer",
+                access_client_id="access-client-id",
+            )
 
     @patch("engine.remote_task_store.urlopen")
     def test_empty_claim_returns_none(self, open_url):
@@ -59,7 +82,6 @@ class RemoteTaskStoreTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             RemoteTaskStore("https://engine.example", "")
 
-
     def test_forbidden_error_includes_safe_cloudflare_metadata_only(self):
         from urllib.error import HTTPError
         from email.message import Message
@@ -77,17 +99,19 @@ class RemoteTaskStoreTests(unittest.TestCase):
         self.assertNotIn("secret-test-token", message)
 
     def test_rate_limit_has_safe_retry_later_error(self):
+        from urllib.error import HTTPError
         with patch("engine.remote_task_store.urlopen",
-                   side_effect=__import__("urllib.error", fromlist=["HTTPError"]).HTTPError(
-                       "https://engine.example/v1/tasks", 429, "limited", {}, None)):
+                   side_effect=HTTPError("https://engine.example/v1/tasks", 429,
+                                         "limited", {}, None)):
             with self.assertRaisesRegex(RemoteTaskStoreError, "rate limit") as caught:
                 self.store.list_tasks()
             self.assertNotIn("secret-test-token", str(caught.exception))
 
     def test_server_error_is_classified_as_temporary(self):
+        from urllib.error import HTTPError
         with patch("engine.remote_task_store.urlopen",
-                   side_effect=__import__("urllib.error", fromlist=["HTTPError"]).HTTPError(
-                       "https://engine.example/v1/tasks", 503, "unavailable", {}, None)):
+                   side_effect=HTTPError("https://engine.example/v1/tasks", 503,
+                                         "unavailable", {}, None)):
             with self.assertRaisesRegex(RemoteTaskStoreError, "temporarily unavailable"):
                 self.store.list_tasks()
 
