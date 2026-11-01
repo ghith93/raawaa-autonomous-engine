@@ -2,7 +2,7 @@
 
 ## Permanent autonomous operating directive
 
-The [Master Autonomous Execution Directive](master-autonomous-execution-directive.ar.md) is permanent repository policy. Every agent and cycle must read it with the [Continuous Improvement Charter](continuous-improvement-charter.md), [Architecture](architecture.md), and applicable policies. A user message consisting only of `.` means resume from the latest verified repository state, execute the highest-priority safe work, and continue. See [AGENTS.md](../AGENTS.md) for startup instructions. Runtime prompt-loader enforcement remains an engineering requirement until implemented and tested.
+The [Master Autonomous Execution Directive](master-autonomous-execution-directive.ar.md) is permanent repository policy. Every agent and cycle must read it with the [Continuous Improvement Charter](continuous-improvement-charter.md), [Architecture](architecture.md), and applicable policies. A user message consisting only of `.` means resume from the latest verified repository state, execute the highest-priority safe work, and continue. See [AGENTS.md](../AGENTS.md) for startup instructions. The Python worker now enforces policy loading through `engine.operating_policy.load_operating_policy()` before every task claim. It reads the complete required documents, validates them, and supplies a compact trusted policy summary with SHA-256 fingerprints before task payload in the live model prompt. Missing or invalid policy blocks the cycle before claim/provider I/O. This enforcement is covered by unit tests and exact-head CI; new execution paths must integrate the same loader.
 
 ## Continuous improvement operating charter
 

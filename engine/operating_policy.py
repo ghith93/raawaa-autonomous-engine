@@ -23,10 +23,10 @@ class OperatingPolicyError(RuntimeError):
 def load_operating_policy(root: Path | None = None) -> dict[str, Any]:
     """Read all governing documents and produce a trusted, bounded prompt context.
 
-    The complete documents are read and validated on every invocation. The full
-    master directive and repository startup rules are supplied to the model.
-    Other governing documents are represented by verified SHA-256 fingerprints;
-    this avoids silently truncating the larger architecture and operations docs.
+    The complete documents are read and validated locally on every invocation. The model
+    receives a compact trusted execution-policy summary plus SHA-256 fingerprints for
+    the exact source documents, rather than the full raw files. This preserves existing
+    provider quota limits and avoids silently truncating policy content.
     """
     base = ROOT if root is None else Path(root)
     documents: dict[str, str] = {}
