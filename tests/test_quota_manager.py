@@ -1,5 +1,6 @@
 import tempfile
 import unittest
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 
 from engine.quota_manager import QuotaLedger, QuotaManager, QuotaProfile
@@ -56,6 +57,25 @@ class QuotaManagerTests(unittest.TestCase):
         row = QuotaManager([route], self.ledger).snapshot(self.now)[0]
         self.assertEqual(row["daily_requests_used"], 1)
         self.assertEqual(row["daily_tokens_used"], 25)
+
+    def test_concurrent_reservations_cannot_overspend_last_request(self):
+        route = self.profile(daily_request_limit=1, daily_token_limit=100)
+        attempts = 8
+
+        def reserve():
+            try:
+                self.ledger.reserve(route.route_id, 10, 1, 100, self.now)
+                return "reserved"
+            except RuntimeError:
+                return "denied"
+
+        with ThreadPoolExecutor(max_workers=attempts) as pool:
+            outcomes = list(pool.map(lambda _: reserve(), range(attempts)))
+
+        self.assertEqual(outcomes.count("reserved"), 1)
+        self.assertEqual(outcomes.count("denied"), attempts - 1)
+        usage = self.ledger.usage_today(route.route_id, self.now)
+        self.assertEqual(usage, {"requests": 1, "tokens": 10})
 
 
 if __name__ == "__main__":
