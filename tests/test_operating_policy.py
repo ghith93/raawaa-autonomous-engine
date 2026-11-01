@@ -17,6 +17,7 @@ class OperatingPolicyTests(unittest.TestCase):
         self.assertIn("Permanent master autonomous execution directive", policy["prompt_context"])
         self.assertIn("sha256:", policy["prompt_context"])
         self.assertGreater(policy["prompt_context_bytes"], 1000)
+        self.assertLess(policy["prompt_context_bytes"], 4000)
 
     def test_missing_document_fails_closed(self):
         with tempfile.TemporaryDirectory() as directory:
