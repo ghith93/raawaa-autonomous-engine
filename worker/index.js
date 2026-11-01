@@ -33,6 +33,96 @@ async function readJson(request) {
   try { return JSON.parse(raw); } catch { throw new Error("invalid_json"); }
 }
 
+
+function safeResearchString(value, max) {
+  return typeof value === "string" && value.trim().length > 0 && value.length <= max;
+}
+
+function normalizeResearchCandidate(item) {
+  if (!item || typeof item !== "object" || Array.isArray(item)) return null;
+  const now = new Date().toISOString();
+  if (item.source === "github") {
+    const fullName = item.full_name;
+    if (!safeResearchString(fullName, 200) || !/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(fullName)) return null;
+    let parsed;
+    try { parsed = new URL(item.url); } catch { return null; }
+    if (parsed.protocol !== "https:" || parsed.hostname !== "github.com" || parsed.pathname.replace(/\/$/, "") !== "/" + fullName || parsed.search || parsed.hash) return null;
+    const metadata = {
+      description: typeof item.description === "string" ? item.description.slice(0, 1000) : "",
+      stars: Number.isInteger(item.stars) && item.stars >= 0 ? Math.min(item.stars, 1000000000) : 0,
+      language: typeof item.language === "string" ? item.language.slice(0, 100) : null,
+      license_spdx: typeof item.license_spdx === "string" ? item.license_spdx.slice(0, 100) : null,
+      pushed_at: typeof item.pushed_at === "string" ? item.pushed_at.slice(0, 40) : null,
+      archived: item.archived === true,
+      topics: Array.isArray(item.topics) ? item.topics.filter(x => typeof x === "string").slice(0, 20).map(x => x.slice(0, 100)) : [],
+      discovered_via: Array.isArray(item.discovered_via) ? item.discovered_via.filter(x => typeof x === "string").slice(0, 10).map(x => x.slice(0, 100)) : [],
+    };
+    return { source_key: "github:" + fullName.toLowerCase(), source: "github", title: fullName, url: "https://github.com/" + fullName, metadata_json: JSON.stringify(metadata), now };
+  }
+  if (item.source === "crossref") {
+    const doi = item.doi;
+    if (!safeResearchString(doi, 250) || !/^10\.\d{4,9}\/[A-Za-z0-9._;()/:+-]+$/i.test(doi)) return null;
+    if (!safeResearchString(item.title, 1000)) return null;
+    const metadata = {
+      authors: Array.isArray(item.authors) ? item.authors.filter(x => typeof x === "string").slice(0, 5).map(x => x.slice(0, 200)) : [],
+      published: typeof item.published === "string" ? item.published.slice(0, 30) : null,
+      container_title: typeof item.container_title === "string" ? item.container_title.slice(0, 300) : null,
+      citation_count: Number.isInteger(item.citation_count) && item.citation_count >= 0 ? Math.min(item.citation_count, 1000000000) : 0,
+      license_urls: Array.isArray(item.license_urls) ? item.license_urls.filter(x => typeof x === "string" && x.startsWith("https://")).slice(0, 5).map(x => x.slice(0, 1000)) : [],
+      work_type: typeof item.work_type === "string" ? item.work_type.slice(0, 100) : null,
+      abstract_retrieved: false,
+    };
+    return { source_key: "crossref:" + doi.toLowerCase(), source: "crossref", title: item.title, url: "https://doi.org/" + doi, metadata_json: JSON.stringify(metadata), now };
+  }
+  return null;
+}
+
+async function listResearchCandidates(url, env) {
+  const rawLimit = Number(url.searchParams.get("limit") || 50);
+  const status = url.searchParams.get("status") || "all";
+  const allowed = ["all", "unreviewed", "accepted", "rejected", "deferred"];
+  if (!Number.isInteger(rawLimit) || rawLimit < 1 || rawLimit > 100 || !allowed.includes(status)) return json({ error: "invalid_query" }, 400);
+  try {
+    const result = status === "all"
+      ? await env.DB.prepare("SELECT source_key,source,title,url,metadata_json,review_status,review_note,first_seen_at,last_seen_at,reviewed_at,discovery_count,updated_at FROM research_candidates ORDER BY last_seen_at DESC LIMIT ?").bind(rawLimit).all()
+      : await env.DB.prepare("SELECT source_key,source,title,url,metadata_json,review_status,review_note,first_seen_at,last_seen_at,reviewed_at,discovery_count,updated_at FROM research_candidates WHERE review_status=? ORDER BY last_seen_at DESC LIMIT ?").bind(status, rawLimit).all();
+    return json({ candidates: result.results || [] });
+  } catch { return json({ error: "storage_unavailable" }, 503); }
+}
+
+async function ingestResearchCandidates(request, env) {
+  let input;
+  try { input = await readJson(request); }
+  catch (error) { return json({ error: error.message === "body_too_large" ? "body_too_large" : "invalid_json" }, 400); }
+  if (!Array.isArray(input?.candidates) || input.candidates.length < 1 || input.candidates.length > 25) return json({ error: "invalid_candidates" }, 400);
+  const normalized = input.candidates.map(normalizeResearchCandidate);
+  if (normalized.some(item => item === null)) return json({ error: "invalid_candidate" }, 400);
+  const statements = normalized.map(item => env.DB.prepare("INSERT INTO research_candidates(source_key,source,title,url,metadata_json,review_status,first_seen_at,last_seen_at,discovery_count,updated_at) VALUES(?,?,?,?,?,'unreviewed',?,?,1,?) ON CONFLICT(source_key) DO UPDATE SET title=excluded.title,url=excluded.url,metadata_json=excluded.metadata_json,last_seen_at=excluded.last_seen_at,discovery_count=research_candidates.discovery_count+1,updated_at=excluded.updated_at").bind(item.source_key, item.source, item.title, item.url, item.metadata_json, item.now, item.now, item.now));
+  const sources = [...new Set(normalized.map(item => item.source))];
+  statements.push(env.DB.prepare("INSERT INTO audit_log(task_id,event,details_json,created_at) VALUES(NULL,?,?,?)").bind("research_candidates_ingested", JSON.stringify({ count: normalized.length, sources }), new Date().toISOString()));
+  try {
+    await env.DB.batch(statements);
+    return json({ accepted_count: normalized.length, sources }, 201);
+  } catch { return json({ error: "storage_unavailable" }, 503); }
+}
+
+async function reviewResearchCandidate(request, env) {
+  let input;
+  try { input = await readJson(request); }
+  catch (error) { return json({ error: error.message === "body_too_large" ? "body_too_large" : "invalid_json" }, 400); }
+  const sourceKey = input?.source_key;
+  const status = input?.review_status;
+  const note = input?.note === undefined ? "" : input.note;
+  if (!safeResearchString(sourceKey, 300) || !["accepted", "rejected", "deferred"].includes(status) || typeof note !== "string" || note.length > 1000) return json({ error: "invalid_review" }, 400);
+  const now = new Date().toISOString();
+  try {
+    const result = await env.DB.prepare("UPDATE research_candidates SET review_status=?,review_note=?,reviewed_at=?,updated_at=? WHERE source_key=?").bind(status, note, now, now, sourceKey).run();
+    if (!result.meta?.changes) return json({ error: "candidate_not_found" }, 404);
+    await env.DB.prepare("INSERT INTO audit_log(task_id,event,details_json,created_at) VALUES(NULL,?,?,?)").bind("research_candidate_reviewed", JSON.stringify({ source_key: sourceKey, review_status: status, note_length: note.length }), now).run();
+    return json({ ok: true, source_key: sourceKey, review_status: status, reviewed_at: now });
+  } catch { return json({ error: "storage_unavailable" }, 503); }
+}
+
 async function recoverStaleTasks(env) {
   const nowIso = new Date().toISOString();
   const stale = await env.DB.prepare(
@@ -78,10 +168,16 @@ export default {
     if (url.pathname !== "/v1/tasks" && url.pathname !== "/v1/tasks/enqueue" &&
         url.pathname !== "/v1/tasks/claim" && url.pathname !== "/v1/tasks/recover" &&
         url.pathname !== "/v1/diagnostics/auth" &&
+        url.pathname !== "/v1/research/candidates" &&
+        url.pathname !== "/v1/research/candidates/review" &&
         !/^\/v1\/tasks\/[A-Za-z0-9-]+\/(heartbeat|finish|retry)$/.test(url.pathname)) {
       return json({ error: "not_found" }, 404);
     }
     if (!(await authorized(request, env))) return json({ error: "unauthorized" }, 401);
+
+    if (url.pathname === "/v1/research/candidates" && request.method === "GET") return listResearchCandidates(url, env);
+    if (url.pathname === "/v1/research/candidates" && request.method === "POST") return ingestResearchCandidates(request, env);
+    if (url.pathname === "/v1/research/candidates/review" && request.method === "POST") return reviewResearchCandidate(request, env);
 
     // Authenticated, read-only POST probe used to distinguish application auth
     // from edge blocks before the runner mutates task state.
