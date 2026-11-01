@@ -28,5 +28,41 @@ jobs:
           python-version: "3.11"
       - name: Validate safe execution policy
         run: python -m engine.cli audit
+      - name: Verify authenticated POST path before task operations
+        env:
+          ENGINE_API_URL: https://raawaa-autonomous-engine-control.ghith-shikhkhaled.workers.dev
+          ENGINE_API_TOKEN: ${{ secrets.ENGINE_API_TOKEN }}
+        run: |
+          python - <<'PY'
+          import os
+          from urllib.error import HTTPError, URLError
+          from urllib.request import Request, urlopen
+
+          request = Request(
+              os.environ["ENGINE_API_URL"].rstrip("/") + "/v1/diagnostics/auth",
+              data=b"{}",
+              headers={
+                  "Authorization": "Bearer " + os.environ["ENGINE_API_TOKEN"],
+                  "Content-Type": "application/json",
+                  "Accept": "application/json",
+              },
+              method="POST",
+          )
+          try:
+              with urlopen(request, timeout=15) as response:
+                  if response.status != 200:
+                      raise SystemExit(f"Authenticated POST preflight returned HTTP {response.status}")
+                  print("Authenticated POST preflight passed.")
+          except HTTPError as error:
+              print(f"Authenticated POST preflight returned HTTP {error.code}.")
+              for name in ("CF-Ray", "cf-mitigated"):
+                  value = error.headers.get(name) if error.headers else None
+                  if value:
+                      print(f"{name}: {value}")
+              raise SystemExit(1)
+          except (URLError, TimeoutError, OSError) as error:
+              print(f"Authenticated POST preflight failed: {type(error).__name__}")
+              raise SystemExit(1)
+          PY
       - name: Process bounded D1 task batch
         run: python -m engine.cli run-batch --max-tasks 5 --max-seconds 60
