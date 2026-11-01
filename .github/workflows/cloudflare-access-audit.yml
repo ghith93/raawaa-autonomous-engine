@@ -1,4 +1,5 @@
 name: Cloudflare Access Audit
+# Keep the audit reusable for ongoing, read-only security diagnostics.
 
 on:
   workflow_dispatch:
