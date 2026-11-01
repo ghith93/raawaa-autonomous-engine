@@ -179,6 +179,8 @@ def main() -> int:
             "model": entry.profile.model,
             "account_tier": entry.account_tier,
             "model_stage": entry.model_stage,
+            "model_terms_source_url": entry.model_terms_source_url,
+            "priority": entry.profile.priority,
             "production_use_allowed": entry.production_use_allowed,
             "enabled": entry.enabled,
             "ready_for_routing": entry.ready_for_routing,
