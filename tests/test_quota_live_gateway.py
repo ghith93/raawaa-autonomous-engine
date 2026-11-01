@@ -63,7 +63,9 @@ class QuotaAwareGatewayTests(unittest.TestCase):
                       terms_source_url="https://" + terms,
                       verified_at=__import__("datetime").datetime(2026, 11, 1, 0,
                           tzinfo=__import__("datetime").timezone.utc),
-                      max_output_tokens=512)
+                      max_output_tokens=512,
+                      input_cost_per_million_usd=0.0,
+                      output_cost_per_million_usd=0.0)
         values.update(changes)
         return QuotaProfile(**values)
 
@@ -119,6 +121,24 @@ class QuotaAwareGatewayTests(unittest.TestCase):
             gateway.generate(self.request)
         self.assertEqual(adapter.calls, 0)
         self.assertEqual(self.quota.audit_events()[0]["event"], "live_request_blocked")
+
+    def test_unknown_or_nonzero_price_never_calls_provider(self):
+        for changes in (
+            {"input_cost_per_million_usd": None},
+            {"output_cost_per_million_usd": None},
+            {"input_cost_per_million_usd": 0.01},
+            {"output_cost_per_million_usd": 0.01},
+        ):
+            with self.subTest(changes=changes):
+                adapter = FakeAdapter("groq")
+                manager = QuotaManager([self.profile(**changes)], self.quota)
+                gateway = QuotaAwareLiveGateway(
+                    manager, {"groq": adapter}, self.usage, True,
+                    environ={"RAAWAA_ENGINE_LIVE_INFERENCE": "enabled"},
+                )
+                with self.assertRaises(ProviderUnavailable):
+                    gateway.generate(self.request)
+                self.assertEqual(adapter.calls, 0)
 
     def test_unverified_route_never_called(self):
         adapter = FakeAdapter("groq")
@@ -176,7 +196,7 @@ class QuotaAwareGatewayTests(unittest.TestCase):
         events = self.quota.audit_events()
         self.assertIn("provider_failure_stopped", {event["event"] for event in events})
 
-    def test_unexpected_adapter_error_stops_rotation_and_releases_tokens(self):
+    def test_unexpected_adapter_error_stops_rotation_and_retains_reserved_quota(self):
         class BrokenAdapter:
             def generate(self, model, request):
                 raise RuntimeError("internal failure")
