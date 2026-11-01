@@ -69,6 +69,8 @@ class InMemoryEnvelopeCheckpointStorage:
             checkpoint = WorkflowCheckpoint.from_dict(checkpoint_data)
             if checkpoint.checkpoint_id != checkpoint_id or checkpoint.workflow_name != workflow_name:
                 raise FrameworkCheckpointStorageError("decoded checkpoint identity does not match its envelope")
+            if checkpoint.graph_signature_hash != payload.get("graph_signature_hash"):
+                raise FrameworkCheckpointStorageError("workflow graph signature does not match its envelope")
             if checkpoint.previous_checkpoint_id != envelope["parent_checkpoint_id"]:
                 raise FrameworkCheckpointStorageError("checkpoint lineage does not match its envelope")
             return checkpoint, envelope["sequence"]
@@ -85,8 +87,14 @@ class InMemoryEnvelopeCheckpointStorage:
             # under the exact restricted type allowlist before storing it.
             framework_payload = encode_checkpoint_value(checkpoint.to_dict())
             restored = decode_checkpoint_value(framework_payload, allowed_types=self._allowed_types)
-            if not isinstance(restored, dict) or restored.get("checkpoint_id") != checkpoint.checkpoint_id:
-                raise FrameworkCheckpointStorageError("framework codec round-trip changed checkpoint identity")
+            if (
+                not isinstance(restored, dict)
+                or restored.get("checkpoint_id") != checkpoint.checkpoint_id
+                or restored.get("workflow_name") != checkpoint.workflow_name
+                or restored.get("graph_signature_hash") != checkpoint.graph_signature_hash
+                or restored.get("previous_checkpoint_id") != checkpoint.previous_checkpoint_id
+            ):
+                raise FrameworkCheckpointStorageError("framework codec round-trip changed checkpoint identity or lineage")
         except FrameworkCheckpointStorageError:
             raise
         except Exception as exc:
