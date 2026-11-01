@@ -71,7 +71,8 @@ def audit() -> int:
         for error in errors:
             print(f"FAIL: {error}")
         return 1
-    mode_label = "safe dry-run" if mode == "safe_dry_run" else "live opt-in configured; operator kill switch still required"\n    print(f"Audit passed: {len(ids)} agent roles; {len(provider_profiles)} provider profiles; {mode_label}; zero spend; external writes disabled.")
+    mode_label = "safe dry-run" if mode == "safe_dry_run" else "live opt-in configured; operator kill switch still required"
+    print(f"Audit passed: {len(ids)} agent roles; {len(provider_profiles)} provider profiles; {mode_label}; zero spend; external writes disabled.")
     return 0
 
 
