@@ -49,6 +49,25 @@ Keep live inference disabled. A provider is eligible for the engine only after i
 - Main pricing: https://www.cerebras.ai/pricing
 - The documentation surfaces both a $0 Free tier and a paid Developer tier with a one-time $5 credit requiring a payment method. Treat the latter as promotional paid-plan credit, not a recurring free tier. Confirm the current account's actual plan before considering a profile.
 
+
+## Account verification update (2026-11-01)
+
+The operator confirmed that the connected Groq organization is on the **Free** plan and supplied the account console's allowed-model list and rate-limit table. The repository's scheduled model-catalog credential check also completed successfully without making any inference/completion request.
+
+### Confirmed account-visible candidate
+
+- Plan: Groq Free (operator-confirmed in the account console).
+- Candidate model: qwen/qwen3.8-27b (present in the supplied allowed-model list).
+- Account console limits supplied for this model: 30 requests/minute, 1,000 requests/day, 8,000 tokens/minute, and 200,000 tokens/day.
+- Other visible allowed model IDs included openai/gpt-oss-20b, openai/gpt-oss-120b, allam-2-7b, Prompt Guard models, Whisper models, and Orpheus TTS models. Do not assume the same quota or task suitability across these model families.
+- The connection check verifies API-key authentication and model-catalog access only. It does not establish inference billing behavior, model-specific commercial terms, or data-handling suitability.
+
+### Current decision
+
+Groq Free is now **account-plan and model-catalog verified**, not merely a public candidate. It is not yet an enabled inference route. The quota ledger must enforce the supplied rolling minute limits atomically before any provider request. Daily limits must also be configured conservatively from the console. Monthly and per-task limits remain engine-side safety caps and must be explicitly chosen; they must not be represented as provider-published limits.
+
+Before any live call, separately verify the model-specific terms and the exact Free-plan pricing/data-handling terms applicable to this organization. Keep live inference disabled until the minute-window enforcement is merged, all profile evidence is complete, and the operator explicitly enables the existing kill switch. No real inference request has been made as part of this verification.
+
 ## Required evidence before enabling any route
 
 1. Provider account is accessible and its exact plan/tier is visible.
