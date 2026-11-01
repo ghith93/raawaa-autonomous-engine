@@ -14,6 +14,7 @@ from engine.free_provider_discovery import discover, discover_all, DiscoveryErro
 from engine.quota_config import load_provider_profile_registry
 from engine.quota_manager import QuotaLedger, QuotaManager
 from engine.live_runtime import build_live_gateway
+from engine.research_discovery import discover_repositories
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -243,6 +244,14 @@ def main() -> int:
             "alerts": quota_alerts(snapshot),
             "routes": snapshot,
         }, indent=2))
+    elif args.command == "research-discover":
+        research_config = load_json(ROOT / "config" / "research_sources.json")
+        result = discover_repositories(
+            queries=research_config["queries"],
+            max_per_query=(research_config["max_results_per_query"] if args.max_per_query is None else args.max_per_query),
+            max_queries=research_config["max_queries_per_run"],
+        )
+        print(json.dumps(result, indent=2, ensure_ascii=False))
     elif args.command == "provider-profile-status":
         entries = load_provider_profile_registry(ROOT / "config" / "provider_profiles.json")
         result = [{
