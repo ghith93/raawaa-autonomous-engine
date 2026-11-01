@@ -5,7 +5,8 @@
     { "title": "Engine architecture", "path": "docs/architecture.md" },
     { "title": "Engine operations", "path": "docs/operations.md" },
     { "title": "Continuous improvement charter", "path": "docs/continuous-improvement-charter.md" },
-    { "title": "Provider free-tier eligibility", "path": "docs/provider-free-tier-eligibility.md" }
+    { "title": "Provider free-tier eligibility", "path": "docs/provider-free-tier-eligibility.md" },
+    { "title": "Agent runtime and memory project evaluation", "path": "docs/research/agent-runtime-platforms-2026-11.md" }
   ],
   "skills": {
     "auto_load": ["raawaa-engine-androidharness"]
