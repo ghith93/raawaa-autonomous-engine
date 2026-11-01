@@ -26,7 +26,7 @@ GitHub Actions is used first for CI and bounded scheduled jobs. It is event-driv
 
 ## Model/provider integration
 
-No provider is enabled in this phase. Future adapters must read credentials only from environment variables or secret stores, never from committed files. The router must enforce per-task, daily, and monthly budgets before making a request, and record actual usage after it returns.
+Provider profiles are now staged in `config/provider_profiles.json` but all remain disabled. Groq GPT-OSS 20B/120B are production-model candidates; Qwen 3.8-27B is preview-only. The read-only profile registry does not load secret values or enable network calls. Future live adapters must read credentials only from environment variables or secret stores, never from committed files. The router enforces per-minute, per-task, daily, and monthly request/token quotas before making a request and records usage after it returns. Paid routes additionally require a monetary ledger and explicit approval.
 
 ## Safety boundaries
 
