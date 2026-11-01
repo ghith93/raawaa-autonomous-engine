@@ -32,7 +32,7 @@ class QuotaAwareLiveGateway:
         for profile in candidates:
             if not self.quota_manager.eligible(profile, estimated_tokens):
                 continue
-            adapter = self.adapters.get(profile.provider)
+            adapter = self.adapters.get(profile.route_id) or self.adapters.get(profile.provider)
             if adapter is None:
                 continue
             try:
