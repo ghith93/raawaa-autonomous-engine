@@ -33,11 +33,36 @@ async function readJson(request) {
   try { return JSON.parse(raw); } catch { throw new Error("invalid_json"); }
 }
 
+async function recoverStaleTasks(env) {
+  const nowIso = new Date().toISOString();
+  const stale = await env.DB.prepare(
+    "SELECT id,attempts,max_attempts,lease_token FROM tasks WHERE status='running' AND (lease_expires_at IS NULL OR lease_expires_at < ?) ORDER BY updated_at,id LIMIT 100"
+  ).bind(nowIso).all();
+  const statements = [];
+  for (const task of stale.results || []) {
+    const status = task.attempts < task.max_attempts ? "pending" : "failed";
+    statements.push(env.DB.prepare(
+      "UPDATE tasks SET status=?,error=?,updated_at=?,lease_token=NULL,lease_expires_at=NULL WHERE id=? AND status='running' AND lease_token IS ? AND (lease_expires_at IS NULL OR lease_expires_at < ?)"
+    ).bind(status, "Recovered expired worker lease.", nowIso, task.id, task.lease_token, nowIso));
+    statements.push(env.DB.prepare(
+      "INSERT INTO audit_log(task_id,event,details_json,created_at) SELECT id,'task_lease_recovered',?,? FROM tasks WHERE id=? AND status=? AND updated_at=?"
+    ).bind(JSON.stringify({ new_status: status, attempt: task.attempts, max_attempts: task.max_attempts }), nowIso, task.id, status, nowIso));
+  }
+  if (statements.length) await env.DB.batch(statements);
+  const requeued = (stale.results || []).filter(t => t.attempts < t.max_attempts).length;
+  const failed = (stale.results || []).length - requeued;
+  return { requeued, failed };
+}
+
 function validText(value, max) {
   return typeof value === "string" && value.trim().length > 0 && value.length <= max;
 }
 
 export default {
+  async scheduled(_controller, env) {
+    await recoverStaleTasks(env);
+  },
+
   async fetch(request, env) {
     const url = new URL(request.url);
     if (request.method === "GET" && url.pathname === "/health") {
@@ -73,28 +98,8 @@ export default {
     }
 
     if (request.method === "POST" && url.pathname === "/v1/tasks/recover") {
-      const nowIso = new Date().toISOString();
-      try {
-        const stale = await env.DB.prepare(
-          "SELECT id,attempts,max_attempts,lease_token FROM tasks WHERE status='running' AND (lease_expires_at IS NULL OR lease_expires_at < ?) ORDER BY updated_at,id LIMIT 100"
-        ).bind(nowIso).all();
-        const statements = [];
-        for (const task of stale.results || []) {
-          const status = task.attempts < task.max_attempts ? "pending" : "failed";
-          statements.push(env.DB.prepare(
-            "UPDATE tasks SET status=?,error=?,updated_at=?,lease_token=NULL,lease_expires_at=NULL WHERE id=? AND status='running' AND lease_token IS ? AND (lease_expires_at IS NULL OR lease_expires_at < ?)"
-          ).bind(status, "Recovered expired worker lease.", nowIso, task.id, task.lease_token, nowIso));
-          statements.push(env.DB.prepare(
-            "INSERT INTO audit_log(task_id,event,details_json,created_at) SELECT id,'task_lease_recovered',?,? FROM tasks WHERE id=? AND status=? AND updated_at=?"
-          ).bind(JSON.stringify({ new_status: status, attempt: task.attempts, max_attempts: task.max_attempts }), nowIso, task.id, status, nowIso));
-        }
-        if (statements.length) await env.DB.batch(statements);
-        const requeued = (stale.results || []).filter(t => t.attempts < t.max_attempts).length;
-        const failed = (stale.results || []).length - requeued;
-        return json({ requeued, failed });
-      } catch {
-        return json({ error: "storage_unavailable" }, 503);
-      }
+      try { return json(await recoverStaleTasks(env)); }
+      catch { return json({ error: "storage_unavailable" }, 503); }
     }
 
     // Claim one pending task atomically. The lease token is generated server-side
