@@ -41,7 +41,7 @@ The isolated experiment adds `experiments/microsoft_agent_framework/checkpoint_e
 
 The prototype defines a deterministic JSON transport envelope with:
 - Explicit schema version, workflow/checkpoint identifiers, parent lineage, and sequence metadata.
-- A 256 KiB encoded-envelope limit and fail-closed handling of excessive JSON nesting.
+- A 256 KiB encoded-envelope limit, maximum JSON nesting depth of 64, and maximum 20,000 payload values.
 - Canonical UTF-8 JSON encoding, duplicate-key rejection, and finite-number validation.
 - SHA-256 checksum verification to detect accidental corruption or an un-recomputed payload change.
 
