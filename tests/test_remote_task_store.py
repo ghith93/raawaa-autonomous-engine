@@ -33,6 +33,7 @@ class RemoteTaskStoreTests(unittest.TestCase):
         self.assertEqual(request.full_url, "https://engine.example/v1/tasks/claim")
         self.assertEqual(request.get_method(), "POST")
         self.assertEqual(request.get_header("Authorization"), "Bearer secret-test-token")
+        self.assertEqual(request.get_header("User-agent"), "RaawaaAutonomousEngine/1.0 (+https://github.com/ghith93/raawaa-autonomous-engine)")
         self.assertIsNone(request.get_header("Cf-access-client-id"))
 
     @patch("engine.remote_task_store.urlopen")
