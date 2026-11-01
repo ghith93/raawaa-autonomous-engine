@@ -35,16 +35,14 @@ assume a sequence of REST calls is one transaction.
 
 ## Migration
 
-Review `migrations/0001_initial.sql` before applying. It is additive and
-idempotent, but applying it creates tables in the configured database. The
-migration is deliberately not run by CI or by the scheduled maintenance workflow.
+Review migration SQL in pull requests before merging. Once a migration change is merged to main, `.github/workflows/d1-auto-migrate.yml` automatically lists and applies the reviewed migrations to the pinned D1 database. The workflow is serialized, verifies the configured database ID/name, and runs only on main pushes that change migrations or the workflow itself. It does not run for ordinary code changes. Keep migrations additive and idempotent; a successful CI run is required before merge.
 
 ## Next steps
 
-1. The manually dispatched workflow `.github/workflows/d1-migrate.yml` now
-   lists remote migration state and applies reviewed migrations only after the
-   operator types the exact target database name. It is never run by CI.
-2. Add disposable-database integration tests for D1 semantics.
+1. Automatic, serialized migration after reviewed changes merge to main is
+   implemented in `.github/workflows/d1-auto-migrate.yml`.
+2. Keep the manual migration workflow as a recovery/operations fallback.
+3. Add disposable-database integration tests for D1 semantics.
 3. Introduce storage protocols and D1 repositories without changing the local
    SQLite implementation used by existing unit tests.
 4. Move routine application traffic behind an authenticated Worker + D1 binding.
