@@ -64,6 +64,39 @@ class ResearchPersistenceTests(unittest.TestCase):
                 "RAAWAA_ENGINE_CF_ACCESS_CLIENT_ID": "only-one",
             })
 
+    def test_retries_temporary_worker_deploy_or_migration_errors(self):
+        snapshot = {"candidates": [{"full_name": "org/repo"}]}
+        calls, sleeps = [], []
+        def flaky_post(*args):
+            calls.append(1)
+            if len(calls) < 3:
+                raise ResearchPersistenceError("research persistence endpoint returned HTTP 404")
+            return {"accepted_count": 1}
+        result = persist_candidates(
+            snapshot,
+            environ={"RAAWAA_ENGINE_API_URL": "https://engine.example", "RAAWAA_ENGINE_API_TOKEN": "test-secret"},
+            request_fn=flaky_post,
+            sleep_fn=sleeps.append,
+        )
+        self.assertEqual(result["persisted"], 1)
+        self.assertEqual(len(calls), 3)
+        self.assertEqual(sleeps, [5, 10])
+
+    def test_does_not_retry_auth_or_validation_errors(self):
+        snapshot = {"candidates": [{"full_name": "org/repo"}]}
+        calls = []
+        def unauthorized(*args):
+            calls.append(1)
+            raise ResearchPersistenceError("research persistence endpoint returned HTTP 401")
+        with self.assertRaises(ResearchPersistenceError):
+            persist_candidates(
+                snapshot,
+                environ={"RAAWAA_ENGINE_API_URL": "https://engine.example", "RAAWAA_ENGINE_API_TOKEN": "test-secret"},
+                request_fn=unauthorized,
+                sleep_fn=lambda _: self.fail("auth errors must not be retried"),
+            )
+        self.assertEqual(len(calls), 1)
+
     def test_partial_acceptance_stops_for_safe_retry(self):
         snapshot = {"candidates": [{"full_name": "org/repo"}]}
         def partial(*args):
