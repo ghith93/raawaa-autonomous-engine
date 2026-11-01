@@ -50,3 +50,10 @@ The Python CLI uses local SQLite by default. To use D1 as the shared task queue,
 - `RAAWAA_ENGINE_API_TOKEN`: the same application bearer token configured as the Worker secret; never commit or print it.
 
 With both values present, `enqueue`, `list`, `run-once`, and `run-batch` use the authenticated D1 API. The local SQLite database continues to hold memory and model-usage records. Without the URL, the CLI uses SQLite for tasks. Remote audit-log listing is not exposed. The runner remains dry-run only and does not call models or external services.
+
+
+## Scheduled lease maintenance
+
+The Worker runs a bounded stale-lease recovery pass every 15 minutes using a Cloudflare Cron Trigger. Each invocation inspects at most 100 expired leases and requeues only tasks that have attempts remaining; exhausted tasks become failed. This is maintenance, not an AI agent loop: it does not execute task handlers, call models, or perform external writes.
+
+The schedule is designed for the Cloudflare Workers Free limits published at implementation time: up to five Cron Triggers per account and 10 ms CPU per Cron invocation. See [Workers limits](https://developers.cloudflare.com/workers/platform/limits/) and [Cron Triggers](https://developers.cloudflare.com/workers/configuration/cron-triggers/). Cloudflare documents that trigger changes can take up to 15 minutes to propagate.
