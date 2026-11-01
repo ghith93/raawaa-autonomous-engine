@@ -59,6 +59,27 @@ class RemoteTaskStoreTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             RemoteTaskStore("https://engine.example", "")
 
+    def test_rate_limit_has_safe_retry_later_error(self):
+        with patch("engine.remote_task_store.urlopen",
+                   side_effect=__import__("urllib.error", fromlist=["HTTPError"]).HTTPError(
+                       "https://engine.example/v1/tasks", 429, "limited", {}, None)):
+            with self.assertRaisesRegex(RemoteTaskStoreError, "rate limit") as caught:
+                self.store.list_tasks()
+            self.assertNotIn("secret-test-token", str(caught.exception))
+
+    def test_server_error_is_classified_as_temporary(self):
+        with patch("engine.remote_task_store.urlopen",
+                   side_effect=__import__("urllib.error", fromlist=["HTTPError"]).HTTPError(
+                       "https://engine.example/v1/tasks", 503, "unavailable", {}, None)):
+            with self.assertRaisesRegex(RemoteTaskStoreError, "temporarily unavailable"):
+                self.store.list_tasks()
+
+    def test_transport_oserror_is_sanitized(self):
+        with patch("engine.remote_task_store.urlopen", side_effect=OSError("socket detail")):
+            with self.assertRaisesRegex(RemoteTaskStoreError, "unavailable") as caught:
+                self.store.list_tasks()
+            self.assertNotIn("socket detail", str(caught.exception))
+
     def test_rejects_invalid_remote_lease_timeout(self):
         with self.assertRaises(ValueError):
             self.store.claim_next(9000)
