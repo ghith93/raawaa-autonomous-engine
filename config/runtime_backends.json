@@ -80,7 +80,8 @@
         "Harness is an MCP client. No authenticated engine MCP endpoint or remote device adapter exists yet.",
         "Foreground service and resume support do not constitute guaranteed 24/7 execution.",
         "A bounded GitHub issue task bridge is implemented but not active until a local AndroidHarness poller is started; it is not a direct MCP or general remote shell adapter.",
-        "Only owner-authored issues with the strict task schema can request the four allowlisted read-only operations; issue title/comment/close updates are task-lifecycle metadata only."
+        "Only owner-authored issues with the strict task schema can request the four allowlisted read-only operations; issue title/comment/close updates are task-lifecycle metadata only.",
+        "The Python test operation runs under the AndroidHarness Linux/app UID and is not OS-sandboxed; restrict it to trusted owner-controlled origin/main code."
       ]
     }
   ]
