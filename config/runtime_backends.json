@@ -1,0 +1,43 @@
+{
+  "schema_version": 1,
+  "backends": [
+    {
+      "id": "androidharness",
+      "display_name": "AndroidHarness",
+      "kind": "external_android_linux_runtime",
+      "status": "registered_specification_only",
+      "operator_reported_snapshot_utc": "2026-11-01T22:40:00Z",
+      "capabilities_reported": [
+        "bash",
+        "git",
+        "gh",
+        "python3",
+        "node20",
+        "npm",
+        "pip",
+        "android_device_access_auto_fallback"
+      ],
+      "capabilities_not_ready_or_unverified": [
+        "java_d8",
+        "openssh_binary",
+        "shizuku_running",
+        "direct_root",
+        "persistent_always_on_execution",
+        "remote_agent_tool_adapter",
+        "cloudflare_deployment_secrets"
+      ],
+      "execution_defaults": {
+        "root": false,
+        "network_listener": "loopback_only",
+        "provider_calls": false,
+        "paid_services": false,
+        "external_writes": false,
+        "production_deployment": false,
+        "bounded_runtime_required": true,
+        "task_id_required": true,
+        "audit_log_required": true
+      },
+      "documentation": "docs/android-harness.md"
+    }
+  ]
+}
