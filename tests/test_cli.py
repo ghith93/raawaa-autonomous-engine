@@ -40,7 +40,7 @@ class CliTests(unittest.TestCase):
         self.assertFalse(result["network_calls_enabled"])
         self.assertEqual(len(result["profiles"]), 3)
         profile = next(item for item in result["profiles"] if item["model"] == "openai/gpt-oss-20b")
-        self.assertEqual(profile["model"], "qwen/qwen3.8-27b")
+        self.assertEqual(profile["model"], "openai/gpt-oss-20b")
         self.assertEqual(profile["api_key_env_configured_by_name_only"], "GROQ_API_KEY")
         self.assertFalse(profile["enabled"])
         self.assertFalse(profile["ready_for_routing"])
@@ -54,7 +54,7 @@ class CliTests(unittest.TestCase):
         output = io.StringIO()
         with contextlib.redirect_stdout(output):
             self.assertEqual(cli.audit(), 0)
-        self.assertIn("1 staged provider profiles", output.getvalue())
+        self.assertIn("3 staged provider profiles", output.getvalue())
         self.assertIn("inference disabled", output.getvalue())
 
     def test_memory_cli_lifecycle(self):
