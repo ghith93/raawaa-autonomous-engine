@@ -1,5 +1,9 @@
 # Operations and contributor guide
 
+## Permanent autonomous operating directive
+
+The [Master Autonomous Execution Directive](master-autonomous-execution-directive.ar.md) is the permanent executive operating charter. Every agent and work cycle must read it together with the [Continuous Improvement and Research Charter](continuous-improvement-charter.md), [Architecture](architecture.md), and applicable operating policies. A user message consisting only of `.` means resume from the latest verified repository state, execute the highest-priority safe work, and continue. See the repository-wide [AGENTS.md](../AGENTS.md) for mandatory agent startup instructions. Runtime prompt-loader enforcement remains an explicit engineering requirement until implemented and tested.
+
 ## Continuous improvement operating charter
 
 The [Continuous Improvement and Research Charter](continuous-improvement-charter.md) is an additive layer over the established architecture and policy; it does not authorize a rewrite or override safety gates. Use the [Reusable Task-Completion Handoff Prompt](task-completion-handoff-prompt.md) or its [Arabic version](task-completion-handoff-prompt.ar.md) to resume work from the latest verified repository state after each cycle. Existing architecture, zero-spend policy, dry-run defaults, provider quotas, and approval gates remain authoritative.
