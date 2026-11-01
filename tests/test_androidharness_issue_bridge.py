@@ -7,6 +7,7 @@ import tarfile
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 from scripts.androidharness_issue_bridge import (
@@ -19,6 +20,7 @@ from scripts.androidharness_issue_bridge import (
     parse_task,
     safe_extract_git_archive,
     safe_python_environment,
+    verify_repository_root,
 )
 
 
@@ -56,6 +58,24 @@ class AndroidHarnessBridgeTests(unittest.TestCase):
         ) + "\n" + chr(96) * 3
         with self.assertRaisesRegex(BridgeError, "duplicate keys"):
             parse_task(duplicate)
+
+
+    def test_bridge_requires_the_approved_repository_origin(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            outputs = [
+                SimpleNamespace(returncode=0, stdout=str(root), stderr=""),
+                SimpleNamespace(returncode=0, stdout="https://github.com/ghith93/raawaa-autonomous-engine.git", stderr=""),
+            ]
+            with patch("scripts.androidharness_issue_bridge.subprocess.run", side_effect=outputs):
+                verify_repository_root(root)
+            outputs = [
+                SimpleNamespace(returncode=0, stdout=str(root), stderr=""),
+                SimpleNamespace(returncode=0, stdout="https://github.com/someone-else/fork.git", stderr=""),
+            ]
+            with patch("scripts.androidharness_issue_bridge.subprocess.run", side_effect=outputs):
+                with self.assertRaisesRegex(BridgeError, "origin does not match"):
+                    verify_repository_root(root)
 
     def test_candidate_issue_requires_owner_prefix_and_open_issue(self):
         issue = {
