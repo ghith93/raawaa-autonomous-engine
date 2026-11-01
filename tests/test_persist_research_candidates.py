@@ -79,6 +79,7 @@ class ResearchPersistenceTests(unittest.TestCase):
             environ={"RAAWAA_ENGINE_API_URL": "https://engine.example", "RAAWAA_ENGINE_API_TOKEN": "test-secret"},
             request_fn=flaky_post,
             sleep_fn=sleeps.append,
+            verify_fn=lambda *args: {"candidates": [{"source_key": "github:org/repo"}]},
         )
         self.assertEqual(result["persisted"], 1)
         self.assertEqual(len(calls), 3)
