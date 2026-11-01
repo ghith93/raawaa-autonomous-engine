@@ -56,9 +56,10 @@ class D1Client:
             with urllib.request.urlopen(request, timeout=self.timeout) as response:
                 data = json.loads(response.read().decode("utf-8"))
         except urllib.error.HTTPError as exc:
-            # Do not include request headers or token in raised errors.
-            detail = exc.read(2048).decode("utf-8", errors="replace")
-            raise D1APIError(f"Cloudflare D1 API returned HTTP {exc.code}: {detail}") from None
+            # Error bodies are untrusted and may echo submitted data. Keep them
+            # out of exceptions and logs; the status code is enough to classify
+            # transport/auth/rate-limit failures without leaking response content.
+            raise D1APIError(f"Cloudflare D1 API returned HTTP {exc.code}") from None
         except (urllib.error.URLError, TimeoutError) as exc:
             raise D1APIError(f"Cloudflare D1 API connection failed: {type(exc).__name__}") from None
         except (UnicodeDecodeError, json.JSONDecodeError) as exc:
