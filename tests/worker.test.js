@@ -148,3 +148,10 @@ test("recover endpoint rejects unauthenticated callers", async () => {
   }), { DB: dbMock(), ENGINE_API_TOKEN: TOKEN });
   assert.equal(response.status, 401);
 });
+
+
+test("scheduled handler runs bounded stale lease recovery", async () => {
+  const DB = dbMock();
+  await worker.scheduled({ cron: "*/15 * * * *" }, { DB });
+  assert.ok(DB.calls.some(x => x.kind === "all" && x.sql.includes("LIMIT 100")));
+});
