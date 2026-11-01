@@ -39,7 +39,7 @@ class CliTests(unittest.TestCase):
             with contextlib.redirect_stdout(output):
                 self.assertEqual(cli.main(), 0)
         result = json.loads(output.getvalue())
-        self.assertFalse(result["network_calls_enabled"])
+        self.assertEqual(result["network_calls_performed"], 0)
         self.assertEqual(len(result["profiles"]), 3)
         profile = next(item for item in result["profiles"] if item["model"] == "openai/gpt-oss-20b")
         self.assertEqual(profile["model"], "openai/gpt-oss-20b")
