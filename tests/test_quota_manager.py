@@ -91,12 +91,12 @@ class QuotaManagerTests(unittest.TestCase):
     def test_monthly_token_limit_blocks_route(self):
         route = self.profile(monthly_token_limit=50)
         self.ledger.record(route.route_id, 40, self.now)
-        self.assertFalse(QuotaManager([route], self.ledger).eligible(11, self.now))
+        self.assertFalse(QuotaManager([route], self.ledger).eligible(route, 11, self.now))
 
     def test_monthly_request_limit_blocks_route(self):
         route = self.profile(monthly_request_limit=1)
         self.ledger.record(route.route_id, 1, self.now)
-        self.assertFalse(QuotaManager([route], self.ledger).eligible(1, self.now))
+        self.assertFalse(QuotaManager([route], self.ledger).eligible(route, 1, self.now))
 
     def test_rate_limit_cooldown_skips_provider(self):
         route = self.profile()
@@ -148,7 +148,8 @@ class QuotaManagerTests(unittest.TestCase):
 
     def test_conflicting_second_settlement_fails_closed(self):
         route = self.profile()
-        reservation = self.ledger.reserve(route.route_id, 100, 10, 1000, self.now)
+        reservation = self.ledger.reserve(route.route_id, 100, 10, 1000, self.now,
+                                    monthly_request_limit=100, monthly_token_limit=10000)
         self.ledger.settle(reservation, 25)
         with self.assertRaisesRegex(RuntimeError, "already settled"):
             self.ledger.settle(reservation, 26)
