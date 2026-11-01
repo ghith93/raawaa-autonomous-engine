@@ -109,3 +109,16 @@ Interpret the preflight result conservatively:
 The endpoint accepts POST only; GET returning 405 is expected and is not evidence that authenticated POST is broken. An unauthenticated task-list GET returning 401 is also expected. Neither result substitutes for the scheduled runner's authenticated POST test.
 
 The preflight does not prove that `/v1/tasks/recover`, claim, heartbeat, or finish works. A successful end-to-end verification requires a subsequent scheduled Task Runner execution to pass the preflight and complete the bounded task batch. Check the exact Actions run and job logs; do not claim the 403 is resolved from a successful Worker deployment or CI run alone.
+
+
+## Quota ledger and live-adapter safety
+
+The optional quota-aware live gateway is disabled by default. When explicitly enabled in a controlled test or approved deployment, it selects only a route whose free-tier status, commercial-use permission, daily request limit, and daily token limit are explicitly verified. Missing or unknown quota data is not eligible.
+
+Before provider I/O, the gateway reserves one request and a conservative token estimate in SQLite using an immediate write transaction. Concurrent reservations therefore compete against the same persisted daily caps. On a valid response, the reservation is settled to actual token usage. Settlement is idempotent only when a repeated call reports the same actual token count; a conflicting second settlement fails closed. Existing quota databases are migrated additively.
+
+For timeouts, transport failures, malformed responses, and unexpected adapter exceptions, retain the full estimate because the provider may already have processed the request. HTTP 429 applies a route cooldown. Do not release an ambiguous reservation or automatically retry the same request against another route unless the provider outcome is known to be safe.
+
+The live gateway rejects mocked completions, empty text, mismatched provider/model identities, invalid token counts, and non-finite or negative costs. A verified-free route that reports a non-zero cost is quarantined; the gateway does not return the completion or rotate to another provider. The adapter's placeholder `cost_usd=0.0` is not evidence of free usage. Verify account-specific provider terms and pricing independently before enabling any live route.
+
+The quota ledger currently enforces daily request and token limits. Do not assume the optional `monthly_credit_usd` profile field is an active monthly monetary cap. Paid model calls remain disabled by default, and there is no automatic paid fallback.
