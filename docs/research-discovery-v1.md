@@ -2,53 +2,28 @@
 
 ## Purpose
 
-The engine now has a bounded, read-only GitHub repository discovery capability. It complements provider model-catalog discovery; it does not replace the broader research and engineering review pipeline defined in the Continuous Improvement Charter.
+The engine has a bounded, read-only GitHub and Crossref discovery capability. It complements provider model-catalog discovery and does not replace the broader research and engineering review pipeline in the Continuous Improvement Charter.
 
 ## What it does
 
 - Searches six curated areas: agent frameworks, coding agents, agent memory, MCP ecosystem, model routing, and durable execution.
-- Uses GitHub public repository Search API with an optional GITHUB_TOKEN for authenticated API rate limits, plus one daily Crossref public scholarly-metadata query without an API key.
-- Caps GitHub and Crossref responses at 1 MiB before parsing and reports invalid UTF-8 as a safe discovery failure.
+- Uses GitHub public repository Search API and one daily Crossref scholarly-metadata query.
+- Caps source responses at 1 MiB before parsing and reports invalid UTF-8 as a safe discovery failure.
 - Counts attempted source requests, including failures, in run telemetry.
 - Limits each run to six queries and at most five candidates per query.
 - Deduplicates repositories and records source query, discovery time, stars, last push, language, SPDX licence label, and topics.
-- Marks every result unreviewed. A licence label is metadata only, not a legal/licence review.
+- Marks every result unreviewed. A licence label is metadata only, not legal/licence review.
 - Makes no model-generation requests, repository clones, code execution, installations, writes, or permission changes.
-- Crossref returns bibliographic metadata only; abstracts are not retrieved. Licence URLs are metadata and are not treated as licence verification. One sequential list request is made per daily run to respect public-pool rate limits.
+- Crossref returns bibliographic metadata only; abstracts are not retrieved.
 
-## Run manually
+## Run and review
 
-    python -m engine.cli research-discover --max-per-query 5
-
-The command writes a JSON snapshot to stdout. The scheduled GitHub Actions workflow runs daily, also runs after relevant research/Worker/migration changes reach main, and uploads the snapshot as a 30-day artifact. It uses read-only repository permissions.
-
-## Review before adoption
-
-1. Open the original repository and verify ownership/authenticity.
-2. Inspect the exact licence file and any model/data licences; do not rely on SPDX metadata alone.
-3. Check recent releases, commits, maintainers, security advisories, dependencies, and open issues.
-4. Assess data flows, secrets exposure, network access, and execution isolation.
-5. Compare with the current engine component and alternatives.
-6. Test in an isolated branch/sandbox, measure benefit/cost, then decide whether to integrate.
-
-Discovery does not imply endorsement, installation, execution, or permission to use external services.
-
-## Current limitations
-
-- GitHub and Crossref are initial sources, not a complete web/official-documentation/scientific/MCP/plugin research engine.
-- Snapshots are workflow artifacts with 30-day retention and candidate metadata is also upserted into the authenticated Cloudflare D1 research_candidates table. Rediscovery updates last_seen_at and discovery_count while preserving human review_status. The authenticated review endpoint records accepted/rejected/deferred decisions. The D1 store is durable cross-run memory; artifacts remain convenient per-run snapshots. After ingestion, the persistence client performs an authenticated keys-only readback and confirms every submitted source key exists before reporting success. The persistence client retries only temporary deployment/migration/availability errors with bounded delays; authentication and validation failures stop immediately.
-- No autonomous agent reads and evaluates candidates yet. Results require engineering/security/licence review.
-- The schedule is daily and bounded, not always-on. D1 ingestion uses the existing Worker application token and accepts only normalized GitHub/Crossref metadata.
-
-Official Crossref references:
-- REST API: https://www.crossref.org/documentation/retrieve-metadata/rest-api/
-- Access and rate limits: https://www.crossref.org/documentation/retrieve-metadata/rest-api/access-and-authentication/
+Run manually with `python -m engine.cli research-discover --max-per-query 5`. The scheduled workflow uploads a 30-day artifact. Review authenticity, licence, maintenance, security, dependencies, data flows, compatibility, and cost before adoption. Discovery does not imply endorsement, installation, execution, or permission to use external services.
 
 ## Persistent D1 research memory
 
-- Authenticated ingestion: POST /v1/research/candidates (batch size is capped at 25 by the Worker; the workflow sends chunks of five).
-- Authenticated listing: GET /v1/research/candidates?status=unreviewed&limit=50. Use keys_only=true for compact verification or include_metadata=true for detailed records.
-- Explicit review: POST /v1/research/candidates/review with source_key and review_status set to accepted, rejected, or deferred.
-- Re-ingestion is idempotent by normalized GitHub repository name or Crossref DOI. It updates last-seen/discovery count but does not overwrite a prior review decision.
-- Only an allowlisted metadata subset is stored. No source code, abstracts, full text, secrets, or model outputs are stored.
-- Migration 0002 is additive and applied by the existing D1 migration workflow after merge to main. Worker deployment is handled by the existing deploy workflow.
+The authenticated ingestion, listing, and review endpoints store only allowlisted normalized GitHub/Crossref metadata. Re-ingestion is idempotent and preserves review decisions. No source code, abstracts, full text, secrets, or model outputs are stored. Keys-only readback verifies ingestion.
+
+**Persistence is disabled by default.** The scheduled workflow executes the D1 persistence step only when the repository Actions variable `RAAWAA_ENGINE_RESEARCH_PERSISTENCE` is explicitly set to the exact value `enabled`. Leave it unset unless the operator deliberately enables persistent research writes. Workflow artifacts continue to be uploaded when persistence is disabled.
+
+Migrations and Worker deployments remain subject to the repository's existing production-change approval policy.
