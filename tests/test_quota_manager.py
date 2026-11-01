@@ -229,9 +229,13 @@ class QuotaManagerTests(unittest.TestCase):
         self.ledger.record(route.route_id, 25, self.now)
         row = QuotaManager([route], self.ledger).snapshot(self.now)[0]
         self.assertEqual(row["daily_requests_used"], 1)
+        self.assertEqual(row["daily_request_limit"], 10)
+        self.assertEqual(row["daily_token_limit"], 1000)
         self.assertEqual(row["daily_tokens_used"], 25)
         self.assertEqual(row["monthly_requests_used"], 1)
         self.assertEqual(row["monthly_tokens_used"], 25)
+        self.assertEqual(row["monthly_request_limit"], 100)
+        self.assertEqual(row["monthly_token_limit"], 10000)
         self.assertTrue(row["enabled"])
         self.assertTrue(row["production_use_allowed"])
 
