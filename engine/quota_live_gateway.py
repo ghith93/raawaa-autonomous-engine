@@ -97,6 +97,17 @@ class QuotaAwareLiveGateway:
                 response.output_tokens,
                 response.cost_usd,
             )
+            if (response.input_tokens > estimated_input_tokens
+                    or response.output_tokens > request.max_output_tokens):
+                # The provider exceeded a hard reservation ceiling. Keep the actual
+                # usage/cost in both ledgers, quarantine this route, and never rotate
+                # to another provider after a potentially billable contract violation.
+                self.quota_manager.ledger.cool_down(
+                    profile.route_id, self.cooldown_seconds, "response_exceeded_token_ceiling"
+                )
+                raise ProviderUnavailable(
+                    "Provider response exceeded reserved token ceilings; route quarantined."
+                )
             if response.cost_usd > 0:
                 # A route advertised as free has contradicted its verified profile.
                 # Preserve the measured usage/cost, quarantine the route, and fail
