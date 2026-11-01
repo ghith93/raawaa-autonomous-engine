@@ -41,7 +41,7 @@ POLICY_FILES = (
     "docs/architecture.md",
     "docs/operations.md",
 )
-ALLOWED_OPERATIONS = {"inspect_environment", "git_status", "run_python_tests"}
+ALLOWED_OPERATIONS = {"inspect_environment", "git_status", "run_python_tests", "run_androidharness_doctor"}
 TOKEN_PATTERN = re.compile(
     r"(?i)(gh[pousr]_[A-Za-z0-9_]{20,}|github_pat_[A-Za-z0-9_]{20,}|"
     r"Bearer\s+\S+|sk-[A-Za-z0-9_-]{20,})"
@@ -342,6 +342,46 @@ class AndroidHarnessIssueBridge:
                 "versions": versions,
                 "disk_free_bytes": disk.free,
                 "memory_available": memory_available,
+            }
+
+
+        if operation == "run_androidharness_doctor":
+            doctor_path = self.root / "scripts" / "androidharness" / "doctor.py"
+            if not doctor_path.is_file():
+                raise BridgeError("read-only AndroidHarness doctor is unavailable")
+            try:
+                result = subprocess.run(
+                    [sys.executable, str(doctor_path), "--json"],
+                    cwd=self.root,
+                    text=True,
+                    capture_output=True,
+                    timeout=120,
+                    check=False,
+                )
+            except (OSError, subprocess.TimeoutExpired) as exc:
+                raise BridgeError("read-only AndroidHarness doctor did not complete") from exc
+            if result.returncode != 0:
+                raise BridgeError("read-only AndroidHarness doctor returned a failure")
+            try:
+                report = json.loads(result.stdout)
+            except json.JSONDecodeError as exc:
+                raise BridgeError("read-only AndroidHarness doctor returned invalid JSON") from exc
+            if (
+                not isinstance(report, dict)
+                or report.get("schema_version") != 1
+                or report.get("mutations_performed") is not False
+                or report.get("network_requests_performed") is not False
+                or report.get("secret_values_emitted") is not False
+                or (report.get("workspace") or {}).get("root") != str(self.root)
+            ):
+                raise BridgeError("read-only AndroidHarness doctor did not satisfy its safety contract")
+            return {
+                "exit_code": 0,
+                "doctor_schema_version": 1,
+                "output": bounded_text(
+                    json.dumps(report, ensure_ascii=False, sort_keys=True),
+                    task["max_output_bytes"],
+                ),
             }
 
         if operation == "git_status":
