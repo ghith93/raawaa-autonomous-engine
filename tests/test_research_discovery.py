@@ -1,4 +1,5 @@
 import unittest
+from unittest.mock import patch
 from datetime import datetime, timezone
 from engine.research_discovery import MAX_RESPONSE_BYTES, ResearchDiscoveryError, _request_json, discover_repositories
 
