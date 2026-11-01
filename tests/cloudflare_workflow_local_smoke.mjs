@@ -89,9 +89,9 @@ try {
   // status(); the completed checkpoint output proves it reached the approval gate.
   const atApprovalGate = x => x.local_step_outputs?.some(value => value?.checkpoint_id?.startsWith("spike:")) && x.output === null;
   const waiting = await waitForStatus(started.id, atApprovalGate);
-  const beforeRestart = waiting.local_step_outputs || [];
-  assert.equal(beforeRestart.filter(x => x?.status === "claimed").length, 1);
-  assert.equal(beforeRestart.filter(x => x?.result === "research-stub").length, 1);
+  const beforeApprovalOutputs = waiting.local_step_outputs || [];
+  assert.equal(beforeApprovalOutputs.filter(x => x?.status === "claimed").length, 1);
+  assert.equal(beforeApprovalOutputs.filter(x => x?.result === "research-stub").length, 1);
 
   await request("/approve/" + started.id, {
     method: "POST",
@@ -99,8 +99,6 @@ try {
   });
   const completed = await waitForStatus(started.id, x => x.status === "complete");
   assert.equal(completed.output?.status, "completed");
-  assert.equal(completed.output?.approval_id, "local-approval-1");
-
   assert.equal(completed.output?.approval_id, "local-approval-1");
 
   const restartPayload = {
