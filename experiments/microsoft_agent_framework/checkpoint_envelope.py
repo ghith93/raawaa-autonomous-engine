@@ -41,7 +41,7 @@ def _canonical_json(value: dict[str, Any]) -> bytes:
             value, ensure_ascii=False, sort_keys=True,
             separators=(",", ":"), allow_nan=False,
         ).encode("utf-8")
-    except (TypeError, ValueError, UnicodeEncodeError) as exc:
+    except (TypeError, ValueError, UnicodeEncodeError, RecursionError) as exc:
         raise CheckpointEnvelopeError("checkpoint payload must contain finite JSON values") from exc
 
 
@@ -106,7 +106,7 @@ def decode_checkpoint_envelope(encoded: bytes | bytearray | memoryview) -> dict[
         )
     except CheckpointEnvelopeError:
         raise
-    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+    except (UnicodeDecodeError, json.JSONDecodeError, RecursionError) as exc:
         raise CheckpointEnvelopeError("checkpoint envelope is not valid UTF-8 JSON") from exc
 
     if not isinstance(envelope, dict) or set(envelope) != _REQUIRED_KEYS:
