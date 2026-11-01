@@ -2,7 +2,7 @@ name: Engine CI
 
 on:
   push:
-    branches: [main, "bootstrap/**", "feature/**"]
+    branches: [main, "bootstrap/**", "feature/**", "fix/**"]
   pull_request:
     branches: [main]
   workflow_dispatch:
