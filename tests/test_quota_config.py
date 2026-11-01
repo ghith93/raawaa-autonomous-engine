@@ -24,6 +24,10 @@ class ProviderProfileConfigTests(unittest.TestCase):
         self.assertEqual(entry.api_key_env, "GROQ_API_KEY")
         self.assertFalse(entry.enabled)
         self.assertFalse(entry.ready_for_routing)
+        self.assertEqual(entry.model_stage, "preview")
+        self.assertFalse(entry.production_use_allowed)
+        self.assertTrue(entry.profile.commercial_use_allowed)
+        self.assertEqual(entry.profile.input_cost_per_million_usd, 0.0)
         self.assertIsNone(entry.profile.input_cost_per_million_usd)
         self.assertFalse(entry.profile.commercial_use_allowed)
 
