@@ -247,6 +247,9 @@ class QuotaManagerTests(unittest.TestCase):
             columns = {row[1] for row in db.execute("PRAGMA table_info(quota_usage)")}
         self.assertIn("settled_at", columns)
         self.assertIn("task_id", columns)
+        with sqlite3.connect(path) as db:
+            indexes = {row[1] for row in db.execute("PRAGMA index_list(quota_usage)")}
+        self.assertIn("idx_quota_usage_route_time", indexes)
 
     def test_settlement_is_idempotent_for_same_usage(self):
         route = self.profile()

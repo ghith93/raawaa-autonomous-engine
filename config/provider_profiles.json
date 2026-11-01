@@ -1,0 +1,35 @@
+{
+  "schema_version": 1,
+  "mode": "staged_disabled",
+  "network_calls_enabled": false,
+  "routes": [
+    {
+      "id": "groq-free-qwen38-primary",
+      "enabled": false,
+      "provider": "groq",
+      "account": "primary",
+      "account_tier": "free",
+      "model": "qwen/qwen3.8-27b",
+      "api_key_env": "GROQ_API_KEY",
+      "endpoint_url": "https://api.groq.com/openai/v1",
+      "free_verified": true,
+      "commercial_use_allowed": false,
+      "minute_request_limit": 30,
+      "minute_token_limit": 8000,
+      "daily_request_limit": 1000,
+      "daily_token_limit": 200000,
+      "monthly_request_limit": 10000,
+      "monthly_token_limit": 2000000,
+      "per_task_request_limit": 3,
+      "per_task_token_limit": 16000,
+      "max_output_tokens": 512,
+      "input_cost_per_million_usd": null,
+      "output_cost_per_million_usd": null,
+      "pricing_source_url": "https://groq.com/pricing",
+      "quota_source_url": "https://console.groq.com/docs/rate-limits",
+      "terms_source_url": "https://console.groq.com/docs/legal/services-agreement",
+      "verified_at": "2026-11-01T00:00:00Z",
+      "verification_note": "Free plan, model visibility, and account quotas were operator-confirmed. Commercial/model-specific terms and exact inference pricing still require verification. Monthly and per-task values are conservative engine-side caps, not provider-published limits."
+    }
+  ]
+}

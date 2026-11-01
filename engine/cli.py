@@ -11,6 +11,7 @@ from engine.model_gateway import ModelGateway, UsageLedger
 from engine.worker import run_once
 from engine.batch_runner import run_batch
 from engine.free_provider_discovery import discover, discover_all, DiscoveryError
+from engine.quota_config import load_provider_profile_registry
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -109,6 +110,7 @@ def build_parser() -> argparse.ArgumentParser:
     archive.add_argument("--id", required=True)
 
     sub.add_parser("model-status")
+    sub.add_parser("provider-profile-status", help="Inspect staged provider quota profiles; never enables inference")
     return parser
 
 
@@ -164,6 +166,28 @@ def main() -> int:
         print(json.dumps(memory_store().list_recent(args.limit), indent=2, ensure_ascii=False))
     elif args.command == "memory-archive":
         print(json.dumps({"archived": memory_store().archive(args.id)}))
+    elif args.command == "provider-profile-status":
+        entries = load_provider_profile_registry(ROOT / "config" / "provider_profiles.json")
+        result = [{
+            "profile_id": entry.profile_id,
+            "provider": entry.profile.provider,
+            "model": entry.profile.model,
+            "account_tier": entry.account_tier,
+            "enabled": entry.enabled,
+            "ready_for_routing": entry.ready_for_routing,
+            "api_key_env_configured_by_name_only": entry.api_key_env,
+            "minute_request_limit": entry.profile.minute_request_limit,
+            "minute_token_limit": entry.profile.minute_token_limit,
+            "daily_request_limit": entry.profile.daily_request_limit,
+            "daily_token_limit": entry.profile.daily_token_limit,
+            "commercial_use_allowed": entry.profile.commercial_use_allowed,
+            "pricing_verified_zero": (
+                entry.profile.input_cost_per_million_usd == 0.0
+                and entry.profile.output_cost_per_million_usd == 0.0
+            ),
+            "verification_note": entry.verification_note,
+        } for entry in entries]
+        print(json.dumps({"network_calls_enabled": False, "profiles": result}, indent=2))
     elif args.command == "model-status":
         policy = load_json(ROOT / "config" / "policy.json")
         gateway = ModelGateway(
