@@ -5,7 +5,7 @@
       "id": "androidharness",
       "display_name": "AndroidHarness",
       "kind": "external_android_linux_runtime",
-      "status": "registered_specification_only",
+      "status": "bridge_implemented_not_activated",
       "operator_reported_snapshot_utc": "2026-11-01T22:40:00Z",
       "capabilities_reported": [
         "bash",
@@ -24,7 +24,8 @@
         "optional_codegraph",
         "local_gguf_model_support",
         "foreground_service_resume",
-        "one_approval_android_sdk_installer"
+        "one_approval_android_sdk_installer",
+        "github_issue_task_bridge_code"
       ],
       "capabilities_not_ready_or_unverified": [
         "java_d8",
@@ -36,7 +37,9 @@
         "cloudflare_deployment_secrets",
         "device_installed_version_3_2_not_verified",
         "local_model_benchmark",
-        "engine_authenticated_mcp_server"
+        "engine_authenticated_mcp_server",
+        "github_issue_task_bridge_running_on_device",
+        "direct_remote_mcp_adapter"
       ],
       "execution_defaults": {
         "root": false,
@@ -51,7 +54,15 @@
         "shizuku": false,
         "full_access": false,
         "mcp_servers": false,
-        "paid_inference": false
+        "paid_inference": false,
+        "github_issue_metadata_writes": "task-lifecycle-only",
+        "arbitrary_shell": false,
+        "allowed_task_operations": [
+          "inspect_environment",
+          "run_androidharness_doctor",
+          "git_status",
+          "run_python_tests"
+        ]
       },
       "documentation": "docs/android-harness.md",
       "upstream_version": "3.2-release",
@@ -68,7 +79,10 @@
         "Android SDK/JDK/Gradle are optional for this Python-first engine; v3.2 android_sdk_install can install OpenJDK 21, D8, aapt2, apksigner, android.jar and optional Gradle behind one explicit approval.",
         "OpenSSH is not required for HTTPS GitHub operations. Shizuku and direct root remain disabled unless a concrete Android system task requires them.",
         "Harness is an MCP client. No authenticated engine MCP endpoint or remote device adapter exists yet.",
-        "Foreground service and resume support do not constitute guaranteed 24/7 execution."
+        "Foreground service and resume support do not constitute guaranteed 24/7 execution.",
+        "A narrow GitHub issue polling bridge is implemented but remains inactive until explicitly started in AndroidHarness Code.",
+        "The bridge accepts only four fixed operations from ghith93-authored task issues and never accepts arbitrary shell, provider calls, deployment, or production writes.",
+        "Python tests run under the AndroidHarness Linux/app UID with a minimal environment; this is not an OS sandbox and tests can access files/network available to that UID."
       ]
     }
   ]
