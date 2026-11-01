@@ -53,7 +53,10 @@ class FileEnvelopeCheckpointStorage(InMemoryEnvelopeCheckpointStorage):
         for path in sorted(self.directory.glob("*.checkpoint")):
             if path.is_symlink():
                 raise FrameworkCheckpointStorageError("checkpoint records must not be symbolic links")
-            size = path.stat().st_size
+            file_stat = path.stat()
+            if os.name == "posix" and stat.S_IMODE(file_stat.st_mode) & 0o077:
+                raise FrameworkCheckpointStorageError("checkpoint file permissions must be private (0600)")
+            size = file_stat.st_size
             if size <= 0 or size > MAX_ENVELOPE_BYTES:
                 raise FrameworkCheckpointStorageError("checkpoint file is empty or exceeds the size limit")
             encoded = path.read_bytes()
