@@ -12,6 +12,10 @@ from experiments.microsoft_agent_framework.framework_checkpoint_storage import (
     FrameworkCheckpointStorageError,
     InMemoryEnvelopeCheckpointStorage,
 )
+from experiments.microsoft_agent_framework.checkpoint_envelope import (
+    decode_checkpoint_envelope,
+    encode_checkpoint_envelope,
+)
 
 
 class ApplicationOnlyState:
@@ -107,6 +111,31 @@ class FrameworkCheckpointStorageTests(unittest.TestCase):
             ).encode()
             with self.assertRaisesRegex(ValueError, "integrity"):
                 await storage.load("tamper-checkpoint")
+        asyncio.run(scenario())
+
+
+    def test_recomputed_envelope_cannot_change_graph_signature(self):
+        async def scenario():
+            storage = InMemoryEnvelopeCheckpointStorage()
+            checkpoint = WorkflowCheckpoint(
+                workflow_name="graph-test",
+                graph_signature_hash="graph-v1",
+                checkpoint_id="graph-checkpoint",
+                state={"value": 1},
+            )
+            await storage.save(checkpoint)
+            envelope = decode_checkpoint_envelope(storage._records["graph-checkpoint"])
+            payload = dict(envelope["payload"])
+            payload["graph_signature_hash"] = "forged-graph"
+            storage._records["graph-checkpoint"] = encode_checkpoint_envelope(
+                workflow_id=envelope["workflow_id"],
+                checkpoint_id=envelope["checkpoint_id"],
+                parent_checkpoint_id=envelope["parent_checkpoint_id"],
+                sequence=envelope["sequence"],
+                payload=payload,
+            )
+            with self.assertRaisesRegex(FrameworkCheckpointStorageError, "graph signature"):
+                await storage.load("graph-checkpoint")
         asyncio.run(scenario())
 
     def test_workflow_names_are_isolated(self):
