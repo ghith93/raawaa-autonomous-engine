@@ -9,7 +9,7 @@ import unittest
 
 
 ROOT = Path(__file__).resolve().parents[1]
-MIGRATIONS = sorted((ROOT / "migrations").glob("*.sql"))"
+MIGRATIONS = sorted((ROOT / "migrations").glob("*.sql"))
 
 
 class D1MigrationTests(unittest.TestCase):
@@ -45,15 +45,18 @@ class D1MigrationTests(unittest.TestCase):
         }.issubset(indexes))
 
     def test_migration_is_idempotent(self):
-        self.db.executescript(self.sql)
-        self.db.executescript(self.sql)
+        for migration in self.sql:
+            self.db.executescript(migration)
+        for migration in self.sql:
+            self.db.executescript(migration)
         versions = self.db.execute(
             "SELECT version FROM schema_migrations"
         ).fetchall()
         self.assertEqual(versions, [("0001_initial",), ("0002_quota_ledger",)])
 
     def test_task_status_constraint_matches_runtime_contract(self):
-        self.db.executescript(self.sql)
+        for migration in self.sql:
+            self.db.executescript(migration)
         with self.assertRaises(sqlite3.IntegrityError):
             self.db.execute(
                 """INSERT INTO tasks(
