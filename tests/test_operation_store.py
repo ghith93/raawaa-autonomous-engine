@@ -47,7 +47,7 @@ class OperationStoreTests(unittest.TestCase):
         claim = self.store.claim(operation["id"])
         self.store.mark_unknown(operation["id"], claim["claim_token"])
         self.assertIsNone(self.store.claim(operation["id"]))
-        with self.assertRaisesRegex(ValueError, "awaiting reconciliation"):
+        with self.assertRaisesRegex(ValueError, "outcome must be"):
             self.store.reconcile(operation["id"], "invalid")
         self.store.reconcile(operation["id"], "not_performed")
         retry = self.store.claim(operation["id"])
