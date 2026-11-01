@@ -158,6 +158,24 @@ class QuotaAwareGatewayTests(unittest.TestCase):
         self.assertEqual(backup.calls, 1)
 
 
+    def test_timeout_does_not_rotate_to_another_provider(self):
+        first = self.profile()
+        second = self.profile(provider="cerebras", account="backup", priority=20)
+        timed_out = FakeAdapter("groq", LiveAdapterError("request timed out"))
+        backup = FakeAdapter("cerebras")
+        manager = QuotaManager([first, second], self.quota)
+        gateway = QuotaAwareLiveGateway(
+            manager, {"groq": timed_out, "cerebras": backup}, self.usage, True,
+            environ={"RAAWAA_ENGINE_LIVE_INFERENCE": "enabled"},
+        )
+        with self.assertRaisesRegex(ProviderUnavailable, "route rotation stopped"):
+            gateway.generate(self.request)
+        self.assertEqual(timed_out.calls, 1)
+        self.assertEqual(backup.calls, 0)
+        self.assertEqual(self.quota.usage_for_task("task-1")["requests"], 1)
+        events = self.quota.audit_events()
+        self.assertIn("provider_failure_stopped", {event["event"] for event in events})
+
     def test_unexpected_adapter_error_stops_rotation_and_releases_tokens(self):
         class BrokenAdapter:
             def generate(self, model, request):
