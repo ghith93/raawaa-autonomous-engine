@@ -22,9 +22,12 @@ class LiveAdapterTests(unittest.TestCase):
     def test_gemini(self):
         body=b'{"candidates":[{"content":{"parts":[{"text":"hello"}]}}],"usageMetadata":{"promptTokenCount":4,"candidatesTokenCount":2}}'
         adapter=GeminiAdapter(environ={"GEMINI_API_KEY":"secret"})
-        with patch("engine.live_adapters.urlopen",return_value=FakeResponse(body)):
+        with patch("engine.live_adapters.urlopen",return_value=FakeResponse(body)) as call:
             result=adapter.generate("models/gemini-test",GenerationRequest("test","hi",20))
         self.assertEqual(result.text,"hello"); self.assertEqual(result.input_tokens,4)
+        request = call.call_args.args[0]
+        self.assertNotIn("secret", request.full_url)
+        self.assertEqual(request.get_header("X-goog-api-key"), "secret")
 
     def test_missing_key_fails_closed(self):
         adapter=OpenAICompatibleAdapter("groq","https://api.example/v1","KEY",environ={})
