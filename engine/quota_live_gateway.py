@@ -1,6 +1,8 @@
 """Quota-gated live inference entry point. Opt-in only; no paid fallback."""
 from __future__ import annotations
 
+import math
+
 from engine.live_adapters import LiveAdapterError
 from engine.model_gateway import ProviderUnavailable, UsageLedger
 from engine.provider import GenerationRequest
@@ -58,6 +60,15 @@ class QuotaAwareLiveGateway:
 
             try:
                 response = adapter.generate(profile.model, request)
+                if response.provider != profile.provider or response.model != profile.model:
+                    raise ValueError("adapter response route does not match reserved profile")
+                if not isinstance(response.text, str):
+                    raise ValueError("adapter response text must be a string")
+                if (type(response.input_tokens) is not int or type(response.output_tokens) is not int
+                        or response.input_tokens < 0 or response.output_tokens < 0):
+                    raise ValueError("adapter response token counts are invalid")
+                if not math.isfinite(response.cost_usd) or response.cost_usd < 0:
+                    raise ValueError("adapter response cost is invalid")
             except LiveAdapterError as exc:
                 last_error = exc
                 self.quota_manager.ledger.settle(reservation_id, 0)
