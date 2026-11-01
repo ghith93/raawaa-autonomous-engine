@@ -15,7 +15,7 @@ An independent, cost-controlled AI operating-system foundation. This repository 
 - CLI commands for task operations, memory, model status, provider discovery, and audit logs.
 - GitHub Actions CI and maintenance workflows.
 
-**It is not yet a continuously running autonomous service.** A Cloudflare control Worker with a D1 binding has been deployed, and GitHub Actions is configured to invoke a bounded task batch every 15 minutes. However, recent Task Runner attempts are being stopped by HTTP 403 at the authenticated POST preflight, before task operations; successful end-to-end task processing is not yet verified. The normal worker path remains a deterministic dry run. There is no always-on scheduler, notification channel, or unattended external-action execution. Live inference is disabled by default, and no verified provider profile or credentials are configured.
+**It is not yet a continuously running autonomous service.** A Cloudflare control Worker with a D1 binding is deployed, and GitHub Actions invokes a bounded task batch every 15 minutes. The previous `workers.dev` HTTP 403 was traced to Cloudflare Error 1010 (Browser Integrity Check) rejecting Python's default `urllib` User-Agent; all Worker clients now send a descriptive application User-Agent. The latest verified Task Runner passed both the public health GET and authenticated POST (HTTP 200), enqueued a one-time idempotent smoke task, and processed it successfully through the D1 claim, specialist dry-run, and lease-fenced finish path. The normal worker path remains a deterministic dry run. There is no always-on scheduler, notification channel, or unattended external-action execution. Live inference is disabled by default, and no verified provider profile or credentials are configured.
 
 ## Safety and cost model
 
@@ -50,10 +50,10 @@ python -m engine.cli run-once
 
 ## Next engineering priorities
 
-1. Resolve the Cloudflare/edge HTTP 403 affecting the authenticated Task Runner preflight; compare the public `/health` GET with the authenticated POST diagnostic now recorded by the workflow.
-2. Verify a complete bounded D1 batch on a current `main` commit; do not equate a successful CI run or Worker deployment with task processing.
-3. Add operation-specific idempotency contracts before enabling side-effecting handlers or external writes.
+1. Verify current account-specific free-provider terms, pricing, quotas, endpoints, and commercial-use eligibility before adding any provider profile or credential.
+2. Implement and test monetary spend/credit accounting before enabling any non-zero-cost route; paid model calls remain disabled.
+3. Add operation-specific idempotency contracts and explicit approval gates before enabling side-effecting handlers or external writes.
 4. Verify a genuinely free host with durable storage before moving beyond scheduled bounded jobs to a continuously running service.
-5. Configure a live provider only after account-specific free-tier, commercial-use, pricing, endpoint, and quota evidence is verified; preserve the kill switch and quota ledger. Add notifications and external integrations incrementally.
+5. Add notifications and external integrations incrementally while preserving the kill switch, quota ledger, and default dry-run posture.
 
 See [Architecture](docs/architecture.md) and [Operations](docs/operations.md).

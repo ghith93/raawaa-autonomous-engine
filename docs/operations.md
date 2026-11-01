@@ -65,7 +65,7 @@ Never add paid fallback or automatic billing upgrades without explicit approval.
 
 ## GitHub Actions and deployment
 
-GitHub Actions runs CI and is configured to invoke a scheduled, bounded D1 queue consumer every 15 minutes. Each invocation runs at most five tasks or admits new tasks for at most 60 seconds, whichever comes first; GitHub schedule delivery can be delayed and is not a real-time SLA. The Cloudflare Worker separately recovers expired leases every 15 minutes. Recent scheduled Task Runner attempts have reached the workflow but failed at the authenticated POST preflight with HTTP 403, so successful D1 batch processing is not currently verified. Neither scheduler is an always-on process.
+GitHub Actions runs CI and is configured to invoke a scheduled, bounded D1 queue consumer every 15 minutes. Each invocation runs at most five tasks or admits new tasks for at most 60 seconds, whichever comes first; GitHub schedule delivery can be delayed and is not a real-time SLA. The Cloudflare Worker separately recovers expired leases every 15 minutes. Recent verification confirms the public Worker health GET and authenticated POST preflight both return HTTP 200. A one-time idempotent `system_audit` smoke task was enqueued and successfully processed through D1 claim, specialist dry-run, and lease-fenced finish. Neither scheduler is an always-on process.
 
 Before selecting a host, verify free-tier limits, sleep behavior, persistent disk availability, outbound network rules, and whether the service can run without a payment method. Do not assume a free trial is a recurring free tier.
 
@@ -89,12 +89,12 @@ Agents may research and propose changes. Policy gates must control execution. Ke
 - No persistent scheduler or always-on service; GitHub Actions and the Cloudflare cron are bounded scheduled jobs.
 - No unattended live-agent loop: the scheduled worker defaults to dry-run, and no verified provider profile or credentials are configured.
 - No notification channel.
-- The Cloudflare control Worker and D1 binding have been deployed, but the current Task Runner is blocked at the authenticated POST preflight by HTTP 403. A complete D1 batch has not been verified after the latest changes.
+- The Cloudflare control Worker and D1 binding are deployed. The latest Task Runner passed health GET and authenticated POST preflights (HTTP 200) and completed a one-time D1 smoke task successfully in dry-run mode. Live inference remains disabled.
 - Lease-token fencing and periodic heartbeat renewal are implemented and covered by tests. External side effects still require handler-specific idempotency before activation.
 - Local SQLite memory and model-usage state need an explicit backup/retention strategy for production.
-- The next diagnostic workflow revision compares public `/health` GET with authenticated POST and records only safe response metadata. If the two paths are both rejected, inspect Cloudflare Security Events or Access logs using the corresponding Ray ID; do not weaken security controls as a workaround.
+- The former `workers.dev` HTTP 403 was Cloudflare Error 1010 / Browser Integrity Check: Cloudflare rejects Python's default `urllib` User-Agent on `workers.dev`. The remote task client and both Task Runner probes now send a descriptive `RaawaaAutonomousEngine/1.0` User-Agent. Do not disable Browser Integrity Check, Access, or WAF to solve this class of issue. The separate Access inventory API error says Access is not enabled; it was not the cause of the Worker 403.
 
-Recommended next work: identify and resolve the HTTP 403 at the Cloudflare/edge boundary, verify one complete bounded D1 batch, then continue with side-effect idempotency and a genuinely free persistent host assessment.
+Recommended next work: verify account-specific provider eligibility and quota evidence before configuring a provider profile; implement monetary accounting before any non-zero-cost route; then continue with side-effect idempotency and a genuinely free persistent host assessment.
 
 ## Diagnosing the authenticated D1 task API
 
