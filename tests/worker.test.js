@@ -155,3 +155,28 @@ test("scheduled handler runs bounded stale lease recovery", async () => {
   await worker.scheduled({ cron: "*/15 * * * *" }, { DB });
   assert.ok(DB.calls.some(x => x.kind === "all" && x.sql.includes("LIMIT 100")));
 });
+
+
+test("authenticated POST diagnostic probe confirms application auth without writes", async () => {
+  const DB = dbMock();
+  const response = await worker.fetch(request("/v1/diagnostics/auth", {
+    method: "POST", body: {},
+  }), { DB, ENGINE_API_TOKEN: TOKEN });
+  assert.equal(response.status, 200);
+  assert.deepEqual(await response.json(), { ok: true, authenticated: true });
+  assert.equal(DB.calls.length, 0);
+});
+
+test("diagnostic probe rejects invalid credentials", async () => {
+  const response = await worker.fetch(request("/v1/diagnostics/auth", {
+    method: "POST", token: "wrong", body: {},
+  }), { DB: dbMock(), ENGINE_API_TOKEN: TOKEN });
+  assert.equal(response.status, 401);
+});
+
+test("diagnostic probe allows only POST", async () => {
+  const response = await worker.fetch(request("/v1/diagnostics/auth", {
+    method: "GET",
+  }), { DB: dbMock(), ENGINE_API_TOKEN: TOKEN });
+  assert.equal(response.status, 405);
+});
