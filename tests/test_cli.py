@@ -25,6 +25,7 @@ class CliTests(unittest.TestCase):
             ["memory-archive", "--id", "memory-id"],
             ["model-status"],
             ["provider-profile-status"],
+            ["research-discover"],
         ]
         for command in commands:
             with self.subTest(command=command):
