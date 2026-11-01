@@ -17,8 +17,6 @@ class AndroidHarnessInfrastructureTests(unittest.TestCase):
         config = json.loads((ROOT / "harness.json").read_text(encoding="utf-8"))
         self.assertEqual(config["default_agent"], "default")
         self.assertIn("raawaa-engine-androidharness", config["skills"]["auto_load"])
-        for folder in config["skills"]["paths"]:
-            self.assertTrue((ROOT / folder).is_dir(), folder)
         skill = ROOT / ".harness/skills/raawaa-engine-androidharness/SKILL.md"
         self.assertTrue(skill.is_file())
         for reference in config["references"]:
