@@ -68,9 +68,9 @@ def bounded_text(text: str, limit: int) -> str:
 
 def summarize_unittest_output(text: str) -> dict[str, Any]:
     """Return only aggregate unittest status; never publish raw test output."""
-    ran = re.search(r"(?m)^Ran (\\d+) tests? in [0-9.]+s$", text)
-    failed = re.search(r"(?m)^FAILED \\(([^)]+)\\)$", text)
-    passed = bool(re.search(r"(?m)^OK(?: \\([^)]*\\))?$", text))
+    ran = re.search(r"(?m)^Ran (\d+) tests? in [0-9.]+s$", text)
+    failed = re.search(r"(?m)^FAILED \(([^)]+)\)$", text)
+    passed = bool(re.search(r"(?m)^OK(?: \([^)]*\))?$", text))
     return {
         "tests_run": int(ran.group(1)) if ran else None,
         "status": "failed" if failed else ("passed" if passed else "incomplete"),
