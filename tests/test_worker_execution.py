@@ -133,7 +133,7 @@ class WorkerExecutionTests(unittest.TestCase):
         store.enqueue("research_brief", "Review this contact", {"data_classification": "public", "notes": "Contact user@example.com"}, idempotency_key="email")
         gateway = Mock()
         result = run_once(store, live_gateway=gateway, environ={"RAAWAA_ENGINE_LIVE_INFERENCE": "enabled"})
-        self.assertEqual(result["detail"], "sensitive_field_detected" if result["detail"] == "sensitive_field_detected" else "secret_pattern_detected")
+        self.assertEqual(result["detail"], "personal_data_detected")
         gateway.generate.assert_not_called()
 
     def test_data_policy_cannot_be_weakened_to_allow_confidential_classification(self):
