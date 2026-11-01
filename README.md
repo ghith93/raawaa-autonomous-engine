@@ -14,6 +14,7 @@ An independent, cost-controlled AI operating-system foundation. This repository 
 - Provider-neutral model gateway interfaces, validated response accounting, and opt-in live inference adapters.
 - CLI commands for task operations, memory, model status, provider discovery, and audit logs.
 - GitHub Actions CI and maintenance workflows.
+- An AndroidHarness runtime profile and constrained execution contract (`config/runtime_backends.json`, `docs/android-harness.md`); live remote invocation remains pending a tested adapter.
 
 **It is not yet a continuously running autonomous service.** A Cloudflare control Worker with a D1 binding is deployed, and GitHub Actions invokes a bounded task batch every 15 minutes. The previous `workers.dev` HTTP 403 was traced to Cloudflare Error 1010 (Browser Integrity Check) rejecting Python's default `urllib` User-Agent; all Worker clients now send a descriptive application User-Agent. The latest verified Task Runner passed both the public health GET and authenticated POST (HTTP 200), enqueued a one-time idempotent smoke task, and processed it successfully through the D1 claim, specialist dry-run, and lease-fenced finish path. The normal worker path remains a deterministic dry run. There is no always-on scheduler, notification channel, or unattended external-action execution. Live inference is disabled by default, and no verified provider profile or credentials are configured.
 
@@ -43,7 +44,7 @@ python -m engine.cli run-once
 ## Repository map
 
 - `engine/`: core runtime, task store, memory, orchestration, provider routing and CLI.
-- `config/`: agent roster, execution policy, provider catalog, and free-resource program metadata.
+- `config/`: agent roster, execution policy, provider catalog, free-resource metadata, and optional runtime backend registry.
 - `docs/`: architecture, operating model, subsystem contracts, and staged roadmap.
 - `.github/workflows/`: CI and bounded maintenance automation.
 - `tests/`: unit and regression tests.
@@ -56,4 +57,4 @@ python -m engine.cli run-once
 4. Verify a genuinely free host with durable storage before moving beyond scheduled bounded jobs to a continuously running service.
 5. Add notifications and external integrations incrementally while preserving the kill switch, quota ledger, and default dry-run posture.
 
-All agents must follow [AGENTS.md](AGENTS.md) and the permanent [Master Autonomous Execution Directive](docs/master-autonomous-execution-directive.ar.md). A user message containing only `.` resumes execution from the latest verified state. Runtime enforcement by every deployed agent remains an engineering requirement until implemented and tested. See [Architecture](docs/architecture.md) and [Operations](docs/operations.md). The additive [Continuous Improvement and Research Charter](docs/continuous-improvement-charter.md) governs proactive research and incremental capability development without replacing existing architecture or safety policy. The [Reusable Task-Completion Handoff Prompt](docs/task-completion-handoff-prompt.md) can be sent after each work cycle to resume from the latest verified state. For the current free-tier, commercial-use, and data-handling assessment, see [Provider free-tier eligibility](docs/provider-free-tier-eligibility.md).
+All agents must follow [AGENTS.md](AGENTS.md) and the permanent [Master Autonomous Execution Directive](docs/master-autonomous-execution-directive.ar.md). A user message containing only `.` resumes execution from the latest verified state. Runtime enforcement by every deployed agent remains an engineering requirement until implemented and tested. See [Architecture](docs/architecture.md) and [Operations](docs/operations.md). The additive [Continuous Improvement and Research Charter](docs/continuous-improvement-charter.md) governs proactive research and incremental capability development without replacing existing architecture or safety policy. The [Reusable Task-Completion Handoff Prompt](docs/task-completion-handoff-prompt.md) can be sent after each work cycle to resume from the latest verified state. For the current free-tier, commercial-use, and data-handling assessment, see [Provider free-tier eligibility](docs/provider-free-tier-eligibility.md). Android/Linux experiments must follow the [AndroidHarness runtime profile](docs/android-harness.md); registration does not yet mean the engine can invoke the tablet session remotely.
