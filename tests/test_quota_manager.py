@@ -21,10 +21,10 @@ class QuotaManagerTests(unittest.TestCase):
                       free_verified=True, commercial_use_allowed=True,
                       daily_request_limit=10, daily_token_limit=1000,
                       monthly_request_limit=100, monthly_token_limit=10000, priority=10,
-                      endpoint_url="https://provider.example/v1",
-                      pricing_source_url="https://provider.example/pricing",
-                      quota_source_url="https://provider.example/limits",
-                      terms_source_url="https://provider.example/terms",
+                      endpoint_url="https://api.groq.com/openai/v1",
+                      pricing_source_url="https://groq.com/pricing",
+                      quota_source_url="https://console.groq.com/docs/rate-limits",
+                      terms_source_url="https://groq.com/terms",
                       verified_at=datetime(2026, 11, 1, 0, tzinfo=timezone.utc),
                       max_output_tokens=512)
         values.update(changes)
@@ -57,9 +57,15 @@ class QuotaManagerTests(unittest.TestCase):
     def test_invalid_https_evidence_urls_are_rejected(self):
         invalid_endpoint = self.profile(endpoint_url="https://")
         credentialed_source = self.profile(
-            pricing_source_url="https://user:password@provider.example/pricing"
+            pricing_source_url="https://user:password@groq.com/pricing"
         )
-        manager = QuotaManager([invalid_endpoint, credentialed_source], self.ledger)
+        placeholder_hosts = [
+            self.profile(endpoint_url="https://provider.example/v1"),
+            self.profile(pricing_source_url="https://example.com/pricing"),
+            self.profile(quota_source_url="https://localhost/limits"),
+            self.profile(terms_source_url="https://docs.example.org/terms"),
+        ]
+        manager = QuotaManager([invalid_endpoint, credentialed_source, *placeholder_hosts], self.ledger)
         for route in manager.profiles:
             self.assertFalse(manager.eligible(route, 1, self.now))
 
