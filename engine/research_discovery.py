@@ -13,6 +13,7 @@ from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
 API = "https://api.github.com/search/repositories"
+MAX_RESPONSE_BYTES = 1048576
 CROSSREF_API = "https://api.crossref.org/works"
 USER_AGENT = "RaawaaAutonomousEngine-Research/1.0 (+https://github.com/ghith93/raawaa-autonomous-engine)"
 DEFAULT_QUERIES = {
@@ -38,12 +39,15 @@ def _request_json(query: str, token: str = "", timeout: int = 15) -> dict:
         with urlopen(request, timeout=timeout) as response:
             if response.status != 200:
                 raise ResearchDiscoveryError(f"GitHub search returned HTTP {response.status}")
-            payload = json.loads(response.read().decode("utf-8"))
+            raw = response.read(MAX_RESPONSE_BYTES + 1)
+            if len(raw) > MAX_RESPONSE_BYTES:
+                raise ResearchDiscoveryError("Research response exceeded the 1 MiB safety limit")
+            payload = json.loads(raw.decode("utf-8"))
     except HTTPError as exc:
         remaining = exc.headers.get("X-RateLimit-Remaining", "unknown")
         reset = exc.headers.get("X-RateLimit-Reset", "unknown")
         raise ResearchDiscoveryError(f"GitHub search returned HTTP {exc.code}; rate_limit_remaining={remaining}; reset_epoch={reset}") from exc
-    except (URLError, TimeoutError, OSError, json.JSONDecodeError) as exc:
+    except (URLError, TimeoutError, OSError, json.JSONDecodeError, UnicodeDecodeError) as exc:
         raise ResearchDiscoveryError(f"GitHub search failed: {type(exc).__name__}") from exc
     if not isinstance(payload, dict) or not isinstance(payload.get("items"), list):
         raise ResearchDiscoveryError("GitHub search returned an unexpected response shape")
@@ -60,12 +64,15 @@ def _request_crossref(query: str, max_results: int = 10, timeout: int = 20) -> d
         with urlopen(request, timeout=timeout) as response:
             if response.status != 200:
                 raise ResearchDiscoveryError(f"Crossref returned HTTP {response.status}")
-            payload = json.loads(response.read().decode("utf-8"))
+            raw = response.read(MAX_RESPONSE_BYTES + 1)
+            if len(raw) > MAX_RESPONSE_BYTES:
+                raise ResearchDiscoveryError("Research response exceeded the 1 MiB safety limit")
+            payload = json.loads(raw.decode("utf-8"))
     except HTTPError as exc:
         limit = exc.headers.get("X-Rate-Limit-Limit", "unknown") if exc.headers else "unknown"
         interval = exc.headers.get("X-Rate-Limit-Interval", "unknown") if exc.headers else "unknown"
         raise ResearchDiscoveryError(f"Crossref returned HTTP {exc.code}; rate_limit={limit}; interval={interval}") from exc
-    except (URLError, TimeoutError, OSError, json.JSONDecodeError) as exc:
+    except (URLError, TimeoutError, OSError, json.JSONDecodeError, UnicodeDecodeError) as exc:
         raise ResearchDiscoveryError(f"Crossref request failed: {type(exc).__name__}") from exc
     message = payload.get("message") if isinstance(payload, dict) else None
     if not isinstance(message, dict) or not isinstance(message.get("items"), list):
@@ -127,8 +134,9 @@ def discover_repositories(queries=None, environ=None, max_per_query=5, max_queri
     query_items = list(query_map.items())[:max_queries]
     for name, query in query_items:
         try:
-            payload = fetch(query, token)
+            # Count attempted requests, including failures, in run telemetry.
             requests_made += 1
+            payload = fetch(query, token)
             for item in payload["items"][:max_per_query]:
                 if not isinstance(item, dict):
                     continue
@@ -159,8 +167,9 @@ def discover_repositories(queries=None, environ=None, max_per_query=5, max_queri
     if academic_query:
         try:
             academic_fetch = academic_request_fn or _request_crossref
-            message = academic_fetch(academic_query, max_academic_results)
+            # Count attempted requests, including failures, in run telemetry.
             academic_requests_made = 1
+            message = academic_fetch(academic_query, max_academic_results)
             items = message.get("items", []) if isinstance(message, dict) else []
             if not isinstance(items, list):
                 raise ResearchDiscoveryError("Crossref result items are malformed")
