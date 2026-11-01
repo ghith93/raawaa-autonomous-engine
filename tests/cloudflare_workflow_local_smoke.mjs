@@ -85,7 +85,10 @@ try {
   assert.equal(duplicate.id, started.id);
   assert.equal(duplicate.reused, true);
 
-  const waiting = await waitForStatus(started.id, x => x.status === "waiting");
+  // Local Wrangler reports a Workflow awaiting waitForEvent as "running" in
+  // status(); the completed checkpoint output proves it reached the approval gate.
+  const atApprovalGate = x => x.local_step_outputs?.some(value => value?.checkpoint_id?.startsWith("spike:")) && x.output === null;
+  const waiting = await waitForStatus(started.id, atApprovalGate);
   const beforeRestart = waiting.local_step_outputs || [];
   assert.equal(beforeRestart.filter(x => x?.status === "claimed").length, 1);
   assert.equal(beforeRestart.filter(x => x?.result === "research-stub").length, 1);
@@ -94,7 +97,7 @@ try {
     method: "POST", body: JSON.stringify({ from_step: "review-stub" }),
   });
   assert.equal(restarted.restarted_from, "review-stub");
-  const waitingAgain = await waitForStatus(started.id, x => x.status === "waiting");
+  const waitingAgain = await waitForStatus(started.id, atApprovalGate);
   const afterRestart = waitingAgain.local_step_outputs || [];
   assert.equal(afterRestart.filter(x => x?.status === "claimed").length, 1,
     "restart from review must reuse the completed claim step");
@@ -116,7 +119,7 @@ try {
     approval_timeout_seconds: 30,
   };
   const cancelStarted = await request("/start", { method: "POST", body: JSON.stringify(cancelPayload) });
-  await waitForStatus(cancelStarted.id, x => x.status === "waiting");
+  await waitForStatus(cancelStarted.id, atApprovalGate);
   const cancelResult = await request("/cancel/" + cancelStarted.id, { method: "POST", body: "{}" });
   assert.equal(cancelResult.terminated, true);
   const terminated = await waitForStatus(cancelStarted.id, x => x.status === "terminated");
