@@ -26,7 +26,9 @@ class ResearchTriageTests(unittest.TestCase):
         item = result["github_candidates"][0]
         self.assertEqual(item["priority"], "high")
         self.assertEqual(item["score"], 100)
-        self.assertFalse(item["license_review_required"])
+        self.assertTrue(item["permissive_license_signal"])
+        self.assertTrue(item["license_review_required"])
+        self.assertTrue(item["cost_review_required"])
         self.assertTrue(item["security_review_required"])
         self.assertFalse(item["automatic_adoption"])
         self.assertEqual(result["model_calls"], 0)
