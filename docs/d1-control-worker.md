@@ -8,6 +8,10 @@ model inference, task execution, arbitrary operation calls, or customer-facing w
 - `GET /health`: public read-only D1 health check.
 - `GET /v1/tasks?limit=50`: authenticated bounded task listing (1–100).
 - `POST /v1/tasks/enqueue`: authenticated, idempotent task intake with bounded JSON payloads.
+- `POST /v1/tasks/claim`: atomically claims the oldest pending task and issues a server-generated 15-minute lease token.
+- `POST /v1/tasks/:id/heartbeat`: extends a still-valid lease by 15 minutes.
+- `POST /v1/tasks/:id/finish`: completes a leased task as `succeeded`, `failed`, or `blocked`.
+- `POST /v1/tasks/:id/retry`: releases a leased task back to `pending` while attempts remain, otherwise marks it `failed`.
 
 All task writes use prepared statements and a D1 batch so task insertion and its audit
 event are committed together. Duplicate idempotency keys return the existing task.
