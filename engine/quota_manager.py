@@ -22,6 +22,12 @@ class QuotaProfile:
     daily_token_limit: int | None = None
     monthly_credit_usd: float | None = None
     priority: int = 100
+    endpoint_url: str | None = None
+    pricing_source_url: str | None = None
+    quota_source_url: str | None = None
+    terms_source_url: str | None = None
+    verified_at: datetime | None = None
+    max_output_tokens: int | None = None
 
     @property
     def route_id(self) -> str:
@@ -156,6 +162,25 @@ class QuotaManager:
     def eligible(self, profile: QuotaProfile, estimated_tokens: int = 1,
                  now: datetime | None = None) -> bool:
         if not profile.free_verified or not profile.commercial_use_allowed:
+            return False
+        # A boolean alone is not evidence. Require an HTTPS endpoint, explicit
+        # pricing/quota/terms sources, a recent timezone-aware verification date,
+        # and a bounded model output ceiling before the route can be selected.
+        evidence_urls = (
+            profile.endpoint_url, profile.pricing_source_url,
+            profile.quota_source_url, profile.terms_source_url,
+        )
+        if any(not isinstance(url, str) or not url.startswith("https://") for url in evidence_urls):
+            return False
+        if (profile.verified_at is None or profile.verified_at.tzinfo is None
+                or profile.verified_at.utcoffset() is None):
+            return False
+        current = (now or datetime.now(timezone.utc)).astimezone(timezone.utc)
+        verified = profile.verified_at.astimezone(timezone.utc)
+        if verified > current or current - verified > timedelta(days=30):
+            return False
+        if (type(profile.max_output_tokens) is not int
+                or not 1 <= profile.max_output_tokens <= 4096):
             return False
         if profile.daily_request_limit is None or profile.daily_token_limit is None:
             return False
