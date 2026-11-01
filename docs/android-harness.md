@@ -73,7 +73,7 @@ When a real AndroidHarness tool/session becomes available to the engine, expose 
 
 Every call must carry a task ID, workspace boundary, timeout, output limit, and policy decision. Deny arbitrary shell strings from untrusted task payloads; use argument arrays or reviewed command templates. Root, network exposure, package installation, credential access, and external writes require separate policy gates. The adapter must integrate the repository operating-policy loader and audit log before any execution.
 
-Until this adapter exists, this document is an integration specification and capability register—not proof that the autonomous engine can remotely invoke AndroidHarness.
+The direct authenticated tool/session adapter described above does not exist. The GitHub issue bridge below is a narrower, implemented alternative for three fixed operations; it is not a general MCP tool interface or direct device control.
 
 ## GitHub-mediated AndroidHarness task bridge
 
@@ -102,7 +102,7 @@ fi
 python3 scripts/androidharness_issue_bridge.py --poll --poll-interval 30
 ```
 
-Run the pull only when the working tree is clean. The script requires the already-authenticated GitHub CLI session with repository issue read/write access; it never reads or prints the stored token. No new token scope, Cloudflare secret, SSH, Java, Shizuku, or root permission is required. Keep the AndroidHarness foreground session alive; Android may still stop background work, so this is not an always-on guarantee.
+Run the pull only when the working tree is clean. The script requires the already-authenticated GitHub CLI session with repository issue read/write access; it never reads or prints the stored token. These bounded issue-title/comment/close operations are internal task-lifecycle writes only; customer-facing or other external writes remain disabled. No new token scope, Cloudflare secret, SSH, Java, Shizuku, or root permission is required. Keep the AndroidHarness foreground session alive; Android may still stop background work, so this is not an always-on guarantee.
 
 The bridge becomes operational only after the first successful device-side task result is visible in its GitHub issue. Until then, the runtime backend remains implemented-but-not-activated. ChatGPT must not claim a tablet task ran without that result.
 
@@ -126,7 +126,7 @@ For `run_python_tests`, include `"commit_sha":"<full 40-character current main S
 5. Add one candidate workload at a time, beginning with a Python-only smoke test.
 6. Evaluate LiteLLM in no-provider/no-key mode; test only local health and configuration parsing.
 7. Evaluate local inference separately with a small quantized model and strict memory/thermal limits.
-8. Add a reviewed AndroidHarness adapter only after the host's actual tool interface and authentication model are documented and testable.
+8. Add direct MCP/tool integration only after the host's actual tool interface and authentication model are documented and testable.
 
 ## Snapshot drift and synchronization
 
