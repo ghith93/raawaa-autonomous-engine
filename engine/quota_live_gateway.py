@@ -64,8 +64,10 @@ class QuotaAwareLiveGateway:
                 response = adapter.generate(profile.model, request)
                 if response.provider != profile.provider or response.model != profile.model:
                     raise ValueError("adapter response route does not match reserved profile")
-                if not isinstance(response.text, str):
-                    raise ValueError("adapter response text must be a string")
+                if not isinstance(response.text, str) or not response.text.strip():
+                    raise ValueError("adapter response text must be a non-empty string")
+                if response.mocked is not False:
+                    raise ValueError("live adapter returned a mocked completion")
                 if (type(response.input_tokens) is not int or type(response.output_tokens) is not int
                         or response.input_tokens < 0 or response.output_tokens < 0):
                     raise ValueError("adapter response token counts are invalid")
