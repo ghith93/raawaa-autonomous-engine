@@ -45,8 +45,8 @@ class CliTests(unittest.TestCase):
         self.assertFalse(profile["enabled"])
         self.assertFalse(profile["ready_for_routing"])
         self.assertTrue(profile["commercial_use_allowed"])
-        self.assertEqual(profile["model_stage"], "preview")
-        self.assertFalse(profile["production_use_allowed"])
+        self.assertEqual(profile["model_stage"], "production")
+        self.assertTrue(profile["production_use_allowed"])
         self.assertNotIn("gsk_", output.getvalue())
 
 
