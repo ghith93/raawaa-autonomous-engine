@@ -28,6 +28,8 @@ class TaskStoreTests(unittest.TestCase):
         task = self.store.list_tasks()[0]
         self.assertEqual(task["status"], "succeeded")
         self.assertIn("dry_run", task["result_json"])
+        self.assertIn('"agent_id": "researcher"', task["result_json"])
+        self.assertIn('"execution_started": false', task["result_json"])
 
     def test_worker_blocks_unknown_task_type(self):
         self.store.enqueue("shell", "Do arbitrary shell work")
