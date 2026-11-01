@@ -20,6 +20,10 @@ The repository currently contains a Python core, JSON configuration, policy eval
 
 Every task should have an owner, objective, bounded scope, deadline, retry limit, estimated cost, allowed tools, and acceptance checks. Retries must be idempotent where possible. The reviewer must not be the same logical role as the worker for consequential changes.
 
+## Runtime operating-policy enforcement
+
+The Python worker calls `engine.operating_policy.load_operating_policy()` at the beginning of every `run_once` cycle, before claiming a task. The loader reads and validates `AGENTS.md`, the permanent master directive, continuous-improvement charter, architecture, and operations guide, computes SHA-256 fingerprints, and fails closed if any required document is missing, unreadable, empty, or invalid. For live model requests, a compact trusted policy summary and the fingerprints are inserted before untrusted task payload; full source documents are read locally rather than copied wholesale into the prompt, preserving existing provider quota limits. This is enforced for the Python worker and CLI Task Runner path only. Any additional agent/provider execution path must reuse this loader and prove integration with tests.
+
 ## GitHub Actions versus a persistent worker
 
 GitHub Actions is used first for CI and bounded scheduled jobs. It is event-driven and ephemeral: it does not provide a continuously running process or a durable task queue. A persistent worker and database are later phases, and must not be deployed until the hosting plan, free-tier limits, data persistence, and billing risks are verified.
