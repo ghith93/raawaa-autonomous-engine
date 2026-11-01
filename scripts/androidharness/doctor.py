@@ -12,7 +12,6 @@ import os
 import platform
 import shutil
 import subprocess
-import sys
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -53,6 +52,26 @@ def _run(arguments: list[str], *, cwd: Path | None = None) -> dict[str, Any]:
         "exit_code": result.returncode,
         "summary": " | ".join(first_lines[:2])[:240] if first_lines else "",
     }
+
+
+def _run_full(arguments: list[str], *, cwd: Path | None = None) -> dict[str, Any]:
+    """Run a bounded read-only command when the full stdout is needed locally."""
+    environment = os.environ.copy()
+    environment["GIT_OPTIONAL_LOCKS"] = "0"
+    try:
+        result = subprocess.run(
+            arguments,
+            cwd=cwd,
+            env=environment,
+            capture_output=True,
+            text=True,
+            timeout=COMMAND_TIMEOUT_SECONDS,
+            check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        return {"ok": False, "error": type(exc).__name__}
+    return {"ok": result.returncode == 0, "stdout": result.stdout}
+
 
 
 def _tool(name: str, arguments: list[str]) -> dict[str, Any]:
@@ -111,23 +130,11 @@ def _workspace() -> dict[str, Any]:
         return {"is_git_repository": False, "branch": None, "commit": None, "dirty_file_count": None}
     branch = _run(["git", "branch", "--show-current"], cwd=ROOT)
     commit = _run(["git", "rev-parse", "--short", "HEAD"], cwd=ROOT)
-    status = _run(["git", "status", "--porcelain"], cwd=ROOT)
-    dirty_count = None
-    if status["ok"]:
-        # Only count changed paths; do not emit filenames.
-        dirty_count = sum(1 for line in status.get("summary", "").splitlines() if line.strip())
-        # Re-run status without truncation for a correct count on large worktrees.
-        result = subprocess.run(
-            ["git", "status", "--porcelain"],
-            cwd=ROOT,
-            env={**os.environ, "GIT_OPTIONAL_LOCKS": "0"},
-            capture_output=True,
-            text=True,
-            timeout=COMMAND_TIMEOUT_SECONDS,
-            check=False,
-        )
-        if result.returncode == 0:
-            dirty_count = sum(1 for line in result.stdout.splitlines() if line.strip())
+    status = _run_full(["git", "status", "--porcelain"], cwd=ROOT)
+    dirty_count = (
+        sum(1 for line in status["stdout"].splitlines() if line.strip())
+        if status["ok"] else None
+    )
     return {
         "is_git_repository": True,
         "branch": branch.get("summary") if branch["ok"] else None,
