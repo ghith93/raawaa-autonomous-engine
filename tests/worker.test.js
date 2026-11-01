@@ -143,7 +143,7 @@ test("quota reservation is one atomic conditional insert across all windows", as
   ).values[0]);
   const statement = DB.calls.find(x => x.kind === "first" && x.sql.includes("INSERT INTO quota_usage"));
   assert.match(statement.sql, /INSERT INTO quota_usage[\s\S]+SELECT/);
-  assert.match(statement.sql, /minute/);
+  assert.ok((statement.sql.match(/occurred_at>\?/g) || []).length >= 2);
   assert.match(statement.sql, /NOT EXISTS/);
   assert.ok(statement.values.length >= 30);
 });
