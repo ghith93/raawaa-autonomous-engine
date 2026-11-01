@@ -54,7 +54,7 @@ If the Worker is protected by Cloudflare Access, the runner can additionally use
 - `RAAWAA_ENGINE_CF_ACCESS_CLIENT_ID`: service-token Client ID.
 - `RAAWAA_ENGINE_CF_ACCESS_CLIENT_SECRET`: service-token Client Secret.
 
-For GitHub Actions, save these as repository secrets named `CF_ACCESS_CLIENT_ID` and `CF_ACCESS_CLIENT_SECRET`. Both are optional, but must be configured together. Create a service token in Zero Trust → Access controls → Service credentials → Service Tokens, then add it to the Access policy for this Worker. Do not disable Access or create a public bypass to make the runner work. The existing application Bearer token remains required after Access admits the request.
+For GitHub Actions, save these as repository secrets named `CF_ACCESS_CLIENT_ID` and `CF_ACCESS_CLIENT_SECRET`. Both are optional, but must be configured together. Create a service token in Zero Trust → Access controls → Service credentials → Service Tokens, then add it to the Access application policy for this Worker using the **Service Auth** action and the **Service Token** selector. Do not use an ordinary Allow policy for service-token authentication: strict service-token mode accepts Service Auth policies only. Do not disable Access or create a public bypass to make the runner work. The existing application Bearer token remains required after Access admits the request.
 
 With `RAAWAA_ENGINE_API_URL` and `RAAWAA_ENGINE_API_TOKEN` present, `enqueue`, `list`, `run-once`, and `run-batch` use the authenticated D1 API. The local SQLite database continues to hold memory and model-usage records. Without the URL, the CLI uses SQLite for tasks. Remote audit-log listing is not exposed. The runner remains dry-run only and does not call models or external services.
 
