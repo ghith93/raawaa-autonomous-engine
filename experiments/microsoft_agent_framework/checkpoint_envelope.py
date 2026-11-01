@@ -173,3 +173,85 @@ def decode_checkpoint_envelope(encoded: bytes | bytearray | memoryview) -> dict[
     if _canonical_json(envelope) != raw:
         raise CheckpointEnvelopeError("checkpoint envelope is not canonically encoded")
     return envelope
+
+
+def _validate_integrity_key(integrity_key: bytes) -> None:
+    if not isinstance(integrity_key, bytes) or len(integrity_key) < 32:
+        raise CheckpointEnvelopeError("integrity_key must contain at least 32 secret bytes")
+
+
+def encode_authenticated_checkpoint_envelope(
+    *,
+    integrity_key: bytes,
+    workflow_id: str,
+    checkpoint_id: str,
+    parent_checkpoint_id: str | None,
+    sequence: int,
+    payload: dict[str, Any],
+) -> bytes:
+    """Encode a checkpoint with HMAC-SHA256 authentication for trusted adapters.
+
+    The key must be managed outside source control and shared only with the
+    authorized writer/reader. This function does not provision or store keys.
+    """
+    _validate_integrity_key(integrity_key)
+    base = encode_checkpoint_envelope(
+        workflow_id=workflow_id,
+        checkpoint_id=checkpoint_id,
+        parent_checkpoint_id=parent_checkpoint_id,
+        sequence=sequence,
+        payload=payload,
+    )
+    tag = hmac.new(
+        integrity_key,
+        b"raawaa-checkpoint-envelope:v1\0" + base,
+        hashlib.sha256,
+    ).hexdigest()
+    envelope = json.loads(base.decode("utf-8"))
+    envelope["hmac_sha256"] = tag
+    encoded = _canonical_json(envelope)
+    if len(encoded) > MAX_ENVELOPE_BYTES:
+        raise CheckpointEnvelopeError("authenticated checkpoint envelope exceeds the 256 KiB limit")
+    return encoded
+
+
+def decode_authenticated_checkpoint_envelope(
+    encoded: bytes | bytearray | memoryview,
+    *,
+    integrity_key: bytes,
+) -> dict[str, Any]:
+    """Authenticate an envelope before validating and returning its checkpoint data."""
+    _validate_integrity_key(integrity_key)
+    if not isinstance(encoded, (bytes, bytearray, memoryview)):
+        raise CheckpointEnvelopeError("encoded checkpoint must be bytes")
+    raw = bytes(encoded)
+    if not raw or len(raw) > MAX_ENVELOPE_BYTES:
+        raise CheckpointEnvelopeError("authenticated checkpoint envelope is empty or exceeds the 256 KiB limit")
+    try:
+        envelope = json.loads(
+            raw.decode("utf-8"),
+            object_pairs_hook=_reject_duplicate_keys,
+            parse_constant=_reject_non_finite,
+        )
+    except CheckpointEnvelopeError:
+        raise
+    except (UnicodeDecodeError, json.JSONDecodeError, RecursionError) as exc:
+        raise CheckpointEnvelopeError("authenticated checkpoint envelope is not valid UTF-8 JSON") from exc
+
+    if not isinstance(envelope, dict) or set(envelope) != (_REQUIRED_KEYS | {"hmac_sha256"}):
+        raise CheckpointEnvelopeError("authenticated checkpoint envelope has an unexpected shape")
+    tag = envelope.get("hmac_sha256")
+    if not isinstance(tag, str) or not _SHA256_PATTERN.fullmatch(tag):
+        raise CheckpointEnvelopeError("hmac_sha256 must be a lowercase hexadecimal digest")
+    unsigned = {key: value for key, value in envelope.items() if key != "hmac_sha256"}
+    base = _canonical_json(unsigned)
+    expected = hmac.new(
+        integrity_key,
+        b"raawaa-checkpoint-envelope:v1\0" + base,
+        hashlib.sha256,
+    ).hexdigest()
+    if not hmac.compare_digest(tag, expected):
+        raise CheckpointEnvelopeError("checkpoint authentication failed")
+    if _canonical_json(envelope) != raw:
+        raise CheckpointEnvelopeError("authenticated checkpoint envelope is not canonically encoded")
+    return decode_checkpoint_envelope(base)
