@@ -121,4 +121,4 @@ For timeouts, transport failures, malformed responses, and unexpected adapter ex
 
 The live gateway rejects mocked completions, empty text, mismatched provider/model identities, invalid token counts, and non-finite or negative costs. A verified-free route that reports a non-zero cost is quarantined; the gateway does not return the completion or rotate to another provider. The adapter's placeholder `cost_usd=0.0` is not evidence of free usage. Verify account-specific provider terms and pricing independently before enabling any live route.
 
-The quota ledger currently enforces daily request and token limits. Do not assume the optional `monthly_credit_usd` profile field is an active monthly monetary cap. Paid model calls remain disabled by default, and there is no automatic paid fallback.
+The quota ledger enforces both daily and monthly request/token limits. Monthly limits are reserved atomically with daily limits before provider I/O. Do not assume the optional `monthly_credit_usd` profile field is an active monthly monetary cap; monetary-credit accounting is not implemented. Paid model calls remain disabled by default, and there is no automatic paid fallback.
