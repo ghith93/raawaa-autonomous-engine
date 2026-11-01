@@ -26,7 +26,7 @@ It deliberately does not call a model, write D1, send messages, publish content,
 
 ## Run locally
 
-From the repository root with Node 20+ and network access to download the pinned Wrangler CLI:
+From the repository root, Node 20+ is enough for core unit tests; the pinned Wrangler 4.156.0 local runtime smoke requires Node 22+ and network access to download the CLI:
 
 ```bash
 npm run test:workflow-spike
