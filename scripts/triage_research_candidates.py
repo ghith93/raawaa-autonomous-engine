@@ -92,7 +92,7 @@ def score_github_candidate(item: dict, now: datetime) -> dict:
     else:
         risks.append("language_unknown")
 
-    discovered_via = set(item.get("discovered_via", [])) if isinstance(item.get("discovered_via"), list) else set()
+    discovered_via = {x for x in item.get("discovered_via", []) if isinstance(x, str)} if isinstance(item.get("discovered_via"), list) else set()
     topics = {x.lower() for x in item.get("topics", []) if isinstance(x, str)} if isinstance(item.get("topics"), list) else set()
     if discovered_via & RELEVANT_TOPICS or topics & {"agents", "agent-framework", "mcp", "llm", "workflow", "memory"}:
         score += 20
@@ -114,8 +114,10 @@ def score_github_candidate(item: dict, now: datetime) -> dict:
         "score": min(100, max(0, score)),
         "priority": _priority(score, archived),
         "license_metadata": license_id,
-        "license_review_required": not license_ready,
+        "permissive_license_signal": license_ready,
+        "license_review_required": True,
         "security_review_required": True,
+        "cost_review_required": True,
         "compatibility_review_required": True,
         "archived": archived,
         "activity_age_days": age_days,
@@ -171,6 +173,7 @@ def score_academic_candidate(item: dict, today: date) -> dict:
         "citation_count": citations,
         "license_review_required": True,
         "full_text_rights_review_required": True,
+        "cost_review_required": True,
         "relevance_terms": matches,
         "reasons": reasons,
         "risk_flags": risks,
