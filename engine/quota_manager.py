@@ -445,7 +445,7 @@ class QuotaManager:
             candidates,
             key=lambda p: (
                 p.priority,
-                -(p.daily_token_limit - self.ledger.usage_today(p.route_id, now)["tokens"]),
+                -(p.daily_token_limit - self.ledger.usage_snapshot(p.route_id, now)["daily"]["tokens"]),
                 p.provider, p.account, p.model,
             ),
         )[0]
