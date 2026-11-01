@@ -141,6 +141,53 @@ jobs:
                   output.write(f"status=request_failed\nray=not_supplied\n")
               raise SystemExit(1)
           PY
+      - name: Enqueue one-time D1 dry-run smoke task
+        if: github.event_name == 'push'
+        env:
+          ENGINE_API_URL: https://raawaa-autonomous-engine-control.ghith-shikhkhaled.workers.dev
+          ENGINE_API_TOKEN: ${{ secrets.ENGINE_API_TOKEN }}
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          import urllib.error
+          import urllib.request
+
+          payload = {
+              "task_type": "system_audit",
+              "title": "One-time D1 queue end-to-end smoke test",
+              "payload": {
+                  "purpose": "Verify authenticated enqueue, claim, lease fencing, specialist dry-run and result persistence.",
+                  "constraints": ["No provider calls", "No external writes", "No customer data"],
+              },
+              "idempotency_key": "raawaa-engine-e2e-smoke-2026-11-01",
+              "max_attempts": 1,
+          }
+          request = urllib.request.Request(
+              os.environ["ENGINE_API_URL"].rstrip("/") + "/v1/tasks/enqueue",
+              data=json.dumps(payload).encode("utf-8"),
+              headers={
+                  "Authorization": "Bearer " + os.environ["ENGINE_API_TOKEN"],
+                  "Content-Type": "application/json",
+                  "Accept": "application/json",
+                  "User-Agent": "RaawaaAutonomousEngine/1.0 (+https://github.com/ghith93/raawaa-autonomous-engine)",
+              },
+              method="POST",
+          )
+          try:
+              with urllib.request.urlopen(request, timeout=15) as response:
+                  result = json.loads(response.read().decode("utf-8"))
+                  task = result.get("task") or {}
+                  print(f"Smoke task enqueue returned HTTP {response.status}; created={result.get('created')}.")
+                  print(f"Smoke task status: {task.get('status', 'not reported')}.")
+          except urllib.error.HTTPError as error:
+              print(f"Smoke task enqueue failed with HTTP {error.code}.")
+              raise SystemExit(1)
+          except (urllib.error.URLError, TimeoutError, OSError, ValueError) as error:
+              print(f"Smoke task enqueue failed: {type(error).__name__}.")
+              raise SystemExit(1)
+          PY
+
       - name: Process bounded D1 task batch
         id: batch
         run: |
