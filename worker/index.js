@@ -50,7 +50,9 @@ export default {
       }
     }
 
-    if (!["/v1/tasks", "/v1/tasks/enqueue"].includes(url.pathname)) {
+    if (url.pathname !== "/v1/tasks" && url.pathname !== "/v1/tasks/enqueue" &&
+        url.pathname !== "/v1/tasks/claim" &&
+        !/^\/v1\/tasks\/[A-Za-z0-9-]+\/(heartbeat|finish|retry)$/.test(url.pathname)) {
       return json({ error: "not_found" }, 404);
     }
     if (!(await authorized(request, env))) return json({ error: "unauthorized" }, 401);
