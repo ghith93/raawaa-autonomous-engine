@@ -50,7 +50,7 @@ class TaskStoreTests(unittest.TestCase):
         stored = self.store.list_tasks()[0]
         self.assertEqual(stored["attempts"], 2)
         self.assertEqual(stored["status"], "failed")
-        self.assertEqual(stored["error"], "worker_error:JSONDecodeError")
+        self.assertEqual(stored["error"], "worker_error:AgentContractError")
 
     def test_recover_stale_running_task(self):
         task = self.store.enqueue("research_brief", "Interrupted", max_attempts=2)
