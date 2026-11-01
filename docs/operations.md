@@ -10,7 +10,7 @@ The default posture remains conservative:
 - Paid model calls and external writes are disabled by default.
 - Provider catalog discovery is read-only and requires a configured provider credential.
 - Live inference adapters are opt-in code paths; do not enable them until provider eligibility, quota limits, and credentials are explicitly configured and verified.
-- Agent roster entries describe specialist roles; they do not mean a persistent multi-agent team is currently running.
+- Safe task types are now assigned to a named specialist role and required capability through a deterministic contract. This remains a dry-run assignment: it does not mean a persistent multi-agent team or model inference is running.
 
 ## Requirements and checks
 
