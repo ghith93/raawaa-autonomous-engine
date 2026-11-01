@@ -418,6 +418,7 @@ class QuotaManager:
                 "route_id": profile.route_id,
                 "free_verified": profile.free_verified,
                 "commercial_use_allowed": profile.commercial_use_allowed,
+                "production_use_allowed": profile.production_use_allowed,
                 "minute_requests_used": minute["requests"],
                 "minute_tokens_used": minute["tokens"],
                 "minute_request_limit": profile.minute_request_limit,
