@@ -427,8 +427,8 @@ class QuotaManager:
         if (minute["requests"] >= profile.minute_request_limit
                 or minute["tokens"] + estimated_tokens > profile.minute_token_limit):
             return False
-        daily = self.ledger.usage_today(profile.route_id, now)
-        monthly = self.ledger.usage_month(profile.route_id, now)
+        daily = usage_snapshot["daily"]
+        monthly = usage_snapshot["monthly"]
         return (
             daily["requests"] < profile.daily_request_limit
             and daily["tokens"] + estimated_tokens <= profile.daily_token_limit
