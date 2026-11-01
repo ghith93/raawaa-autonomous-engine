@@ -62,6 +62,8 @@ class AndroidHarnessInfrastructureTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         report = json.loads(result.stdout)
         self.assertFalse(report["mutations_performed"])
+        self.assertFalse(report["network_requests_performed"])
+        self.assertFalse(report["secret_values_emitted"])
         self.assertIn("tools", report)
         self.assertIn("device", report)
         self.assertIn("workspace", report)
