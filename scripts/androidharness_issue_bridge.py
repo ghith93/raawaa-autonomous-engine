@@ -77,8 +77,19 @@ def parse_task(body: str) -> dict[str, Any]:
     block_end = body.find(fence, payload_start)
     if payload_start <= 0 or block_end < 0:
         raise BridgeError("task JSON block is incomplete")
+    def reject_duplicate_keys(pairs):
+        result = {}
+        for key, value in pairs:
+            if key in result:
+                raise BridgeError("task JSON contains duplicate keys")
+            result[key] = value
+        return result
     try:
-        task = json.loads(body[payload_start:block_end].strip())
+        task = json.loads(
+            body[payload_start:block_end].strip(),
+            object_pairs_hook=reject_duplicate_keys,
+            parse_constant=lambda value: (_ for _ in ()).throw(BridgeError("task JSON contains a non-finite number")),
+        )
     except json.JSONDecodeError as exc:
         raise BridgeError("task JSON is invalid") from exc
     if not isinstance(task, dict):
@@ -86,7 +97,7 @@ def parse_task(body: str) -> dict[str, Any]:
     allowed = {"schema_version", "operation", "commit_sha", "timeout_seconds", "max_output_bytes"}
     if set(task) - allowed:
         raise BridgeError("task contains unsupported fields")
-    if task.get("schema_version") != 1:
+    if type(task.get("schema_version")) is not int or task.get("schema_version") != 1:
         raise BridgeError("unsupported task schema")
     operation = task.get("operation")
     if operation not in ALLOWED_OPERATIONS:
@@ -173,10 +184,28 @@ def safe_extract_git_archive(archive_bytes: bytes, destination: Path) -> None:
 
 
 def safe_python_environment(workspace: Path) -> dict[str, str]:
-    allowed = ("PATH", "HOME", "TMPDIR", "LANG", "LC_ALL", "TERM", "PREFIX")
+    sandbox_home = workspace / ".androidharness-home"
+    temporary = workspace / ".androidharness-tmp"
+    for directory in (
+        sandbox_home,
+        temporary,
+        sandbox_home / ".config",
+        sandbox_home / ".cache",
+        sandbox_home / ".local" / "share",
+    ):
+        directory.mkdir(parents=True, exist_ok=True)
+    allowed = ("PATH", "LANG", "LC_ALL", "TERM")
     environment = {key: os.environ[key] for key in allowed if key in os.environ}
-    environment["PYTHONNOUSERSITE"] = "1"
-    environment["PYTHONPATH"] = str(workspace)
+    environment.update({
+        "HOME": str(sandbox_home),
+        "TMPDIR": str(temporary),
+        "XDG_CONFIG_HOME": str(sandbox_home / ".config"),
+        "XDG_CACHE_HOME": str(sandbox_home / ".cache"),
+        "XDG_DATA_HOME": str(sandbox_home / ".local" / "share"),
+        "PYTHONNOUSERSITE": "1",
+        "PYTHONDONTWRITEBYTECODE": "1",
+        "PYTHONPATH": str(workspace),
+    })
     return environment
 
 
