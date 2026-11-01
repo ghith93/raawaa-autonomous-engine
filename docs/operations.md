@@ -1,5 +1,9 @@
 # Operations and contributor guide
 
+## Continuous improvement operating charter
+
+The [Continuous Improvement and Research Charter](continuous-improvement-charter.md) is an additive layer over the established architecture and policy; it does not authorize a rewrite or override safety gates. Use the [Reusable Task-Completion Handoff Prompt](task-completion-handoff-prompt.md) to resume work from the latest verified repository state after each cycle. Existing architecture, zero-spend policy, dry-run defaults, provider quotas, and approval gates remain authoritative.
+
 ## Current operating mode
 
 Core v1 is merged. The system has a local SQLite task store, structured memory, deterministic workflow planner, provider discovery, quota-aware routing primitives, a provider-neutral model gateway, and a CLI.
