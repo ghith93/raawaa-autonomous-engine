@@ -100,7 +100,7 @@ def parse_task(body: str) -> dict[str, Any]:
     if type(task.get("schema_version")) is not int or task.get("schema_version") != 1:
         raise BridgeError("unsupported task schema")
     operation = task.get("operation")
-    if operation not in ALLOWED_OPERATIONS:
+    if not isinstance(operation, str) or operation not in ALLOWED_OPERATIONS:
         raise BridgeError("operation is not allowlisted")
     timeout_seconds = task.get("timeout_seconds", 600)
     if isinstance(timeout_seconds, bool) or not isinstance(timeout_seconds, int) or not 15 <= timeout_seconds <= 600:
