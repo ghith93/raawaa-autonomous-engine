@@ -30,7 +30,7 @@ From the repository root with Node 20+ and network access to download the pinned
 
 ```bash
 npm run test:workflow-spike
-npx --yes wrangler@4.79.0 --version
+npx --yes wrangler@4.156.0 --version
 npm run test:workflow-local
 ```
 
