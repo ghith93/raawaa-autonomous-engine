@@ -45,6 +45,7 @@ class WorkerExecutionTests(unittest.TestCase):
         profile = QuotaProfile(
             provider="groq", account="test", model="verified-test-model",
             free_verified=True, commercial_use_allowed=True,
+            minute_request_limit=30, minute_token_limit=8000,
             daily_request_limit=10, daily_token_limit=2000,
             monthly_request_limit=100, monthly_token_limit=20000,
             per_task_request_limit=2, per_task_token_limit=4000,
