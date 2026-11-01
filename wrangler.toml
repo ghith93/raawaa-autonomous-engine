@@ -8,3 +8,6 @@ binding = "DB"
 database_name = "raawaa-autonomous-e"
 database_id = "f0ffbed3-940f-488d-a7d1-31cbc5fbf742"
 migrations_dir = "migrations"
+
+[triggers]
+crons = ["*/15 * * * *"]
