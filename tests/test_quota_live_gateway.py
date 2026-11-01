@@ -68,17 +68,17 @@ class QuotaAwareGatewayTests(unittest.TestCase):
 
     def test_429_cools_down_and_rotates(self):
         first = self.profile()
-        second = self.profile(account="backup", priority=20)
+        second = self.profile(provider="cerebras", account="backup", priority=20)
         limited = FakeAdapter("groq", LiveAdapterError("rate limited", status_code=429))
-        backup = FakeAdapter("groq")
+        backup = FakeAdapter("cerebras")
         manager = QuotaManager([first, second], self.quota)
-        gateway = QuotaAwareLiveGateway(manager, {"groq": limited}, self.usage, True)
-        # Same provider key maps to one adapter; use a provider-specific second route in the next test.
-        gateway.adapters["groq"] = limited
-        with self.assertRaises(ProviderUnavailable):
-            gateway.generate(self.request)
+        gateway = QuotaAwareLiveGateway(manager, {"groq": limited, "cerebras": backup},
+                                        self.usage, True)
+        result = gateway.generate(self.request)
+        self.assertEqual(result.provider, "cerebras")
         self.assertTrue(self.quota.cooldown_active(first.route_id))
-        self.assertEqual(limited.calls, 2)
+        self.assertEqual(limited.calls, 1)
+        self.assertEqual(backup.calls, 1)
 
     def test_no_paid_or_unknown_quota_fallback(self):
         adapter = FakeAdapter("groq")
