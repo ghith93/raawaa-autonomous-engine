@@ -8,7 +8,7 @@ from engine.task_store import TaskStore
 from engine.memory import MemoryStore
 from engine.model_gateway import ModelGateway, UsageLedger
 from engine.worker import run_once
-from engine.free_provider_discovery import discover, discover_all
+from engine.free_provider_discovery import discover, discover_all, DiscoveryError
 
 ROOT = Path(__file__).resolve().parent.parent
 
