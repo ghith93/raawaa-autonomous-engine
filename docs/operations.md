@@ -2,7 +2,7 @@
 
 ## Continuous improvement operating charter
 
-The [Continuous Improvement and Research Charter](continuous-improvement-charter.md) is an additive layer over the established architecture and policy; it does not authorize a rewrite or override safety gates. Use the [Reusable Task-Completion Handoff Prompt](task-completion-handoff-prompt.md) to resume work from the latest verified repository state after each cycle. Existing architecture, zero-spend policy, dry-run defaults, provider quotas, and approval gates remain authoritative.
+The [Continuous Improvement and Research Charter](continuous-improvement-charter.md) is an additive layer over the established architecture and policy; it does not authorize a rewrite or override safety gates. Use the [Reusable Task-Completion Handoff Prompt](task-completion-handoff-prompt.md) or its [Arabic version](task-completion-handoff-prompt.ar.md) to resume work from the latest verified repository state after each cycle. Existing architecture, zero-spend policy, dry-run defaults, provider quotas, and approval gates remain authoritative.
 
 ## Current operating mode
 
