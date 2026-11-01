@@ -65,7 +65,7 @@ Never add paid fallback or automatic billing upgrades without explicit approval.
 
 ## GitHub Actions and deployment
 
-GitHub Actions is used for CI and bounded maintenance tasks. It is not an always-on queue consumer or persistent server. The D1 control Worker is deployed on Cloudflare Workers and exposes an authenticated queue API; no scheduled consumer is enabled yet.
+GitHub Actions runs CI and a scheduled, bounded D1 queue consumer every 15 minutes. Each invocation runs at most five tasks or admits new tasks for at most 60 seconds, whichever comes first; GitHub schedule delivery can be delayed and is not a real-time SLA. The Cloudflare Worker separately recovers expired leases every 15 minutes. Neither scheduler is an always-on process.
 
 Before selecting a host, verify free-tier limits, sleep behavior, persistent disk availability, outbound network rules, and whether the service can run without a payment method. Do not assume a free trial is a recurring free tier.
 
