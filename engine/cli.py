@@ -143,6 +143,9 @@ def main() -> int:
         print(json.dumps(store().list_tasks(args.limit), indent=2, ensure_ascii=False))
     elif args.command == "run-once":
         print(json.dumps(run_once(store()), indent=2, ensure_ascii=False))
+    elif args.command == "run-batch":
+        print(json.dumps(run_batch(store(), args.max_tasks, args.max_seconds),
+                         indent=2, ensure_ascii=False))
     elif args.command == "audit-log":
         print(json.dumps(store().audit_events(args.limit), indent=2, ensure_ascii=False))
     elif args.command == "memory-add":
