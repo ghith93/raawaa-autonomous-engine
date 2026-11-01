@@ -224,7 +224,7 @@ test("research candidate review is explicit and audited", async () => {
   assert.equal(response.status, 200);
   assert.equal((await response.json()).review_status, "accepted");
   assert.ok(DB.calls.some(x => x.kind === "run" && x.sql.startsWith("UPDATE research_candidates")));
-  assert.ok(DB.calls.some(x => x.kind === "run" && x.sql.includes("research_candidate_reviewed")));
+  assert.ok(DB.calls.some(x => x.kind === "run" && x.sql.includes("INSERT INTO audit_log") && x.values[0] === "research_candidate_reviewed"));
 });
 
 test("research candidate review rejects unsupported state changes", async () => {
