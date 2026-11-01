@@ -35,3 +35,5 @@ jobs:
           node-version: "20"
       - name: Run Cloudflare Worker unit tests
         run: npm run test:worker
+      - name: Run Cloudflare Workflows spike unit tests
+        run: npm run test:workflow-spike
