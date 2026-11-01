@@ -69,7 +69,35 @@ def _post(base_url: str, token: str, candidates: list[dict],
         raise ResearchPersistenceError("research persistence endpoint unavailable or returned invalid JSON") from None
 
 
-def persist_candidates(snapshot: dict, environ=None, request_fn=None, batch_size: int = 5, sleep_fn=None) -> dict:
+
+def _get(base_url: str, token: str, access_client_id: str = "",
+         access_client_secret: str = "", timeout: int = 20) -> dict:
+    headers = {
+        "Authorization": "Bearer " + token,
+        "Accept": "application/json",
+        "User-Agent": USER_AGENT,
+    }
+    if access_client_id and access_client_secret:
+        headers["CF-Access-Client-Id"] = access_client_id
+        headers["CF-Access-Client-Secret"] = access_client_secret
+    request = Request(base_url.rstrip("/") + "/v1/research/candidates?status=all&limit=100",
+                      headers=headers, method="GET")
+    try:
+        with urlopen(request, timeout=timeout) as response:
+            raw = response.read(64 * 1024 + 1)
+            if len(raw) > 64 * 1024:
+                raise ResearchPersistenceError("research readback response exceeded limit")
+            data = json.loads(raw.decode("utf-8"))
+            if response.status != 200 or not isinstance(data, dict):
+                raise ResearchPersistenceError("research readback endpoint returned an invalid response")
+            return data
+    except HTTPError as exc:
+        raise ResearchPersistenceError(f"research readback endpoint returned HTTP {exc.code}") from None
+    except (URLError, TimeoutError, OSError, json.JSONDecodeError, UnicodeDecodeError):
+        raise ResearchPersistenceError("research readback endpoint unavailable or returned invalid JSON") from None
+
+
+def persist_candidates(snapshot: dict, environ=None, request_fn=None, batch_size: int = 5, sleep_fn=None, verify_fn=None) -> dict:
     if isinstance(batch_size, bool) or not isinstance(batch_size, int) or not 1 <= batch_size <= 10:
         raise ValueError("batch_size must be between 1 and 10")
     candidates = load_candidates(snapshot)
@@ -107,7 +135,20 @@ def persist_candidates(snapshot: dict, environ=None, request_fn=None, batch_size
             raise ResearchPersistenceError("research persistence endpoint accepted an unexpected candidate count")
         persisted += accepted
         batches += 1
-    return {"discovered": len(candidates), "persisted": persisted, "batches": batches, "sources": sources}
+    verify = verify_fn or _get
+    readback = verify(base_url, token, access_id, access_secret)
+    rows = readback.get("candidates") if isinstance(readback, dict) else None
+    if not isinstance(rows, list):
+        raise ResearchPersistenceError("research readback endpoint returned an invalid candidate list")
+    found = {row.get("source_key") for row in rows if isinstance(row, dict)}
+    expected = {
+        ("github:" + item["full_name"].lower()) if item["source"] == "github"
+        else ("crossref:" + item["doi"].lower())
+        for item in candidates
+    }
+    if expected - found:
+        raise ResearchPersistenceError("research D1 readback did not confirm every submitted candidate")
+    return {"discovered": len(candidates), "persisted": persisted, "verified": len(expected), "batches": batches, "sources": sources}
 
 
 def main(argv=None) -> int:
