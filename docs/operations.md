@@ -70,6 +70,20 @@ The model gateway and quota controls provide foundations for opt-in inference. K
 
 Never add paid fallback or automatic billing upgrades without explicit approval.
 
+
+### Explicit live-inference opt-in path
+
+The CLI and scheduled Task Runner now use the same local live-runtime factory. It constructs OpenAI-compatible adapters only when all of these independent gates pass:
+
+1. The operator environment switch RAAWAA_ENGINE_LIVE_INFERENCE is exactly enabled.
+2. config/policy.json uses live_inference_opt_in while paid calls, daily/monthly budgets, and external writes remain disabled/zero.
+3. At least one provider profile is explicitly enabled in config/provider_profiles.json and passes the static zero-cost, free-tier, commercial-use, production-stage, and quota checks.
+4. The profile's API-key environment variable is present. The factory checks presence only and never logs or prints the key.
+
+The scheduled GitHub Actions Task Runner reads the optional repository Actions variable RAAWAA_ENGINE_LIVE_INFERENCE; it is unset by default. The variable alone cannot activate a route: policy mode and a profile must also be explicitly changed. Adapter construction is local only; the first provider request occurs only when the worker calls gateway.generate for a task.
+
+Current configuration deliberately keeps policy mode at safe_dry_run and all profiles disabled. GPT-OSS 20B and 120B are production-stage candidates but remain disabled. Qwen 3.8-27B is Preview/evaluation-only and is rejected by the production eligibility gate. Do not change these defaults without the required explicit operator decision. No live inference request has been sent.
+
 ## GitHub Actions and deployment
 
 GitHub Actions runs CI and is configured to invoke a scheduled, bounded D1 queue consumer every 15 minutes. Each invocation runs at most five tasks or admits new tasks for at most 60 seconds, whichever comes first; GitHub schedule delivery can be delayed and is not a real-time SLA. The Cloudflare Worker separately recovers expired leases every 15 minutes. Recent verification confirms the public Worker health GET and authenticated POST preflight both return HTTP 200. A one-time idempotent `system_audit` smoke task was enqueued and successfully processed through D1 claim, specialist dry-run, and lease-fenced finish. Neither scheduler is an always-on process.
