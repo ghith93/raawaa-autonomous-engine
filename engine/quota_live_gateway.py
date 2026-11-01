@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import math
+import os
 
 from engine.live_adapters import LiveAdapterError
 from engine.model_gateway import ProviderUnavailable, UsageLedger
@@ -13,7 +14,8 @@ class QuotaAwareLiveGateway:
     """Only calls a provider after a verified-free, commercial-use route is reserved."""
 
     def __init__(self, quota_manager: QuotaManager, adapters: dict, usage_ledger: UsageLedger,
-                 network_calls_enabled: bool = False, cooldown_seconds: int = 900):
+                 network_calls_enabled: bool = False, cooldown_seconds: int = 900,
+                 environ=None):
         if cooldown_seconds < 1:
             raise ValueError("cooldown_seconds must be positive")
         self.quota_manager = quota_manager
@@ -21,10 +23,27 @@ class QuotaAwareLiveGateway:
         self.usage_ledger = usage_ledger
         self.network_calls_enabled = network_calls_enabled
         self.cooldown_seconds = cooldown_seconds
+        self.environ = os.environ if environ is None else environ
+
+    def _live_enabled(self) -> bool:
+        return (
+            self.network_calls_enabled
+            and self.environ.get("RAAWAA_ENGINE_LIVE_INFERENCE", "").strip().lower() == "enabled"
+        )
+
+    def _audit(self, event: str, request: GenerationRequest,
+               profile=None, **details) -> None:
+        self.quota_manager.ledger.audit_event(
+            event,
+            route_id=profile.route_id if profile is not None else None,
+            task_kind=request.task_kind,
+            details=details,
+        )
 
     def generate(self, request: GenerationRequest):
-        if not self.network_calls_enabled:
-            raise ProviderUnavailable("Live network execution is disabled by policy.")
+        if not self._live_enabled():
+            self._audit("live_request_blocked", request, reason="kill_switch_off")
+            raise ProviderUnavailable("Live network execution is disabled by policy or operator kill switch.")
         if not request.prompt.strip():
             raise ValueError("prompt is required")
         if not 1 <= request.max_output_tokens <= 4096:
@@ -65,6 +84,10 @@ class QuotaAwareLiveGateway:
                 # Another worker may have reserved the remaining capacity.
                 continue
 
+            self._audit(
+                "quota_reserved", request, profile,
+                estimated_tokens=estimated_tokens,
+            )
             try:
                 response = adapter.generate(profile.model, request)
                 if response.provider != profile.provider or response.model != profile.model:
@@ -80,6 +103,11 @@ class QuotaAwareLiveGateway:
                     raise ValueError("adapter response cost is invalid")
             except LiveAdapterError as exc:
                 last_error = exc
+                self._audit(
+                    "provider_error", request, profile,
+                    http_status=exc.status_code or 0,
+                    error_type=type(exc).__name__,
+                )
                 # The provider may have processed the request before a timeout,
                 # transport failure, or malformed response. Retain the full token
                 # reservation conservatively; request count is already consumed.
@@ -88,6 +116,10 @@ class QuotaAwareLiveGateway:
                     self.quota_manager.ledger.cool_down(
                         profile.route_id, self.cooldown_seconds, "http_429"
                     )
+                    self._audit(
+                        "provider_cooldown", request, profile,
+                        reason="http_429", cooldown_seconds=self.cooldown_seconds,
+                    )
                 # Only known provider errors are eligible for route rotation.
                 continue
             except Exception as exc:
@@ -95,6 +127,10 @@ class QuotaAwareLiveGateway:
                 # Unknown adapter failures have ambiguous remote execution status.
                 # Keep the reservation rather than making possibly-used quota reusable.
                 self.quota_manager.ledger.settle(reservation_id, estimated_tokens)
+                self._audit(
+                    "adapter_failure", request, profile,
+                    error_type=type(exc).__name__, reason="ambiguous_adapter_failure",
+                )
                 raise ProviderUnavailable(
                     "Live adapter failed unexpectedly; route rotation was stopped."
                 ) from exc
@@ -109,6 +145,10 @@ class QuotaAwareLiveGateway:
                 response.output_tokens,
                 response.cost_usd,
             )
+            self._audit(
+                "completion_received", request, profile,
+                actual_tokens=actual_tokens, cost_usd=response.cost_usd,
+            )
             if (response.input_tokens > estimated_input_tokens
                     or response.output_tokens > request.max_output_tokens):
                 # The provider exceeded a hard reservation ceiling. Keep the actual
@@ -116,6 +156,11 @@ class QuotaAwareLiveGateway:
                 # to another provider after a potentially billable contract violation.
                 self.quota_manager.ledger.cool_down(
                     profile.route_id, self.cooldown_seconds, "response_exceeded_token_ceiling"
+                )
+                self._audit(
+                    "route_quarantined", request, profile,
+                    reason="response_exceeded_token_ceiling",
+                    cooldown_seconds=self.cooldown_seconds,
                 )
                 raise ProviderUnavailable(
                     "Provider response exceeded reserved token ceilings; route quarantined."
@@ -126,6 +171,12 @@ class QuotaAwareLiveGateway:
                 # closed rather than returning a result or silently trying another.
                 self.quota_manager.ledger.cool_down(
                     profile.route_id, self.cooldown_seconds, "unexpected_nonzero_cost"
+                )
+                self._audit(
+                    "route_quarantined", request, profile,
+                    reason="unexpected_nonzero_cost",
+                    cooldown_seconds=self.cooldown_seconds,
+                    cost_usd=response.cost_usd,
                 )
                 raise ProviderUnavailable(
                     "Provider reported non-zero cost for a verified-free route; route quarantined."
@@ -140,7 +191,10 @@ class QuotaAwareLiveGateway:
 
     def status(self):
         return {
-            "network_calls_enabled": self.network_calls_enabled,
+            "network_calls_enabled": self._live_enabled(),
+            "operator_kill_switch_enabled": (
+                self.environ.get("RAAWAA_ENGINE_LIVE_INFERENCE", "").strip().lower() == "enabled"
+            ),
             "paid_fallback_enabled": False,
             "quota_routes": self.quota_manager.snapshot(),
             "registered_adapters": sorted(self.adapters),
