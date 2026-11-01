@@ -29,6 +29,13 @@ class ResearchDiscoveryTests(unittest.TestCase):
     def test_query_and_limit_validation(self):
         with self.assertRaises(ValueError): discover_repositories({}, {})
         with self.assertRaises(ValueError): discover_repositories({"x": "y"}, {}, max_per_query=11)
+        with self.assertRaises(ValueError): discover_repositories({"x": "y", "z": "q"}, {}, max_queries=1, request_fn=lambda q, token: {"items": []})
+
+    def test_query_count_is_bounded(self):
+        calls = []
+        result = discover_repositories({"a": "one", "b": "two", "c": "three"}, {}, max_queries=2, request_fn=lambda q, token: (calls.append(q) or {"items": []}))
+        self.assertEqual(len(calls), 2)
+        self.assertEqual(result["queries_attempted"], 2)
 
     def test_failure_is_reported_without_exposing_response_body(self):
         def fail(query, token): raise ResearchDiscoveryError("GitHub search returned HTTP 403; rate_limit_remaining=0")
