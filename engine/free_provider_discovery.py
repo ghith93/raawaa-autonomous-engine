@@ -62,7 +62,8 @@ def discover(provider: str, environ: dict[str, str] | None = None) -> list[dict[
     headers = {"Accept": "application/json"}
     url = spec["url"]
     if provider == "gemini":
-        url = f"{url}?key={key}"
+        # API keys in URLs are commonly captured by proxies and access logs.
+        headers["x-goog-api-key"] = key
     else:
         headers["Authorization"] = f"Bearer {key}"
 
