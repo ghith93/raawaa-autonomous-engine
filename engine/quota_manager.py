@@ -153,6 +153,44 @@ class QuotaLedger:
             ).fetchone()
         return {"requests": int(row["requests"]), "tokens": int(row["tokens"])}
 
+
+    def usage_snapshot(self, route_id: str, now: datetime | None = None) -> dict:
+        """Read all provider windows and cooldown state from one local DB connection."""
+        current = (now or datetime.now(timezone.utc)).astimezone(timezone.utc)
+        minute_start = (current - timedelta(seconds=60)).isoformat()
+        day_start = current.replace(hour=0, minute=0, second=0, microsecond=0).isoformat()
+        month_start = current.replace(day=1, hour=0, minute=0, second=0, microsecond=0).isoformat()
+        with self._connect() as db:
+            def read(sql, values):
+                row = db.execute(sql, values).fetchone()
+                return {"requests": int(row["requests"]), "tokens": int(row["tokens"])}
+            minute = read(
+                "SELECT COALESCE(SUM(requests),0) requests, COALESCE(SUM(tokens),0) tokens "
+                "FROM quota_usage WHERE route_id=? AND occurred_at>?",
+                (route_id, minute_start),
+            )
+            daily = read(
+                "SELECT COALESCE(SUM(requests),0) requests, COALESCE(SUM(tokens),0) tokens "
+                "FROM quota_usage WHERE route_id=? AND occurred_at>=?",
+                (route_id, day_start),
+            )
+            monthly = read(
+                "SELECT COALESCE(SUM(requests),0) requests, COALESCE(SUM(tokens),0) tokens "
+                "FROM quota_usage WHERE route_id=? AND occurred_at>=?",
+                (route_id, month_start),
+            )
+            cooldown = db.execute(
+                "SELECT until_at FROM quota_cooldowns WHERE route_id=?", (route_id,)
+            ).fetchone()
+        return {
+            "minute": minute,
+            "daily": daily,
+            "monthly": monthly,
+            "cooldown_active": bool(
+                cooldown and datetime.fromisoformat(cooldown["until_at"]) > current
+            ),
+        }
+
     def usage_for_task(self, task_id: str) -> dict[str, int]:
         if not isinstance(task_id, str) or not task_id.strip():
             raise ValueError("task_id is required")
@@ -382,9 +420,10 @@ class QuotaManager:
             return False
         if type(estimated_tokens) is not int or estimated_tokens < 1:
             return False
-        if self.ledger.cooldown_active(profile.route_id, now):
+        usage_snapshot = self.ledger.usage_snapshot(profile.route_id, now)
+        if usage_snapshot["cooldown_active"]:
             return False
-        minute = self.ledger.usage_minute(profile.route_id, now)
+        minute = usage_snapshot["minute"]
         if (minute["requests"] >= profile.minute_request_limit
                 or minute["tokens"] + estimated_tokens > profile.minute_token_limit):
             return False
@@ -414,9 +453,10 @@ class QuotaManager:
     def snapshot(self, now: datetime | None = None) -> list[dict]:
         rows = []
         for profile in self.profiles:
-            usage = self.ledger.usage_today(profile.route_id, now)
-            monthly = self.ledger.usage_month(profile.route_id, now)
-            minute = self.ledger.usage_minute(profile.route_id, now)
+            usage = self.ledger.usage_snapshot(profile.route_id, now)
+            daily = usage["daily"]
+            monthly = usage["monthly"]
+            minute = usage["minute"]
             rows.append({
                 "route_id": profile.route_id,
                 "enabled": profile.enabled,
@@ -427,8 +467,8 @@ class QuotaManager:
                 "minute_tokens_used": minute["tokens"],
                 "minute_request_limit": profile.minute_request_limit,
                 "minute_token_limit": profile.minute_token_limit,
-                "daily_requests_used": usage["requests"],
-                "daily_tokens_used": usage["tokens"],
+                "daily_requests_used": daily["requests"],
+                "daily_tokens_used": daily["tokens"],
                 "daily_request_limit": profile.daily_request_limit,
                 "daily_token_limit": profile.daily_token_limit,
                 "monthly_requests_used": monthly["requests"],
@@ -436,6 +476,6 @@ class QuotaManager:
                 "monthly_request_limit": profile.monthly_request_limit,
                 "monthly_token_limit": profile.monthly_token_limit,
                 "eligible": self.eligible(profile, 1, now),
-                "cooldown": self.ledger.cooldown_active(profile.route_id, now),
+                "cooldown": usage["cooldown_active"],
             })
         return rows
