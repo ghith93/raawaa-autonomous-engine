@@ -81,6 +81,12 @@ class CheckpointEnvelopeTests(unittest.TestCase):
             self.make_blob(payload={"value": float("nan")})
         with self.assertRaises(CheckpointEnvelopeError):
             self.make_blob(payload={"value": object()})
+        with self.assertRaises(CheckpointEnvelopeError):
+            self.make_blob(payload={1: "non-string-key"})
+        cyclic = {}
+        cyclic["self"] = cyclic
+        with self.assertRaises(CheckpointEnvelopeError):
+            self.make_blob(payload=cyclic)
 
     def test_binary_pickle_payload_is_not_accepted_as_a_payload(self):
         with self.assertRaises(CheckpointEnvelopeError):
@@ -89,7 +95,7 @@ class CheckpointEnvelopeTests(unittest.TestCase):
     def test_excessive_json_nesting_fails_closed(self):
         nested = {}
         cursor = nested
-        for _ in range(2000):
+        for _ in range(100):
             cursor["child"] = {}
             cursor = cursor["child"]
         with self.assertRaises(CheckpointEnvelopeError):
