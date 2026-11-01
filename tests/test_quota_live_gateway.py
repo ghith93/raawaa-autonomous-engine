@@ -83,7 +83,7 @@ class QuotaAwareGatewayTests(unittest.TestCase):
     def test_unverified_route_never_called(self):
         adapter = FakeAdapter("groq")
         manager = QuotaManager([self.profile(free_verified=False)], self.quota)
-        gateway = QuotaAwareLiveGateway(manager, {"groq": adapter}, self.usage, True, environ={"RAAWAA_ENGINE_LIVE_INFERENCE": "enabled"})
+        gateway = QuotaAwareLiveGateway(manager, {"groq": adapter}, self.usage, True, environ={"RAAWAA_ENGINE_LIVE_INFERENCE": "enabled"}, environ={"RAAWAA_ENGINE_LIVE_INFERENCE": "enabled"})
         with self.assertRaises(ProviderUnavailable):
             gateway.generate(self.request)
         self.assertEqual(adapter.calls, 0)
@@ -91,7 +91,7 @@ class QuotaAwareGatewayTests(unittest.TestCase):
     def test_success_reserves_and_settles_actual_usage(self):
         adapter = FakeAdapter("groq")
         manager = QuotaManager([self.profile()], self.quota)
-        gateway = QuotaAwareLiveGateway(manager, {"groq": adapter}, self.usage, True)
+        gateway = QuotaAwareLiveGateway(manager, {"groq": adapter}, self.usage, True, environ={"RAAWAA_ENGINE_LIVE_INFERENCE": "enabled"})
         result = gateway.generate(self.request)
         self.assertEqual(result.text, "ok")
         row = manager.snapshot()[0]
@@ -110,7 +110,7 @@ class QuotaAwareGatewayTests(unittest.TestCase):
         backup = FakeAdapter("cerebras")
         manager = QuotaManager([first, second], self.quota)
         gateway = QuotaAwareLiveGateway(manager, {"groq": limited, "cerebras": backup},
-                                        self.usage, True)
+                                        self.usage, True, environ={"RAAWAA_ENGINE_LIVE_INFERENCE": "enabled"})
         result = gateway.generate(self.request)
         self.assertEqual(result.provider, "cerebras")
         self.assertTrue(self.quota.cooldown_active(first.route_id))
@@ -128,7 +128,7 @@ class QuotaAwareGatewayTests(unittest.TestCase):
         backup = FakeAdapter("cerebras")
         manager = QuotaManager([first, second], self.quota)
         gateway = QuotaAwareLiveGateway(
-            manager, {"groq": BrokenAdapter(), "cerebras": backup}, self.usage, True
+            manager, {"groq": BrokenAdapter(), "cerebras": backup}, self.usage, True, environ={"RAAWAA_ENGINE_LIVE_INFERENCE": "enabled"}
         )
         with self.assertRaises(ProviderUnavailable):
             gateway.generate(self.request)
@@ -148,7 +148,7 @@ class QuotaAwareGatewayTests(unittest.TestCase):
         profile = self.profile()
         manager = QuotaManager([profile], self.quota)
         gateway = QuotaAwareLiveGateway(
-            manager, {"groq": MockedCompletion()}, self.usage, True
+            manager, {"groq": MockedCompletion()}, self.usage, True, environ={"RAAWAA_ENGINE_LIVE_INFERENCE": "enabled"}
         )
         with self.assertRaisesRegex(ProviderUnavailable, "failed unexpectedly"):
             gateway.generate(self.request)
@@ -168,7 +168,7 @@ class QuotaAwareGatewayTests(unittest.TestCase):
         profile = self.profile()
         manager = QuotaManager([profile], self.quota)
         gateway = QuotaAwareLiveGateway(
-            manager, {"groq": EmptyCompletion()}, self.usage, True
+            manager, {"groq": EmptyCompletion()}, self.usage, True, environ={"RAAWAA_ENGINE_LIVE_INFERENCE": "enabled"}
         )
         with self.assertRaisesRegex(ProviderUnavailable, "failed unexpectedly"):
             gateway.generate(self.request)
@@ -181,7 +181,7 @@ class QuotaAwareGatewayTests(unittest.TestCase):
 
         profile = self.profile()
         manager = QuotaManager([profile], self.quota)
-        gateway = QuotaAwareLiveGateway(manager, {"groq": WrongProvider()}, self.usage, True)
+        gateway = QuotaAwareLiveGateway(manager, {"groq": WrongProvider()}, self.usage, True, environ={"RAAWAA_ENGINE_LIVE_INFERENCE": "enabled"})
         with self.assertRaises(ProviderUnavailable):
             gateway.generate(self.request)
         row = manager.snapshot()[0]
@@ -201,7 +201,7 @@ class QuotaAwareGatewayTests(unittest.TestCase):
                     return response
 
             manager = QuotaManager([self.profile()], self.quota)
-            gateway = QuotaAwareLiveGateway(manager, {"groq": MalformedAdapter()}, self.usage, True)
+            gateway = QuotaAwareLiveGateway(manager, {"groq": MalformedAdapter()}, self.usage, True, environ={"RAAWAA_ENGINE_LIVE_INFERENCE": "enabled"})
             with self.subTest(response=response):
                 with self.assertRaises(ProviderUnavailable):
                     gateway.generate(self.request)
@@ -211,7 +211,7 @@ class QuotaAwareGatewayTests(unittest.TestCase):
         adapter = FakeAdapter("groq")
         profile = self.profile(daily_token_limit=25)
         manager = QuotaManager([profile], self.quota)
-        gateway = QuotaAwareLiveGateway(manager, {"groq": adapter}, self.usage, True)
+        gateway = QuotaAwareLiveGateway(manager, {"groq": adapter}, self.usage, True, environ={"RAAWAA_ENGINE_LIVE_INFERENCE": "enabled"})
         request = GenerationRequest("research", "مرحبا", 20)
         with self.assertRaises(ProviderUnavailable):
             gateway.generate(request)
@@ -224,7 +224,7 @@ class QuotaAwareGatewayTests(unittest.TestCase):
 
         profile = self.profile()
         manager = QuotaManager([profile], self.quota)
-        gateway = QuotaAwareLiveGateway(manager, {"groq": OversizedAdapter()}, self.usage, True)
+        gateway = QuotaAwareLiveGateway(manager, {"groq": OversizedAdapter()}, self.usage, True, environ={"RAAWAA_ENGINE_LIVE_INFERENCE": "enabled"})
         with self.assertRaisesRegex(ProviderUnavailable, "exceeded reserved token ceilings"):
             gateway.generate(self.request)
         self.assertTrue(self.quota.cooldown_active(profile.route_id))
@@ -238,7 +238,7 @@ class QuotaAwareGatewayTests(unittest.TestCase):
 
         profile = self.profile()
         manager = QuotaManager([profile], self.quota)
-        gateway = QuotaAwareLiveGateway(manager, {"groq": ChargedAdapter()}, self.usage, True)
+        gateway = QuotaAwareLiveGateway(manager, {"groq": ChargedAdapter()}, self.usage, True, environ={"RAAWAA_ENGINE_LIVE_INFERENCE": "enabled"})
         with self.assertRaisesRegex(ProviderUnavailable, "non-zero cost"):
             gateway.generate(self.request)
         self.assertTrue(self.quota.cooldown_active(profile.route_id))
@@ -249,7 +249,7 @@ class QuotaAwareGatewayTests(unittest.TestCase):
         adapter = FakeAdapter("groq")
         profile = self.profile(max_output_tokens=10)
         manager = QuotaManager([profile], self.quota)
-        gateway = QuotaAwareLiveGateway(manager, {"groq": adapter}, self.usage, True)
+        gateway = QuotaAwareLiveGateway(manager, {"groq": adapter}, self.usage, True, environ={"RAAWAA_ENGINE_LIVE_INFERENCE": "enabled"})
         with self.assertRaises(ProviderUnavailable):
             gateway.generate(self.request)
         self.assertEqual(adapter.calls, 0)
@@ -259,7 +259,7 @@ class QuotaAwareGatewayTests(unittest.TestCase):
         adapter = FakeAdapter("groq")
         profile = self.profile(monthly_request_limit=1, monthly_token_limit=100)
         manager = QuotaManager([profile], self.quota)
-        gateway = QuotaAwareLiveGateway(manager, {"groq": adapter}, self.usage, True)
+        gateway = QuotaAwareLiveGateway(manager, {"groq": adapter}, self.usage, True, environ={"RAAWAA_ENGINE_LIVE_INFERENCE": "enabled"})
         gateway.generate(self.request)
         with self.assertRaises(ProviderUnavailable):
             gateway.generate(self.request)
@@ -280,7 +280,7 @@ class QuotaAwareGatewayTests(unittest.TestCase):
     def test_no_paid_or_unknown_quota_fallback(self):
         adapter = FakeAdapter("groq")
         manager = QuotaManager([self.profile(daily_token_limit=None)], self.quota)
-        gateway = QuotaAwareLiveGateway(manager, {"groq": adapter}, self.usage, True)
+        gateway = QuotaAwareLiveGateway(manager, {"groq": adapter}, self.usage, True, environ={"RAAWAA_ENGINE_LIVE_INFERENCE": "enabled"})
         with self.assertRaises(ProviderUnavailable):
             gateway.generate(self.request)
         self.assertEqual(adapter.calls, 0)
