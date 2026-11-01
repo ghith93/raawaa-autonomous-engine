@@ -49,7 +49,7 @@ class AndroidHarnessBridgeTests(unittest.TestCase):
             parse_task(task_body({"schema_version": 1, "operation": "run_python_tests", "commit_sha": "main"}))
         with self.assertRaisesRegex(BridgeError, "allowlisted"):
             parse_task(task_body({"schema_version": 1, "operation": ["git_status"]}))
-        with self.assertRaisesRegex(BridgeError, "unsupported schema"):
+        with self.assertRaisesRegex(BridgeError, "unsupported task schema"):
             parse_task(task_body({"schema_version": True, "operation": "git_status"}))
         duplicate = TASK_MARKER + "\n" + chr(96) * 3 + "json\n" + (
             '{"schema_version":1,"schema_version":1,"operation":"git_status"}'
