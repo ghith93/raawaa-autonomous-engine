@@ -219,7 +219,12 @@ class AndroidHarnessIssueBridge:
         descriptor = os.open(self.audit_path, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
         try:
             payload = (json.dumps(record, sort_keys=True, separators=(",", ":")) + "\n").encode()
-            os.write(descriptor, payload)
+            view = memoryview(payload)
+            while view:
+                written = os.write(descriptor, view)
+                if written <= 0:
+                    raise BridgeError("local audit record could not be written")
+                view = view[written:]
             os.fsync(descriptor)
         finally:
             os.close(descriptor)
@@ -419,7 +424,12 @@ class AndroidHarnessIssueBridge:
     def run_forever(self, interval: int, max_tasks: int) -> None:
         completed = 0
         while True:
-            processed = self.run_once()
+            try:
+                processed = self.run_once()
+            except BridgeError as exc:
+                print(f"AndroidHarness bridge poll failed safely: {exc}", file=sys.stderr)
+                time.sleep(interval)
+                continue
             if processed:
                 completed += 1
                 if max_tasks and completed >= max_tasks:
