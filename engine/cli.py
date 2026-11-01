@@ -5,6 +5,7 @@ import os
 from pathlib import Path
 
 from engine.task_store import TaskStore
+from engine.memory import MemoryStore
 from engine.worker import run_once
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -15,8 +16,16 @@ def load_json(path: Path):
         return json.load(stream)
 
 
+def db_path() -> str:
+    return os.environ.get("RAAWAA_ENGINE_DB", str(ROOT / "data" / "engine.db"))
+
+
 def store() -> TaskStore:
-    return TaskStore(os.environ.get("RAAWAA_ENGINE_DB", str(ROOT / "data" / "engine.db")))
+    return TaskStore(db_path())
+
+
+def memory_store() -> MemoryStore:
+    return MemoryStore(db_path())
 
 
 def audit() -> int:
@@ -72,6 +81,16 @@ def main() -> int:
         print(json.dumps(run_once(store()), indent=2))
     elif args.command == "audit-log":
         print(json.dumps(store().audit_events(args.limit), indent=2))
+    elif args.command == "memory-add":
+        item = memory_store().add(args.category, args.content, args.source, args.confidence,
+                                  [tag for tag in args.tags.split(",") if tag], args.ttl_days)
+        print(json.dumps(item, indent=2, ensure_ascii=False))
+    elif args.command == "memory-search":
+        print(json.dumps(memory_store().search(args.query, args.category, args.limit), indent=2, ensure_ascii=False))
+    elif args.command == "memory-list":
+        print(json.dumps(memory_store().list_recent(args.limit), indent=2, ensure_ascii=False))
+    elif args.command == "memory-archive":
+        print(json.dumps({"archived": memory_store().archive(args.id)}))
     return 0
 
 
