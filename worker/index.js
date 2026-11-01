@@ -100,7 +100,7 @@ export default {
       }
     }
 
-    const taskAction = url.pathname.match(/^\\/v1\\/tasks\\/([A-Za-z0-9-]+)\\/(heartbeat|finish|retry)$/);
+    const taskAction = url.pathname.match(/^\/v1\/tasks\/([A-Za-z0-9-]+)\/(heartbeat|finish|retry)$/);
     if (request.method === "POST" && taskAction) {
       const [, taskId, action] = taskAction;
       let input;
