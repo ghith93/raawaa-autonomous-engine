@@ -93,17 +93,6 @@ try {
   assert.equal(beforeRestart.filter(x => x?.status === "claimed").length, 1);
   assert.equal(beforeRestart.filter(x => x?.result === "research-stub").length, 1);
 
-  const restarted = await request("/restart/" + started.id, {
-    method: "POST", body: JSON.stringify({ from_step: "review-stub" }),
-  });
-  assert.equal(restarted.restarted_from, "review-stub");
-  const waitingAgain = await waitForStatus(started.id, atApprovalGate);
-  const afterRestart = waitingAgain.local_step_outputs || [];
-  assert.equal(afterRestart.filter(x => x?.status === "claimed").length, 1,
-    "restart from review must reuse the completed claim step");
-  assert.equal(afterRestart.filter(x => x?.result === "research-stub").length, 1,
-    "restart from review must reuse the completed research step");
-
   await request("/approve/" + started.id, {
     method: "POST",
     body: JSON.stringify({ approved: true, approval_id: "local-approval-1" }),
@@ -111,6 +100,28 @@ try {
   const completed = await waitForStatus(started.id, x => x.status === "complete");
   assert.equal(completed.output?.status, "completed");
   assert.equal(completed.output?.approval_id, "local-approval-1");
+
+  assert.equal(completed.output?.approval_id, "local-approval-1");
+
+  const restartPayload = {
+    task_id: "task-restart",
+    idempotency_key: "idem-restart",
+  };
+  const restartStart = await request("/start", { method: "POST", body: JSON.stringify(restartPayload) });
+  const beforeRestart = await waitForStatus(restartStart.id, x => x.status === "complete");
+  const beforeCompletedAt = beforeRestart.output?.result?.completed_at;
+  assert.equal(typeof beforeCompletedAt, "string");
+  const restarted = await request("/restart/" + restartStart.id, {
+    method: "POST", body: JSON.stringify({ from_step: "review-stub" }),
+  });
+  assert.equal(restarted.restarted_from, "review-stub");
+  const afterRestart = await waitForStatus(restartStart.id,
+    x => x.status === "complete" && x.output?.result?.completed_at !== beforeCompletedAt);
+  const replayedOutputs = afterRestart.local_step_outputs || [];
+  assert.equal(replayedOutputs.filter(x => x?.status === "claimed").length, 1,
+    "restart from review must reuse the completed claim step");
+  assert.equal(replayedOutputs.filter(x => x?.result === "research-stub").length, 1,
+    "restart from review must reuse the completed research step");
 
   const cancelPayload = {
     task_id: "task-cancel",
