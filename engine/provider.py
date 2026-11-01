@@ -9,6 +9,7 @@ class GenerationRequest:
     task_kind: str
     prompt: str
     max_output_tokens: int = 512
+    task_id: str | None = None
 
 
 @dataclass(frozen=True)
