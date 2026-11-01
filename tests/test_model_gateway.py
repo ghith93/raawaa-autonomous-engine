@@ -34,12 +34,13 @@ class ModelGatewayTests(unittest.TestCase):
         result=gateway.generate(GenerationRequest("offline_test","test"))
         self.assertEqual(result.cost_usd,0.0)
 
-    def test_paid_model_rejected_when_paid_calls_disabled(self):
-        gateway=ModelGateway([ModelOption("mock","paid-model","free",True,0.1)],
+    def test_paid_model_not_selected_when_paid_calls_disabled(self):
+        gateway=ModelGateway([ModelOption("mock","paid-model","paid",True,0.1)],
             {"mock":MockAdapter()},self.ledger,network_calls_enabled=True,
             daily_budget_usd=1.0,monthly_budget_usd=1.0,allow_paid_calls=False)
-        with self.assertRaises(BudgetExceeded):
+        with self.assertRaises(ProviderUnavailable):
             gateway.generate(GenerationRequest("research","test"))
+
     def test_status_exposes_no_live_adapter(self):
         gateway=ModelGateway([],{},self.ledger)
         self.assertFalse(gateway.status()["live_provider_adapters_enabled"])
