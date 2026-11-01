@@ -6,7 +6,9 @@ from urllib.request import Request, urlopen
 from engine.provider import GenerationRequest, GenerationResponse
 
 class LiveAdapterError(RuntimeError):
-    pass
+    def __init__(self, message, status_code=None):
+        super().__init__(message)
+        self.status_code = status_code
 
 def _post_json(url, headers, body, timeout=45):
     request = Request(url, data=json.dumps(body).encode("utf-8"),
@@ -17,7 +19,7 @@ def _post_json(url, headers, body, timeout=45):
                 raise LiveAdapterError(f"Provider returned HTTP {response.status}")
             payload=json.loads(response.read().decode("utf-8"))
     except HTTPError as exc:
-        raise LiveAdapterError(f"Provider returned HTTP {exc.code}") from exc
+        raise LiveAdapterError(f"Provider returned HTTP {exc.code}", status_code=exc.code) from exc
     except (URLError, TimeoutError, json.JSONDecodeError) as exc:
         raise LiveAdapterError(f"Provider request failed: {type(exc).__name__}") from exc
     if not isinstance(payload, dict):
