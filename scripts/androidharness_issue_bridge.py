@@ -438,23 +438,21 @@ class AndroidHarnessIssueBridge:
                         timeout=task["timeout_seconds"],
                         check=False,
                     )
-                    output = bounded_text((result.stdout or "") + "\n" + (result.stderr or ""),
-                                          task["max_output_bytes"])
+                    summary = summarize_unittest_output((result.stdout or "") + "\n" + (result.stderr or ""))
                     return {
                         "exit_code": result.returncode,
                         "commit_sha": commit_sha,
+                        "policy_sha256": target_policy,
                         "test_command": "python -m unittest discover -s tests -v",
-                        "output": output,
+                        "test_summary": summary,
                     }
-                except subprocess.TimeoutExpired as exc:
-                    partial = (exc.stdout or "") + "\n" + (exc.stderr or "")
-                    if isinstance(partial, bytes):
-                        partial = partial.decode("utf-8", errors="replace")
+                except subprocess.TimeoutExpired:
                     return {
                         "exit_code": 124,
                         "commit_sha": commit_sha,
+                        "policy_sha256": target_policy,
                         "test_command": "python -m unittest discover -s tests -v",
-                        "output": bounded_text(partial + "\nTIMEOUT", task["max_output_bytes"]),
+                        "test_summary": {"tests_run": None, "status": "timeout", "failure_summary": None},
                     }
 
         raise BridgeError("operation is not allowlisted")
