@@ -5,8 +5,12 @@ import asyncio
 import inspect
 import json
 
-from agent_framework import InMemoryCheckpointStorage, step, workflow
+from agent_framework import step, workflow
 from agent_framework.openai import OpenAIChatCompletionClient
+
+from experiments.microsoft_agent_framework.framework_checkpoint_storage import (
+    InMemoryEnvelopeCheckpointStorage,
+)
 
 
 CALLS = {"source_a": 0, "source_b": 0, "review": 0}
@@ -37,7 +41,7 @@ async def parallel_research(topic: str) -> str:
 
 
 async def run_evaluation() -> dict:
-    storage = InMemoryCheckpointStorage()
+    storage = InMemoryEnvelopeCheckpointStorage()
     instance = parallel_research.build(checkpoint_storage=storage)
 
     first = await instance.run("agent orchestration")
@@ -65,7 +69,7 @@ async def run_evaluation() -> dict:
         "core_version": "1.24.0",
         "openai_integration_version": "1.18.0",
         "workflow": "parallel research branches -> reviewer",
-        "checkpoint_storage": "InMemoryCheckpointStorage",
+        "checkpoint_storage": "InMemoryEnvelopeCheckpointStorage",
         "checkpoint_resume_reuses_completed_steps": True,
         "openai_chat_completions_base_url_supported": True,
         "groq_base_url": "https://api.groq.com/openai/v1",
