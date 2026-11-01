@@ -94,3 +94,18 @@ Agents may research and propose changes. Policy gates must control execution. Ke
 - Local SQLite memory and task state need an explicit backup/retention strategy for production.
 
 Recommended next work: harden task ownership and concurrent recovery, add side-effect handler contracts, then implement a bounded scheduler/worker on a verified free persistent host.
+
+## Diagnosing the authenticated D1 task API
+
+The scheduled task runner performs a read-free authenticated POST preflight to `/v1/diagnostics/auth` before it calls any task-management endpoint. A successful preflight returns HTTP 200 with an authentication confirmation and does not read or write D1. It exists to separate bearer-token/edge failures from failures in an individual task route.
+
+Interpret the preflight result conservatively:
+
+- **200:** the POST reached the Worker and the bearer token was accepted. If a later task endpoint fails, investigate that endpoint's route, method, handler, and D1 binding rather than changing the shared authentication policy.
+- **401:** the request reached the Worker authentication guard, but the supplied token was not accepted. Verify that the GitHub Actions secret and deployed Worker secret were synchronized by the reviewed deployment workflow. Never print or paste either secret.
+- **403:** inspect the safe `CF-Ray` and `cf-mitigated` response headers, when present, to determine whether Cloudflare edge controls intervened. Do not infer that every 403 is a WAF event, and do not disable Access, WAF, or authentication as a workaround.
+- **5xx or transport failure:** investigate Worker execution, availability, and D1 binding health. Do not retry task mutations blindly unless their idempotency contract makes that safe.
+
+The endpoint accepts POST only; GET returning 405 is expected and is not evidence that authenticated POST is broken. An unauthenticated task-list GET returning 401 is also expected. Neither result substitutes for the scheduled runner's authenticated POST test.
+
+The preflight does not prove that `/v1/tasks/recover`, claim, heartbeat, or finish works. A successful end-to-end verification requires a subsequent scheduled Task Runner execution to pass the preflight and complete the bounded task batch. Check the exact Actions run and job logs; do not claim the 403 is resolved from a successful Worker deployment or CI run alone.
