@@ -1,24 +1,37 @@
+import json
 import os
 import tempfile
 import unittest
+from datetime import datetime, timezone
+from pathlib import Path
 from unittest.mock import Mock
 
+from engine.model_gateway import UsageLedger
+from engine.provider import GenerationResponse
+from engine.quota_manager import QuotaLedger, QuotaManager, QuotaProfile
+from engine.quota_live_gateway import QuotaAwareLiveGateway
 from engine.task_store import TaskStore
 from engine.worker import run_once
 
 
-class FakeResponse:
-    provider = "groq"
-    model = "verified-test-model"
-    text = "A bounded specialist result."
-    input_tokens = 12
-    output_tokens = 8
+class FakeAdapter:
+    def __init__(self):
+        self.calls = 0
+        self.last_request = None
+
+    def generate(self, model, request):
+        self.calls += 1
+        self.last_request = request
+        return GenerationResponse("groq", model, "A bounded specialist result.", 12, 8, 0.0, mocked=False)
 
 
 class WorkerExecutionTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
-        self.store = TaskStore(os.path.join(self.temp.name, "tasks.db"))
+        root = Path(self.temp.name)
+        self.store = TaskStore(root / "tasks.db")
+        self.quota = QuotaLedger(root / "quota.db")
+        self.usage = UsageLedger(root / "usage.db")
         self.task = self.store.enqueue(
             "research_brief", "Research the requested topic",
             {"topic": "test topic", "constraints": ["no external writes"]},
@@ -28,6 +41,25 @@ class WorkerExecutionTests(unittest.TestCase):
     def tearDown(self):
         self.temp.cleanup()
 
+    def gateway(self, adapter):
+        profile = QuotaProfile(
+            provider="groq", account="test", model="verified-test-model",
+            free_verified=True, commercial_use_allowed=True,
+            daily_request_limit=10, daily_token_limit=2000,
+            monthly_request_limit=100, monthly_token_limit=20000,
+            per_task_request_limit=2, per_task_token_limit=4000,
+            endpoint_url="https://api.groq.com/openai/v1",
+            pricing_source_url="https://groq.com/pricing",
+            quota_source_url="https://console.groq.com/docs/rate-limits",
+            terms_source_url="https://groq.com/terms",
+            verified_at=datetime.now(timezone.utc), max_output_tokens=512,
+        )
+        manager = QuotaManager([profile], self.quota)
+        return QuotaAwareLiveGateway(
+            manager, {"groq": adapter}, self.usage, network_calls_enabled=True,
+            environ={"RAAWAA_ENGINE_LIVE_INFERENCE": "enabled"},
+        ), manager
+
     def test_default_path_is_dry_run_and_never_calls_gateway(self):
         gateway = Mock()
         result = run_once(self.store, live_gateway=gateway, environ={})
@@ -35,25 +67,27 @@ class WorkerExecutionTests(unittest.TestCase):
         gateway.generate.assert_not_called()
         saved = self.store.list_tasks(1)[0]
         self.assertEqual(saved["status"], "succeeded")
-        self.assertEqual(saved["result_json"] and __import__("json").loads(saved["result_json"])["provider_calls"], 0)
+        self.assertEqual(json.loads(saved["result_json"])["provider_calls"], 0)
 
-    def test_live_path_passes_task_id_and_persists_completion_under_lease(self):
-        gateway = Mock()
-        gateway.generate.return_value = FakeResponse()
+    def test_live_path_reserves_quota_and_persists_result_under_lease(self):
+        adapter = FakeAdapter()
+        gateway, manager = self.gateway(adapter)
         result = run_once(
             self.store, live_gateway=gateway,
             environ={"RAAWAA_ENGINE_LIVE_INFERENCE": "enabled"},
         )
         self.assertEqual(result["mode"], "live_inference")
-        request = gateway.generate.call_args.args[0]
-        self.assertEqual(request.task_id, self.task["id"])
-        self.assertEqual(request.task_kind, "research")
-        self.assertIn("test topic", request.prompt)
+        self.assertEqual(adapter.calls, 1)
+        self.assertEqual(adapter.last_request.task_id, self.task["id"])
+        self.assertEqual(adapter.last_request.task_kind, "research")
+        self.assertIn("test topic", adapter.last_request.prompt)
+        quota = manager.snapshot()[0]
+        self.assertEqual(quota["daily_requests_used"], 1)
+        self.assertEqual(quota["daily_tokens_used"], 20)
         saved = self.store.list_tasks(1)[0]
         self.assertEqual(saved["status"], "succeeded")
-        import json
         stored = json.loads(saved["result_json"])
-        self.assertEqual(stored["output"], FakeResponse.text)
+        self.assertEqual(stored["output"], "A bounded specialist result.")
         self.assertEqual(stored["external_writes"], 0)
 
     def test_live_switch_without_gateway_blocks_instead_of_silent_dry_run(self):
@@ -65,10 +99,12 @@ class WorkerExecutionTests(unittest.TestCase):
         self.assertEqual(self.store.list_tasks(1)[0]["status"], "blocked")
 
     def test_live_failure_is_blocked_and_never_auto_retried(self):
-        gateway = Mock()
-        gateway.generate.side_effect = TimeoutError("ambiguous provider outcome")
+        class FailingGateway:
+            def generate(self, request):
+                raise TimeoutError("ambiguous provider outcome")
+
         result = run_once(
-            self.store, live_gateway=gateway,
+            self.store, live_gateway=FailingGateway(),
             environ={"RAAWAA_ENGINE_LIVE_INFERENCE": "enabled"},
         )
         self.assertEqual(result["status"], "blocked")
