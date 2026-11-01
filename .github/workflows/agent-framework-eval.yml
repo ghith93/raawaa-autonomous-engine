@@ -5,6 +5,7 @@ on:
     paths:
       - "experiments/microsoft-agent-framework/**"
       - "requirements-agent-framework-eval.txt"
+      - "docs/research/microsoft-agent-framework-evaluation.md"
       - ".github/workflows/agent-framework-eval.yml"
 
 permissions:
