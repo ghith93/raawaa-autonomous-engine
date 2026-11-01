@@ -40,6 +40,26 @@ class ResearchDiscoveryTests(unittest.TestCase):
         self.assertEqual(len(calls), 2)
         self.assertEqual(result["queries_attempted"], 2)
 
+    def test_crossref_metadata_is_normalized_without_abstract_or_licence_claims(self):
+        def fake_crossref(query, limit):
+            self.assertEqual(limit, 5)
+            return {"items": [{"DOI": "10.1234/agent-paper", "title": ["Agent orchestration research"], "author": [{"given": "Ada", "family": "Lovelace"}], "published": {"date-parts": [[2025, 4, 2]]}, "URL": "https://doi.org/10.1234/agent-paper", "container-title": ["Journal of Agents"], "is-referenced-by-count": 12, "license": [{"URL": "https://creativecommons.org/licenses/by/4.0/"}], "type": "journal-article"}, {"DOI": "10.1234/no-title", "title": []}]}
+        result = discover_repositories({"agents": "agent framework"}, {}, request_fn=lambda q, token: {"items": []}, academic_query="agent memory", max_academic_results=5, academic_request_fn=fake_crossref)
+        self.assertEqual(result["academic_requests_made"], 1)
+        self.assertEqual(result["academic_candidates"][0]["doi"], "10.1234/agent-paper")
+        self.assertEqual(result["academic_candidates"][0]["authors"], ["Ada Lovelace"])
+        self.assertEqual(result["academic_candidates"][0]["published"], "2025-4-2")
+        self.assertEqual(result["academic_candidates"][0]["citation_count"], 12)
+        self.assertFalse(result["academic_candidates"][0]["license_verified"])
+        self.assertFalse(result["academic_candidates"][0]["abstract_retrieved"])
+        self.assertEqual(result["generation_requests"], 0)
+
+    def test_crossref_failure_is_nonfatal_and_reported(self):
+        def fail(query, limit): raise ResearchDiscoveryError("Crossref returned HTTP 429")
+        result = discover_repositories({"agents": "agent framework"}, {}, request_fn=lambda q, token: {"items": []}, academic_query="agent memory", academic_request_fn=fail)
+        self.assertEqual(result["academic_requests_made"], 0)
+        self.assertIn("429", result["academic_unavailable"])
+        self.assertEqual(result["candidate_count"], 0)
     def test_failure_is_reported_without_exposing_response_body(self):
         def fail(query, token): raise ResearchDiscoveryError("GitHub search returned HTTP 403; rate_limit_remaining=0")
         result = discover_repositories({"agents": "agent framework"}, {}, request_fn=fail)

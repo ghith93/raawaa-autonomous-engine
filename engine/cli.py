@@ -252,6 +252,8 @@ def main() -> int:
             queries=research_config["queries"],
             max_per_query=(research_config["max_results_per_query"] if args.max_per_query is None else args.max_per_query),
             max_queries=research_config["max_queries_per_run"],
+            academic_query=research_config.get("academic_query"),
+            max_academic_results=research_config.get("max_academic_results", 10),
         )
         print(json.dumps(result, indent=2, ensure_ascii=False))
     elif args.command == "provider-profile-status":
