@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "max_queries_per_run": 6,
+  "max_results_per_query": 5,
+  "queries": {
+    "agent_frameworks": "agent framework orchestration topic:agents archived:false",
+    "coding_agents": "open source coding agent archived:false",
+    "agent_memory": "agent memory long term memory framework archived:false",
+    "mcp_ecosystem": "MCP server tools model context protocol archived:false",
+    "model_routing": "LLM model router inference gateway quota archived:false",
+    "durable_execution": "durable workflow orchestration agent execution archived:false"
+  },
+  "review_policy": {
+    "automatic_install": false,
+    "automatic_execution": false,
+    "require_license_review": true,
+    "require_security_review": true,
+    "require_cost_review": true,
+    "require_compatibility_review": true
+  }
+}
