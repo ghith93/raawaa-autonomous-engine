@@ -145,6 +145,21 @@ class AndroidHarnessBridgeTests(unittest.TestCase):
             self.assertEqual(bridge.audit_records[0]["status"], "claimed")
             self.assertEqual(bridge.audit_records[1]["status"], "completed")
 
+
+    def test_single_instance_lock_prevents_duplicate_pollers(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            audit = Path(temporary) / "private" / "bridge.jsonl"
+            first = AndroidHarnessIssueBridge(audit_path=audit)
+            second = AndroidHarnessIssueBridge(audit_path=audit)
+            descriptor = first.acquire_single_instance_lock()
+            try:
+                with self.assertRaisesRegex(BridgeError, "already running"):
+                    second.acquire_single_instance_lock()
+            finally:
+                os.close(descriptor)
+            descriptor = second.acquire_single_instance_lock()
+            os.close(descriptor)
+
     def test_missing_policy_fails_closed_without_claiming_task(self):
         class FakeBridge(AndroidHarnessIssueBridge):
             def __init__(self):
