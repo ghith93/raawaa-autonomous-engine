@@ -1,6 +1,7 @@
 import unittest
+from unittest.mock import patch
 from datetime import datetime, timezone
-from engine.research_discovery import ResearchDiscoveryError, discover_repositories
+from engine.research_discovery import MAX_RESPONSE_BYTES, ResearchDiscoveryError, _request_crossref, _request_json, discover_repositories
 
 class ResearchDiscoveryTests(unittest.TestCase):
     def test_discovery_returns_metadata_only_candidates_and_deduplicates(self):
@@ -26,6 +27,31 @@ class ResearchDiscoveryTests(unittest.TestCase):
         self.assertFalse(result["installation_or_cloning"])
         self.assertEqual(result["generation_requests"], 0)
 
+    def test_github_and_crossref_responses_are_size_bounded(self):
+        class OversizedResponse:
+            status = 200
+            def __enter__(self): return self
+            def __exit__(self, *args): return False
+            def read(self, limit): return b"x" * (MAX_RESPONSE_BYTES + 1)
+        with patch("engine.research_discovery.urlopen", return_value=OversizedResponse()):
+            with self.assertRaisesRegex(ResearchDiscoveryError, "1 MiB"):
+                _request_json("agent framework")
+        with patch("engine.research_discovery.urlopen", return_value=OversizedResponse()):
+            with self.assertRaisesRegex(ResearchDiscoveryError, "1 MiB"):
+                _request_crossref("agent memory")
+
+    def test_invalid_utf8_from_both_sources_is_reported_safely(self):
+        class InvalidUtf8Response:
+            status = 200
+            def __enter__(self): return self
+            def __exit__(self, *args): return False
+            def read(self, limit): return bytes([255])
+        with patch("engine.research_discovery.urlopen", return_value=InvalidUtf8Response()):
+            with self.assertRaisesRegex(ResearchDiscoveryError, "UnicodeDecodeError"):
+                _request_json("agent framework")
+        with patch("engine.research_discovery.urlopen", return_value=InvalidUtf8Response()):
+            with self.assertRaisesRegex(ResearchDiscoveryError, "UnicodeDecodeError"):
+                _request_crossref("agent memory")
     def test_query_and_limit_validation(self):
         with self.assertRaises(ValueError): discover_repositories({}, {})
         with self.assertRaises(ValueError): discover_repositories({"x": "y"}, {}, max_per_query=11)
@@ -57,13 +83,13 @@ class ResearchDiscoveryTests(unittest.TestCase):
     def test_crossref_failure_is_nonfatal_and_reported(self):
         def fail(query, limit): raise ResearchDiscoveryError("Crossref returned HTTP 429")
         result = discover_repositories({"agents": "agent framework"}, {}, request_fn=lambda q, token: {"items": []}, academic_query="agent memory", academic_request_fn=fail)
-        self.assertEqual(result["academic_requests_made"], 0)
+        self.assertEqual(result["academic_requests_made"], 1)
         self.assertIn("429", result["academic_unavailable"])
         self.assertEqual(result["candidate_count"], 0)
     def test_failure_is_reported_without_exposing_response_body(self):
         def fail(query, token): raise ResearchDiscoveryError("GitHub search returned HTTP 403; rate_limit_remaining=0")
         result = discover_repositories({"agents": "agent framework"}, {}, request_fn=fail)
-        self.assertEqual(result["requests_made"], 0)
+        self.assertEqual(result["requests_made"], 1)
         self.assertIn("agents", result["unavailable"])
         self.assertEqual(result["candidate_count"], 0)
 
