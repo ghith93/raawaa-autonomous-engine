@@ -155,7 +155,7 @@ jobs:
           def write_output(name, value):
               value = " ".join(str(value or "unknown").split())[:240]
               with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
-                  output.write(f"{name}={value}\\n")
+                  output.write(f"{name}={value}\n")
 
           write_output("status", "unknown")
           write_output("ray", "not_supplied")
@@ -200,7 +200,7 @@ jobs:
               except ValueError:
                   match = re.search(r"<title[^>]*>(.*?)</title>", raw, re.IGNORECASE | re.DOTALL)
                   if match:
-                      detail = "HTML title: " + re.sub(r"\\s+", " ", match.group(1))
+                      detail = "HTML title: " + re.sub(r"\s+", " ", match.group(1))
               for secret_name in ("CF_ACCESS_CLIENT_ID", "CF_ACCESS_CLIENT_SECRET"):
                   secret = os.environ.get(secret_name, "")
                   if secret:
@@ -230,6 +230,9 @@ jobs:
             const body = "## Worker route diagnostic\n\n" +
               "Run: " + context.serverUrl + "/" + context.repo.owner + "/" + context.repo.repo + "/actions/runs/" + context.runId + "\n\n" +
               "workers.dev enabled: `" + (process.env.WORKERS_DEV_ENABLED || "unknown") + "`\n" +
-              "Preview URLs enabled: `" + (process.env.WORKER_PREVIEWS_ENABLED || "unknown") + "`\n\n" +
+              "Preview URLs enabled: `" + (process.env.WORKER_PREVIEWS_ENABLED || "unknown") + "`\\n" +
+              "Health status: `" + (process.env.WORKER_HEALTH_STATUS || "unknown") + "`\\n" +
+              "Health Ray ID: `" + (process.env.WORKER_HEALTH_RAY || "not supplied") + "`\\n" +
+              "Sanitized response detail: " + (process.env.WORKER_HEALTH_DETAIL || "not available") + "\\n\\n" +
               "Read-only inspection; no Cloudflare settings were changed.";
             await github.rest.issues.createComment({ owner: context.repo.owner, repo: context.repo.repo, issue_number: 34, body });
