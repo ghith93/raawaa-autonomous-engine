@@ -1,0 +1,34 @@
+name: Groq API Connection Check
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "scripts/groq_connection_check.py"
+      - ".github/workflows/groq-connection-check.yml"
+  workflow_dispatch:
+  schedule:
+    - cron: "17 10 * * 1"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: groq-api-connection-check
+  cancel-in-progress: false
+
+jobs:
+  verify-connection:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    env:
+      GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+    steps:
+      - name: Check out reviewed main
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Verify Groq API authentication and model catalog (no inference)
+        run: python scripts/groq_connection_check.py
