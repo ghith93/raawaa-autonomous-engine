@@ -141,6 +141,19 @@ class QuotaAwareGatewayTests(unittest.TestCase):
                     gateway.generate(self.request)
                 self.assertEqual(adapter.calls, 0)
 
+
+    def test_preview_only_profile_is_blocked_before_provider_call(self):
+        adapter = FakeAdapter("groq")
+        profile = self.profile(production_use_allowed=False)
+        manager = QuotaManager([profile], self.quota)
+        gateway = QuotaAwareLiveGateway(
+            manager, {"groq": adapter}, self.usage, True,
+            environ={"RAAWAA_ENGINE_LIVE_INFERENCE": "enabled"},
+        )
+        with self.assertRaises(ProviderUnavailable):
+            gateway.generate(self.request)
+        self.assertEqual(adapter.calls, 0)
+
     def test_unverified_route_never_called(self):
         adapter = FakeAdapter("groq")
         manager = QuotaManager([self.profile(free_verified=False)], self.quota)
