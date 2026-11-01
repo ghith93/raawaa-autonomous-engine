@@ -63,7 +63,7 @@ class QuotaAwareGatewayTests(unittest.TestCase):
     def test_missing_task_id_blocks_before_provider_call(self):
         adapter = FakeAdapter("groq")
         manager = QuotaManager([self.profile()], self.quota)
-        gateway = QuotaAwareLiveGateway(manager, {"groq": adapter}, self.usage, True)
+        gateway = QuotaAwareLiveGateway(manager, {"groq": adapter}, self.usage, True, environ={"RAAWAA_ENGINE_LIVE_INFERENCE": "enabled"})
         request = GenerationRequest("research", "hello world", 20)
         with self.assertRaisesRegex(ProviderUnavailable, "task ID is required"):
             gateway.generate(request)
@@ -73,7 +73,7 @@ class QuotaAwareGatewayTests(unittest.TestCase):
         adapter = FakeAdapter("groq")
         profile = self.profile(per_task_request_limit=1, per_task_token_limit=1000)
         manager = QuotaManager([profile], self.quota)
-        gateway = QuotaAwareLiveGateway(manager, {"groq": adapter}, self.usage, True)
+        gateway = QuotaAwareLiveGateway(manager, {"groq": adapter}, self.usage, True, environ={"RAAWAA_ENGINE_LIVE_INFERENCE": "enabled"})
         gateway.generate(self.request)
         with self.assertRaises(ProviderUnavailable):
             gateway.generate(self.request)
