@@ -126,8 +126,20 @@ class QuotaAwareLiveGateway:
                         "provider_cooldown", request, profile,
                         reason="http_429", cooldown_seconds=self.cooldown_seconds,
                     )
-                # Only known provider errors are eligible for route rotation.
-                continue
+                    # An explicit rate-limit response rejects this request, so a
+                    # different verified route may be tried safely.
+                    continue
+                # A timeout, transport failure, malformed response, 5xx, or
+                # non-429 HTTP error may follow provider-side processing. Never
+                # replay the same request against another route in this case.
+                self._audit(
+                    "provider_failure_stopped", request, profile,
+                    reason="non_429_no_route_rotation",
+                    http_status=exc.status_code or 0,
+                )
+                raise ProviderUnavailable(
+                    "Provider error was not HTTP 429; route rotation stopped to avoid replay."
+                ) from exc
             except Exception as exc:
                 # Do not silently rotate after an unknown adapter/programming error.
                 # Unknown adapter failures have ambiguous remote execution status.
