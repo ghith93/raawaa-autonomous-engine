@@ -1,0 +1,121 @@
+name: Cloudflare Worker Inventory
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/cloudflare-worker-inventory.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: cloudflare-worker-inventory
+  cancel-in-progress: false
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: Verify Cloudflare credentials are present without exposing them
+        env:
+          CF_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CF_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          test -n "$CF_API_TOKEN" || { echo "CLOUDFLARE_API_TOKEN is missing."; exit 1; }
+          test -n "$CF_ACCOUNT_ID" || { echo "CLOUDFLARE_ACCOUNT_ID is missing."; exit 1; }
+          echo "Cloudflare API token and account ID are present (values withheld)."
+
+      - name: Read-only Cloudflare Worker inventory
+        env:
+          CF_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CF_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          EXPECTED_WORKER: raawaa-autonomous-engine-control
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          import sys
+          import urllib.error
+          import urllib.request
+
+          account = os.environ["CF_ACCOUNT_ID"]
+          token = os.environ["CF_API_TOKEN"]
+          expected = os.environ["EXPECTED_WORKER"]
+          url = f"https://api.cloudflare.com/client/v4/accounts/{account}/workers/scripts?per_page=1000&page=1"
+          request = urllib.request.Request(
+              url,
+              headers={"Authorization": f"Bearer {token}", "Accept": "application/json"},
+              method="GET",
+          )
+          try:
+              with urllib.request.urlopen(request, timeout=20) as response:
+                  status = response.status
+                  payload = json.loads(response.read().decode("utf-8"))
+          except urllib.error.HTTPError as error:
+              print(f"Cloudflare Workers inventory API returned HTTP {error.code}.")
+              print("The token may be missing Workers Scripts Read/Write permission, or the account ID may not match.")
+              sys.exit(1)
+          except (urllib.error.URLError, TimeoutError, OSError, ValueError) as error:
+              print(f"Cloudflare inventory request failed: {type(error).__name__}.")
+              sys.exit(1)
+
+          if not payload.get("success"):
+              codes = [str(item.get("code", "unknown")) for item in payload.get("errors", [])]
+              print("Cloudflare API did not report success. Error codes: " + (", ".join(codes) or "not supplied"))
+              sys.exit(1)
+
+          scripts = payload.get("result") or []
+          matches = [item for item in scripts if item.get("id") == expected]
+          print(f"Cloudflare API inventory request: HTTP {status}; success=true.")
+          print(f"Worker scripts returned on page 1: {len(scripts)}.")
+          if matches:
+              item = matches[0]
+              print("EXPECTED_WORKER_DEPLOYED=true")
+              print(f"Worker name: {item.get('id', expected)}")
+              print(f"Created: {item.get('created_on', 'not reported')}")
+              print(f"Modified: {item.get('modified_on', 'not reported')}")
+          else:
+              print("EXPECTED_WORKER_DEPLOYED=false")
+              print(f"No deployed Worker named {expected} was found on the first inventory page.")
+              sys.exit(2)
+          PY
+
+      - name: Check the public Worker health endpoint
+        if: success() || failure()
+        env:
+          WORKER_URL: https://raawaa-autonomous-engine-control.ghith-shikhkhaled.workers.dev
+          CF_ACCESS_CLIENT_ID: ${{ secrets.CF_ACCESS_CLIENT_ID }}
+          CF_ACCESS_CLIENT_SECRET: ${{ secrets.CF_ACCESS_CLIENT_SECRET }}
+        run: |
+          python - <<'PY'
+          import os
+          import urllib.error
+          import urllib.request
+
+          headers = {"Accept": "application/json"}
+          client_id = os.environ.get("CF_ACCESS_CLIENT_ID", "")
+          client_secret = os.environ.get("CF_ACCESS_CLIENT_SECRET", "")
+          if bool(client_id) != bool(client_secret):
+              print("Cloudflare Access service-token secrets are only partially configured.")
+              raise SystemExit(1)
+          if client_id:
+              headers["CF-Access-Client-Id"] = client_id
+              headers["CF-Access-Client-Secret"] = client_secret
+
+          request = urllib.request.Request(os.environ["WORKER_URL"].rstrip("/") + "/health", headers=headers)
+          try:
+              with urllib.request.urlopen(request, timeout=15) as response:
+                  print(f"Worker /health: HTTP {response.status}.")
+                  print("Response body withheld.")
+          except urllib.error.HTTPError as error:
+              print(f"Worker /health: HTTP {error.code}.")
+              for name in ("CF-Ray", "cf-mitigated", "server"):
+                  value = error.headers.get(name)
+                  if value:
+                      print(f"{name}: {value}")
+          except (urllib.error.URLError, TimeoutError, OSError) as error:
+              print(f"Worker /health request failed: {type(error).__name__}.")
+          PY
