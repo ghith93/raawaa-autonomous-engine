@@ -15,7 +15,7 @@ An independent, cost-controlled AI operating-system foundation. This repository 
 - CLI commands for task operations, memory, model status, provider discovery, and audit logs.
 - GitHub Actions CI and maintenance workflows.
 
-**It is not yet a continuously running autonomous service.** The worker remains dry-run oriented; there is no always-on scheduler, production deployment, notification channel, or unattended external-action execution. Live inference is not enabled by default. Provider discovery requires credentials and makes read-only catalog requests.
+**It is not yet a continuously running autonomous service.** A Cloudflare control Worker with a D1 binding has been deployed, and GitHub Actions is configured to invoke a bounded task batch every 15 minutes. However, recent Task Runner attempts are being stopped by HTTP 403 at the authenticated POST preflight, before task operations; successful end-to-end task processing is not yet verified. The normal worker path remains a deterministic dry run. There is no always-on scheduler, notification channel, or unattended external-action execution. Live inference is disabled by default, and no verified provider profile or credentials are configured.
 
 ## Safety and cost model
 
@@ -24,7 +24,7 @@ An independent, cost-controlled AI operating-system foundation. This repository 
 - Secrets never belong in source control; use narrowly scoped repository secrets only for deliberately enabled integrations.
 - Agents propose work; policy gates determine what may execute.
 - External writes, deployment, financial actions, and consequential customer-facing operations require explicit policy and approval.
-- Retries are bounded; side-effecting handlers must add ownership/heartbeat and idempotency guarantees before activation.
+- Retries are bounded. Lease-token fencing and periodic heartbeat renewal are implemented and tested; side-effecting handlers still need operation-specific idempotency guarantees before activation.
 - GitHub Actions is suitable for CI and bounded jobs, not a substitute for a durable always-on service.
 - No changes to `Raawaa-store` or `raawaa-official`.
 
@@ -50,10 +50,10 @@ python -m engine.cli run-once
 
 ## Next engineering priorities
 
-1. Add worker heartbeat and lease ownership tokens; prove safe recovery under concurrent workers.
-2. Add idempotency contracts for side-effecting task handlers before enabling any external action.
-3. Implement a bounded scheduler/worker deployment only after verifying a genuinely free host and persistent storage.
-4. Add an agent execution loop with reviewer/policy gates, observability, and hard quota enforcement.
-5. Add notifications and external integrations incrementally, with explicit permissions and tests.
+1. Resolve the Cloudflare/edge HTTP 403 affecting the authenticated Task Runner preflight; compare the public `/health` GET with the authenticated POST diagnostic now recorded by the workflow.
+2. Verify a complete bounded D1 batch on a current `main` commit; do not equate a successful CI run or Worker deployment with task processing.
+3. Add operation-specific idempotency contracts before enabling side-effecting handlers or external writes.
+4. Verify a genuinely free host with durable storage before moving beyond scheduled bounded jobs to a continuously running service.
+5. Configure a live provider only after account-specific free-tier, commercial-use, pricing, endpoint, and quota evidence is verified; preserve the kill switch and quota ledger. Add notifications and external integrations incrementally.
 
 See [Architecture](docs/architecture.md) and [Operations](docs/operations.md).
