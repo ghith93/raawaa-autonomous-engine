@@ -20,6 +20,7 @@ function safeWranglerEnvironment() {
 async function request(path, options = {}) {
   const response = await fetch(BASE + path, {
     ...options,
+    signal: options.signal || AbortSignal.timeout(10_000),
     headers: { "content-type": "application/json", ...(options.headers || {}) },
   });
   const body = await response.json();
@@ -89,6 +90,7 @@ try {
   // status(); the completed checkpoint output proves it reached the approval gate.
   const atApprovalGate = x => x.local_step_outputs?.some(value => value?.checkpoint_id?.startsWith("spike:")) && x.output === null;
   const waiting = await waitForStatus(started.id, atApprovalGate);
+  await delay(500); // allow the local runtime to register waitForEvent after the checkpoint
   const beforeApprovalOutputs = waiting.local_step_outputs || [];
   assert.equal(beforeApprovalOutputs.filter(x => x?.status === "claimed").length, 1);
   assert.equal(beforeApprovalOutputs.filter(x => x?.result === "research-stub").length, 1);
@@ -129,6 +131,7 @@ try {
   };
   const cancelStarted = await request("/start", { method: "POST", body: JSON.stringify(cancelPayload) });
   await waitForStatus(cancelStarted.id, atApprovalGate);
+  await delay(500);
   const cancelResult = await request("/cancel/" + cancelStarted.id, { method: "POST", body: "{}" });
   assert.equal(cancelResult.terminated, true);
   const terminated = await waitForStatus(cancelStarted.id, x => x.status === "terminated");
