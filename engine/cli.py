@@ -12,6 +12,7 @@ from engine.worker import run_once
 from engine.batch_runner import run_batch
 from engine.free_provider_discovery import discover, discover_all, DiscoveryError
 from engine.quota_config import load_provider_profile_registry
+from engine.live_runtime import build_live_gateway
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -44,8 +45,17 @@ def audit() -> int:
     except (OSError, ValueError, KeyError, TypeError) as exc:
         provider_profiles = []
         errors.append(f"Provider profile registry failed closed: {type(exc).__name__}.")
-    if policy.get("mode") != "safe_dry_run":
-        errors.append("Initial release must remain in safe_dry_run mode.")
+    mode = policy.get("mode")
+    if mode not in {"safe_dry_run", "live_inference_opt_in"}:
+        errors.append("Policy mode must be safe_dry_run or live_inference_opt_in.")
+    enabled_profiles = [entry for entry in provider_profiles if entry.enabled]
+    if mode == "safe_dry_run" and enabled_profiles:
+        errors.append("Provider routes must remain disabled in safe_dry_run mode.")
+    if mode == "live_inference_opt_in":
+        if not enabled_profiles:
+            errors.append("live_inference_opt_in requires at least one explicitly enabled provider profile.")
+        if any(not entry.ready_for_routing for entry in enabled_profiles):
+            errors.append("Every enabled provider profile must pass static eligibility checks.")
     if policy.get("daily_budget_usd", 0) != 0 or policy.get("monthly_budget_usd", 0) != 0:
         errors.append("Initial release must have zero configured spend budgets.")
     if policy.get("allow_paid_model_calls") is not False:
@@ -61,7 +71,7 @@ def audit() -> int:
         for error in errors:
             print(f"FAIL: {error}")
         return 1
-    print(f"Audit passed: {len(ids)} agent roles; {len(provider_profiles)} staged provider profiles; inference disabled; safe dry-run; zero spend; external writes disabled.")
+    mode_label = "safe dry-run" if mode == "safe_dry_run" else "live opt-in configured; operator kill switch still required"\n    print(f"Audit passed: {len(ids)} agent roles; {len(provider_profiles)} provider profiles; {mode_label}; zero spend; external writes disabled.")
     return 0
 
 
@@ -152,9 +162,21 @@ def main() -> int:
     elif args.command == "list":
         print(json.dumps(store().list_tasks(args.limit), indent=2, ensure_ascii=False))
     elif args.command == "run-once":
-        print(json.dumps(run_once(store()), indent=2, ensure_ascii=False))
+        gateway = build_live_gateway(
+            db_path(), ROOT / "config" / "policy.json",
+            ROOT / "config" / "provider_profiles.json",
+        )
+        print(json.dumps(run_once(store(), live_gateway=gateway, environ=os.environ),
+                         indent=2, ensure_ascii=False))
     elif args.command == "run-batch":
-        print(json.dumps(run_batch(store(), args.max_tasks, args.max_seconds),
+        gateway = build_live_gateway(
+            db_path(), ROOT / "config" / "policy.json",
+            ROOT / "config" / "provider_profiles.json",
+        )
+        runner = lambda current_store: run_once(
+            current_store, live_gateway=gateway, environ=os.environ
+        )
+        print(json.dumps(run_batch(store(), args.max_tasks, args.max_seconds, runner=runner),
                          indent=2, ensure_ascii=False))
     elif args.command == "audit-log":
         print(json.dumps(store().audit_events(args.limit), indent=2, ensure_ascii=False))
