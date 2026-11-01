@@ -19,7 +19,9 @@ from scripts.androidharness_issue_bridge import (
     is_candidate_issue,
     parse_task,
     safe_extract_git_archive,
-    safe_python_environment,
+    minimal_python_environment,
+    summarize_unittest_output,
+    verify_policy_files,
     verify_repository_root,
 )
 
@@ -59,6 +61,40 @@ class AndroidHarnessBridgeTests(unittest.TestCase):
         with self.assertRaisesRegex(BridgeError, "duplicate keys"):
             parse_task(duplicate)
 
+
+    def test_unittest_summary_exposes_only_aggregate_counts(self):
+        passed = summarize_unittest_output("Ran 42 tests in 1.234s\\n\\nOK\\n")
+        self.assertEqual(passed, {
+            "tests_run": 42,
+            "status": "passed",
+            "failure_summary": None,
+        })
+        failed = summarize_unittest_output(
+            "Ran 42 tests in 1.234s\\n\\nFAILED (failures=2, errors=1)\\n"
+        )
+        self.assertEqual(failed["tests_run"], 42)
+        self.assertEqual(failed["status"], "failed")
+        self.assertEqual(failed["failure_summary"], "failures=2, errors=1")
+        self.assertNotIn("traceback", json.dumps(failed).lower())
+
+    def test_target_policy_files_are_verified_from_the_archive(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            for relative in (
+                "AGENTS.md",
+                "docs/master-autonomous-execution-directive.ar.md",
+                "docs/continuous-improvement-charter.md",
+                "docs/architecture.md",
+                "docs/operations.md",
+            ):
+                path = root / relative
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text("required policy\\n", encoding="utf-8")
+            fingerprints = verify_policy_files(root)
+            self.assertEqual(len(fingerprints), 5)
+            (root / "docs/operations.md").write_text("", encoding="utf-8")
+            with self.assertRaisesRegex(BridgeError, "empty"):
+                verify_policy_files(root)
 
     def test_bridge_requires_the_approved_repository_origin(self):
         with tempfile.TemporaryDirectory() as temporary:
