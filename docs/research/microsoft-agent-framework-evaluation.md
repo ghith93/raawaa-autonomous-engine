@@ -92,6 +92,14 @@ The in-memory framework adapter now requires an integrity key. The isolated work
 
 HMAC protects against a storage writer who can alter stored records but does not possess the separately managed key. It does not protect against compromise of the application process or key, and it does not make pickle safe. The framework codec still requires trusted checkpoint provenance and strict storage access controls. No production secret, D1 write, Worker change, or migration is part of this prototype.
 
+## Authenticated file-backed restart fixture (2026-11-02)
+
+The isolated evaluation now includes `FileEnvelopeCheckpointStorage`, a local-filesystem adapter derived from the tested in-memory adapter. It loads and authenticates records on construction, uses SHA-256-derived filenames to avoid path traversal, rejects symlinks and oversized/non-private files, writes through a 0600 temporary file followed by atomic replace and directory fsync, and ignores orphan temporary files from interrupted writes. The directory must be private (0700) on POSIX systems.
+
+The test suite creates a checkpoint, constructs a fresh adapter instance with the same test key, and verifies state recovery after the original instance is discarded. It also verifies delete persistence, wrong-key/corrupt-record rejection, private file modes, and tolerance of an orphan temporary file.
+
+This is a local restart/recovery fixture only. It does not establish multi-process locking, distributed concurrency, backup/retention, key rotation, or production-grade filesystem hardening. It is not wired to the engine runtime or D1. Checkpoint values still use the pinned framework's pickle-bearing codec, so the directory must remain trusted and access-controlled.
+
 ## Decision and safety
 
 Do not replace the current runtime or add these dependencies to default engine requirements yet. The experiment remains isolated and optional. The evaluation sends zero provider requests, uses zero paid services, requires no credentials, and does not change production data or deployment state.
