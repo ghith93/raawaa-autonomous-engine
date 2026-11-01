@@ -22,7 +22,6 @@ class QuotaManagerTests(unittest.TestCase):
                       minute_request_limit=30, minute_token_limit=8000,
                       daily_request_limit=10, daily_token_limit=1000,
                       monthly_request_limit=100, monthly_token_limit=10000,
-                                    minute_request_limit=30, minute_token_limit=8000,
                       per_task_request_limit=5, per_task_token_limit=5000, priority=10,
                       endpoint_url="https://api.groq.com/openai/v1",
                       pricing_source_url="https://groq.com/pricing",
@@ -195,7 +194,6 @@ class QuotaManagerTests(unittest.TestCase):
                 self.ledger.reserve(
                     route.route_id, 10, 10, 1000, self.now,
                     monthly_request_limit=100, monthly_token_limit=10000,
-                                    minute_request_limit=30, minute_token_limit=8000,
                                     task_id="minute-race", per_task_request_limit=10,
                     per_task_token_limit=1000, minute_request_limit=1,
                     minute_token_limit=100,
@@ -254,7 +252,6 @@ class QuotaManagerTests(unittest.TestCase):
         route = self.profile()
         reservation = self.ledger.reserve(route.route_id, 100, 10, 1000, self.now,
                                     monthly_request_limit=100, monthly_token_limit=10000,
-                                    minute_request_limit=30, minute_token_limit=8000,
                                     task_id="task-settle", per_task_request_limit=5,
                                     per_task_token_limit=5000)
         self.ledger.settle(reservation, 25)
@@ -266,7 +263,6 @@ class QuotaManagerTests(unittest.TestCase):
         route = self.profile()
         reservation = self.ledger.reserve(route.route_id, 100, 10, 1000, self.now,
                                     monthly_request_limit=100, monthly_token_limit=10000,
-            minute_request_limit=30, minute_token_limit=8000,
                                     task_id="task-settle", per_task_request_limit=5,
                                     per_task_token_limit=5000)
         self.ledger.settle(reservation, 25)
@@ -288,7 +284,6 @@ class QuotaManagerTests(unittest.TestCase):
             try:
                 self.ledger.reserve(route.route_id, 10, 10, 1000, self.now,
                                     monthly_request_limit=1, monthly_token_limit=100,
-                                    minute_request_limit=30, minute_token_limit=8000,
                                     task_id="task-concurrent", per_task_request_limit=1,
                                     per_task_token_limit=100)
                 return "reserved"
