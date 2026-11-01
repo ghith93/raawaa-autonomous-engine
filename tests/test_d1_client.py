@@ -1,4 +1,6 @@
+import io
 import json
+import urllib.error
 import unittest
 from unittest.mock import patch
 
@@ -48,6 +50,18 @@ class D1ClientTests(unittest.TestCase):
         with self.assertRaises(D1APIError) as ctx:
             self.client().query("SELECT 1")
         self.assertNotIn("secret-test-token", str(ctx.exception))
+
+    @patch("engine.d1_client.urllib.request.urlopen")
+    def test_http_error_body_is_not_exposed(self, open_url):
+        open_url.side_effect = urllib.error.HTTPError(
+            "https://api.cloudflare.com/test", 403, "Forbidden", {},
+            io.BytesIO(b'{"debug":"secret-test-token and submitted SQL"}'),
+        )
+        with self.assertRaises(D1APIError) as ctx:
+            self.client().query("SELECT 1")
+        self.assertEqual(str(ctx.exception), "Cloudflare D1 API returned HTTP 403")
+        self.assertNotIn("secret-test-token", str(ctx.exception))
+        self.assertNotIn("submitted SQL", str(ctx.exception))
 
     def test_rejects_empty_sql_and_bad_batch(self):
         client = self.client()
