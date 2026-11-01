@@ -83,6 +83,50 @@ jobs:
               sys.exit(2)
           PY
 
+      - name: Inspect workers.dev route configuration (read-only)
+        env:
+          CF_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CF_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          EXPECTED_WORKER: raawaa-autonomous-engine-control
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          import urllib.error
+          import urllib.parse
+          import urllib.request
+
+          account = urllib.parse.quote(os.environ["CF_ACCOUNT_ID"], safe="")
+          worker = urllib.parse.quote(os.environ["EXPECTED_WORKER"], safe="")
+          url = f"https://api.cloudflare.com/client/v4/accounts/{account}/workers/scripts/{worker}/subdomain"
+          request = urllib.request.Request(
+              url,
+              headers={"Authorization": "Bearer " + os.environ["CF_API_TOKEN"],
+                       "Accept": "application/json"},
+              method="GET",
+          )
+          try:
+              with urllib.request.urlopen(request, timeout=20) as response:
+                  payload = json.loads(response.read().decode("utf-8"))
+                  print(f"Worker subdomain API: HTTP {response.status}.")
+          except urllib.error.HTTPError as error:
+              print(f"Worker subdomain API: HTTP {error.code}.")
+              print(f"CF-RAY: {error.headers.get('CF-RAY', 'not supplied')}")
+              raise SystemExit(0)
+          except (urllib.error.URLError, TimeoutError, OSError, ValueError) as error:
+              print(f"Worker subdomain inspection failed: {type(error).__name__}.")
+              raise SystemExit(0)
+
+          if not payload.get("success"):
+              codes = [str(item.get("code", "unknown")) for item in payload.get("errors", [])]
+              print("Worker subdomain API did not report success; error codes: " +
+                    (", ".join(codes) or "not supplied"))
+              raise SystemExit(0)
+
+          result = payload.get("result") or {}
+          print(f"WORKERS_DEV_ENABLED={str(result.get('enabled')).lower()}")
+          print(f"WORKER_PREVIEWS_ENABLED={str(result.get('previews_enabled')).lower()}")
+
       - name: Check the public Worker health endpoint
         if: success() || failure()
         env:
