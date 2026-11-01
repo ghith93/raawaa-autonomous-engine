@@ -1,6 +1,7 @@
 """Execute the production D1 migration with SQLite to catch real SQL/schema regressions."""
 from pathlib import Path
 import sqlite3
+import re
 import unittest
 
 
@@ -53,6 +54,49 @@ class D1MigrationContractTests(unittest.TestCase):
                 "INSERT INTO quota_usage(id,route_id,requests,tokens,occurred_at,task_id) VALUES(?,?,?,?,?,?)",
                 ("reservation-2", "groq:account:model", 0, 10, "2026-11-01T00:00:00Z", "task-1")
             )
+
+
+    def test_worker_atomic_reservation_sql_executes_and_enforces_quota_windows(self):
+        for migration in self.sql:
+            self.db.executescript(migration)
+        worker_source = (ROOT / "worker" / "index.js").read_text(encoding="utf-8")
+        match = re.search(r"const sql = `([\s\S]*?)`;", worker_source)
+        self.assertIsNotNone(match)
+        sql = match.group(1)
+
+        def reserve(reservation_id, task_id, estimate, minute_requests=30,
+                    minute_tokens=8000, daily_requests=1000,
+                    daily_tokens=200000, task_requests=1, task_tokens=16000):
+            now = "2026-11-01T12:00:00.000Z"
+            day = "2026-11-01T00:00:00.000Z"
+            month = day
+            minute = "2026-11-01T11:59:00.000Z"
+            route = "groq:primary:openai/gpt-oss-20b"
+            values = (
+                reservation_id, route, estimate, now, task_id,
+                route, day, daily_requests,
+                route, day, estimate, daily_tokens,
+                route, month, 10000,
+                route, month, estimate, 2000000,
+                route, minute, minute_requests,
+                route, minute, estimate, minute_tokens,
+                task_id, task_requests,
+                task_id, estimate, task_tokens,
+                route, now,
+            )
+            return self.db.execute(sql, values).fetchone()
+
+        self.assertEqual(reserve("r1", "task-1", 7000), ("r1",))
+        # The same task cannot reserve a second model request after a prior/ambiguous call.
+        self.assertIsNone(reserve("r2", "task-1", 100))
+        # Another task still cannot exceed the rolling minute token cap.
+        self.assertIsNone(reserve("r3", "task-2", 2000))
+        # Cooldowns are enforced inside the same atomic reservation statement.
+        self.db.execute(
+            "INSERT INTO quota_cooldowns(route_id,until_at,reason) VALUES(?,?,?)",
+            ("groq:primary:openai/gpt-oss-20b", "2026-11-01T12:15:00.000Z", "http_429")
+        )
+        self.assertIsNone(reserve("r4", "task-3", 100))
 
     def test_task_idempotency_and_status_constraints(self):
         for migration in self.sql:
