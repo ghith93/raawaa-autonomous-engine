@@ -219,7 +219,7 @@ def main() -> int:
             ),
             "verification_note": entry.verification_note,
         } for entry in entries]
-        print(json.dumps({"network_calls_enabled": False, "profiles": result}, indent=2))
+        print(json.dumps({"network_calls_performed": 0, "runtime_activation": "separate_explicit_gates", "profiles": result}, indent=2))
     elif args.command == "model-status":
         policy = load_json(ROOT / "config" / "policy.json")
         gateway = ModelGateway(
