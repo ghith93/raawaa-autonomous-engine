@@ -87,6 +87,7 @@ def load_provider_profile_registry(path: str | Path) -> list[ProviderProfileEntr
             model=item["model"],
             free_verified=item["free_verified"],
             commercial_use_allowed=item["commercial_use_allowed"],
+            production_use_allowed=item.get("production_use_allowed", False),
             minute_request_limit=item.get("minute_request_limit"),
             minute_token_limit=item.get("minute_token_limit"),
             daily_request_limit=item.get("daily_request_limit"),
