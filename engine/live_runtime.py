@@ -13,7 +13,8 @@ from engine.live_adapters import OpenAICompatibleAdapter
 from engine.model_gateway import UsageLedger
 from engine.quota_config import load_provider_profile_registry
 from engine.quota_live_gateway import QuotaAwareLiveGateway
-from engine.quota_manager import QuotaLedger, QuotaManager
+from engine.quota_ledger_factory import build_quota_ledger
+from engine.quota_manager import QuotaManager
 
 
 LIVE_SWITCH = "RAAWAA_ENGINE_LIVE_INFERENCE"
@@ -50,7 +51,7 @@ def build_live_gateway(
     if not candidates:
         return None
 
-    quota_ledger = QuotaLedger(db_path)
+    quota_ledger = build_quota_ledger(db_path, source)
     manager = QuotaManager([entry.profile for entry in candidates], quota_ledger)
     adapters = {}
     eligible_profiles = []
