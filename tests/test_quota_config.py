@@ -48,6 +48,7 @@ class ProviderProfileConfigTests(unittest.TestCase):
                 self.assertEqual(entry.profile.minute_token_limit, 8000)
                 self.assertEqual(entry.profile.daily_request_limit, 1000)
                 self.assertEqual(entry.profile.daily_token_limit, 200000)
+                self.assertEqual(entry.profile.per_task_request_limit, 1)
                 self.assertEqual(entry.profile.input_cost_per_million_usd, 0.0)
                 self.assertIn("openai/gpt-oss", entry.model_terms_source_url)
 
