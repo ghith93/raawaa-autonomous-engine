@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import math
 import os
+import os
 
 from engine.live_adapters import LiveAdapterError
 from engine.model_gateway import ProviderUnavailable, UsageLedger
