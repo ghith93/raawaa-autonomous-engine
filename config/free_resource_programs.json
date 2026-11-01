@@ -1,0 +1,34 @@
+{
+  "schema_version": 1,
+  "policy": {
+    "enabled": false,
+    "require_owner_account": true,
+    "require_terms_review": true,
+    "require_commercial_use_check": true,
+    "never_evade_rate_limits": true,
+    "never_pool_unrelated_accounts": true,
+    "never_auto_upgrade_billing": true
+  },
+  "recurring_free_tiers": [
+    {"id": "gemini_ai_studio", "provider": "google", "status": "verify_per_project", "source": "https://ai.google.dev/gemini-api/docs/rate-limits"},
+    {"id": "groq_developer", "provider": "groq", "status": "verify_per_account", "source": "https://console.groq.com/docs/rate-limits"},
+    {"id": "cerebras_developer", "provider": "cerebras", "status": "verify_per_account", "source": "https://inference-docs.cerebras.ai/support/rate-limits"},
+    {"id": "openrouter_free_models", "provider": "openrouter", "status": "verify_model_and_account", "source": "https://openrouter.ai/docs/guides/routing/routers/free-models-router"},
+    {"id": "cloudflare_workers_ai", "provider": "cloudflare", "status": "verify_account_and_plan", "source": "https://developers.cloudflare.com/workers-ai/platform/pricing/"},
+    {"id": "mistral_experiment", "provider": "mistral", "status": "verify_terms_and_account", "source": "https://docs.mistral.ai/deployment/ai-studio/tier"},
+    {"id": "github_models", "provider": "github", "status": "verify_account_limits_and_terms", "source": "https://docs.github.com/en/github-models/prototyping-with-ai-models"},
+    {"id": "huggingface_inference", "provider": "huggingface", "status": "small_monthly_credit_not_recurring_free_capacity", "source": "https://huggingface.co/docs/inference-providers/pricing"}
+  ],
+  "credit_programs": [
+    {"id": "cloud_provider_startup_credits", "type": "promotional_or_grant", "status": "research_required", "expiry_required": true},
+    {"id": "developer_education_programs", "type": "promotional_or_grant", "status": "eligibility_required", "expiry_required": true},
+    {"id": "open_source_sponsorships", "type": "grant_or_sponsorship", "status": "research_required", "expiry_required": true}
+  ],
+  "accounting": {
+    "recurring_quota_separate_from_promotional_credits": true,
+    "credits_expire_at": "required",
+    "provider_terms_url": "required",
+    "commercial_use_status": "required",
+    "billing_auto_upgrade": false
+  }
+}
