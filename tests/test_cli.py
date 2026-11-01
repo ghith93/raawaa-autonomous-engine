@@ -24,10 +24,28 @@ class CliTests(unittest.TestCase):
             ["memory-list"],
             ["memory-archive", "--id", "memory-id"],
             ["model-status"],
+            ["provider-profile-status"],
         ]
         for command in commands:
             with self.subTest(command=command):
                 self.assertEqual(parser.parse_args(command).command, command[0])
+
+
+    def test_provider_profile_status_is_read_only_and_keeps_groq_disabled(self):
+        output = io.StringIO()
+        with patch("sys.argv", ["engine", "provider-profile-status"]):
+            with contextlib.redirect_stdout(output):
+                self.assertEqual(cli.main(), 0)
+        result = json.loads(output.getvalue())
+        self.assertFalse(result["network_calls_enabled"])
+        self.assertEqual(len(result["profiles"]), 1)
+        profile = result["profiles"][0]
+        self.assertEqual(profile["model"], "qwen/qwen3.8-27b")
+        self.assertEqual(profile["api_key_env_configured_by_name_only"], "GROQ_API_KEY")
+        self.assertFalse(profile["enabled"])
+        self.assertFalse(profile["ready_for_routing"])
+        self.assertFalse(profile["commercial_use_allowed"])
+        self.assertNotIn("gsk_", output.getvalue())
 
     def test_memory_cli_lifecycle(self):
         with tempfile.TemporaryDirectory() as tmp:
