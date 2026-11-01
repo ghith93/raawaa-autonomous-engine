@@ -66,11 +66,24 @@ class QuotaAwareGatewayTests(unittest.TestCase):
         with self.assertRaises(ProviderUnavailable):
             gateway.generate(self.request)
         self.assertEqual(adapter.calls, 0)
+        events = self.quota.audit_events()
+        self.assertEqual(events[0]["event"], "live_request_blocked")
+        self.assertEqual(events[0]["details"], {"reason": "kill_switch_off"})
+
+    def test_operator_kill_switch_required_even_when_programmatic_flag_is_true(self):
+        adapter = FakeAdapter("groq")
+        manager = QuotaManager([self.profile()], self.quota)
+        gateway = QuotaAwareLiveGateway(manager, {"groq": adapter}, self.usage,
+                                        network_calls_enabled=True, environ={})
+        with self.assertRaises(ProviderUnavailable):
+            gateway.generate(self.request)
+        self.assertEqual(adapter.calls, 0)
+        self.assertEqual(self.quota.audit_events()[0]["event"], "live_request_blocked")
 
     def test_unverified_route_never_called(self):
         adapter = FakeAdapter("groq")
         manager = QuotaManager([self.profile(free_verified=False)], self.quota)
-        gateway = QuotaAwareLiveGateway(manager, {"groq": adapter}, self.usage, True)
+        gateway = QuotaAwareLiveGateway(manager, {"groq": adapter}, self.usage, True, environ={"RAAWAA_ENGINE_LIVE_INFERENCE": "enabled"})
         with self.assertRaises(ProviderUnavailable):
             gateway.generate(self.request)
         self.assertEqual(adapter.calls, 0)
@@ -84,6 +97,11 @@ class QuotaAwareGatewayTests(unittest.TestCase):
         row = manager.snapshot()[0]
         self.assertEqual(row["daily_requests_used"], 1)
         self.assertEqual(row["daily_tokens_used"], 12)
+        events = self.quota.audit_events()
+        self.assertEqual({event["event"] for event in events},
+                         {"quota_reserved", "completion_received"})
+        self.assertNotIn("hello world", str(events))
+        self.assertNotIn('"ok"', str(events))
 
     def test_429_cools_down_and_rotates(self):
         first = self.profile()
@@ -248,6 +266,16 @@ class QuotaAwareGatewayTests(unittest.TestCase):
         self.assertEqual(adapter.calls, 1)
         row = manager.snapshot()[0]
         self.assertEqual(row["monthly_requests_used"], 1)
+
+    def test_audit_ledger_filters_prompt_and_output_fields(self):
+        self.quota.audit_event(
+            "safe_test", route_id="groq:main:model-x", task_kind="research",
+            details={"reason": "safe", "prompt": "private prompt", "output": "private output"},
+        )
+        event = self.quota.audit_events()[0]
+        self.assertEqual(event["details"], {"reason": "safe"})
+        self.assertNotIn("private prompt", str(event))
+        self.assertNotIn("private output", str(event))
 
     def test_no_paid_or_unknown_quota_fallback(self):
         adapter = FakeAdapter("groq")
