@@ -53,7 +53,7 @@ class QuotaAwareGatewayTests(unittest.TestCase):
         }
         endpoint, pricing, quota, terms = hosts.get(provider, hosts["groq"])
         values = dict(provider=provider, account=account, model="model-x",
-                      free_verified=True, commercial_use_allowed=True, production_use_allowed=True,
+                      free_verified=True, commercial_use_allowed=True, production_use_allowed=True, enabled=True,
                       minute_request_limit=30, minute_token_limit=8000,
                       daily_request_limit=10, daily_token_limit=1000,
                       monthly_request_limit=100, monthly_token_limit=10000,
