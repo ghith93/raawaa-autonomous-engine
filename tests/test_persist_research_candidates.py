@@ -46,10 +46,12 @@ class ResearchPersistenceTests(unittest.TestCase):
             },
             request_fn=fake_post,
             batch_size=5,
+            verify_fn=lambda *args: {"candidates": [{"source_key": "github:org/repo-" + str(i)} for i in range(7)] + [{"source_key": "crossref:10.1234/paper"}]},
         )
         self.assertEqual([call[2] for call in calls], [5, 3])
         self.assertEqual(calls[0], ("https://engine.example", "test-secret", 5, "access-id", "access-secret"))
         self.assertEqual(result["persisted"], 8)
+        self.assertEqual(result["verified"], 8)
         self.assertEqual(result["batches"], 2)
         self.assertEqual(result["sources"], ["crossref", "github"])
 
@@ -77,6 +79,7 @@ class ResearchPersistenceTests(unittest.TestCase):
             environ={"RAAWAA_ENGINE_API_URL": "https://engine.example", "RAAWAA_ENGINE_API_TOKEN": "test-secret"},
             request_fn=flaky_post,
             sleep_fn=sleeps.append,
+            verify_fn=lambda *args: {"candidates": [{"source_key": "github:org/repo"}]},
         )
         self.assertEqual(result["persisted"], 1)
         self.assertEqual(len(calls), 3)
@@ -94,8 +97,19 @@ class ResearchPersistenceTests(unittest.TestCase):
                 environ={"RAAWAA_ENGINE_API_URL": "https://engine.example", "RAAWAA_ENGINE_API_TOKEN": "test-secret"},
                 request_fn=unauthorized,
                 sleep_fn=lambda _: self.fail("auth errors must not be retried"),
+                verify_fn=lambda *args: {"candidates": []},
             )
         self.assertEqual(len(calls), 1)
+
+    def test_readback_must_confirm_every_submitted_candidate(self):
+        snapshot = {"candidates": [{"full_name": "org/repo"}]}
+        with self.assertRaises(ResearchPersistenceError):
+            persist_candidates(
+                snapshot,
+                environ={"RAAWAA_ENGINE_API_URL": "https://engine.example", "RAAWAA_ENGINE_API_TOKEN": "test-secret"},
+                request_fn=lambda *args: {"accepted_count": 1},
+                verify_fn=lambda *args: {"candidates": []},
+            )
 
     def test_partial_acceptance_stops_for_safe_retry(self):
         snapshot = {"candidates": [{"full_name": "org/repo"}]}

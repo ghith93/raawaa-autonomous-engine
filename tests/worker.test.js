@@ -241,3 +241,24 @@ test("research candidate listing rejects invalid filters", async () => {
   const response = await worker.fetch(request("/v1/research/candidates?limit=1000&status=unknown"), { DB: dbMock(), ENGINE_API_TOKEN: TOKEN });
   assert.equal(response.status, 400);
 });
+
+test("research listing omits large metadata by default and includes it only on request", async () => {
+  const DB = dbMock();
+  const response = await worker.fetch(request("/v1/research/candidates?limit=20&status=all"), { DB, ENGINE_API_TOKEN: TOKEN });
+  assert.equal(response.status, 200);
+  const defaultQuery = DB.calls.find(x => x.kind === "all");
+  assert.doesNotMatch(defaultQuery.sql, /metadata_json/);
+  const detailedDB = dbMock();
+  await worker.fetch(request("/v1/research/candidates?limit=20&include_metadata=true"), { DB: detailedDB, ENGINE_API_TOKEN: TOKEN });
+  const detailedQuery = detailedDB.calls.find(x => x.kind === "all");
+  assert.match(detailedQuery.sql, /metadata_json/);
+});
+
+test("research keys-only listing returns only stable candidate keys", async () => {
+  const DB = dbMock();
+  const response = await worker.fetch(request("/v1/research/candidates?status=all&limit=100&keys_only=true"), { DB, ENGINE_API_TOKEN: TOKEN });
+  assert.equal(response.status, 200);
+  const query = DB.calls.find(x => x.kind === "all");
+  assert.match(query.sql, /SELECT source_key FROM research_candidates/);
+  assert.doesNotMatch(query.sql, /metadata_json|review_note|title/);
+});
