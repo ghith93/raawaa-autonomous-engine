@@ -1,0 +1,93 @@
+import tempfile
+import unittest
+from pathlib import Path
+
+from engine.live_adapters import LiveAdapterError
+from engine.model_gateway import ProviderUnavailable, UsageLedger
+from engine.provider import GenerationRequest, GenerationResponse
+from engine.quota_manager import QuotaLedger, QuotaManager, QuotaProfile
+from engine.quota_live_gateway import QuotaAwareLiveGateway
+
+
+class FakeAdapter:
+    def __init__(self, provider, error=None):
+        self.provider = provider
+        self.error = error
+        self.calls = 0
+
+    def generate(self, model, request):
+        self.calls += 1
+        if self.error:
+            raise self.error
+        return GenerationResponse(self.provider, model, "ok", 5, 7, 0.0, mocked=False)
+
+
+class QuotaAwareGatewayTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        root = Path(self.tmp.name)
+        self.quota = QuotaLedger(root / "quota.db")
+        self.usage = UsageLedger(root / "usage.db")
+        self.request = GenerationRequest("research", "hello world", 20)
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def profile(self, provider="groq", account="main", **changes):
+        values = dict(provider=provider, account=account, model="model-x",
+                      free_verified=True, commercial_use_allowed=True,
+                      daily_request_limit=10, daily_token_limit=1000, priority=10)
+        values.update(changes)
+        return QuotaProfile(**values)
+
+    def test_network_disabled_by_default(self):
+        adapter = FakeAdapter("groq")
+        manager = QuotaManager([self.profile()], self.quota)
+        gateway = QuotaAwareLiveGateway(manager, {"groq": adapter}, self.usage)
+        with self.assertRaises(ProviderUnavailable):
+            gateway.generate(self.request)
+        self.assertEqual(adapter.calls, 0)
+
+    def test_unverified_route_never_called(self):
+        adapter = FakeAdapter("groq")
+        manager = QuotaManager([self.profile(free_verified=False)], self.quota)
+        gateway = QuotaAwareLiveGateway(manager, {"groq": adapter}, self.usage, True)
+        with self.assertRaises(ProviderUnavailable):
+            gateway.generate(self.request)
+        self.assertEqual(adapter.calls, 0)
+
+    def test_success_reserves_and_settles_actual_usage(self):
+        adapter = FakeAdapter("groq")
+        manager = QuotaManager([self.profile()], self.quota)
+        gateway = QuotaAwareLiveGateway(manager, {"groq": adapter}, self.usage, True)
+        result = gateway.generate(self.request)
+        self.assertEqual(result.text, "ok")
+        row = manager.snapshot()[0]
+        self.assertEqual(row["daily_requests_used"], 1)
+        self.assertEqual(row["daily_tokens_used"], 12)
+
+    def test_429_cools_down_and_rotates(self):
+        first = self.profile()
+        second = self.profile(account="backup", priority=20)
+        limited = FakeAdapter("groq", LiveAdapterError("rate limited", status_code=429))
+        backup = FakeAdapter("groq")
+        manager = QuotaManager([first, second], self.quota)
+        gateway = QuotaAwareLiveGateway(manager, {"groq": limited}, self.usage, True)
+        # Same provider key maps to one adapter; use a provider-specific second route in the next test.
+        gateway.adapters["groq"] = limited
+        with self.assertRaises(ProviderUnavailable):
+            gateway.generate(self.request)
+        self.assertTrue(self.quota.cooldown_active(first.route_id))
+        self.assertEqual(limited.calls, 2)
+
+    def test_no_paid_or_unknown_quota_fallback(self):
+        adapter = FakeAdapter("groq")
+        manager = QuotaManager([self.profile(daily_token_limit=None)], self.quota)
+        gateway = QuotaAwareLiveGateway(manager, {"groq": adapter}, self.usage, True)
+        with self.assertRaises(ProviderUnavailable):
+            gateway.generate(self.request)
+        self.assertEqual(adapter.calls, 0)
+
+
+if __name__ == "__main__":
+    unittest.main()
