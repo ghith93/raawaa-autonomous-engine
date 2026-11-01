@@ -5,6 +5,7 @@ trial credits, and promotional credits are never treated as permanent free capac
 """
 from __future__ import annotations
 
+import json
 import sqlite3
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
@@ -84,6 +85,14 @@ class QuotaLedger:
                 route_id TEXT PRIMARY KEY,
                 until_at TEXT NOT NULL,
                 reason TEXT NOT NULL
+            )""")
+            db.execute("""CREATE TABLE IF NOT EXISTS quota_audit_events (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                event TEXT NOT NULL,
+                route_id TEXT,
+                task_kind TEXT,
+                details_json TEXT NOT NULL,
+                occurred_at TEXT NOT NULL
             )""")
             # Existing databases predate settlement idempotency. Keep existing
             # rows unsettled rather than guessing whether an interrupted request
@@ -239,6 +248,47 @@ class QuotaLedger:
                 "SELECT until_at FROM quota_cooldowns WHERE route_id=?", (route_id,)
             ).fetchone()
         return bool(row and datetime.fromisoformat(row["until_at"]) > now.astimezone(timezone.utc))
+
+    def audit_event(self, event: str, route_id: str | None = None,
+                    task_kind: str | None = None,
+                    details: dict | None = None,
+                    now: datetime | None = None) -> int:
+        """Persist metadata-only inference audit events; never store prompts or outputs."""
+        if not isinstance(event, str) or not event or len(event) > 80:
+            raise ValueError("audit event name is invalid")
+        allowed = {
+            "reason", "error_type", "http_status", "estimated_tokens",
+            "actual_tokens", "cooldown_seconds", "cost_usd",
+        }
+        safe = {}
+        for key, value in (details or {}).items():
+            if key not in allowed:
+                continue
+            if isinstance(value, str):
+                safe[key] = value[:100]
+            elif type(value) in {int, float, bool}:
+                safe[key] = value
+        stamp = (now or datetime.now(timezone.utc)).astimezone(timezone.utc).isoformat()
+        with self._connect() as db:
+            cur = db.execute(
+                "INSERT INTO quota_audit_events(event,route_id,task_kind,details_json,occurred_at) "
+                "VALUES(?,?,?,?,?)",
+                (event, route_id[:200] if isinstance(route_id, str) else None,
+                 task_kind[:100] if isinstance(task_kind, str) else None,
+                 json.dumps(safe, sort_keys=True), stamp),
+            )
+            return int(cur.lastrowid)
+
+    def audit_events(self, limit: int = 100) -> list[dict]:
+        limit = max(1, min(int(limit), 500))
+        with self._connect() as db:
+            rows = db.execute(
+                "SELECT * FROM quota_audit_events ORDER BY id DESC LIMIT ?", (limit,)
+            ).fetchall()
+        return [
+            {**dict(row), "details": json.loads(row["details_json"])}
+            for row in rows
+        ]
 
 
 class QuotaManager:
