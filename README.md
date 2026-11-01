@@ -56,4 +56,4 @@ python -m engine.cli run-once
 4. Verify a genuinely free host with durable storage before moving beyond scheduled bounded jobs to a continuously running service.
 5. Add notifications and external integrations incrementally while preserving the kill switch, quota ledger, and default dry-run posture.
 
-See [Architecture](docs/architecture.md) and [Operations](docs/operations.md).
+See [Architecture](docs/architecture.md) and [Operations](docs/operations.md). For the current free-tier, commercial-use, and data-handling assessment, see [Provider free-tier eligibility](docs/provider-free-tier-eligibility.md).
