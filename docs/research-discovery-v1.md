@@ -8,6 +8,8 @@ The engine now has a bounded, read-only GitHub repository discovery capability. 
 
 - Searches six curated areas: agent frameworks, coding agents, agent memory, MCP ecosystem, model routing, and durable execution.
 - Uses GitHub public repository Search API with an optional GITHUB_TOKEN for authenticated API rate limits.
+- Caps each response at 1 MiB before parsing and reports invalid UTF-8 as a safe discovery failure.
+- Counts attempted requests, including failed requests, in run telemetry.
 - Limits each run to six queries and at most five candidates per query.
 - Deduplicates repositories and records source query, discovery time, stars, last push, language, SPDX licence label, and topics.
 - Marks every result unreviewed. A licence label is metadata only, not a legal/licence review.
