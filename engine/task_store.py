@@ -4,7 +4,7 @@ from __future__ import annotations
 import json
 import sqlite3
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -118,6 +118,52 @@ class TaskStore:
                  error, utc_now(), task_id),
             )
             self._audit(db, task_id, "task_" + status, {"error": error} if error else (result or {}))
+
+    def retry_or_fail(self, task_id: str, error: str) -> str:
+        """Return a failed running task to pending, or fail it after its attempt budget."""
+        with self._connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            row = db.execute("SELECT * FROM tasks WHERE id=?", (task_id,)).fetchone()
+            if row is None:
+                raise KeyError(task_id)
+            if row["status"] != "running":
+                raise ValueError("only running tasks can be retried or failed")
+            status = "pending" if row["attempts"] < row["max_attempts"] else "failed"
+            db.execute(
+                "UPDATE tasks SET status=?,error=?,updated_at=? WHERE id=?",
+                (status, error, utc_now(), task_id),
+            )
+            self._audit(db, task_id, "task_retry_scheduled" if status == "pending" else "task_failed",
+                        {"attempt": row["attempts"], "max_attempts": row["max_attempts"],
+                         "error": error})
+            return status
+
+    def recover_stale(self, lease_timeout_seconds: int = 900) -> dict[str, int]:
+        """Recover abandoned running tasks using updated_at as a conservative lease."""
+        if lease_timeout_seconds < 1:
+            raise ValueError("lease_timeout_seconds must be positive")
+        cutoff = (datetime.now(timezone.utc) - timedelta(seconds=lease_timeout_seconds)).isoformat()
+        recovered = failed = 0
+        with self._connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            rows = db.execute(
+                "SELECT * FROM tasks WHERE status='running' AND updated_at < ? ORDER BY updated_at,id",
+                (cutoff,),
+            ).fetchall()
+            for row in rows:
+                status = "pending" if row["attempts"] < row["max_attempts"] else "failed"
+                db.execute(
+                    "UPDATE tasks SET status=?,error=?,updated_at=? WHERE id=? AND status='running'",
+                    (status, "Recovered stale worker lease.", utc_now(), row["id"]),
+                )
+                self._audit(db, row["id"], "task_lease_recovered",
+                            {"new_status": status, "attempt": row["attempts"],
+                             "max_attempts": row["max_attempts"]})
+                if status == "pending":
+                    recovered += 1
+                else:
+                    failed += 1
+        return {"requeued": recovered, "failed": failed}
 
     def list_tasks(self, limit: int = 50) -> list[dict[str, Any]]:
         limit = max(1, min(int(limit), 200))
