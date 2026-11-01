@@ -3,11 +3,13 @@ from __future__ import annotations
 
 import json
 import os
+from pathlib import Path
 
 from engine.agent_runtime import build_task_contract, load_agent_roster
 from engine.lease_heartbeat import LeaseHeartbeat, LeaseHeartbeatLost
 from engine.provider import GenerationRequest
 from engine.task_store import TaskStore
+from engine.live_data_policy import validate_live_payload
 
 
 SAFE_TASKS = {"research_brief", "code_review", "content_draft", "system_audit"}
@@ -62,6 +64,28 @@ def run_once(store: TaskStore, live_gateway=None, environ=None) -> dict | None:
                 )
                 return {"id": task["id"], "status": "blocked",
                         "reason": "live_gateway_unavailable", "recovery": recovery}
+
+            policy_path = Path(__file__).resolve().parent.parent / "config" / "policy.json"
+            try:
+                with policy_path.open(encoding="utf-8") as stream:
+                    policy_data = json.load(stream)
+                data_policy = policy_data.get("live_inference_data_policy")
+            except (OSError, ValueError, TypeError):
+                data_policy = None
+            allowed, data_reason = validate_live_payload(
+                contract["title"], contract["payload_received"], data_policy
+            )
+            if not allowed:
+                heartbeat.stop()
+                heartbeat.check()
+                store.finish(
+                    task["id"], "blocked",
+                    error=f"live_data_policy_blocked:{data_reason}",
+                    lease_token=task["lease_token"],
+                )
+                return {"id": task["id"], "status": "blocked",
+                        "reason": "live_data_policy_blocked", "detail": data_reason,
+                        "recovery": recovery}
 
             request = GenerationRequest(
                 task_kind=contract["required_capability"],

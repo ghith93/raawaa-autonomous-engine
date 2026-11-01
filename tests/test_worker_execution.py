@@ -34,7 +34,7 @@ class WorkerExecutionTests(unittest.TestCase):
         self.usage = UsageLedger(root / "usage.db")
         self.task = self.store.enqueue(
             "research_brief", "Research the requested topic",
-            {"topic": "test topic", "constraints": ["no external writes"]},
+            {"topic": "test topic", "constraints": ["no external writes"], "data_classification": "public"},
             idempotency_key="worker-live-test",
         )
 
@@ -92,6 +92,55 @@ class WorkerExecutionTests(unittest.TestCase):
         self.assertEqual(stored["output"], "A bounded specialist result.")
         self.assertEqual(stored["external_writes"], 0)
 
+    def test_live_path_blocks_unclassified_payload_before_provider_call(self):
+        root = Path(self.temp.name)
+        store = TaskStore(root / "unclassified.db")
+        store.enqueue("research_brief", "Unclassified", {"topic": "safe-looking"}, idempotency_key="unclassified")
+        gateway = Mock()
+        result = run_once(store, live_gateway=gateway, environ={"RAAWAA_ENGINE_LIVE_INFERENCE": "enabled"})
+        self.assertEqual(result["status"], "blocked")
+        self.assertEqual(result["reason"], "live_data_policy_blocked")
+        self.assertEqual(result["detail"], "data_classification_required_or_disallowed")
+        gateway.generate.assert_not_called()
+
+    def test_live_path_blocks_sensitive_fields_and_secret_patterns(self):
+        root = Path(self.temp.name)
+        for key, value, expected in (
+            ("api_key", "not-a-real-key", "sensitive_field_detected"),
+            ("formula", "confidential mixture", "sensitive_field_detected"),
+            ("notes", "credential gsk_123456789012345678901234567890", "secret_pattern_detected"),
+        ):
+            with self.subTest(key=key):
+                store = TaskStore(root / (key + ".db"))
+                store.enqueue("research_brief", "Sensitive test", {key: value, "data_classification": "public"}, idempotency_key=key)
+                gateway = Mock()
+                result = run_once(store, live_gateway=gateway, environ={"RAAWAA_ENGINE_LIVE_INFERENCE": "enabled"})
+                self.assertEqual(result["status"], "blocked")
+                self.assertEqual(result["detail"], expected)
+                gateway.generate.assert_not_called()
+
+    def test_live_path_blocks_payload_over_configured_byte_limit(self):
+        root = Path(self.temp.name)
+        store = TaskStore(root / "oversized.db")
+        store.enqueue("research_brief", "Oversized", {"data_classification": "public", "text": "x" * 7100}, idempotency_key="oversized")
+        gateway = Mock()
+        result = run_once(store, live_gateway=gateway, environ={"RAAWAA_ENGINE_LIVE_INFERENCE": "enabled"})
+        self.assertEqual(result["detail"], "task_payload_too_large")
+        gateway.generate.assert_not_called()
+    def test_live_path_blocks_personal_email_values(self):
+        root = Path(self.temp.name)
+        store = TaskStore(root / "email.db")
+        store.enqueue("research_brief", "Review this contact", {"data_classification": "public", "notes": "Contact user@example.com"}, idempotency_key="email")
+        gateway = Mock()
+        result = run_once(store, live_gateway=gateway, environ={"RAAWAA_ENGINE_LIVE_INFERENCE": "enabled"})
+        self.assertEqual(result["detail"], "personal_data_detected")
+        gateway.generate.assert_not_called()
+
+    def test_data_policy_cannot_be_weakened_to_allow_confidential_classification(self):
+        from engine.live_data_policy import validate_live_payload
+        allowed, reason = validate_live_payload("title", {"data_classification": "confidential"}, {"require_explicit_classification": True, "allowed_classifications": ["public", "internal", "confidential"], "blocked_key_fragments": [], "max_prompt_bytes": 7000})
+        self.assertFalse(allowed)
+        self.assertEqual(reason, "data_policy_invalid")
     def test_live_switch_without_gateway_blocks_instead_of_silent_dry_run(self):
         result = run_once(
             self.store, environ={"RAAWAA_ENGINE_LIVE_INFERENCE": "enabled"}

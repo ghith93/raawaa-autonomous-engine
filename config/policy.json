@@ -16,5 +16,42 @@
   ],
   "max_task_retries": 2,
   "max_parallel_agents": 2,
-  "default_task_timeout_seconds": 300
+  "default_task_timeout_seconds": 300,
+  "live_inference_data_policy": {
+    "require_explicit_classification": true,
+    "allowed_classifications": [
+      "public",
+      "internal"
+    ],
+    "max_prompt_bytes": 7000,
+    "blocked_key_fragments": [
+      "password",
+      "passwd",
+      "secret",
+      "apikey",
+      "access_token",
+      "refresh_token",
+      "authorization",
+      "privatekey",
+      "credential",
+      "customer",
+      "personaldata",
+      "personalinformation",
+      "payment",
+      "cardnumber",
+      "cvv",
+      "bankaccount",
+      "nationalid",
+      "passport",
+      "medicalrecord",
+      "formula",
+      "ingredient",
+      "composition",
+      "proprietary",
+      "orderdata",
+      "email",
+      "phone",
+      "address"
+    ]
+  }
 }
