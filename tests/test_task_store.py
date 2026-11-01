@@ -67,7 +67,7 @@ class TaskStoreTests(unittest.TestCase):
         task = self.store.enqueue("research_brief", "Exhausted", max_attempts=1)
         self.store.claim_next()
         with sqlite3.connect(self.store.db_path) as db:
-            db.execute("UPDATE tasks SET updated_at='2000-01-01T00:00:00+00:00' WHERE id=?",
+            db.execute("UPDATE tasks SET lease_expires_at='2000-01-01T00:00:00+00:00' WHERE id=?",
                        (task["id"],))
         result = self.store.recover_stale(lease_timeout_seconds=60)
         self.assertEqual(result, {"requeued": 0, "failed": 1})
