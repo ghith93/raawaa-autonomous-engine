@@ -112,7 +112,7 @@ jobs:
           print("\n--- Access application summary ---")
           if not apps:
               print("No Access applications returned for this account.")
-          for app in apps:
+          for app in apps or []:
               name = app.get("name") or "unnamed"
               domain = app.get("domain") or ""
               domains = app.get("self_hosted_domains") or []
@@ -131,7 +131,7 @@ jobs:
           print("\n--- Access service-token summary ---")
           if not service_tokens:
               print("No Access service tokens returned for this account.")
-          for item in service_tokens:
+          for item in service_tokens or []:
               name = item.get("name") or "unnamed"
               if "raawaa" in name.lower() or "engine" in name.lower():
                   print(f"Related service token: {name}")
