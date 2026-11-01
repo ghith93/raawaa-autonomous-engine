@@ -1,6 +1,10 @@
 name: Scheduled D1 Task Runner
 
 on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/task-runner.yml"
   schedule:
     - cron: "8,23,38,53 * * * *"
   workflow_dispatch:
