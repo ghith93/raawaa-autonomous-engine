@@ -195,8 +195,17 @@ jobs:
                           f"{item.get('code', 'unknown')}: {item.get('message', 'no message')}"
                           for item in errors[:3]
                       )
+                  elif isinstance(payload, dict):
+                      allowed = {"error", "message", "code", "success", "status", "detail"}
+                      safe_fields = {
+                          key: value for key, value in payload.items()
+                          if key in allowed and isinstance(value, (str, int, float, bool))
+                      }
+                      detail = json.dumps(safe_fields, sort_keys=True) if safe_fields else (
+                          "JSON response keys: " + ", ".join(sorted(str(key)[:60] for key in payload)[:12])
+                      )
                   else:
-                      detail = "JSON error response without structured errors"
+                      detail = "JSON response was not an object"
               except ValueError:
                   match = re.search(r"<title[^>]*>(.*?)</title>", raw, re.IGNORECASE | re.DOTALL)
                   if match:
