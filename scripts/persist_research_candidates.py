@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 import os
 import sys
+import time
 from pathlib import Path
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
@@ -55,7 +56,10 @@ def _post(base_url: str, token: str, candidates: list[dict],
                       data=payload, headers=headers, method="POST")
     try:
         with urlopen(request, timeout=timeout) as response:
-            data = json.loads(response.read(16 * 1024 + 1).decode("utf-8"))
+            raw = response.read(16 * 1024 + 1)
+            if len(raw) > 16 * 1024:
+                raise ResearchPersistenceError("research persistence response exceeded limit")
+            data = json.loads(raw.decode("utf-8"))
             if response.status not in (200, 201) or not isinstance(data, dict):
                 raise ResearchPersistenceError("research persistence endpoint returned an invalid response")
             return data
@@ -65,7 +69,7 @@ def _post(base_url: str, token: str, candidates: list[dict],
         raise ResearchPersistenceError("research persistence endpoint unavailable or returned invalid JSON") from None
 
 
-def persist_candidates(snapshot: dict, environ=None, request_fn=None, batch_size: int = 5) -> dict:
+def persist_candidates(snapshot: dict, environ=None, request_fn=None, batch_size: int = 5, sleep_fn=None) -> dict:
     if isinstance(batch_size, bool) or not isinstance(batch_size, int) or not 1 <= batch_size <= 10:
         raise ValueError("batch_size must be between 1 and 10")
     candidates = load_candidates(snapshot)
@@ -82,10 +86,22 @@ def persist_candidates(snapshot: dict, environ=None, request_fn=None, batch_size
     if bool(access_id) != bool(access_secret):
         raise ValueError("Cloudflare Access service-token credentials must be configured as a pair")
     post = request_fn or _post
+    sleeper = sleep_fn or time.sleep
+    retry_delays = (5, 10, 20)
+    retryable_markers = ("HTTP 404", "HTTP 408", "HTTP 429", "HTTP 500", "HTTP 502", "HTTP 503", "HTTP 504", "unavailable")
     persisted = batches = 0
     for offset in range(0, len(candidates), batch_size):
         batch = candidates[offset:offset + batch_size]
-        result = post(base_url, token, batch, access_id, access_secret)
+        result = None
+        for attempt in range(len(retry_delays) + 1):
+            try:
+                result = post(base_url, token, batch, access_id, access_secret)
+                break
+            except ResearchPersistenceError as exc:
+                retryable = any(marker in str(exc) for marker in retryable_markers)
+                if not retryable or attempt >= len(retry_delays):
+                    raise
+                sleeper(retry_delays[attempt])
         accepted = result.get("accepted_count") if isinstance(result, dict) else None
         if type(accepted) is not int or accepted != len(batch):
             raise ResearchPersistenceError("research persistence endpoint accepted an unexpected candidate count")
