@@ -32,7 +32,7 @@ python -m engine.cli run-once
 python -m engine.cli audit-log
 ```
 
-The SQLite store supports task lifecycle operations, idempotency, bounded retries, and stale-task recovery. The current worker is not a persistent service. A stale lease timeout by itself is not sufficient to safely recover side-effecting tasks: add heartbeat, lease ownership/fencing tokens, and idempotency at the handler boundary before external actions are permitted.
+The SQLite store supports task lifecycle operations, idempotency, bounded retries, and stale-task recovery. The current worker is a bounded invocation, not a persistent service. The optional remote D1 task adapter is selected only when both `RAAWAA_ENGINE_API_URL` and `RAAWAA_ENGINE_API_TOKEN` are configured; otherwise SQLite remains the default. The remote adapter covers enqueue, list, claim, heartbeat, finish, retry, and stale-lease recovery. Memory and model-usage ledgers remain local SQLite. D1 leases are capped at 15 minutes. This adapter does not make task execution persistent or enable external actions; those still require handler-level idempotency and explicit policy gates.
 
 ## Memory operations
 
@@ -65,7 +65,7 @@ Never add paid fallback or automatic billing upgrades without explicit approval.
 
 ## GitHub Actions and deployment
 
-GitHub Actions is used for CI and bounded maintenance tasks. It is not an always-on queue consumer or persistent server. No production deployment or continuously running scheduler is currently configured.
+GitHub Actions is used for CI and bounded maintenance tasks. It is not an always-on queue consumer or persistent server. The D1 control Worker is deployed on Cloudflare Workers and exposes an authenticated queue API; no scheduled consumer is enabled yet.
 
 Before selecting a host, verify free-tier limits, sleep behavior, persistent disk availability, outbound network rules, and whether the service can run without a payment method. Do not assume a free trial is a recurring free tier.
 

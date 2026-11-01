@@ -9,6 +9,7 @@ model inference, task execution, arbitrary operation calls, or customer-facing w
 - `GET /v1/tasks?limit=50`: authenticated bounded task listing (1–100).
 - `POST /v1/tasks/enqueue`: authenticated, idempotent task intake with bounded JSON payloads.
 - `POST /v1/tasks/claim`: atomically claims the oldest pending task and issues a server-generated 15-minute lease token.
+- `POST /v1/tasks/recover`: recovers up to 100 expired leases, requeueing tasks within their attempt budget and failing exhausted tasks.
 - `POST /v1/tasks/:id/heartbeat`: extends a still-valid lease by 15 minutes.
 - `POST /v1/tasks/:id/finish`: completes a leased task as `succeeded`, `failed`, or `blocked`.
 - `POST /v1/tasks/:id/retry`: releases a leased task back to `pending` while attempts remain, otherwise marks it `failed`.
@@ -39,3 +40,13 @@ disabled until the D1 worker/runner lifecycle is separately implemented and test
 
 Run `npm run test:worker` with Node.js 20+. Tests use an in-memory mock binding and
 do not connect to or mutate the real Cloudflare database.
+
+
+## Python runner connection
+
+The Python CLI uses local SQLite by default. To use D1 as the shared task queue, configure these environment variables on the runner:
+
+- `RAAWAA_ENGINE_API_URL=https://raawaa-autonomous-engine-control.ghith-shikhkhaled.workers.dev`
+- `RAAWAA_ENGINE_API_TOKEN`: the same application bearer token configured as the Worker secret; never commit or print it.
+
+With both values present, `enqueue`, `list`, `run-once`, and `run-batch` use the authenticated D1 API. The local SQLite database continues to hold memory and model-usage records. Without the URL, the CLI uses SQLite for tasks. Remote audit-log listing is not exposed. The runner remains dry-run only and does not call models or external services.

@@ -130,3 +130,21 @@ test("finish rejects unsupported terminal states", async () => {
   assert.equal(response.status, 400);
   assert.deepEqual(await response.json(), { error: "invalid_status" });
 });
+
+
+test("recover endpoint is authenticated and bounded to stale task selection", async () => {
+  const DB = dbMock();
+  const response = await worker.fetch(request("/v1/tasks/recover", { method: "POST", body: {} }), {
+    DB, ENGINE_API_TOKEN: TOKEN,
+  });
+  assert.equal(response.status, 200);
+  assert.deepEqual(await response.json(), { requeued: 0, failed: 0 });
+  assert.ok(DB.calls.some(x => x.kind === "all" && x.sql.includes("lease_expires_at")));
+});
+
+test("recover endpoint rejects unauthenticated callers", async () => {
+  const response = await worker.fetch(request("/v1/tasks/recover", {
+    method: "POST", token: null, body: {},
+  }), { DB: dbMock(), ENGINE_API_TOKEN: TOKEN });
+  assert.equal(response.status, 401);
+});

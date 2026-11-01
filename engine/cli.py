@@ -5,6 +5,7 @@ import os
 from pathlib import Path
 
 from engine.task_store import TaskStore
+from engine.remote_task_store import RemoteTaskStore
 from engine.memory import MemoryStore
 from engine.model_gateway import ModelGateway, UsageLedger
 from engine.worker import run_once
@@ -23,7 +24,9 @@ def db_path() -> str:
     return os.environ.get("RAAWAA_ENGINE_DB", str(ROOT / "data" / "engine.db"))
 
 
-def store() -> TaskStore:
+def store():
+    if os.environ.get("RAAWAA_ENGINE_API_URL"):
+        return RemoteTaskStore()
     return TaskStore(db_path())
 
 

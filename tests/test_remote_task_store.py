@@ -1,0 +1,68 @@
+import json
+import unittest
+from unittest.mock import patch
+
+from engine.remote_task_store import RemoteTaskStore, RemoteTaskStoreError
+
+
+class FakeResponse:
+    def __init__(self, value):
+        self.value = value
+    def __enter__(self):
+        return self
+    def __exit__(self, *args):
+        return False
+    def read(self, limit):
+        return json.dumps(self.value).encode()
+
+
+class RemoteTaskStoreTests(unittest.TestCase):
+    def setUp(self):
+        self.store = RemoteTaskStore("https://engine.example", "secret-test-token")
+
+    @patch("engine.remote_task_store.urlopen")
+    def test_claim_returns_server_lease_token(self, open_url):
+        open_url.return_value = FakeResponse({
+            "task": {"id": "task-1", "payload_json": "{}", "status": "running"},
+            "lease_token": "lease-1",
+        })
+        task = self.store.claim_next()
+        self.assertEqual(task["lease_token"], "lease-1")
+        request = open_url.call_args.args[0]
+        self.assertEqual(request.full_url, "https://engine.example/v1/tasks/claim")
+        self.assertEqual(request.get_method(), "POST")
+        self.assertEqual(request.get_header("Authorization"), "Bearer secret-test-token")
+
+    @patch("engine.remote_task_store.urlopen")
+    def test_empty_claim_returns_none(self, open_url):
+        open_url.return_value = FakeResponse({"task": None})
+        self.assertIsNone(self.store.claim_next())
+
+    @patch("engine.remote_task_store.urlopen")
+    def test_finish_sends_lease_and_terminal_result(self, open_url):
+        open_url.return_value = FakeResponse({"ok": True, "status": "succeeded"})
+        self.store.finish("task-1", "succeeded", {"safe": True}, lease_token="lease-1")
+        payload = json.loads(open_url.call_args.args[0].data)
+        self.assertEqual(payload["lease_token"], "lease-1")
+        self.assertEqual(payload["result"], {"safe": True})
+
+    @patch("engine.remote_task_store.urlopen")
+    def test_recovery_is_bounded_and_validated(self, open_url):
+        open_url.return_value = FakeResponse({"requeued": 2, "failed": 1})
+        self.assertEqual(self.store.recover_stale(), {"requeued": 2, "failed": 1})
+        self.assertEqual(open_url.call_args.args[0].full_url,
+                         "https://engine.example/v1/tasks/recover")
+
+    def test_requires_https_and_token(self):
+        with self.assertRaises(ValueError):
+            RemoteTaskStore("http://engine.example", "token")
+        with self.assertRaises(ValueError):
+            RemoteTaskStore("https://engine.example", "")
+
+    def test_rejects_invalid_remote_lease_timeout(self):
+        with self.assertRaises(ValueError):
+            self.store.claim_next(9000)
+
+
+if __name__ == "__main__":
+    unittest.main()
