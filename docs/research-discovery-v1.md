@@ -20,7 +20,7 @@ The engine now has a bounded, read-only GitHub repository discovery capability. 
 
     python -m engine.cli research-discover --max-per-query 5
 
-The command writes a JSON snapshot to stdout. The scheduled GitHub Actions workflow runs daily and uploads the snapshot as a 30-day artifact. It uses read-only repository permissions.
+The command writes a JSON snapshot to stdout. The scheduled GitHub Actions workflow runs daily, also runs after relevant research/Worker/migration changes reach main, and uploads the snapshot as a 30-day artifact. It uses read-only repository permissions.
 
 ## Review before adoption
 
@@ -36,7 +36,7 @@ Discovery does not imply endorsement, installation, execution, or permission to 
 ## Current limitations
 
 - GitHub and Crossref are initial sources, not a complete web/official-documentation/scientific/MCP/plugin research engine.
-- Snapshots are workflow artifacts with 30-day retention and candidate metadata is also upserted into the authenticated Cloudflare D1 research_candidates table. Rediscovery updates last_seen_at and discovery_count while preserving human review_status. The authenticated review endpoint records accepted/rejected/deferred decisions. The D1 store is durable cross-run memory; artifacts remain convenient per-run snapshots.
+- Snapshots are workflow artifacts with 30-day retention and candidate metadata is also upserted into the authenticated Cloudflare D1 research_candidates table. Rediscovery updates last_seen_at and discovery_count while preserving human review_status. The authenticated review endpoint records accepted/rejected/deferred decisions. The D1 store is durable cross-run memory; artifacts remain convenient per-run snapshots. The persistence client retries only temporary deployment/migration/availability errors with bounded delays; authentication and validation failures stop immediately.
 - No autonomous agent reads and evaluates candidates yet. Results require engineering/security/licence review.
 - The schedule is daily and bounded, not always-on. D1 ingestion uses the existing Worker application token and accepts only normalized GitHub/Crossref metadata.
 
