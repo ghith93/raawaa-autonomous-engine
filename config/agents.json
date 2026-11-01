@@ -1,0 +1,11 @@
+{
+  "agents": [
+    {"id": "manager", "role": "orchestrator", "enabled": true, "capabilities": ["plan", "prioritize", "delegate", "report"]},
+    {"id": "researcher", "role": "research", "enabled": true, "capabilities": ["research", "compare", "summarize"]},
+    {"id": "engineer", "role": "engineering", "enabled": true, "capabilities": ["inspect_code", "propose_changes", "test"]},
+    {"id": "reviewer", "role": "quality_and_security", "enabled": true, "capabilities": ["review", "risk_assess", "validate"]},
+    {"id": "marketer", "role": "marketing_and_content", "enabled": true, "capabilities": ["strategy", "draft_content", "analyze_campaigns"]},
+    {"id": "operator", "role": "operations_and_monitoring", "enabled": true, "capabilities": ["monitor", "triage", "report"]}
+  ],
+  "note": "Roster is declarative only. No agent model or external tool is invoked by this starter."
+}
