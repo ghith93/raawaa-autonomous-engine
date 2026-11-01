@@ -32,7 +32,7 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          node-version: "22"
       - name: Run Cloudflare Worker unit tests
         run: npm run test:worker
       - name: Run Cloudflare Workflows spike unit tests
