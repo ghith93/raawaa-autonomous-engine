@@ -18,3 +18,8 @@ The command performs read-only GET requests to provider model-list endpoints. It
 - Verify model, account tier, regional availability, rate limits, retention and training terms before activation.
 - No automatic upgrade, paid fallback, billing activation or purchase is permitted.
 - Any future inference adapter must have explicit model allowlists and remain blocked until cost and quota checks pass.
+
+
+## Credential handling
+
+Gemini discovery sends its API key through the `x-goog-api-key` request header, not a URL query parameter. URLs are more likely to be captured in proxy, gateway, and access logs. Regression tests assert that the key is absent from the request URL.
