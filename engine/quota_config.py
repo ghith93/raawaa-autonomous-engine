@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -68,7 +69,7 @@ def load_provider_profile_registry(path: str | Path) -> list[ProviderProfileEntr
         if item.get("enabled") is not False:
             raise ValueError("staged provider profiles must explicitly set enabled=false")
         api_key_env = item.get("api_key_env")
-        if not isinstance(api_key_env, str) or not api_key_env.isidentifier():
+        if not isinstance(api_key_env, str) or not re.fullmatch(r"[A-Z][A-Z0-9_]*", api_key_env):
             raise ValueError("provider API key environment variable name is invalid")
         note = item.get("verification_note", "")
         if not isinstance(note, str):
