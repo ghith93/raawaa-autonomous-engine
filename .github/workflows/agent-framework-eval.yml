@@ -28,6 +28,6 @@ jobs:
       - name: Install pinned optional evaluation dependencies
         run: python -m pip install --disable-pip-version-check -r requirements-agent-framework-eval.txt
       - name: Run deterministic multi-branch and checkpoint evaluation
-        run: python experiments/microsoft-agent-framework/evaluate.py
+        run: PYTHONPATH=. python experiments/microsoft-agent-framework/evaluate.py
       - name: Test pinned framework checkpoint codec adapter
         run: python -m unittest discover -s experiments/microsoft_agent_framework -p 'test_*.py' -v
