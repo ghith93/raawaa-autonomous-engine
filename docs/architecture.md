@@ -32,6 +32,12 @@ GitHub Actions is used first for CI and bounded scheduled jobs. It is event-driv
 
 Provider profiles are now staged in `config/provider_profiles.json` but all remain disabled. Groq GPT-OSS 20B/120B are production-model candidates; Qwen 3.8-27B is preview-only. The read-only profile registry does not load secret values or enable network calls. Future live adapters must read credentials only from environment variables or secret stores, never from committed files. The router enforces per-minute, per-task, daily, and monthly request/token quotas before making a request and records usage after it returns. Paid routes additionally require a monetary ledger and explicit approval.
 
+## Optional AndroidHarness execution backend
+
+AndroidHarness is registered as an external Android/Linux runtime in `config/runtime_backends.json`. Its intended role is a bounded compatibility lab and optional execution target for Python/Node tools, local-model experiments, agent-framework evaluation, and device-specific validation. It is complementary to GitHub Actions (reproducible CI) and Cloudflare (deployed control plane), not a replacement for either.
+
+The integration is currently a documented capability profile, not a working remote tool adapter. The engine must not dispatch commands to it unless a real authenticated harness session is exposed and a tested adapter is implemented. The profile records an operator-reported readiness snapshot; all capabilities must be re-probed before use. LiteLLM, llama.cpp/GGUF, Ollama, and local LLM inference are candidates requiring individual compatibility and resource tests, not confirmed supported workloads. See [AndroidHarness runtime profile](android-harness.md) for the compatibility matrix, tool contract, safety rules, and onboarding sequence.
+
 ## Safety boundaries
 
 Human approval is mandatory for publishing, sending messages, spending money, price changes, production deployment, deleting data, changing access, and modifying a storefront. Read-only research and local tests can be automated within configured limits.
