@@ -164,10 +164,12 @@ def verify_repository_root(root: Path = ROOT) -> None:
     if origin.returncode != 0:
         raise BridgeError("repository origin could not be verified")
     remote = origin.stdout.strip().removesuffix(".git").rstrip("/")
-    if not (
-        remote.endswith("github.com/ghith93/raawaa-autonomous-engine")
-        or remote.endswith("github.com:ghith93/raawaa-autonomous-engine")
-    ):
+    approved_remotes = {
+        "https://github.com/ghith93/raawaa-autonomous-engine",
+        "git@github.com:ghith93/raawaa-autonomous-engine",
+        "ssh://git@github.com/ghith93/raawaa-autonomous-engine",
+    }
+    if remote not in approved_remotes:
         raise BridgeError("repository origin does not match the approved Raawaa Autonomous Engine")
 
 
