@@ -19,6 +19,7 @@ class ProviderProfileEntry:
     verification_note: str
     production_use_allowed: bool
     model_stage: str
+    model_terms_source_url: str
     profile: QuotaProfile
 
     @property
@@ -105,6 +106,7 @@ def load_provider_profile_registry(path: str | Path) -> list[ProviderProfileEntr
             verified_at=datetime.fromisoformat(item["verified_at"].replace("Z", "+00:00"))
             if isinstance(item.get("verified_at"), str) else None,
             max_output_tokens=item.get("max_output_tokens"),
+            priority=item.get("priority", 100),
         )
         entries.append(ProviderProfileEntry(
             profile_id=profile_id,
@@ -114,6 +116,7 @@ def load_provider_profile_registry(path: str | Path) -> list[ProviderProfileEntr
             verification_note=note,
             production_use_allowed=production_use_allowed,
             model_stage=model_stage,
+            model_terms_source_url=item.get("model_terms_source_url", ""),
             profile=profile,
         ))
     return entries
