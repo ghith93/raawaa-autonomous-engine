@@ -86,6 +86,15 @@ class CheckpointEnvelopeTests(unittest.TestCase):
         with self.assertRaises(CheckpointEnvelopeError):
             self.make_blob(payload=b"pickle-like-bytes")
 
+    def test_excessive_json_nesting_fails_closed(self):
+        nested = {}
+        cursor = nested
+        for _ in range(2000):
+            cursor["child"] = {}
+            cursor = cursor["child"]
+        with self.assertRaises(CheckpointEnvelopeError):
+            self.make_blob(payload=nested)
+
 
 if __name__ == "__main__":
     unittest.main()
