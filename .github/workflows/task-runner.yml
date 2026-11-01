@@ -41,7 +41,10 @@ jobs:
           from urllib.error import HTTPError, URLError
           from urllib.request import Request, urlopen
 
-          headers = {"Accept": "application/json"}
+          headers = {
+              "Accept": "application/json",
+              "User-Agent": "RaawaaAutonomousEngine/1.0 (+https://github.com/ghith93/raawaa-autonomous-engine)",
+          }
           client_id = os.environ.get("CF_ACCESS_CLIENT_ID", "")
           client_secret = os.environ.get("CF_ACCESS_CLIENT_SECRET", "")
           if bool(client_id) != bool(client_secret):
@@ -84,6 +87,7 @@ jobs:
               "Authorization": "Bearer " + os.environ["ENGINE_API_TOKEN"],
               "Content-Type": "application/json",
               "Accept": "application/json",
+              "User-Agent": "RaawaaAutonomousEngine/1.0 (+https://github.com/ghith93/raawaa-autonomous-engine)",
           }
           client_id = os.environ.get("CF_ACCESS_CLIENT_ID", "")
           client_secret = os.environ.get("CF_ACCESS_CLIENT_SECRET", "")
