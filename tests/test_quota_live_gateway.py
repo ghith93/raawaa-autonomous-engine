@@ -28,7 +28,7 @@ class QuotaAwareGatewayTests(unittest.TestCase):
         root = Path(self.tmp.name)
         self.quota = QuotaLedger(root / "quota.db")
         self.usage = UsageLedger(root / "usage.db")
-        self.request = GenerationRequest("research", "hello world", 20)
+        self.request = GenerationRequest("research", "hello world", 20, task_id="task-1")
 
     def tearDown(self):
         self.tmp.cleanup()
@@ -48,7 +48,8 @@ class QuotaAwareGatewayTests(unittest.TestCase):
         values = dict(provider=provider, account=account, model="model-x",
                       free_verified=True, commercial_use_allowed=True,
                       daily_request_limit=10, daily_token_limit=1000,
-                      monthly_request_limit=100, monthly_token_limit=10000, priority=10,
+                      monthly_request_limit=100, monthly_token_limit=10000,
+                      per_task_request_limit=5, per_task_token_limit=5000, priority=10,
                       endpoint_url="https://" + endpoint,
                       pricing_source_url="https://" + pricing,
                       quota_source_url="https://" + quota,
@@ -58,6 +59,26 @@ class QuotaAwareGatewayTests(unittest.TestCase):
                       max_output_tokens=512)
         values.update(changes)
         return QuotaProfile(**values)
+
+    def test_missing_task_id_blocks_before_provider_call(self):
+        adapter = FakeAdapter("groq")
+        manager = QuotaManager([self.profile()], self.quota)
+        gateway = QuotaAwareLiveGateway(manager, {"groq": adapter}, self.usage, True)
+        request = GenerationRequest("research", "hello world", 20)
+        with self.assertRaisesRegex(ProviderUnavailable, "task ID is required"):
+            gateway.generate(request)
+        self.assertEqual(adapter.calls, 0)
+
+    def test_per_task_quota_blocks_before_provider_call(self):
+        adapter = FakeAdapter("groq")
+        profile = self.profile(per_task_request_limit=1, per_task_token_limit=1000)
+        manager = QuotaManager([profile], self.quota)
+        gateway = QuotaAwareLiveGateway(manager, {"groq": adapter}, self.usage, True)
+        gateway.generate(self.request)
+        with self.assertRaises(ProviderUnavailable):
+            gateway.generate(self.request)
+        self.assertEqual(adapter.calls, 1)
+        self.assertEqual(self.quota.usage_for_task("task-1")["requests"], 1)
 
     def test_network_disabled_by_default(self):
         adapter = FakeAdapter("groq")

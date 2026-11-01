@@ -27,6 +27,8 @@ class QuotaAwareLiveGateway:
             raise ProviderUnavailable("Live network execution is disabled by policy.")
         if not request.prompt.strip():
             raise ValueError("prompt is required")
+        if not isinstance(request.task_id, str) or not request.task_id.strip():
+            raise ProviderUnavailable("A task ID is required for per-task quota enforcement.")
         if not 1 <= request.max_output_tokens <= 4096:
             raise ValueError("max_output_tokens must be between 1 and 4096")
 
@@ -60,6 +62,9 @@ class QuotaAwareLiveGateway:
                     profile.daily_token_limit,
                     monthly_request_limit=profile.monthly_request_limit,
                     monthly_token_limit=profile.monthly_token_limit,
+                    task_id=request.task_id,
+                    per_task_request_limit=profile.per_task_request_limit,
+                    per_task_token_limit=profile.per_task_token_limit,
                 )
             except RuntimeError:
                 # Another worker may have reserved the remaining capacity.

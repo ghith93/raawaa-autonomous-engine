@@ -20,7 +20,8 @@ class QuotaManagerTests(unittest.TestCase):
         values = dict(provider="groq", account="primary", model="model-a",
                       free_verified=True, commercial_use_allowed=True,
                       daily_request_limit=10, daily_token_limit=1000,
-                      monthly_request_limit=100, monthly_token_limit=10000, priority=10,
+                      monthly_request_limit=100, monthly_token_limit=10000,
+                      per_task_request_limit=5, per_task_token_limit=5000, priority=10,
                       endpoint_url="https://api.groq.com/openai/v1",
                       pricing_source_url="https://groq.com/pricing",
                       quota_source_url="https://console.groq.com/docs/rate-limits",
@@ -73,7 +74,11 @@ class QuotaManagerTests(unittest.TestCase):
         bool_request_limit = self.profile(daily_request_limit=True)
         bool_token_limit = self.profile(daily_token_limit=True)
         bool_monthly_limit = self.profile(monthly_request_limit=True)
-        manager = QuotaManager([bool_request_limit, bool_token_limit, bool_monthly_limit], self.ledger)
+        bool_task_limit = self.profile(per_task_token_limit=True)
+        manager = QuotaManager(
+            [bool_request_limit, bool_token_limit, bool_monthly_limit, bool_task_limit],
+            self.ledger,
+        )
         for route in manager.profiles:
             self.assertFalse(manager.eligible(route, 1, self.now))
 
@@ -103,6 +108,41 @@ class QuotaManagerTests(unittest.TestCase):
         route = self.profile(monthly_request_limit=1)
         self.ledger.record(route.route_id, 1, self.now)
         self.assertFalse(QuotaManager([route], self.ledger).eligible(route, 1, self.now))
+
+    def test_per_task_request_and_token_limits_are_atomic(self):
+        route = self.profile(per_task_request_limit=1, per_task_token_limit=50)
+        self.ledger.reserve(
+            route.route_id, 40, 10, 1000, self.now,
+            monthly_request_limit=100, monthly_token_limit=10000,
+            task_id="task-one", per_task_request_limit=1, per_task_token_limit=50,
+        )
+        with self.assertRaises(RuntimeError):
+            self.ledger.reserve(
+                route.route_id, 1, 10, 1000, self.now,
+                monthly_request_limit=100, monthly_token_limit=10000,
+                task_id="task-one", per_task_request_limit=1, per_task_token_limit=50,
+            )
+        self.assertEqual(self.ledger.usage_for_task("task-one"),
+                         {"requests": 1, "tokens": 40})
+
+    def test_per_task_limits_aggregate_across_provider_routes(self):
+        first = self.profile(provider="groq", per_task_request_limit=5,
+                             per_task_token_limit=50)
+        backup = self.profile(provider="cerebras", account="backup",
+                              per_task_request_limit=5, per_task_token_limit=50)
+        self.ledger.reserve(
+            first.route_id, 40, 10, 1000, self.now,
+            monthly_request_limit=100, monthly_token_limit=10000,
+            task_id="shared-task", per_task_request_limit=5, per_task_token_limit=50,
+        )
+        with self.assertRaises(RuntimeError):
+            self.ledger.reserve(
+                backup.route_id, 11, 10, 1000, self.now,
+                monthly_request_limit=100, monthly_token_limit=10000,
+                task_id="shared-task", per_task_request_limit=5, per_task_token_limit=50,
+            )
+        self.assertEqual(self.ledger.usage_for_task("shared-task"),
+                         {"requests": 1, "tokens": 40})
 
     def test_rate_limit_cooldown_skips_provider(self):
         route = self.profile()
@@ -142,11 +182,14 @@ class QuotaManagerTests(unittest.TestCase):
         with sqlite3.connect(path) as db:
             columns = {row[1] for row in db.execute("PRAGMA table_info(quota_usage)")}
         self.assertIn("settled_at", columns)
+        self.assertIn("task_id", columns)
 
     def test_settlement_is_idempotent_for_same_usage(self):
         route = self.profile()
         reservation = self.ledger.reserve(route.route_id, 100, 10, 1000, self.now,
-                                    monthly_request_limit=100, monthly_token_limit=10000)
+                                    monthly_request_limit=100, monthly_token_limit=10000,
+                                    task_id="task-settle", per_task_request_limit=5,
+                                    per_task_token_limit=5000)
         self.ledger.settle(reservation, 25)
         self.ledger.settle(reservation, 25)
         self.assertEqual(self.ledger.usage_today(route.route_id, self.now),
@@ -155,7 +198,9 @@ class QuotaManagerTests(unittest.TestCase):
     def test_conflicting_second_settlement_fails_closed(self):
         route = self.profile()
         reservation = self.ledger.reserve(route.route_id, 100, 10, 1000, self.now,
-                                    monthly_request_limit=100, monthly_token_limit=10000)
+                                    monthly_request_limit=100, monthly_token_limit=10000,
+                                    task_id="task-settle", per_task_request_limit=5,
+                                    per_task_token_limit=5000)
         self.ledger.settle(reservation, 25)
         with self.assertRaisesRegex(RuntimeError, "already settled"):
             self.ledger.settle(reservation, 26)
@@ -174,7 +219,9 @@ class QuotaManagerTests(unittest.TestCase):
         def reserve():
             try:
                 self.ledger.reserve(route.route_id, 10, 10, 1000, self.now,
-                                    monthly_request_limit=1, monthly_token_limit=100)
+                                    monthly_request_limit=1, monthly_token_limit=100,
+                                    task_id="task-concurrent", per_task_request_limit=1,
+                                    per_task_token_limit=100)
                 return "reserved"
             except RuntimeError:
                 return "denied"

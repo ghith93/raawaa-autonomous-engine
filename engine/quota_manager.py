@@ -50,6 +50,8 @@ class QuotaProfile:
     daily_token_limit: int | None = None
     monthly_request_limit: int | None = None
     monthly_token_limit: int | None = None
+    per_task_request_limit: int | None = None
+    per_task_token_limit: int | None = None
     monthly_credit_usd: float | None = None
     priority: int = 100
     endpoint_url: str | None = None
@@ -75,7 +77,8 @@ class QuotaLedger:
                 requests INTEGER NOT NULL,
                 tokens INTEGER NOT NULL,
                 occurred_at TEXT NOT NULL,
-                settled_at TEXT
+                settled_at TEXT,
+                task_id TEXT
             )""")
             db.execute("""CREATE TABLE IF NOT EXISTS quota_cooldowns (
                 route_id TEXT PRIMARY KEY,
@@ -88,6 +91,9 @@ class QuotaLedger:
             columns = {row["name"] for row in db.execute("PRAGMA table_info(quota_usage)")}
             if "settled_at" not in columns:
                 db.execute("ALTER TABLE quota_usage ADD COLUMN settled_at TEXT")
+            if "task_id" not in columns:
+                db.execute("ALTER TABLE quota_usage ADD COLUMN task_id TEXT")
+            db.execute("CREATE INDEX IF NOT EXISTS idx_quota_usage_task ON quota_usage(task_id, occurred_at)")
 
     def _connect(self):
         db = sqlite3.connect(self.db_path, timeout=10)
@@ -118,16 +124,33 @@ class QuotaLedger:
             ).fetchone()
         return {"requests": int(row["requests"]), "tokens": int(row["tokens"])}
 
+    def usage_for_task(self, task_id: str) -> dict[str, int]:
+        if not isinstance(task_id, str) or not task_id.strip():
+            raise ValueError("task_id is required")
+        with self._connect() as db:
+            row = db.execute(
+                "SELECT COALESCE(SUM(requests),0) requests, COALESCE(SUM(tokens),0) tokens "
+                "FROM quota_usage WHERE task_id=?", (task_id,)
+            ).fetchone()
+        return {"requests": int(row["requests"]), "tokens": int(row["tokens"])}
+
     def reserve(self, route_id: str, estimated_tokens: int, request_limit: int,
                 token_limit: int, now: datetime | None = None,
                 monthly_request_limit: int | None = None,
-                monthly_token_limit: int | None = None) -> int:
+                monthly_token_limit: int | None = None,
+                task_id: str | None = None,
+                per_task_request_limit: int | None = None,
+                per_task_token_limit: int | None = None) -> int:
         """Atomically reserve one request and its estimated tokens before network I/O."""
         if (type(estimated_tokens) is not int or type(request_limit) is not int
                 or type(token_limit) is not int or type(monthly_request_limit) is not int
                 or type(monthly_token_limit) is not int
+                or type(per_task_request_limit) is not int
+                or type(per_task_token_limit) is not int
+                or not isinstance(task_id, str) or not task_id.strip()
                 or min(estimated_tokens, request_limit, token_limit,
-                       monthly_request_limit, monthly_token_limit) < 1):
+                       monthly_request_limit, monthly_token_limit,
+                       per_task_request_limit, per_task_token_limit) < 1):
             raise ValueError("reservation limits and estimated tokens must be positive integers")
         now = now or datetime.now(timezone.utc)
         current = now.astimezone(timezone.utc)
@@ -144,14 +167,20 @@ class QuotaLedger:
                 "SELECT COALESCE(SUM(requests),0) requests, COALESCE(SUM(tokens),0) tokens "
                 "FROM quota_usage WHERE route_id=? AND occurred_at>=?", (route_id, month_start)
             ).fetchone()
+            task = db.execute(
+                "SELECT COALESCE(SUM(requests),0) requests, COALESCE(SUM(tokens),0) tokens "
+                "FROM quota_usage WHERE task_id=?", (task_id,)
+            ).fetchone()
             if (int(daily["requests"]) >= request_limit
                     or int(daily["tokens"]) + estimated_tokens > token_limit
                     or int(monthly["requests"]) >= monthly_request_limit
-                    or int(monthly["tokens"]) + estimated_tokens > monthly_token_limit):
+                    or int(monthly["tokens"]) + estimated_tokens > monthly_token_limit
+                    or int(task["requests"]) >= per_task_request_limit
+                    or int(task["tokens"]) + estimated_tokens > per_task_token_limit):
                 raise RuntimeError("quota reservation unavailable")
             cur = db.execute(
-                "INSERT INTO quota_usage(route_id,requests,tokens,occurred_at) VALUES(?,?,?,?)",
-                (route_id, 1, estimated_tokens, stamp),
+                "INSERT INTO quota_usage(route_id,requests,tokens,occurred_at,task_id) VALUES(?,?,?,?,?)",
+                (route_id, 1, estimated_tokens, stamp, task_id),
             )
             return int(cur.lastrowid)
 
@@ -245,8 +274,11 @@ class QuotaManager:
                 or type(profile.daily_token_limit) is not int
                 or type(profile.monthly_request_limit) is not int
                 or type(profile.monthly_token_limit) is not int
+                or type(profile.per_task_request_limit) is not int
+                or type(profile.per_task_token_limit) is not int
                 or min(profile.daily_request_limit, profile.daily_token_limit,
-                       profile.monthly_request_limit, profile.monthly_token_limit) < 1):
+                       profile.monthly_request_limit, profile.monthly_token_limit,
+                       profile.per_task_request_limit, profile.per_task_token_limit) < 1):
             return False
         if type(estimated_tokens) is not int or estimated_tokens < 1:
             return False
