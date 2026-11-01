@@ -62,6 +62,37 @@ class QuotaLedger:
             ).fetchone()
         return {"requests": int(row["requests"]), "tokens": int(row["tokens"])}
 
+    def reserve(self, route_id: str, estimated_tokens: int, request_limit: int,
+                token_limit: int, now: datetime | None = None) -> int:
+        """Atomically reserve one request and its estimated tokens before network I/O."""
+        if estimated_tokens < 1 or request_limit < 1 or token_limit < 1:
+            raise ValueError("reservation limits and estimated tokens must be positive")
+        now = now or datetime.now(timezone.utc)
+        start = now.astimezone(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0).isoformat()
+        stamp = now.astimezone(timezone.utc).isoformat()
+        with self._connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            row = db.execute(
+                "SELECT COALESCE(SUM(requests),0) requests, COALESCE(SUM(tokens),0) tokens "
+                "FROM quota_usage WHERE route_id=? AND occurred_at>=?", (route_id, start)
+            ).fetchone()
+            if int(row["requests"]) >= request_limit or int(row["tokens"]) + estimated_tokens > token_limit:
+                raise RuntimeError("quota reservation unavailable")
+            cur = db.execute(
+                "INSERT INTO quota_usage(route_id,requests,tokens,occurred_at) VALUES(?,?,?,?)",
+                (route_id, 1, estimated_tokens, stamp),
+            )
+            return int(cur.lastrowid)
+
+    def settle(self, reservation_id: int, actual_tokens: int) -> None:
+        """Replace estimated token reservation with actual usage; request count remains consumed."""
+        if actual_tokens < 0:
+            raise ValueError("actual_tokens cannot be negative")
+        with self._connect() as db:
+            cur = db.execute("UPDATE quota_usage SET tokens=? WHERE id=?", (actual_tokens, reservation_id))
+            if cur.rowcount != 1:
+                raise KeyError("quota reservation not found")
+
     def record(self, route_id: str, tokens: int, now: datetime | None = None) -> None:
         if tokens < 0:
             raise ValueError("tokens cannot be negative")
