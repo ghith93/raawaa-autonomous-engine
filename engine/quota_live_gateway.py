@@ -30,8 +30,10 @@ class QuotaAwareLiveGateway:
         if not 1 <= request.max_output_tokens <= 4096:
             raise ValueError("max_output_tokens must be between 1 and 4096")
 
-        # Character-based estimate is more conservative than whitespace word count.
-        estimated_input_tokens = max(1, (len(request.prompt) + 2) // 3)
+        # Reserve against UTF-8 bytes, not a lossy character/word heuristic. This
+        # intentionally overestimates most tokenizers so concurrent calls are less
+        # likely to exceed a provider's hard daily token cap before settlement.
+        estimated_input_tokens = max(1, len(request.prompt.encode("utf-8")))
         estimated_tokens = estimated_input_tokens + request.max_output_tokens
 
         candidates = sorted(
@@ -95,6 +97,16 @@ class QuotaAwareLiveGateway:
                 response.output_tokens,
                 response.cost_usd,
             )
+            if response.cost_usd > 0:
+                # A route advertised as free has contradicted its verified profile.
+                # Preserve the measured usage/cost, quarantine the route, and fail
+                # closed rather than returning a result or silently trying another.
+                self.quota_manager.ledger.cool_down(
+                    profile.route_id, self.cooldown_seconds, "unexpected_nonzero_cost"
+                )
+                raise ProviderUnavailable(
+                    "Provider reported non-zero cost for a verified-free route; route quarantined."
+                )
             return response
 
         if last_error is not None:
