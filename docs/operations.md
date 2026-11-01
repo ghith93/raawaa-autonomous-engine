@@ -59,7 +59,7 @@ python -m engine.cli provider-profile-status
 python -m engine.cli free-models --provider all
 ```
 
-The provider-profile-status command reads the staged profile registry locally and reports account tier, model, quota caps, and eligibility blockers. It never reads API key values or enables network execution. Provider catalog discovery is a deliberate, read-only network command. It requires the relevant provider credential and lists model identifiers only; it does not generate text or establish that a model is free. Treat unknown pricing, quota, regional availability, and commercial-use eligibility as unavailable.
+The provider-profile-status command reads the staged profile registry locally and reports account tier, model stage, production-use eligibility, quota caps, and eligibility blockers. Preview models remain blocked from the live gateway unless production use is explicitly permitted by the verified model terms. It never reads API key values or enables network execution. Provider catalog discovery is a deliberate, read-only network command. It requires the relevant provider credential and lists model identifiers only; it does not generate text or establish that a model is free. Treat unknown pricing, quota, regional availability, and commercial-use eligibility as unavailable.
 
 The model gateway and quota controls provide foundations for opt-in inference. Keep live inference disabled until:
 1. the provider's current free-tier and commercial-use terms are verified;
