@@ -50,8 +50,12 @@ class RemoteTaskStore:
                 raise RemoteTaskStoreError("Remote task lease was lost") from None
             if exc.code == 404:
                 raise RemoteTaskStoreError("Remote task was not found") from None
+            if exc.code == 429:
+                raise RemoteTaskStoreError("Remote task API rate limit reached; retry in a later run") from None
+            if 500 <= exc.code <= 599 or exc.code == 408:
+                raise RemoteTaskStoreError(f"Remote task API temporarily unavailable (HTTP {exc.code})") from None
             raise RemoteTaskStoreError(f"Remote task API returned HTTP {exc.code}") from None
-        except (URLError, TimeoutError, json.JSONDecodeError, UnicodeDecodeError):
+        except (URLError, TimeoutError, OSError, json.JSONDecodeError, UnicodeDecodeError):
             raise RemoteTaskStoreError("Remote task API is unavailable or returned invalid JSON") from None
 
     def enqueue(self, task_type: str, title: str, payload: dict[str, Any] | None = None,
