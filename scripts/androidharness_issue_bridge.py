@@ -148,6 +148,29 @@ def verify_policy_files(root: Path = ROOT) -> dict[str, str]:
     return fingerprints
 
 
+
+def verify_repository_root(root: Path = ROOT) -> None:
+    root = root.resolve()
+    top = subprocess.run(
+        ["git", "-C", str(root), "rev-parse", "--show-toplevel"],
+        text=True, capture_output=True, timeout=15, check=False
+    )
+    if top.returncode != 0 or Path(top.stdout.strip()).resolve() != root:
+        raise BridgeError("script is not running from the expected repository root")
+    origin = subprocess.run(
+        ["git", "-C", str(root), "remote", "get-url", "origin"],
+        text=True, capture_output=True, timeout=15, check=False
+    )
+    if origin.returncode != 0:
+        raise BridgeError("repository origin could not be verified")
+    remote = origin.stdout.strip().removesuffix(".git").rstrip("/")
+    if not (
+        remote.endswith("github.com/ghith93/raawaa-autonomous-engine")
+        or remote.endswith("github.com:ghith93/raawaa-autonomous-engine")
+    ):
+        raise BridgeError("repository origin does not match the approved Raawaa Autonomous Engine")
+
+
 def safe_extract_git_archive(archive_bytes: bytes, destination: Path) -> None:
     if len(archive_bytes) > 64 * 1024 * 1024:
         raise BridgeError("repository archive exceeds the 64 MiB limit")
@@ -508,11 +531,13 @@ def main() -> int:
         if auth.returncode != 0:
             raise BridgeError("GitHub CLI is not authenticated; no task was claimed")
         bridge = AndroidHarnessIssueBridge()
+        verify_repository_root(bridge.root)
         verify_policy_files(bridge.root)
         lock_descriptor = bridge.acquire_single_instance_lock()
         if args.once:
             print("processed" if bridge.run_once() else "no eligible tasks")
         else:
+            print("AndroidHarness bridge active; waiting for approved GitHub tasks")
             bridge.run_forever(args.poll_interval, args.max_tasks)
     except KeyboardInterrupt:
         print("AndroidHarness bridge stopped")
