@@ -1,6 +1,6 @@
 """Bounded dry-run worker. No external tools or model providers are called."""
 from engine.task_store import TaskStore
-from engine.agent_runtime import AgentContractError, build_task_contract, load_agent_roster
+from engine.agent_runtime import build_task_contract, load_agent_roster
 
 
 SAFE_TASKS = {"research_brief", "code_review", "content_draft", "system_audit"}
