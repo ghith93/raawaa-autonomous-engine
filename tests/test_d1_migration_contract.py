@@ -6,6 +6,7 @@ import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
 MIGRATION = ROOT / "migrations" / "0001_initial.sql"
+MIGRATION_2 = ROOT / "migrations" / "0002_research_candidates.sql"
 
 
 class D1MigrationContractTests(unittest.TestCase):
@@ -33,6 +34,24 @@ class D1MigrationContractTests(unittest.TestCase):
             "SELECT version FROM schema_migrations"
         ).fetchall()
         self.assertEqual(versions, [("0001_initial",)])
+
+    def test_research_candidate_migration_is_additive_and_review_state_is_constrained(self):
+        self.db.executescript(self.sql)
+        migration = MIGRATION_2.read_text(encoding="utf-8")
+        self.db.executescript(migration)
+        self.db.executescript(migration)
+        tables = {row[0] for row in self.db.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+        self.assertIn("research_candidates", tables)
+        versions = self.db.execute("SELECT version FROM schema_migrations ORDER BY version").fetchall()
+        self.assertEqual(versions, [("0001_initial",), ("0002_research_candidates",)])
+        row = ("github:org/agent", "github", "org/agent", "https://github.com/org/agent", "{}", "unreviewed", "2026-11-01", "2026-11-01", 1, "2026-11-01")
+        self.db.execute("""INSERT INTO research_candidates
+            (source_key,source,title,url,metadata_json,review_status,first_seen_at,last_seen_at,discovery_count,updated_at)
+            VALUES (?,?,?,?,?,?,?,?,?,?)""", row)
+        with self.assertRaises(sqlite3.IntegrityError):
+            self.db.execute("""INSERT INTO research_candidates
+                (source_key,source,title,url,metadata_json,review_status,first_seen_at,last_seen_at,discovery_count,updated_at)
+                VALUES ('bad','github','bad','https://github.com/bad','{}','auto_install','now','now',1,'now')""")
 
     def test_task_idempotency_and_status_constraints(self):
         self.db.executescript(self.sql)
