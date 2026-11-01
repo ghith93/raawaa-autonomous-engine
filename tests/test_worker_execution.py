@@ -53,6 +53,7 @@ class WorkerExecutionTests(unittest.TestCase):
             quota_source_url="https://console.groq.com/docs/rate-limits",
             terms_source_url="https://groq.com/terms",
             verified_at=datetime.now(timezone.utc), max_output_tokens=512,
+            input_cost_per_million_usd=0.0, output_cost_per_million_usd=0.0,
         )
         manager = QuotaManager([profile], self.quota)
         return QuotaAwareLiveGateway(
