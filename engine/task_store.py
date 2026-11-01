@@ -1,4 +1,4 @@
-"""SQLite-backed task queue with idempotent enqueue and an audit trail."""
+"""SQLite task queue with idempotency, fenced worker leases, and audit events."""
 from __future__ import annotations
 
 import json
@@ -32,35 +32,30 @@ class TaskStore:
         with self._connect() as db:
             db.executescript("""
             CREATE TABLE IF NOT EXISTS tasks (
-              id TEXT PRIMARY KEY,
-              idempotency_key TEXT NOT NULL UNIQUE,
-              task_type TEXT NOT NULL,
-              title TEXT NOT NULL,
-              payload_json TEXT NOT NULL,
+              id TEXT PRIMARY KEY, idempotency_key TEXT NOT NULL UNIQUE,
+              task_type TEXT NOT NULL, title TEXT NOT NULL, payload_json TEXT NOT NULL,
               status TEXT NOT NULL CHECK(status IN ('pending','running','succeeded','failed','blocked')),
-              attempts INTEGER NOT NULL DEFAULT 0,
-              max_attempts INTEGER NOT NULL DEFAULT 2,
-              created_at TEXT NOT NULL,
-              updated_at TEXT NOT NULL,
-              result_json TEXT,
-              error TEXT
+              attempts INTEGER NOT NULL DEFAULT 0, max_attempts INTEGER NOT NULL DEFAULT 2,
+              created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+              result_json TEXT, error TEXT, lease_token TEXT, lease_expires_at TEXT
             );
             CREATE INDEX IF NOT EXISTS idx_tasks_status_created ON tasks(status, created_at);
             CREATE TABLE IF NOT EXISTS audit_log (
-              id INTEGER PRIMARY KEY AUTOINCREMENT,
-              task_id TEXT,
-              event TEXT NOT NULL,
-              details_json TEXT NOT NULL,
-              created_at TEXT NOT NULL,
+              id INTEGER PRIMARY KEY AUTOINCREMENT, task_id TEXT, event TEXT NOT NULL,
+              details_json TEXT NOT NULL, created_at TEXT NOT NULL,
               FOREIGN KEY(task_id) REFERENCES tasks(id)
             );
             """)
+            # Forward-compatible migration for databases created by runtime v1.
+            columns = {row["name"] for row in db.execute("PRAGMA table_info(tasks)")}
+            if "lease_token" not in columns:
+                db.execute("ALTER TABLE tasks ADD COLUMN lease_token TEXT")
+            if "lease_expires_at" not in columns:
+                db.execute("ALTER TABLE tasks ADD COLUMN lease_expires_at TEXT")
 
     def _audit(self, db, task_id: str | None, event: str, details: dict[str, Any]):
-        db.execute(
-            "INSERT INTO audit_log(task_id,event,details_json,created_at) VALUES(?,?,?,?)",
-            (task_id, event, json.dumps(details, sort_keys=True), utc_now()),
-        )
+        db.execute("INSERT INTO audit_log(task_id,event,details_json,created_at) VALUES(?,?,?,?)",
+                   (task_id, event, json.dumps(details, sort_keys=True), utc_now()))
 
     def enqueue(self, task_type: str, title: str, payload: dict[str, Any] | None = None,
                 idempotency_key: str | None = None, max_attempts: int = 2) -> dict[str, Any]:
@@ -68,94 +63,114 @@ class TaskStore:
             raise ValueError("task_type and title are required")
         if max_attempts < 1 or max_attempts > 5:
             raise ValueError("max_attempts must be between 1 and 5")
-        key = idempotency_key or str(uuid.uuid4())
-        task_id = str(uuid.uuid4())
-        now = utc_now()
+        key, task_id, now = idempotency_key or str(uuid.uuid4()), str(uuid.uuid4()), utc_now()
         with self._connect() as db:
             existing = db.execute("SELECT * FROM tasks WHERE idempotency_key=?", (key,)).fetchone()
             if existing:
                 return dict(existing)
-            db.execute(
-                """INSERT INTO tasks(id,idempotency_key,task_type,title,payload_json,status,
-                   attempts,max_attempts,created_at,updated_at)
-                   VALUES(?,?,?,?,?,'pending',0,?,?,?)""",
-                (task_id, key, task_type, title, json.dumps(payload or {}, sort_keys=True),
-                 max_attempts, now, now),
-            )
+            db.execute("""INSERT INTO tasks(id,idempotency_key,task_type,title,payload_json,status,
+                       attempts,max_attempts,created_at,updated_at)
+                       VALUES(?,?,?,?,?,'pending',0,?,?,?)""",
+                       (task_id, key, task_type, title, json.dumps(payload or {}, sort_keys=True),
+                        max_attempts, now, now))
             self._audit(db, task_id, "task_enqueued", {"task_type": task_type, "title": title})
             return dict(db.execute("SELECT * FROM tasks WHERE id=?", (task_id,)).fetchone())
 
-    def claim_next(self) -> dict[str, Any] | None:
+    def claim_next(self, lease_timeout_seconds: int = 900) -> dict[str, Any] | None:
+        if lease_timeout_seconds < 1:
+            raise ValueError("lease_timeout_seconds must be positive")
         with self._connect() as db:
             db.execute("BEGIN IMMEDIATE")
-            row = db.execute(
-                "SELECT * FROM tasks WHERE status='pending' ORDER BY created_at,id LIMIT 1"
-            ).fetchone()
+            row = db.execute("SELECT * FROM tasks WHERE status='pending' ORDER BY created_at,id LIMIT 1").fetchone()
             if row is None:
                 return None
-            now = utc_now()
-            db.execute(
-                "UPDATE tasks SET status='running',attempts=attempts+1,updated_at=? WHERE id=? AND status='pending'",
-                (now, row["id"]),
-            )
-            self._audit(db, row["id"], "task_claimed", {"attempt": row["attempts"] + 1})
+            now = datetime.now(timezone.utc)
+            token = str(uuid.uuid4())
+            expires = (now + timedelta(seconds=lease_timeout_seconds)).isoformat()
+            changed = db.execute("""UPDATE tasks SET status='running',attempts=attempts+1,
+                         updated_at=?,lease_token=?,lease_expires_at=?
+                         WHERE id=? AND status='pending'""",
+                         (now.isoformat(), token, expires, row["id"])).rowcount
+            if changed != 1:
+                return None
+            self._audit(db, row["id"], "task_claimed", {"attempt": row["attempts"] + 1,
+                        "lease_expires_at": expires})
             return dict(db.execute("SELECT * FROM tasks WHERE id=?", (row["id"],)).fetchone())
 
+    def heartbeat(self, task_id: str, lease_token: str, lease_timeout_seconds: int = 900) -> str:
+        if not lease_token or lease_timeout_seconds < 1:
+            raise ValueError("valid lease token and positive timeout are required")
+        now = datetime.now(timezone.utc)
+        expires = (now + timedelta(seconds=lease_timeout_seconds)).isoformat()
+        with self._connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            changed = db.execute("""UPDATE tasks SET updated_at=?,lease_expires_at=?
+                WHERE id=? AND status='running' AND lease_token=? AND lease_expires_at>=?""",
+                (now.isoformat(), expires, task_id, lease_token, now.isoformat())).rowcount
+            if changed != 1:
+                raise ValueError("lease lost or expired")
+            self._audit(db, task_id, "task_heartbeat", {"lease_expires_at": expires})
+        return expires
+
+    def _assert_lease(self, row, lease_token: str | None):
+        if row["status"] != "running":
+            raise ValueError("only running tasks can be modified")
+        if not lease_token or row["lease_token"] != lease_token:
+            raise ValueError("lease ownership lost")
+        if not row["lease_expires_at"] or row["lease_expires_at"] < utc_now():
+            raise ValueError("lease expired; worker must not complete the task")
+
     def finish(self, task_id: str, status: str, result: dict[str, Any] | None = None,
-               error: str | None = None):
+               error: str | None = None, lease_token: str | None = None):
         if status not in {"succeeded", "failed", "blocked"}:
             raise ValueError("invalid terminal status")
         with self._connect() as db:
+            db.execute("BEGIN IMMEDIATE")
             row = db.execute("SELECT * FROM tasks WHERE id=?", (task_id,)).fetchone()
             if row is None:
                 raise KeyError(task_id)
-            if row["status"] != "running":
-                raise ValueError("only running tasks can be completed")
-            # Failed tasks are retried only when explicitly returned to pending.
-            db.execute(
-                "UPDATE tasks SET status=?,result_json=?,error=?,updated_at=? WHERE id=?",
+            self._assert_lease(row, lease_token)
+            now = utc_now()
+            changed = db.execute("""UPDATE tasks SET status=?,result_json=?,error=?,updated_at=?,
+                lease_token=NULL,lease_expires_at=NULL
+                WHERE id=? AND status='running' AND lease_token=?""",
                 (status, json.dumps(result, sort_keys=True) if result is not None else None,
-                 error, utc_now(), task_id),
-            )
+                 error, now, task_id, lease_token)).rowcount
+            if changed != 1:
+                raise ValueError("lease ownership lost")
             self._audit(db, task_id, "task_" + status, {"error": error} if error else (result or {}))
 
-    def retry_or_fail(self, task_id: str, error: str) -> str:
-        """Return a failed running task to pending, or fail it after its attempt budget."""
+    def retry_or_fail(self, task_id: str, error: str, lease_token: str | None = None) -> str:
         with self._connect() as db:
             db.execute("BEGIN IMMEDIATE")
             row = db.execute("SELECT * FROM tasks WHERE id=?", (task_id,)).fetchone()
             if row is None:
                 raise KeyError(task_id)
-            if row["status"] != "running":
-                raise ValueError("only running tasks can be retried or failed")
+            self._assert_lease(row, lease_token)
             status = "pending" if row["attempts"] < row["max_attempts"] else "failed"
-            db.execute(
-                "UPDATE tasks SET status=?,error=?,updated_at=? WHERE id=?",
-                (status, error, utc_now(), task_id),
-            )
+            db.execute("""UPDATE tasks SET status=?,error=?,updated_at=?,lease_token=NULL,
+                lease_expires_at=NULL WHERE id=? AND status='running' AND lease_token=?""",
+                (status, error, utc_now(), task_id, lease_token))
             self._audit(db, task_id, "task_retry_scheduled" if status == "pending" else "task_failed",
-                        {"attempt": row["attempts"], "max_attempts": row["max_attempts"],
-                         "error": error})
+                        {"attempt": row["attempts"], "max_attempts": row["max_attempts"], "error": error})
             return status
 
     def recover_stale(self, lease_timeout_seconds: int = 900) -> dict[str, int]:
-        """Recover abandoned running tasks using updated_at as a conservative lease."""
+        """Requeue expired leases; the old worker is fenced by clearing its ownership token."""
         if lease_timeout_seconds < 1:
             raise ValueError("lease_timeout_seconds must be positive")
-        cutoff = (datetime.now(timezone.utc) - timedelta(seconds=lease_timeout_seconds)).isoformat()
+        now = datetime.now(timezone.utc).isoformat()
         recovered = failed = 0
         with self._connect() as db:
             db.execute("BEGIN IMMEDIATE")
-            rows = db.execute(
-                "SELECT * FROM tasks WHERE status='running' AND updated_at < ? ORDER BY updated_at,id",
-                (cutoff,),
-            ).fetchall()
+            rows = db.execute("""SELECT * FROM tasks WHERE status='running'
+                AND (lease_expires_at IS NULL OR lease_expires_at < ?) ORDER BY updated_at,id""",
+                (now,)).fetchall()
             for row in rows:
                 status = "pending" if row["attempts"] < row["max_attempts"] else "failed"
-                db.execute(
-                    "UPDATE tasks SET status=?,error=?,updated_at=? WHERE id=? AND status='running'",
-                    (status, "Recovered stale worker lease.", utc_now(), row["id"]),
-                )
+                db.execute("""UPDATE tasks SET status=?,error=?,updated_at=?,lease_token=NULL,
+                    lease_expires_at=NULL WHERE id=? AND status='running' AND lease_token IS ?""",
+                    (status, "Recovered expired worker lease.", now, row["id"], row["lease_token"]))
                 self._audit(db, row["id"], "task_lease_recovered",
                             {"new_status": status, "attempt": row["attempts"],
                              "max_attempts": row["max_attempts"]})
@@ -169,12 +184,10 @@ class TaskStore:
         limit = max(1, min(int(limit), 200))
         with self._connect() as db:
             return [dict(row) for row in db.execute(
-                "SELECT * FROM tasks ORDER BY created_at DESC LIMIT ?", (limit,)
-            ).fetchall()]
+                "SELECT * FROM tasks ORDER BY created_at DESC LIMIT ?", (limit,)).fetchall()]
 
     def audit_events(self, limit: int = 100) -> list[dict[str, Any]]:
         limit = max(1, min(int(limit), 500))
         with self._connect() as db:
             return [dict(row) for row in db.execute(
-                "SELECT * FROM audit_log ORDER BY id DESC LIMIT ?", (limit,)
-            ).fetchall()]
+                "SELECT * FROM audit_log ORDER BY id DESC LIMIT ?", (limit,)).fetchall()]

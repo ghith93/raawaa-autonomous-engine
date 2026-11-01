@@ -55,7 +55,7 @@ class TaskStoreTests(unittest.TestCase):
         claimed = self.store.claim_next()
         self.assertEqual(claimed["id"], task["id"])
         with sqlite3.connect(self.store.db_path) as db:
-            db.execute("UPDATE tasks SET updated_at='2000-01-01T00:00:00+00:00' WHERE id=?",
+            db.execute("UPDATE tasks SET lease_expires_at='2000-01-01T00:00:00+00:00' WHERE id=?",
                        (task["id"],))
         result = self.store.recover_stale(lease_timeout_seconds=60)
         self.assertEqual(result, {"requeued": 1, "failed": 0})
@@ -67,11 +67,36 @@ class TaskStoreTests(unittest.TestCase):
         task = self.store.enqueue("research_brief", "Exhausted", max_attempts=1)
         self.store.claim_next()
         with sqlite3.connect(self.store.db_path) as db:
-            db.execute("UPDATE tasks SET updated_at='2000-01-01T00:00:00+00:00' WHERE id=?",
+            db.execute("UPDATE tasks SET lease_expires_at='2000-01-01T00:00:00+00:00' WHERE id=?",
                        (task["id"],))
         result = self.store.recover_stale(lease_timeout_seconds=60)
         self.assertEqual(result, {"requeued": 0, "failed": 1})
         self.assertEqual(self.store.list_tasks()[0]["status"], "failed")
+
+    def test_old_worker_is_fenced_after_stale_lease_recovery(self):
+        task = self.store.enqueue("research_brief", "Lease fencing", max_attempts=3)
+        old_claim = self.store.claim_next(lease_timeout_seconds=1)
+        with sqlite3.connect(self.store.db_path) as db:
+            db.execute("UPDATE tasks SET lease_expires_at='2000-01-01T00:00:00+00:00' WHERE id=?",
+                       (task["id"],))
+        self.assertEqual(self.store.recover_stale(lease_timeout_seconds=1),
+                         {"requeued": 1, "failed": 0})
+        new_claim = self.store.claim_next()
+        self.assertNotEqual(old_claim["lease_token"], new_claim["lease_token"])
+        with self.assertRaisesRegex(ValueError, "lease ownership lost"):
+            self.store.finish(task["id"], "succeeded", result={"stale": True},
+                              lease_token=old_claim["lease_token"])
+        self.store.finish(task["id"], "succeeded", result={"ok": True},
+                          lease_token=new_claim["lease_token"])
+        self.assertEqual(self.store.list_tasks()[0]["status"], "succeeded")
+
+    def test_heartbeat_extends_only_current_unexpired_lease(self):
+        task = self.store.enqueue("research_brief", "Heartbeat")
+        claim = self.store.claim_next(lease_timeout_seconds=60)
+        expiry = self.store.heartbeat(task["id"], claim["lease_token"], 120)
+        self.assertGreater(expiry, claim["lease_expires_at"])
+        with self.assertRaisesRegex(ValueError, "lease lost or expired"):
+            self.store.heartbeat(task["id"], "not-the-token", 120)
 
     def test_audit_log_written(self):
         self.store.enqueue("system_audit", "Audit")

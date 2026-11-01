@@ -41,3 +41,10 @@ The SQLite task store now supports bounded retry and stale-running recovery:
 - Unsupported task types remain `blocked` and are not retried.
 
 **Important limitation:** the current worker only creates dry-run tickets and has no external side effects. Stale lease recovery must not be used for long-running external actions until lease heartbeats, ownership tokens, and idempotent side-effect handling are implemented. A timeout alone cannot prove that an old worker has stopped.
+
+
+## Lease ownership hardening
+
+The task store now assigns a unique lease token and expiry timestamp when a worker claims a task. A worker may renew only its own unexpired lease with `heartbeat(task_id, lease_token, timeout)`. Completion and retry operations require the same token and reject expired or superseded owners. Recovery clears the old token before re-queueing, fencing a delayed worker from completing a task after another worker has reclaimed it. Existing SQLite databases are migrated by adding the lease columns.
+
+This protects task-state transitions, but it does not make external side effects exactly-once. Before adding side-effecting handlers, use handler-level idempotency keys and reconcile the external operation's outcome; keep the worker dry-run until then.
