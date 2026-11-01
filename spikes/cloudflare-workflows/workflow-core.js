@@ -109,13 +109,18 @@ export async function runTaskWorkflow(rawPayload, step, adapters) {
       }
       throw error;
     }
-    if (!approval || approval.approved !== true ||
-        typeof approval.approval_id !== "string" || approval.approval_id.length < 1 ||
-        approval.approval_id.length > 128) {
+    // The Workers API documents the event payload as the waitForEvent return
+    // value. Accept the local emulator's WorkflowEvent wrapper as well, while
+    // validating the same strict payload shape in either case.
+    const approvalPayload = approval && typeof approval === "object" &&
+      approval.payload && typeof approval.payload === "object" ? approval.payload : approval;
+    if (!approvalPayload || approvalPayload.approved !== true ||
+        typeof approvalPayload.approval_id !== "string" || approvalPayload.approval_id.length < 1 ||
+        approvalPayload.approval_id.length > 128) {
       return { status: "blocked", reason: "approval_rejected", task_id: payload.task_id };
     }
-    approvalId = approval.approval_id;
-    if (adapters.afterStep) await adapters.afterStep("await-external-approval", approval);
+    approvalId = approvalPayload.approval_id;
+    if (adapters.afterStep) await adapters.afterStep("await-external-approval", approvalPayload);
   }
 
   const completed = await durableStep(step, "complete-task", () =>
