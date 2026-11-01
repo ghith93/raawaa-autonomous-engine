@@ -1,0 +1,10 @@
+name = "raawaa-autonomous-engine-control"
+main = "worker/index.js"
+compatibility_date = "2026-10-31"
+workers_dev = true
+
+[[d1_databases]]
+binding = "DB"
+database_name = "raawaa-autonomous-e"
+database_id = "f0ffbed3-940f-488d-a7d1-31cbc5fbf742"
+migrations_dir = "migrations"
