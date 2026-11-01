@@ -44,6 +44,9 @@ class QuotaAwareLiveGateway:
         )
         last_error = None
         for profile in candidates:
+            if (profile.max_output_tokens is None
+                    or request.max_output_tokens > profile.max_output_tokens):
+                continue
             if not self.quota_manager.eligible(profile, estimated_tokens):
                 continue
             adapter = self.adapters.get(profile.route_id) or self.adapters.get(profile.provider)

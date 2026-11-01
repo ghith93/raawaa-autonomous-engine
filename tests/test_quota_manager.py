@@ -19,7 +19,13 @@ class QuotaManagerTests(unittest.TestCase):
     def profile(self, **changes):
         values = dict(provider="groq", account="primary", model="model-a",
                       free_verified=True, commercial_use_allowed=True,
-                      daily_request_limit=10, daily_token_limit=1000, priority=10)
+                      daily_request_limit=10, daily_token_limit=1000, priority=10,
+                      endpoint_url="https://provider.example/v1",
+                      pricing_source_url="https://provider.example/pricing",
+                      quota_source_url="https://provider.example/limits",
+                      terms_source_url="https://provider.example/terms",
+                      verified_at=datetime(2026, 11, 1, 0, tzinfo=timezone.utc),
+                      max_output_tokens=512)
         values.update(changes)
         return QuotaProfile(**values)
 
@@ -35,6 +41,17 @@ class QuotaManagerTests(unittest.TestCase):
     def test_commercial_restriction_blocks_route(self):
         route = self.profile(commercial_use_allowed=False)
         self.assertIsNone(QuotaManager([route], self.ledger).select(10, self.now))
+
+    def test_route_requires_complete_recent_evidence(self):
+        missing = self.profile(endpoint_url=None)
+        stale = self.profile(verified_at=self.now.replace(year=2026) -
+                             __import__("datetime").timedelta(days=31))
+        future = self.profile(verified_at=self.now.replace(year=2026) +
+                              __import__("datetime").timedelta(days=1))
+        no_output_cap = self.profile(max_output_tokens=None)
+        manager = QuotaManager([missing, stale, future, no_output_cap], self.ledger)
+        for route in manager.profiles:
+            self.assertFalse(manager.eligible(route, 1, self.now))
 
     def test_daily_request_limit_rotates_to_next_account(self):
         first = self.profile()
