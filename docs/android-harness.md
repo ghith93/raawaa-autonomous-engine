@@ -14,7 +14,7 @@ Version 3.2 adds native project configuration (`harness.json`), project skill/pl
 - [Read-only environment doctor](../scripts/androidharness/doctor.py)
 - [Detailed 3.2 research and model evaluation](research/androidharness-3.2-evaluation.md)
 
-The project config defines read-only researcher/reviewer/security-reviewer profiles and auto-loads the project skill. It allows routine shell/edit/network operations only within normal app permissions, asks before deletion, denies outside-workspace access, and does not configure an MCP endpoint. These profiles are nested-agent profiles, not persistent autonomous agents.
+The project config defines read-only researcher/reviewer/security-reviewer profiles and auto-loads the project skill. It allows routine shell/edit/network operations within normal app permissions, asks before deletion, denies outside-workspace access in ordinary app modes, and does not configure an MCP endpoint. AndroidHarness Full access is a separate user-controlled app setting that can override project permission rules; it is not enabled or requested here. These profiles are nested-agent profiles, not persistent autonomous agents.
 
 AndroidHarness is registered as an optional external Android/Linux execution environment for this project. It complements GitHub Actions and Cloudflare; it does not replace the repository's control plane, task ledger, policy enforcement, or CI.
 
