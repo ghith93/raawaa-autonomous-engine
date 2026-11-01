@@ -47,6 +47,8 @@ Memory is local SQLite storage in the current implementation. Do not store API k
 
 ## Model and provider operations
 
+Before adding or enabling a provider profile, use the current [free-tier provider eligibility review](provider-free-tier-eligibility.md). It distinguishes public free-tier claims from account-specific limits and records data-handling and model-term restrictions.
+
 ```bash
 python -m engine.cli model-status
 python -m engine.cli free-models --provider all
