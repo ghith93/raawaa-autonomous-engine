@@ -111,15 +111,15 @@ Use a currently listed Kilo model with tool support for Code work. Use Pollinati
 
 The most balanced first benchmark is:
 
-- **Qwen3 1.7B GGUF, Q4_K_M** — approximately 1.28 GB.
-- AndroidHarness's own model recommendation lists a 4 GiB minimum RAM tier and supports a maximum context of 40,960 tokens; that is not a guarantee of stable performance on every workload.
-- Start with context 2,048, input 1,536, output 512, and four CPU threads.
+- **Qwen3 1.7B GGUF, Q4_K_M** — 1,282,439,584 bytes (~1.28 GB), pinned by AndroidHarness to revision `dcb19155b962dbb6389f4691a982043a8e651022` with SHA-256 `72c5c3cb38fa32d5256e2fe30d03e7a64c6c79e668ad84057e3bd66e250b24fb`. The bundled model catalog lists a 4 GiB minimum RAM tier and max context 40,960; this is not a guarantee of stable performance. The catalog says to check the source repository's license terms.
+- Alternative with an explicit Apache-2.0 catalog entry: **SmolLM2 1.7B GGUF, Q4_K_M** — 1,055,609,824 bytes (~1.06 GB), pinned revision `1f03464768bfcc0319fc50da8ff5fb20b6417ba2`, SHA-256 `77665ea4815999596525c636fbeb56ba8b080b46ae85efef4f0d986a139834d7`, 4 GiB minimum RAM and max context 8,192.
+- Start either candidate with context 2,048, input 1,536, output 512, and four CPU threads.
 - Measure generation latency, available RAM before/after, Android process stability, heat/thermal throttling and tool-call reliability.
 - Require at least 2.5 GB available RAM for the initial test; otherwise skip it.
 
 Other candidates:
 - [Qwen2.5-Coder 1.5B Q4_K_M](https://huggingface.co/bartowski/Qwen2.5-Coder-1.5B-Instruct-GGUF): approximately 0.99 GB; a small coding-specialist comparison candidate.
-- Qwen3 4B Q4_K_M: approximately 2.50 GB, with higher memory and heat risk. Do not start here on an 8 GB tablet.
+- Qwen3 4B Q4_K_M: 2,497,280,256 bytes (~2.50 GB), catalog minimum 6 GiB RAM, with higher memory and heat risk. Do not start here on an 8 GB tablet.
 
 Use local inference for offline summaries, classification and small helper tasks only after benchmarking. Do not make a small local model the main autonomous coding agent until it passes the same tool-use and completion tests as the cloud route. Verify the exact repository/model license before downloading or redistributing any quantization.
 
