@@ -2,24 +2,22 @@
 
 ## Status
 
-The operation ledger is implemented as a persistence and coordination primitive.
-It is not connected to the worker, external providers, messaging, commerce, billing,
-or deployment. All current worker behavior remains dry-run.
+The operation ledger is implemented as a persistence primitive. It is not connected
+to the worker, external providers, messaging, commerce, billing, or deployment.
+All current worker behavior remains dry-run.
 
 ## Required handler protocol
 
-1. Derive a stable idempotency key from the business intent (not from a retry number).
+1. Derive a stable idempotency key from the business intent, not a retry number.
 2. Call `OperationStore.prepare(type, key, payload)` before any external request.
    Reusing a key with different input is rejected.
-3. Claim the operation. Only a `pending` record can be claimed; the returned claim
-   token fences stale local workers from finalizing it.
-4. Send the same idempotency key to the downstream service when that service supports
-   idempotency. Persist its external reference and confirmed result.
-5. If the response is ambiguous (timeout, disconnect, process crash, or uncertain
-   provider response), mark or leave the operation unresolved. Do not replay it.
-6. Reconcile against the downstream system. Use `reconcile(..., "succeeded")` if the
-   effect is confirmed, or `reconcile(..., "not_performed")` only when the downstream
-   system confirms it did not happen. The latter returns the operation to `pending`.
+3. Claim the operation. Only a `pending` record can be claimed; its claim token
+   fences stale local workers from finalizing it.
+4. Send the same idempotency key downstream when supported, then persist the
+   external reference and confirmed result.
+5. On an ambiguous response, stop the attempt and mark it `unknown`. Never replay it.
+6. Reconcile only after independently checking the downstream system. A confirmed
+   success becomes terminal. Return to `pending` only when non-execution is confirmed.
 
 ## Guarantees and limitations
 
@@ -27,12 +25,14 @@ or deployment. All current worker behavior remains dry-run.
 - A transaction allows only one local claim from `pending`.
 - Claim tokens prevent stale local workers from finalizing an operation.
 - `executing` and `unknown` operations are never automatically replayed.
-- This is not an exactly-once delivery guarantee. A downstream API must honor the
-  same idempotency key, or expose a reliable lookup/reconciliation mechanism, to
-  prevent duplicate effects across network/process failures.
-- A crash after the external effect but before local success persistence leaves an
-  `executing` record. It must be reconciled; do not reset it automatically.
-- The ledger does not authorize an external action. Existing policy/approval gates
+- Reconciliation cannot release a still-`executing` claim. An attempt must first end
+  and be marked `unknown`, preventing an operator from accidentally releasing a
+  live claim while its request may still be in flight.
+- A crash can leave an operation `executing`; an operator/recovery procedure must
+  establish that the old attempt is no longer active before marking it unknown.
+- This is not exactly-once delivery. The downstream API must honor the same key or
+  expose reliable lookup/reconciliation to prevent duplicate effects across failures.
+- The ledger does not authorize external actions; existing policy and approval gates
   remain mandatory.
 
 ## Validation
