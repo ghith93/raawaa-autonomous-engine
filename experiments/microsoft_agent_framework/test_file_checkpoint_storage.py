@@ -10,10 +10,10 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from agent_framework._workflows._checkpoint import WorkflowCheckpoint
+from agent_framework.exceptions import WorkflowCheckpointException
 
 from experiments.microsoft_agent_framework.checkpoint_envelope import CheckpointEnvelopeError
 from experiments.microsoft_agent_framework.file_checkpoint_storage import FileEnvelopeCheckpointStorage
-from experiments.microsoft_agent_framework.framework_checkpoint_storage import FrameworkCheckpointStorageError
 
 
 TEST_INTEGRITY_KEY = b"test-only-checkpoint-integrity-key-32-bytes"
@@ -86,7 +86,7 @@ class FileCheckpointStorageTests(unittest.TestCase):
             ))
             self.assertTrue(await storage.delete("delete-checkpoint"))
             restarted = FileEnvelopeCheckpointStorage(directory, integrity_key=TEST_INTEGRITY_KEY)
-            with self.assertRaises(Exception):
+            with self.assertRaises(WorkflowCheckpointException):
                 await restarted.load("delete-checkpoint")
         with tempfile.TemporaryDirectory() as directory:
             asyncio.run(scenario(directory))
