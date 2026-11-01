@@ -28,6 +28,35 @@ jobs:
           python-version: "3.11"
       - name: Validate safe execution policy
         run: python -m engine.cli audit
+      - name: Diagnose public Worker health path
+        env:
+          ENGINE_API_URL: https://raawaa-autonomous-engine-control.ghith-shikhkhaled.workers.dev
+        run: |
+          python - <<'PY'
+          import os
+          from urllib.error import HTTPError, URLError
+          from urllib.request import Request, urlopen
+
+          url = os.environ["ENGINE_API_URL"].rstrip("/") + "/health"
+          request = Request(url, headers={"Accept": "application/json"}, method="GET")
+          try:
+              with urlopen(request, timeout=15) as response:
+                  print(f"Public Worker health returned HTTP {response.status}.")
+                  headers = response.headers
+          except HTTPError as error:
+              print(f"Public Worker health returned HTTP {error.code}.")
+              headers = error.headers
+          except (URLError, TimeoutError, OSError) as error:
+              print(f"Public Worker health failed: {type(error).__name__}.")
+              headers = None
+
+          # Emit only non-secret response metadata to help distinguish edge,
+          # method-specific, and Worker/D1 failures. Never print response bodies.
+          for name in ("CF-Ray", "cf-mitigated", "server", "content-type"):
+              value = headers.get(name) if headers else None
+              if value:
+                  print(f"{name}: {value}")
+          PY
       - name: Verify authenticated POST path before task operations
         env:
           ENGINE_API_URL: https://raawaa-autonomous-engine-control.ghith-shikhkhaled.workers.dev
