@@ -429,8 +429,12 @@ class QuotaManager:
                 "minute_token_limit": profile.minute_token_limit,
                 "daily_requests_used": usage["requests"],
                 "daily_tokens_used": usage["tokens"],
+                "daily_request_limit": profile.daily_request_limit,
+                "daily_token_limit": profile.daily_token_limit,
                 "monthly_requests_used": monthly["requests"],
                 "monthly_tokens_used": monthly["tokens"],
+                "monthly_request_limit": profile.monthly_request_limit,
+                "monthly_token_limit": profile.monthly_token_limit,
                 "eligible": self.eligible(profile, 1, now),
                 "cooldown": self.ledger.cooldown_active(profile.route_id, now),
             })

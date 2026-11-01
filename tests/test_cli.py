@@ -27,6 +27,7 @@ class CliTests(unittest.TestCase):
             ["memory-archive", "--id", "memory-id"],
             ["model-status"],
             ["provider-profile-status"],
+            ["quota-status"],
         ]
         for command in commands:
             with self.subTest(command=command):
@@ -90,6 +91,37 @@ class CliTests(unittest.TestCase):
             with patch.object(cli, "ROOT", root), contextlib.redirect_stdout(output):
                 self.assertEqual(cli.audit(), 1)
             self.assertIn("disabled in safe_dry_run", output.getvalue())
+
+
+    def test_quota_status_is_local_and_reports_disabled_profiles(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            output = io.StringIO()
+            with patch.dict(os.environ, {"RAAWAA_ENGINE_DB": os.path.join(tmp, "engine.db")}):
+                with patch("sys.argv", ["engine", "quota-status"]):
+                    with contextlib.redirect_stdout(output):
+                        self.assertEqual(cli.main(), 0)
+            result = json.loads(output.getvalue())
+            self.assertEqual(result["network_calls_performed"], 0)
+            self.assertEqual(result["route_count"], 3)
+            self.assertEqual(result["eligible_routes"], 0)
+            self.assertEqual(result["alerts"], [])
+            self.assertTrue(all(not route["enabled"] for route in result["routes"]))
+            self.assertNotIn("gsk_", output.getvalue())
+
+    def test_quota_alerts_warn_at_eighty_percent_and_critical_at_limit(self):
+        route = {
+            "route_id": "groq:test:model",
+            "minute_requests_used": 24,
+            "minute_request_limit": 30,
+            "minute_tokens_used": 8000,
+            "minute_token_limit": 8000,
+            "daily_requests_used": 1,
+            "daily_request_limit": 1000,
+        }
+        alerts = cli.quota_alerts([route])
+        self.assertEqual(len(alerts), 2)
+        self.assertEqual({item["level"] for item in alerts}, {"warning", "critical"})
+        self.assertEqual({item["window"] for item in alerts}, {"minute"})
 
     def test_memory_cli_lifecycle(self):
         with tempfile.TemporaryDirectory() as tmp:
