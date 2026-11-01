@@ -49,10 +49,12 @@ def _request_json(query: str, token: str = "", timeout: int = 15) -> dict:
     return payload
 
 
-def discover_repositories(queries=None, environ=None, max_per_query=5, request_fn=None, now=None):
+def discover_repositories(queries=None, environ=None, max_per_query=5, max_queries=6, request_fn=None, now=None):
     """Search a bounded set of GitHub topics and return unreviewed candidates."""
     if isinstance(max_per_query, bool) or not isinstance(max_per_query, int) or not 1 <= max_per_query <= 10:
         raise ValueError("max_per_query must be an integer between 1 and 10")
+    if isinstance(max_queries, bool) or not isinstance(max_queries, int) or not 1 <= max_queries <= 10:
+        raise ValueError("max_queries must be an integer between 1 and 10")
     query_map = DEFAULT_QUERIES if queries is None else queries
     if not isinstance(query_map, dict) or not 1 <= len(query_map) <= 10:
         raise ValueError("queries must contain between 1 and 10 named queries")
@@ -66,9 +68,8 @@ def discover_repositories(queries=None, environ=None, max_per_query=5, request_f
     candidates = {}
     unavailable = {}
     requests_made = 0
-    for name, query in query_map.items():
-        if requests_made + len(unavailable) >= 10:
-            break
+    query_items = list(query_map.items())[:max_queries]
+    for name, query in query_items:
         try:
             payload = fetch(query, token)
             requests_made += 1
@@ -100,7 +101,7 @@ def discover_repositories(queries=None, environ=None, max_per_query=5, request_f
     ordered = sorted(candidates.values(), key=lambda item: (item["pushed_at"] or "", item["stars"], item["full_name"]), reverse=True)
     return {
         "schema_version": 1, "discovery_only": True, "source": "github_public_repository_search",
-        "retrieved_at": retrieved_at, "queries_attempted": requests_made + len(unavailable),
+        "retrieved_at": retrieved_at, "queries_attempted": len(query_items),
         "requests_made": requests_made, "generation_requests": 0, "code_execution": False,
         "installation_or_cloning": False, "candidate_count": len(ordered), "candidates": ordered,
         "unavailable": unavailable, "review_required": True,
