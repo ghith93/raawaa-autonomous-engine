@@ -54,8 +54,8 @@ class CliTests(unittest.TestCase):
         output = io.StringIO()
         with contextlib.redirect_stdout(output):
             self.assertEqual(cli.audit(), 0)
-        self.assertIn("3 staged provider profiles", output.getvalue())
-        self.assertIn("inference disabled", output.getvalue())
+        self.assertIn("3 provider profiles", output.getvalue())
+        self.assertIn("safe dry-run", output.getvalue())
 
     def test_memory_cli_lifecycle(self):
         with tempfile.TemporaryDirectory() as tmp:
