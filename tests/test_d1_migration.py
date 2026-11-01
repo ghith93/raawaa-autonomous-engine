@@ -9,19 +9,20 @@ import unittest
 
 
 ROOT = Path(__file__).resolve().parents[1]
-MIGRATION = ROOT / "migrations" / "0001_initial.sql"
+MIGRATIONS = sorted((ROOT / "migrations").glob("*.sql"))"
 
 
 class D1MigrationTests(unittest.TestCase):
     def setUp(self):
         self.db = sqlite3.connect(":memory:")
-        self.sql = MIGRATION.read_text(encoding="utf-8")
+        self.sql = [path.read_text(encoding="utf-8") for path in MIGRATIONS]
 
     def tearDown(self):
         self.db.close()
 
     def test_migration_creates_expected_tables_and_indexes(self):
-        self.db.executescript(self.sql)
+        for migration in self.sql:
+            self.db.executescript(migration)
         tables = {
             row[0] for row in self.db.execute(
                 "SELECT name FROM sqlite_master WHERE type='table'"
@@ -29,7 +30,7 @@ class D1MigrationTests(unittest.TestCase):
         }
         self.assertTrue({
             "schema_migrations", "tasks", "audit_log", "operations",
-            "memories", "model_usage",
+            "memories", "model_usage", "quota_usage", "quota_cooldowns", "quota_audit_events",
         }.issubset(tables))
 
         indexes = {
@@ -49,7 +50,7 @@ class D1MigrationTests(unittest.TestCase):
         versions = self.db.execute(
             "SELECT version FROM schema_migrations"
         ).fetchall()
-        self.assertEqual(versions, [("0001_initial",)])
+        self.assertEqual(versions, [("0001_initial",), ("0002_quota_ledger",)])
 
     def test_task_status_constraint_matches_runtime_contract(self):
         self.db.executescript(self.sql)
