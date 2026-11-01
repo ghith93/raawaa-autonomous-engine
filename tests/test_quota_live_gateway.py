@@ -103,6 +103,40 @@ class QuotaAwareGatewayTests(unittest.TestCase):
             len(self.request.prompt.encode("utf-8")) + self.request.max_output_tokens,
         )
 
+    def test_mocked_response_is_rejected_by_live_gateway(self):
+        class MockedCompletion:
+            def generate(self, model, request):
+                return GenerationResponse("groq", model, "mock output", 5, 7, 0.0, mocked=True)
+
+        profile = self.profile()
+        manager = QuotaManager([profile], self.quota)
+        gateway = QuotaAwareLiveGateway(
+            manager, {"groq": MockedCompletion()}, self.usage, True
+        )
+        with self.assertRaisesRegex(ProviderUnavailable, "failed unexpectedly"):
+            gateway.generate(self.request)
+        row = manager.snapshot()[0]
+        self.assertEqual(row["daily_requests_used"], 1)
+        self.assertEqual(
+            row["daily_tokens_used"],
+            len(self.request.prompt.encode("utf-8")) + self.request.max_output_tokens,
+        )
+        self.assertEqual(self.usage.totals()["daily_usd"], 0.0)
+
+    def test_empty_completion_is_rejected_by_live_gateway(self):
+        class EmptyCompletion:
+            def generate(self, model, request):
+                return GenerationResponse("groq", model, "   ", 5, 0, 0.0, mocked=False)
+
+        profile = self.profile()
+        manager = QuotaManager([profile], self.quota)
+        gateway = QuotaAwareLiveGateway(
+            manager, {"groq": EmptyCompletion()}, self.usage, True
+        )
+        with self.assertRaisesRegex(ProviderUnavailable, "failed unexpectedly"):
+            gateway.generate(self.request)
+        self.assertEqual(manager.snapshot()[0]["daily_requests_used"], 1)
+
     def test_mismatched_provider_response_is_rejected_before_accounting(self):
         class WrongProvider:
             def generate(self, model, request):
