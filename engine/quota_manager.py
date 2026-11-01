@@ -17,9 +17,19 @@ def _valid_https_url(value: str | None) -> bool:
         return False
     try:
         parsed = urlsplit(value)
+        host = (parsed.hostname or "").lower().rstrip(".")
+        reserved_hosts = (
+            "localhost", "example.com", "example.net", "example.org",
+        )
+        is_reserved = (
+            host in reserved_hosts
+            or any(host.endswith("." + suffix) for suffix in reserved_hosts)
+            or any(host.endswith(suffix) for suffix in (".example", ".invalid", ".test", ".localhost"))
+        )
         return (
             parsed.scheme == "https"
-            and bool(parsed.hostname)
+            and bool(host)
+            and not is_reserved
             and parsed.username is None
             and parsed.password is None
         )
