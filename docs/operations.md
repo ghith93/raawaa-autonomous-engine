@@ -65,7 +65,7 @@ Never add paid fallback or automatic billing upgrades without explicit approval.
 
 ## GitHub Actions and deployment
 
-GitHub Actions runs CI and a scheduled, bounded D1 queue consumer every 15 minutes. Each invocation runs at most five tasks or admits new tasks for at most 60 seconds, whichever comes first; GitHub schedule delivery can be delayed and is not a real-time SLA. The Cloudflare Worker separately recovers expired leases every 15 minutes. Neither scheduler is an always-on process.
+GitHub Actions runs CI and is configured to invoke a scheduled, bounded D1 queue consumer every 15 minutes. Each invocation runs at most five tasks or admits new tasks for at most 60 seconds, whichever comes first; GitHub schedule delivery can be delayed and is not a real-time SLA. The Cloudflare Worker separately recovers expired leases every 15 minutes. Recent scheduled Task Runner attempts have reached the workflow but failed at the authenticated POST preflight with HTTP 403, so successful D1 batch processing is not currently verified. Neither scheduler is an always-on process.
 
 Before selecting a host, verify free-tier limits, sleep behavior, persistent disk availability, outbound network rules, and whether the service can run without a payment method. Do not assume a free trial is a recurring free tier.
 
@@ -86,14 +86,15 @@ Agents may research and propose changes. Policy gates must control execution. Ke
 
 ## Known limitations and next steps
 
-- No persistent scheduler or always-on worker.
-- No unattended autonomous agent loop.
+- No persistent scheduler or always-on service; GitHub Actions and the Cloudflare cron are bounded scheduled jobs.
+- No unattended live-agent loop: the scheduled worker defaults to dry-run, and no verified provider profile or credentials are configured.
 - No notification channel.
-- No production deployment.
-- Long-running task handlers still need periodic heartbeat renewal; the stores already enforce lease-token ownership fencing, and external side effects need handler-level idempotency before activation.
-- Local SQLite memory and task state need an explicit backup/retention strategy for production.
+- The Cloudflare control Worker and D1 binding have been deployed, but the current Task Runner is blocked at the authenticated POST preflight by HTTP 403. A complete D1 batch has not been verified after the latest changes.
+- Lease-token fencing and periodic heartbeat renewal are implemented and covered by tests. External side effects still require handler-specific idempotency before activation.
+- Local SQLite memory and model-usage state need an explicit backup/retention strategy for production.
+- The next diagnostic workflow revision compares public `/health` GET with authenticated POST and records only safe response metadata. If the two paths are both rejected, inspect Cloudflare Security Events or Access logs using the corresponding Ray ID; do not weaken security controls as a workaround.
 
-Recommended next work: harden task ownership and concurrent recovery, add side-effect handler contracts, then implement a bounded scheduler/worker on a verified free persistent host.
+Recommended next work: identify and resolve the HTTP 403 at the Cloudflare/edge boundary, verify one complete bounded D1 batch, then continue with side-effect idempotency and a genuinely free persistent host assessment.
 
 ## Diagnosing the authenticated D1 task API
 
@@ -127,4 +128,4 @@ The quota ledger enforces both daily and monthly request/token limits. Monthly l
 
 The worker accepts an optional, programmatically constructed `QuotaAwareLiveGateway`. The default CLI and scheduled Task Runner do not construct or inject one, so the normal execution path remains a deterministic zero-network dry run. Live execution is considered only when the operator switch `RAAWAA_ENGINE_LIVE_INFERENCE=enabled` is present **and** a gateway has been explicitly injected. The gateway independently requires its programmatic network flag, a task ID, and at least one currently verified eligible provider profile with atomic per-task/daily/monthly request and token reservations.
 
-The worker sends the task title and JSON payload to the selected provider only in that explicitly enabled path. Treat queued payloads as untrusted input and do not enqueue secrets, passwords, private customer records, or other sensitive data. The live request is bounded to 256 output tokens. Provider/gateway failures are terminally blocked for that attempt rather than automatically retried, because a timeout or transport failure may mean the provider already processed the request. Lease heartbeat and ownership fencing remain required before result persistence. No provider profile or credential is shipped/configured by this change; therefore this wiring alone does not enable live inference or change scheduled jobs from dry-run mode.
+The worker sends the task title and JSON payload to the selected provider only in that explicitly enabled path. Treat queued payloads as untrusted input and do not enqueue secrets, passwords, private customer records, or other sensitive data. The live request is bounded to 256 output tokens. Provider/gateway failures are terminally blocked for that attempt rather than automatically retried, because a timeout or transport failure may mean the provider already processed the request. Lease heartbeat renewal and ownership fencing are enforced before result persistence. No provider profile or credential is shipped/configured by this change; therefore this wiring alone does not enable live inference or change scheduled jobs from dry-run mode.
