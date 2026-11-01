@@ -18,7 +18,7 @@ class QuotaManagerTests(unittest.TestCase):
 
     def profile(self, **changes):
         values = dict(provider="groq", account="primary", model="model-a",
-                      free_verified=True, commercial_use_allowed=True, production_use_allowed=True,
+                      free_verified=True, commercial_use_allowed=True, production_use_allowed=True, enabled=True,
                       minute_request_limit=30, minute_token_limit=8000,
                       daily_request_limit=10, daily_token_limit=1000,
                       monthly_request_limit=100, monthly_token_limit=10000,
@@ -57,6 +57,12 @@ class QuotaManagerTests(unittest.TestCase):
                 route.input_cost_per_million_usd, route.output_cost_per_million_usd
             )):
                 self.assertFalse(manager.eligible(route, 1, self.now))
+        self.assertIsNone(manager.select(1, self.now))
+
+    def test_disabled_profile_is_never_eligible_or_selected(self):
+        route = self.profile(enabled=False)
+        manager = QuotaManager([route], self.ledger)
+        self.assertFalse(manager.eligible(route, 1, self.now))
         self.assertIsNone(manager.select(1, self.now))
 
     def test_preview_or_nonproduction_profile_is_never_eligible(self):
