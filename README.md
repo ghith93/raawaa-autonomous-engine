@@ -56,4 +56,4 @@ python -m engine.cli run-once
 4. Verify a genuinely free host with durable storage before moving beyond scheduled bounded jobs to a continuously running service.
 5. Add notifications and external integrations incrementally while preserving the kill switch, quota ledger, and default dry-run posture.
 
-See [Architecture](docs/architecture.md) and [Operations](docs/operations.md). For the current free-tier, commercial-use, and data-handling assessment, see [Provider free-tier eligibility](docs/provider-free-tier-eligibility.md).
+See [Architecture](docs/architecture.md) and [Operations](docs/operations.md). The additive [Continuous Improvement and Research Charter](docs/continuous-improvement-charter.md) governs proactive research and incremental capability development without replacing existing architecture or safety policy. The [Reusable Task-Completion Handoff Prompt](docs/task-completion-handoff-prompt.md) can be sent after each work cycle to resume from the latest verified state. For the current free-tier, commercial-use, and data-handling assessment, see [Provider free-tier eligibility](docs/provider-free-tier-eligibility.md).
