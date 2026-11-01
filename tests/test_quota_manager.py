@@ -53,6 +53,28 @@ class QuotaManagerTests(unittest.TestCase):
         for route in manager.profiles:
             self.assertFalse(manager.eligible(route, 1, self.now))
 
+    def test_invalid_https_evidence_urls_are_rejected(self):
+        invalid_endpoint = self.profile(endpoint_url="https://")
+        credentialed_source = self.profile(
+            pricing_source_url="https://user:password@provider.example/pricing"
+        )
+        manager = QuotaManager([invalid_endpoint, credentialed_source], self.ledger)
+        for route in manager.profiles:
+            self.assertFalse(manager.eligible(route, 1, self.now))
+
+    def test_invalid_quota_limit_types_are_rejected(self):
+        bool_request_limit = self.profile(daily_request_limit=True)
+        bool_token_limit = self.profile(daily_token_limit=True)
+        manager = QuotaManager([bool_request_limit, bool_token_limit], self.ledger)
+        for route in manager.profiles:
+            self.assertFalse(manager.eligible(route, 1, self.now))
+
+    def test_invalid_estimated_token_count_is_rejected(self):
+        route = self.profile()
+        manager = QuotaManager([route], self.ledger)
+        self.assertFalse(manager.eligible(route, True, self.now))
+        self.assertFalse(manager.eligible(route, 0, self.now))
+
     def test_daily_request_limit_rotates_to_next_account(self):
         first = self.profile()
         second = self.profile(account="secondary", priority=20)
