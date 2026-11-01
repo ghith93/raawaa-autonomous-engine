@@ -8,6 +8,7 @@ on:
       - "engine/research_discovery.py"
       - "config/research_sources.json"
       - "scripts/persist_research_candidates.py"
+      - "scripts/triage_research_candidates.py"
       - "worker/index.js"
       - "migrations/**"
   schedule:
@@ -38,6 +39,8 @@ jobs:
         run: python -m engine.cli audit
       - name: Discover public research candidates
         run: python -m engine.cli research-discover --max-per-query 5 > research-candidates.json
+      - name: Rank candidates for manual review
+        run: python scripts/triage_research_candidates.py research-candidates.json > research-triage.json
       - name: Upload bounded research snapshot
         uses: actions/upload-artifact@v4
         with:
@@ -45,7 +48,15 @@ jobs:
           path: research-candidates.json
           if-no-files-found: error
           retention-days: 30
+      - name: Upload first-pass triage report
+        uses: actions/upload-artifact@v4
+        with:
+          name: research-triage-${{ github.run_id }}
+          path: research-triage.json
+          if-no-files-found: error
+          retention-days: 30
       - name: Persist research metadata in D1
+        if: vars.RAAWAA_ENGINE_RESEARCH_PERSISTENCE == 'enabled'
         env:
           RAAWAA_ENGINE_API_URL: https://raawaa-autonomous-engine-control.ghith-shikhkhaled.workers.dev
           RAAWAA_ENGINE_API_TOKEN: ${{ secrets.ENGINE_API_TOKEN }}
