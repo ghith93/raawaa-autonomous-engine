@@ -4,6 +4,7 @@ from __future__ import annotations
 import asyncio
 import inspect
 import json
+import secrets
 
 from agent_framework import step, workflow
 from agent_framework.openai import OpenAIChatCompletionClient
@@ -41,7 +42,7 @@ async def parallel_research(topic: str) -> str:
 
 
 async def run_evaluation() -> dict:
-    storage = InMemoryEnvelopeCheckpointStorage()
+    storage = InMemoryEnvelopeCheckpointStorage(integrity_key=secrets.token_bytes(32))
     instance = parallel_research.build(checkpoint_storage=storage)
 
     first = await instance.run("agent orchestration")

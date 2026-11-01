@@ -19,8 +19,8 @@ from agent_framework.exceptions import WorkflowCheckpointException
 
 from .checkpoint_envelope import (
     CheckpointEnvelopeError,
-    decode_checkpoint_envelope,
-    encode_checkpoint_envelope,
+    decode_authenticated_checkpoint_envelope,
+    encode_authenticated_checkpoint_envelope,
 )
 
 
@@ -37,11 +37,14 @@ class InMemoryEnvelopeCheckpointStorage:
     have been reviewed.
     """
 
-    def __init__(self, allowed_checkpoint_types: tuple[str, ...] = ()) -> None:
+    def __init__(self, integrity_key: bytes, allowed_checkpoint_types: tuple[str, ...] = ()) -> None:
+        if not isinstance(integrity_key, bytes) or len(integrity_key) < 32:
+            raise ValueError("integrity_key must contain at least 32 secret bytes")
         if not isinstance(allowed_checkpoint_types, tuple) or any(
             not isinstance(item, str) or not item for item in allowed_checkpoint_types
         ):
             raise ValueError("allowed_checkpoint_types must be a tuple of non-empty type keys")
+        self._integrity_key = integrity_key
         self._allowed_types = frozenset(allowed_checkpoint_types)
         self._records: dict[str, bytes] = {}
         self._lock = asyncio.Lock()
@@ -54,7 +57,7 @@ class InMemoryEnvelopeCheckpointStorage:
 
     def _decode_record(self, checkpoint_id: str, encoded: bytes) -> tuple[WorkflowCheckpoint, int]:
         try:
-            envelope = decode_checkpoint_envelope(encoded)
+            envelope = decode_authenticated_checkpoint_envelope(encoded, integrity_key=self._integrity_key)
             payload = envelope["payload"]
             workflow_name = payload["workflow_name"]
             if envelope["checkpoint_id"] != checkpoint_id:
@@ -104,14 +107,14 @@ class InMemoryEnvelopeCheckpointStorage:
         async with self._lock:
             existing = self._records.get(checkpoint.checkpoint_id)
             if existing is not None:
-                prior = decode_checkpoint_envelope(existing)
+                prior = decode_authenticated_checkpoint_envelope(existing, integrity_key=self._integrity_key)
                 if prior["payload"].get("framework_checkpoint") != framework_payload:
                     raise FrameworkCheckpointStorageError("checkpoint ID already exists with different content")
                 return checkpoint.checkpoint_id
 
             sequence = 1
             for record in self._records.values():
-                envelope = decode_checkpoint_envelope(record)
+                envelope = decode_authenticated_checkpoint_envelope(record, integrity_key=self._integrity_key)
                 if envelope["workflow_id"] == workflow_id:
                     sequence = max(sequence, envelope["sequence"] + 1)
 
@@ -120,7 +123,8 @@ class InMemoryEnvelopeCheckpointStorage:
                 "graph_signature_hash": checkpoint.graph_signature_hash,
                 "framework_checkpoint": framework_payload,
             }
-            self._records[checkpoint.checkpoint_id] = encode_checkpoint_envelope(
+            self._records[checkpoint.checkpoint_id] = encode_authenticated_checkpoint_envelope(
+                integrity_key=self._integrity_key,
                 workflow_id=workflow_id,
                 checkpoint_id=checkpoint.checkpoint_id,
                 parent_checkpoint_id=checkpoint.previous_checkpoint_id,
@@ -143,7 +147,7 @@ class InMemoryEnvelopeCheckpointStorage:
             records = list(self._records.items())
         selected = []
         for checkpoint_id, encoded in records:
-            envelope = decode_checkpoint_envelope(encoded)
+            envelope = decode_authenticated_checkpoint_envelope(encoded, integrity_key=self._integrity_key)
             if envelope["workflow_id"] == workflow_id:
                 checkpoint, sequence = self._decode_record(checkpoint_id, encoded)
                 selected.append((sequence, checkpoint))
@@ -159,7 +163,7 @@ class InMemoryEnvelopeCheckpointStorage:
             records = list(self._records.items())
         selected = []
         for checkpoint_id, encoded in records:
-            envelope = decode_checkpoint_envelope(encoded)
+            envelope = decode_authenticated_checkpoint_envelope(encoded, integrity_key=self._integrity_key)
             if envelope["workflow_id"] == workflow_id:
                 checkpoint, sequence = self._decode_record(checkpoint_id, encoded)
                 selected.append((sequence, checkpoint))
@@ -173,7 +177,7 @@ class InMemoryEnvelopeCheckpointStorage:
             records = list(self._records.items())
         selected = []
         for checkpoint_id, encoded in records:
-            envelope = decode_checkpoint_envelope(encoded)
+            envelope = decode_authenticated_checkpoint_envelope(encoded, integrity_key=self._integrity_key)
             if envelope["workflow_id"] == workflow_id:
                 _, sequence = self._decode_record(checkpoint_id, encoded)
                 selected.append((sequence, checkpoint_id))

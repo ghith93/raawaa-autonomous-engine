@@ -13,9 +13,12 @@ from experiments.microsoft_agent_framework.framework_checkpoint_storage import (
     InMemoryEnvelopeCheckpointStorage,
 )
 from experiments.microsoft_agent_framework.checkpoint_envelope import (
-    decode_checkpoint_envelope,
-    encode_checkpoint_envelope,
+    decode_authenticated_checkpoint_envelope,
+    encode_authenticated_checkpoint_envelope,
 )
+
+
+TEST_INTEGRITY_KEY = b"test-only-checkpoint-integrity-key-32-bytes"
 
 
 class ApplicationOnlyState:
@@ -26,7 +29,7 @@ class ApplicationOnlyState:
 class FrameworkCheckpointStorageTests(unittest.TestCase):
     def test_framework_codec_round_trip_and_checkpoint_storage_protocol(self):
         async def scenario():
-            storage = InMemoryEnvelopeCheckpointStorage()
+            storage = InMemoryEnvelopeCheckpointStorage(integrity_key=TEST_INTEGRITY_KEY)
             first = WorkflowCheckpoint(
                 workflow_name="parallel-research",
                 graph_signature_hash="graph-v1",
@@ -63,7 +66,7 @@ class FrameworkCheckpointStorageTests(unittest.TestCase):
 
     def test_checkpoint_codec_rejects_unapproved_application_types(self):
         async def scenario():
-            storage = InMemoryEnvelopeCheckpointStorage()
+            storage = InMemoryEnvelopeCheckpointStorage(integrity_key=TEST_INTEGRITY_KEY)
             checkpoint = WorkflowCheckpoint(
                 workflow_name="custom-state",
                 graph_signature_hash="graph-v1",
@@ -76,7 +79,7 @@ class FrameworkCheckpointStorageTests(unittest.TestCase):
 
     def test_duplicate_checkpoint_id_cannot_change_content(self):
         async def scenario():
-            storage = InMemoryEnvelopeCheckpointStorage()
+            storage = InMemoryEnvelopeCheckpointStorage(integrity_key=TEST_INTEGRITY_KEY)
             first = WorkflowCheckpoint(
                 workflow_name="duplicate-test",
                 graph_signature_hash="graph-v1",
@@ -96,7 +99,7 @@ class FrameworkCheckpointStorageTests(unittest.TestCase):
 
     def test_tampered_record_fails_before_framework_deserialization(self):
         async def scenario():
-            storage = InMemoryEnvelopeCheckpointStorage()
+            storage = InMemoryEnvelopeCheckpointStorage(integrity_key=TEST_INTEGRITY_KEY)
             checkpoint = WorkflowCheckpoint(
                 workflow_name="tamper-test",
                 graph_signature_hash="graph-v1",
@@ -109,14 +112,14 @@ class FrameworkCheckpointStorageTests(unittest.TestCase):
             storage._records["tamper-checkpoint"] = json.dumps(
                 envelope, ensure_ascii=False, sort_keys=True, separators=(",", ":")
             ).encode()
-            with self.assertRaisesRegex(ValueError, "integrity"):
+            with self.assertRaisesRegex(ValueError, "authentication"):
                 await storage.load("tamper-checkpoint")
         asyncio.run(scenario())
 
 
     def test_recomputed_envelope_cannot_change_graph_signature(self):
         async def scenario():
-            storage = InMemoryEnvelopeCheckpointStorage()
+            storage = InMemoryEnvelopeCheckpointStorage(integrity_key=TEST_INTEGRITY_KEY)
             checkpoint = WorkflowCheckpoint(
                 workflow_name="graph-test",
                 graph_signature_hash="graph-v1",
@@ -124,10 +127,13 @@ class FrameworkCheckpointStorageTests(unittest.TestCase):
                 state={"value": 1},
             )
             await storage.save(checkpoint)
-            envelope = decode_checkpoint_envelope(storage._records["graph-checkpoint"])
+            envelope = decode_authenticated_checkpoint_envelope(
+                storage._records["graph-checkpoint"], integrity_key=TEST_INTEGRITY_KEY
+            )
             payload = dict(envelope["payload"])
             payload["graph_signature_hash"] = "forged-graph"
-            storage._records["graph-checkpoint"] = encode_checkpoint_envelope(
+            storage._records["graph-checkpoint"] = encode_authenticated_checkpoint_envelope(
+                integrity_key=TEST_INTEGRITY_KEY,
                 workflow_id=envelope["workflow_id"],
                 checkpoint_id=envelope["checkpoint_id"],
                 parent_checkpoint_id=envelope["parent_checkpoint_id"],
@@ -140,7 +146,7 @@ class FrameworkCheckpointStorageTests(unittest.TestCase):
 
     def test_workflow_names_are_isolated(self):
         async def scenario():
-            storage = InMemoryEnvelopeCheckpointStorage()
+            storage = InMemoryEnvelopeCheckpointStorage(integrity_key=TEST_INTEGRITY_KEY)
             await storage.save(WorkflowCheckpoint(
                 workflow_name="workflow-a", graph_signature_hash="a", checkpoint_id="cp-a"
             ))

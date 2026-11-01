@@ -84,6 +84,14 @@ Exact PR-head isolated evaluation [run 41358422590](https://github.com/ghith93/r
 
 This proves the pinned framework's current functional workflow can checkpoint and resume through the isolated adapter. It does not prove durability across process restart, D1 compatibility, concurrent distributed writes, or authenticated storage.
 
+## Authenticated checkpoint envelope prototype (2026-11-02)
+
+The envelope now has an authenticated variant using HMAC-SHA256 with domain separation. It requires a key of at least 32 bytes supplied out-of-band; the key is never embedded in the record. The decoder verifies the HMAC in constant time before returning checkpoint payload data. Tests cover correct-key round-trip, wrong-key rejection, short/missing keys, and a storage writer who changes checkpoint content and recomputes the unkeyed SHA-256 checksum but cannot produce a valid HMAC.
+
+The in-memory framework adapter now requires an integrity key. The isolated workflow evaluation generates a fresh random 32-byte key per run; unit tests use a clearly test-only fixture key. This demonstrates the authentication boundary without configuring or exposing any real credential.
+
+HMAC protects against a storage writer who can alter stored records but does not possess the separately managed key. It does not protect against compromise of the application process or key, and it does not make pickle safe. The framework codec still requires trusted checkpoint provenance and strict storage access controls. No production secret, D1 write, Worker change, or migration is part of this prototype.
+
 ## Decision and safety
 
 Do not replace the current runtime or add these dependencies to default engine requirements yet. The experiment remains isolated and optional. The evaluation sends zero provider requests, uses zero paid services, requires no credentials, and does not change production data or deployment state.

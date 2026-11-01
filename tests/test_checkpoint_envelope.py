@@ -4,7 +4,9 @@ import unittest
 from experiments.microsoft_agent_framework.checkpoint_envelope import (
     MAX_ENVELOPE_BYTES,
     CheckpointEnvelopeError,
+    decode_authenticated_checkpoint_envelope,
     decode_checkpoint_envelope,
+    encode_authenticated_checkpoint_envelope,
     encode_checkpoint_envelope,
 )
 
@@ -38,6 +40,67 @@ class CheckpointEnvelopeTests(unittest.TestCase):
                               separators=(",", ":")).encode()
         with self.assertRaisesRegex(CheckpointEnvelopeError, "integrity"):
             decode_checkpoint_envelope(tampered)
+
+
+    def test_authenticated_round_trip_and_wrong_key_rejection(self):
+        key = b"test-only-integrity-key-material-32-bytes"
+        blob = encode_authenticated_checkpoint_envelope(
+            integrity_key=key,
+            workflow_id="research-workflow",
+            checkpoint_id="checkpoint-auth",
+            parent_checkpoint_id=None,
+            sequence=1,
+            payload={"state": {"value": "verified"}},
+        )
+        decoded = decode_authenticated_checkpoint_envelope(blob, integrity_key=key)
+        self.assertEqual(decoded["payload"]["state"]["value"], "verified")
+        self.assertNotIn("hmac_sha256", decoded)
+        with self.assertRaisesRegex(CheckpointEnvelopeError, "authentication"):
+            decode_authenticated_checkpoint_envelope(blob, integrity_key=b"wrong-key-material-32-bytes-long")
+
+    def test_hmac_rejects_writer_who_recomputes_unkeyed_checksum(self):
+        key = b"test-only-integrity-key-material-32-bytes"
+        original = encode_authenticated_checkpoint_envelope(
+            integrity_key=key,
+            workflow_id="research-workflow",
+            checkpoint_id="checkpoint-auth",
+            parent_checkpoint_id=None,
+            sequence=1,
+            payload={"state": {"value": "original"}},
+        )
+        original_wrapper = json.loads(original)
+        forged_base = self.make_blob(payload={"state": {"value": "writer-forged"}})
+        forged_wrapper = json.loads(forged_base)
+        forged_wrapper["hmac_sha256"] = original_wrapper["hmac_sha256"]
+        forged = json.dumps(forged_wrapper, ensure_ascii=False, sort_keys=True,
+                            separators=(",", ":")).encode()
+        with self.assertRaisesRegex(CheckpointEnvelopeError, "authentication"):
+            decode_authenticated_checkpoint_envelope(forged, integrity_key=key)
+
+    def test_authenticated_envelope_rejects_short_keys_and_missing_tags(self):
+        with self.assertRaisesRegex(CheckpointEnvelopeError, "32 secret bytes"):
+            encode_authenticated_checkpoint_envelope(
+                integrity_key=b"too-short",
+                workflow_id="research-workflow",
+                checkpoint_id="checkpoint-auth",
+                parent_checkpoint_id=None,
+                sequence=1,
+                payload={},
+            )
+        key = b"test-only-integrity-key-material-32-bytes"
+        blob = encode_authenticated_checkpoint_envelope(
+            integrity_key=key,
+            workflow_id="research-workflow",
+            checkpoint_id="checkpoint-auth",
+            parent_checkpoint_id=None,
+            sequence=1,
+            payload={},
+        )
+        wrapper = json.loads(blob)
+        del wrapper["hmac_sha256"]
+        malformed = json.dumps(wrapper, sort_keys=True, separators=(",", ":")).encode()
+        with self.assertRaisesRegex(CheckpointEnvelopeError, "shape"):
+            decode_authenticated_checkpoint_envelope(malformed, integrity_key=key)
 
     def test_duplicate_keys_and_noncanonical_json_are_rejected(self):
         with self.assertRaisesRegex(CheckpointEnvelopeError, "duplicate"):
