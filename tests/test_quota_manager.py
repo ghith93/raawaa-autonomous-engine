@@ -74,7 +74,11 @@ class QuotaManagerTests(unittest.TestCase):
         bool_request_limit = self.profile(daily_request_limit=True)
         bool_token_limit = self.profile(daily_token_limit=True)
         bool_monthly_limit = self.profile(monthly_request_limit=True)
-        manager = QuotaManager([bool_request_limit, bool_token_limit, bool_monthly_limit], self.ledger)
+        bool_task_limit = self.profile(per_task_token_limit=True)
+        manager = QuotaManager(
+            [bool_request_limit, bool_token_limit, bool_monthly_limit, bool_task_limit],
+            self.ledger,
+        )
         for route in manager.profiles:
             self.assertFalse(manager.eligible(route, 1, self.now))
 
@@ -190,9 +194,7 @@ class QuotaManagerTests(unittest.TestCase):
 
     def test_concurrent_reservations_cannot_overspend_last_request(self):
         route = self.profile(daily_request_limit=10, daily_token_limit=1000,
-                             monthly_request_limit=1, monthly_token_limit=100,
-                                    task_id="task-concurrent", per_task_request_limit=1,
-                                    per_task_token_limit=100)
+                             monthly_request_limit=1, monthly_token_limit=100)
         attempts = 8
 
         def reserve():
