@@ -34,14 +34,25 @@ class QuotaAwareGatewayTests(unittest.TestCase):
         self.tmp.cleanup()
 
     def profile(self, provider="groq", account="main", **changes):
+        hosts = {
+            "groq": ("api.groq.com/openai/v1", "groq.com/pricing",
+                    "console.groq.com/docs/rate-limits", "groq.com/terms"),
+            "cerebras": ("api.cerebras.ai/v1", "cerebras.ai/pricing",
+                         "docs.cerebras.ai/rate-limits", "cerebras.ai/terms"),
+            "gemini": ("generativelanguage.googleapis.com/v1beta",
+                       "ai.google.dev/gemini-api/docs/pricing",
+                       "ai.google.dev/gemini-api/docs/rate-limits",
+                       "policies.google.com/terms"),
+        }
+        endpoint, pricing, quota, terms = hosts.get(provider, hosts["groq"])
         values = dict(provider=provider, account=account, model="model-x",
                       free_verified=True, commercial_use_allowed=True,
                       daily_request_limit=10, daily_token_limit=1000,
                       monthly_request_limit=100, monthly_token_limit=10000, priority=10,
-                      endpoint_url="https://provider.example/v1",
-                      pricing_source_url="https://provider.example/pricing",
-                      quota_source_url="https://provider.example/limits",
-                      terms_source_url="https://provider.example/terms",
+                      endpoint_url="https://" + endpoint,
+                      pricing_source_url="https://" + pricing,
+                      quota_source_url="https://" + quota,
+                      terms_source_url="https://" + terms,
                       verified_at=__import__("datetime").datetime(2026, 11, 1, 0,
                           tzinfo=__import__("datetime").timezone.utc),
                       max_output_tokens=512)
