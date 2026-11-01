@@ -1,4 +1,4 @@
-"""CLI for policy audit and the bounded local task queue."""
+"""CLI for policy audit, local task runtime, memory, and explicit read-only discovery."""
 import argparse
 import json
 import os
@@ -8,7 +8,7 @@ from engine.task_store import TaskStore
 from engine.memory import MemoryStore
 from engine.model_gateway import ModelGateway, UsageLedger
 from engine.worker import run_once
-from engine.free_provider_discovery import discover_all
+from engine.free_provider_discovery import discover, discover_all, DiscoveryError
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -55,52 +55,98 @@ def audit() -> int:
     return 0
 
 
-def main() -> int:
+def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Raawaa Autonomous Engine")
     sub = parser.add_subparsers(dest="command", required=True)
     sub.add_parser("audit")
-    sub.add_parser("free-models", help="Explicitly discover provider model catalogs (read-only; no inference)")
+
+    discovery = sub.add_parser(
+        "free-models",
+        help="Explicitly discover provider model catalogs (read-only; no inference)",
+    )
+    discovery.add_argument("--provider", choices=["gemini", "groq", "cerebras", "all"],
+                           default="all")
+
     enqueue = sub.add_parser("enqueue")
     enqueue.add_argument("--type", required=True, dest="task_type")
     enqueue.add_argument("--title", required=True)
     enqueue.add_argument("--payload", default="{}")
     enqueue.add_argument("--key")
     enqueue.add_argument("--max-attempts", type=int, default=2)
+
     listing = sub.add_parser("list")
     listing.add_argument("--limit", type=int, default=50)
     sub.add_parser("run-once")
+
     log = sub.add_parser("audit-log")
     log.add_argument("--limit", type=int, default=100)
-    args = parser.parse_args()
+
+    add = sub.add_parser("memory-add")
+    add.add_argument("--category", required=True)
+    add.add_argument("--content", required=True)
+    add.add_argument("--source", required=True)
+    add.add_argument("--confidence", type=float, default=0.8)
+    add.add_argument("--tags", default="")
+    add.add_argument("--ttl-days", type=int)
+
+    search = sub.add_parser("memory-search")
+    search.add_argument("--query", required=True)
+    search.add_argument("--category")
+    search.add_argument("--limit", type=int, default=20)
+
+    memory_listing = sub.add_parser("memory-list")
+    memory_listing.add_argument("--limit", type=int, default=50)
+
+    archive = sub.add_parser("memory-archive")
+    archive.add_argument("--id", required=True)
+
+    sub.add_parser("model-status")
+    return parser
+
+
+def main() -> int:
+    args = build_parser().parse_args()
 
     if args.command == "audit":
         return audit()
-    if args.command == "enqueue":
-        task = store().enqueue(args.task_type, args.title, json.loads(args.payload), args.key, args.max_attempts)
-        print(json.dumps(task, indent=2))
+    if args.command == "free-models":
+        result = (discover_all() if args.provider == "all"
+                  else {args.provider: discover(args.provider)})
+        print(json.dumps(result, indent=2, ensure_ascii=False))
+    elif args.command == "enqueue":
+        payload = json.loads(args.payload)
+        if not isinstance(payload, dict):
+            raise ValueError("--payload must decode to a JSON object")
+        task = store().enqueue(args.task_type, args.title, payload, args.key, args.max_attempts)
+        print(json.dumps(task, indent=2, ensure_ascii=False))
     elif args.command == "list":
-        print(json.dumps(store().list_tasks(args.limit), indent=2))
+        print(json.dumps(store().list_tasks(args.limit), indent=2, ensure_ascii=False))
     elif args.command == "run-once":
-        print(json.dumps(run_once(store()), indent=2))
+        print(json.dumps(run_once(store()), indent=2, ensure_ascii=False))
     elif args.command == "audit-log":
-        print(json.dumps(store().audit_events(args.limit), indent=2))
+        print(json.dumps(store().audit_events(args.limit), indent=2, ensure_ascii=False))
     elif args.command == "memory-add":
-        item = memory_store().add(args.category, args.content, args.source, args.confidence,
-                                  [tag for tag in args.tags.split(",") if tag], args.ttl_days)
+        item = memory_store().add(
+            args.category, args.content, args.source, args.confidence,
+            [tag.strip() for tag in args.tags.split(",") if tag.strip()], args.ttl_days
+        )
         print(json.dumps(item, indent=2, ensure_ascii=False))
     elif args.command == "memory-search":
-        print(json.dumps(memory_store().search(args.query, args.category, args.limit), indent=2, ensure_ascii=False))
+        print(json.dumps(memory_store().search(args.query, args.category, args.limit),
+                         indent=2, ensure_ascii=False))
     elif args.command == "memory-list":
         print(json.dumps(memory_store().list_recent(args.limit), indent=2, ensure_ascii=False))
     elif args.command == "memory-archive":
         print(json.dumps({"archived": memory_store().archive(args.id)}))
     elif args.command == "model-status":
         policy = load_json(ROOT / "config" / "policy.json")
-        gateway = ModelGateway([], {}, UsageLedger(db_path()),
+        gateway = ModelGateway(
+            [], {}, UsageLedger(db_path()),
             daily_budget_usd=policy.get("daily_budget_usd", 0),
             monthly_budget_usd=policy.get("monthly_budget_usd", 0),
             allow_paid_calls=policy.get("allow_paid_model_calls", False),
-            network_calls_enabled=False)
+            network_calls_enabled=False,
+        )
         print(json.dumps(gateway.status(), indent=2))
     return 0
 
