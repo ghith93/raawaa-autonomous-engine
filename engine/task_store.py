@@ -117,6 +117,8 @@ class TaskStore:
             raise ValueError("only running tasks can be modified")
         if not lease_token or row["lease_token"] != lease_token:
             raise ValueError("lease ownership lost")
+        if not row["lease_expires_at"] or row["lease_expires_at"] < utc_now():
+            raise ValueError("lease expired; worker must not complete the task")
 
     def finish(self, task_id: str, status: str, result: dict[str, Any] | None = None,
                error: str | None = None, lease_token: str | None = None):
