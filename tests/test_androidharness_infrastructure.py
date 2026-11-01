@@ -50,6 +50,13 @@ class AndroidHarnessInfrastructureTests(unittest.TestCase):
             "OPENROUTER_API_KEY": marker,
             "GITHUB_TOKEN": marker,
         })
+        before = subprocess.run(
+            ["git", "status", "--porcelain"],
+            cwd=ROOT,
+            text=True,
+            capture_output=True,
+            check=True,
+        ).stdout
         result = subprocess.run(
             [sys.executable, "scripts/androidharness/doctor.py", "--json"],
             cwd=ROOT,
@@ -69,6 +76,14 @@ class AndroidHarnessInfrastructureTests(unittest.TestCase):
         self.assertIn("workspace", report)
         self.assertNotIn(marker, result.stdout)
         self.assertNotIn(marker, result.stderr)
+        after = subprocess.run(
+            ["git", "status", "--porcelain"],
+            cwd=ROOT,
+            text=True,
+            capture_output=True,
+            check=True,
+        ).stdout
+        self.assertEqual(after, before)
 
 
 if __name__ == "__main__":
