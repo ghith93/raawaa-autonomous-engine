@@ -7,7 +7,6 @@ import os
 from engine.agent_runtime import build_task_contract, load_agent_roster
 from engine.lease_heartbeat import LeaseHeartbeat, LeaseHeartbeatLost
 from engine.provider import GenerationRequest
-from engine.model_gateway import ProviderUnavailable
 from engine.task_store import TaskStore
 
 
