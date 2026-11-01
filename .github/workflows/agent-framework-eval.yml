@@ -4,6 +4,7 @@ on:
   pull_request:
     paths:
       - "experiments/microsoft-agent-framework/**"
+      - "experiments/microsoft_agent_framework/**"
       - "requirements-agent-framework-eval.txt"
       - "docs/research/microsoft-agent-framework-evaluation.md"
       - ".github/workflows/agent-framework-eval.yml"
