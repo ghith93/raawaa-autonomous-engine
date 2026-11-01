@@ -5,7 +5,7 @@
       "id": "androidharness",
       "display_name": "AndroidHarness",
       "kind": "external_android_linux_runtime",
-      "status": "registered_specification_only",
+      "status": "bridge_implemented_not_activated",
       "operator_reported_snapshot_utc": "2026-11-01T22:40:00Z",
       "capabilities_reported": [
         "bash",
@@ -15,7 +15,8 @@
         "node20",
         "npm",
         "pip",
-        "android_device_access_auto_fallback"
+        "android_device_access_auto_fallback",
+        "github_issue_task_bridge_code"
       ],
       "capabilities_not_ready_or_unverified": [
         "java_d8",
@@ -23,8 +24,9 @@
         "shizuku_running",
         "direct_root",
         "persistent_always_on_execution",
-        "remote_agent_tool_adapter",
-        "cloudflare_deployment_secrets"
+        "cloudflare_deployment_secrets",
+        "github_issue_task_bridge_running_on_device",
+        "direct_remote_mcp_adapter"
       ],
       "execution_defaults": {
         "root": false,
@@ -35,7 +37,14 @@
         "production_deployment": false,
         "bounded_runtime_required": true,
         "task_id_required": true,
-        "audit_log_required": true
+        "audit_log_required": true,
+        "github_issue_metadata_writes": "task-lifecycle-only",
+        "arbitrary_shell": false,
+        "allowed_task_operations": [
+          "inspect_environment",
+          "git_status",
+          "run_python_tests"
+        ]
       },
       "documentation": "docs/android-harness.md"
     }
