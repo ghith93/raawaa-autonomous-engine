@@ -72,6 +72,18 @@ The branch now adds `InMemoryEnvelopeCheckpointStorage`, an ephemeral adapter im
 
 This remains an isolated test adapter, not durable storage. The adapter imports private framework modules and is valid only for the pinned package versions; any version change requires a fresh source/API review. It stores pickle-bearing encoded values in memory only. Do not connect it to D1 or any externally writable store. The SHA-256 envelope checksum remains unauthenticated and cannot protect against a malicious writer who can recompute it.
 
+## End-to-end workflow resume using the custom adapter
+
+The deterministic two-branch research workflow now uses `InMemoryEnvelopeCheckpointStorage` instead of the framework's built-in in-memory storage. The pinned framework writes its real workflow checkpoints through the custom adapter; the evaluation retrieves the latest checkpoint and resumes the workflow by checkpoint ID.
+
+Exact PR-head isolated evaluation [run 41358422590](https://github.com/ghith93/raawaa-autonomous-engine/actions/runs/41358422590) passed:
+- Both parallel source steps and the reviewer ran exactly once on the first pass.
+- After resume, the call counts remained source_a=1, source_b=1, review=1; completed work was not replayed.
+- The adapter round-trip and all six storage contract tests passed.
+- Provider requests sent: 0. Paid services used: 0.
+
+This proves the pinned framework's current functional workflow can checkpoint and resume through the isolated adapter. It does not prove durability across process restart, D1 compatibility, concurrent distributed writes, or authenticated storage.
+
 ## Decision and safety
 
 Do not replace the current runtime or add these dependencies to default engine requirements yet. The experiment remains isolated and optional. The evaluation sends zero provider requests, uses zero paid services, requires no credentials, and does not change production data or deployment state.
