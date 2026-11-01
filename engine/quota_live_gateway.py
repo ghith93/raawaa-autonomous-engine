@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import math
 import os
-import os
 
 from engine.live_adapters import LiveAdapterError
 from engine.model_gateway import ProviderUnavailable, UsageLedger
@@ -217,6 +216,6 @@ class QuotaAwareLiveGateway:
             "quota_routes": self.quota_manager.snapshot(),
             "registered_adapters": sorted(self.adapters),
             "cost_accounting_note": (
-                "Adapter cost_usd is a placeholder until provider pricing is verified."
+                "Only profiles with verified zero input/output prices are eligible; any reported non-zero response cost is recorded and quarantines the route."
             ),
         }
