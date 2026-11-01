@@ -23,3 +23,8 @@ python -m engine.cli audit
 ```
 
 Live adapters are not wired into the CLI, worker, or scheduled workflows. This library gateway is opt-in only.
+
+
+## Provider response validation
+
+The gateway verifies that the returned provider and model match the reserved route, response text is a string, token counts are non-negative integers, and reported cost is finite and non-negative. Invalid adapter responses stop route rotation and are not recorded as successful usage. The quota reservation is settled to zero tokens while the request itself remains counted.
