@@ -1,6 +1,6 @@
 # Reusable Task-Completion Handoff Prompt
 
-Copy and send this prompt after a task or whenever you want work to continue:
+Copy and send this prompt after a task or whenever you want work to continue. An Arabic version is available in task-completion-handoff-prompt.ar.md:
 
 ---
 
