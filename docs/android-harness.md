@@ -93,7 +93,12 @@ The supplied AndroidHarness clone is at `/workspace/raawaa-autonomous-engine`. A
 ```bash
 cd /workspace/raawaa-autonomous-engine
 git status --short
-git pull --ff-only origin main
+if [ -z "$(git status --porcelain)" ]; then
+  git pull --ff-only origin main
+else
+  echo "Working tree is not clean; stop without changing files."
+  exit 1
+fi
 python3 scripts/androidharness_issue_bridge.py --poll --poll-interval 30
 ```
 
@@ -105,11 +110,9 @@ The bridge becomes operational only after the first successful device-side task 
 
 The issue must be authored by `ghith93`, use the exact title prefix above, and include:
 
-```text
 <!-- RAawaa-AndroidHarness-Task:v1 -->
 ```json
 {"schema_version":1,"operation":"inspect_environment","timeout_seconds":60,"max_output_bytes":8000}
-```
 ```
 
 For `run_python_tests`, include `"commit_sha":"<full 40-character current main SHA>"`. Never put secrets or arbitrary commands in task bodies.
