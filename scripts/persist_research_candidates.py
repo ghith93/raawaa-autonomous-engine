@@ -80,7 +80,7 @@ def _get(base_url: str, token: str, access_client_id: str = "",
     if access_client_id and access_client_secret:
         headers["CF-Access-Client-Id"] = access_client_id
         headers["CF-Access-Client-Secret"] = access_client_secret
-    request = Request(base_url.rstrip("/") + "/v1/research/candidates?status=all&limit=100",
+    request = Request(base_url.rstrip("/") + "/v1/research/candidates?status=all&limit=100&keys_only=true",
                       headers=headers, method="GET")
     try:
         with urlopen(request, timeout=timeout) as response:
