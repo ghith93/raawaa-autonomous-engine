@@ -64,12 +64,15 @@ def _request_crossref(query: str, max_results: int = 10, timeout: int = 20) -> d
         with urlopen(request, timeout=timeout) as response:
             if response.status != 200:
                 raise ResearchDiscoveryError(f"Crossref returned HTTP {response.status}")
-            payload = json.loads(response.read().decode("utf-8"))
+            raw = response.read(MAX_RESPONSE_BYTES + 1)
+            if len(raw) > MAX_RESPONSE_BYTES:
+                raise ResearchDiscoveryError("Research response exceeded the 1 MiB safety limit")
+            payload = json.loads(raw.decode("utf-8"))
     except HTTPError as exc:
         limit = exc.headers.get("X-Rate-Limit-Limit", "unknown") if exc.headers else "unknown"
         interval = exc.headers.get("X-Rate-Limit-Interval", "unknown") if exc.headers else "unknown"
         raise ResearchDiscoveryError(f"Crossref returned HTTP {exc.code}; rate_limit={limit}; interval={interval}") from exc
-    except (URLError, TimeoutError, OSError, json.JSONDecodeError) as exc:
+    except (URLError, TimeoutError, OSError, json.JSONDecodeError, UnicodeDecodeError) as exc:
         raise ResearchDiscoveryError(f"Crossref request failed: {type(exc).__name__}") from exc
     message = payload.get("message") if isinstance(payload, dict) else None
     if not isinstance(message, dict) or not isinstance(message.get("items"), list):
