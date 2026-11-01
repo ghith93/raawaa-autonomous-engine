@@ -84,3 +84,17 @@ This engine is Python-first. Missing Java/D8/Gradle must never block its Python 
 ## Completion standard
 
 Report separately: configuration prepared, device-side approval completed, packages installed, tests run, CI result, PR merged, and runtime smoke test. Never collapse these into a single "setup complete" claim. If the AndroidHarness tool/session is not available in this run, prepare repository-side configuration and give the operator one concise Code-run instruction; do not pretend to control the tablet.
+
+
+## GitHub issue bridge activation and operation
+
+The repository includes a bounded GitHub issue poller at scripts/androidharness_issue_bridge.py. It is a GitHub-mediated task bridge, not a direct MCP server, general shell, or UI-control channel.
+
+When the operator asks to activate the bridge:
+1. Confirm the selected workspace is the exact Raawaa Autonomous Engine repository and the GitHub CLI is already authenticated. Never print or read the token.
+2. Check git status. If the working tree is clean, fast-forward main; if it is dirty, stop without overwriting anything.
+3. Start exactly one foreground process with: python3 scripts/androidharness_issue_bridge.py --poll --poll-interval 30
+4. Keep the process in the AndroidHarness foreground service/session. Do not claim 24/7 availability.
+5. The bridge accepts only issues authored by ghith93 with the exact [AndroidHarness Task] title prefix and versioned JSON marker.
+
+Allowed bridge operations are fixed: inspect_environment, git_status, run_python_tests (only against the exact fetched origin/main SHA), and run_androidharness_doctor (read-only; must assert no mutations, no network requests, and no secret output). Do not modify the bridge to accept arbitrary shell or user-provided command strings. Do not enqueue root, package installation, SSH, provider, Cloudflare, production, or customer-facing operations. Task output is bounded and results are posted to the issue. If a task is left marked Running after interruption, inspect the private audit log before manually requeueing it.
