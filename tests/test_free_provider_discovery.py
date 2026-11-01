@@ -38,6 +38,9 @@ class FreeProviderDiscoveryTests(unittest.TestCase):
         result = discover("gemini", {"GEMINI_API_KEY": "test-key"})
         self.assertEqual(result[0]["model"], "models/gemini-test")
         self.assertFalse(result[0]["free_tier_verified"])
+        request = mocked.call_args.args[0]
+        self.assertNotIn("test-key", request.full_url)
+        self.assertEqual(request.get_header("X-goog-api-key"), "test-key")
 
     @patch("engine.free_provider_discovery.urlopen")
     def test_discover_all_reports_missing_keys_without_generation(self, mocked):
