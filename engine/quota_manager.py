@@ -419,6 +419,7 @@ class QuotaManager:
             minute = self.ledger.usage_minute(profile.route_id, now)
             rows.append({
                 "route_id": profile.route_id,
+                "enabled": profile.enabled,
                 "free_verified": profile.free_verified,
                 "commercial_use_allowed": profile.commercial_use_allowed,
                 "production_use_allowed": profile.production_use_allowed,
