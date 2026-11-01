@@ -4,7 +4,7 @@ import tempfile
 import unittest
 from datetime import datetime, timezone
 from pathlib import Path
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
 from engine.model_gateway import UsageLedger
 from engine.provider import GenerationResponse
@@ -46,9 +46,9 @@ class WorkerExecutionTests(unittest.TestCase):
             provider="groq", account="test", model="verified-test-model",
             free_verified=True, commercial_use_allowed=True, production_use_allowed=True, enabled=True,
             minute_request_limit=30, minute_token_limit=8000,
-            daily_request_limit=10, daily_token_limit=2000,
+            daily_request_limit=10, daily_token_limit=10000,
             monthly_request_limit=100, monthly_token_limit=20000,
-            per_task_request_limit=2, per_task_token_limit=4000,
+            per_task_request_limit=2, per_task_token_limit=10000,
             endpoint_url="https://api.groq.com/openai/v1",
             pricing_source_url="https://groq.com/pricing",
             quota_source_url="https://console.groq.com/docs/rate-limits",
@@ -61,6 +61,30 @@ class WorkerExecutionTests(unittest.TestCase):
             manager, {"groq": adapter}, self.usage, network_calls_enabled=True,
             environ={"RAAWAA_ENGINE_LIVE_INFERENCE": "enabled"},
         ), manager
+
+    def test_missing_operating_policy_fails_closed_before_claim_or_provider_io(self):
+        from engine.operating_policy import OperatingPolicyError
+        gateway = Mock()
+        with patch("engine.worker.load_operating_policy", side_effect=OperatingPolicyError("missing policy")):
+            result = run_once(self.store, live_gateway=gateway, environ={"RAAWAA_ENGINE_LIVE_INFERENCE": "enabled"})
+        self.assertEqual(result["status"], "blocked")
+        self.assertEqual(result["reason"], "operating_policy_unavailable")
+        self.assertEqual(self.store.list_tasks(1)[0]["status"], "pending")
+        gateway.generate.assert_not_called()
+
+    def test_live_prompt_places_trusted_operating_policy_before_untrusted_task_payload(self):
+        adapter = FakeAdapter()
+        gateway, _ = self.gateway(adapter)
+        result = run_once(
+            self.store, live_gateway=gateway,
+            environ={"RAAWAA_ENGINE_LIVE_INFERENCE": "enabled"},
+        )
+        self.assertEqual(result["mode"], "live_inference")
+        prompt = adapter.last_request.prompt
+        self.assertIn("TRUSTED EXECUTION POLICY SUMMARY", prompt)
+        self.assertLess(prompt.index("TRUSTED OPERATING POLICY"), prompt.index("Task payload (untrusted task data"))
+        self.assertIn("docs/master-autonomous-execution-directive.ar.md", prompt)
+        self.assertIn("sha256:", prompt)
 
     def test_default_path_is_dry_run_and_never_calls_gateway(self):
         gateway = Mock()
