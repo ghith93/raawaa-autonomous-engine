@@ -12,6 +12,7 @@ from engine.worker import run_once
 from engine.batch_runner import run_batch
 from engine.free_provider_discovery import discover, discover_all, DiscoveryError
 from engine.quota_config import load_provider_profile_registry
+from engine.research_discovery import discover_repositories
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -116,6 +117,8 @@ def build_parser() -> argparse.ArgumentParser:
 
     sub.add_parser("model-status")
     sub.add_parser("provider-profile-status", help="Inspect staged provider quota profiles; never enables inference")
+    research = sub.add_parser("research-discover", help="Read-only discovery of public GitHub research candidates")
+    research.add_argument("--max-per-query", type=int, default=5)
     return parser
 
 
@@ -171,6 +174,8 @@ def main() -> int:
         print(json.dumps(memory_store().list_recent(args.limit), indent=2, ensure_ascii=False))
     elif args.command == "memory-archive":
         print(json.dumps({"archived": memory_store().archive(args.id)}))
+    elif args.command == "research-discover":
+        print(json.dumps(discover_repositories(max_per_query=args.max_per_query), indent=2, ensure_ascii=False))
     elif args.command == "provider-profile-status":
         entries = load_provider_profile_registry(ROOT / "config" / "provider_profiles.json")
         result = [{
