@@ -46,6 +46,21 @@ class RemoteTaskStore:
             # Do not include response bodies, request headers, or credentials in errors.
             if exc.code == 401:
                 raise RemoteTaskStoreError("Remote task API authentication failed") from None
+            if exc.code == 403:
+                # Cloudflare edge responses commonly include CF-Ray and may
+                # include cf-mitigated. Log only these non-secret identifiers;
+                # never include response bodies, request headers, or tokens.
+                metadata = []
+                ray_id = exc.headers.get("CF-Ray") if exc.headers else None
+                mitigated = exc.headers.get("cf-mitigated") if exc.headers else None
+                if ray_id:
+                    metadata.append(f"CF-Ray {ray_id}")
+                if mitigated:
+                    metadata.append(f"cf-mitigated {mitigated}")
+                detail = f" (response metadata: {', '.join(metadata)})" if metadata else ""
+                raise RemoteTaskStoreError(
+                    f"Remote task API returned HTTP 403; inspect edge/access policy{detail}"
+                ) from None
             if exc.code == 409:
                 raise RemoteTaskStoreError("Remote task lease was lost") from None
             if exc.code == 404:
