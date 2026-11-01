@@ -15,7 +15,7 @@ python -m unittest discover -s tests -v
 
 ## GitHub Actions
 
-The CI workflow runs on pushes to the main/bootstrap/feature branches, pull requests targeting main, and manual dispatch. It validates the policy and runs unit tests. It does not access provider secrets or deploy anything.
+The CI workflow runs on pushes to main and bootstrap/**, feature/**, and fix/** branches, pull requests targeting main, and manual dispatch. It validates the policy and runs unit tests. It does not access provider secrets or deploy anything.
 
 ## Secrets
 
