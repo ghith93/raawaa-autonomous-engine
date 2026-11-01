@@ -13,10 +13,9 @@ class ProviderProfileConfigTests(unittest.TestCase):
 
     def test_staged_groq_profile_loads_but_is_not_route_ready(self):
         entries = load_provider_profile_registry(self.source)
-        self.assertEqual(len(entries), 1)
-        entry = entries[0]
+        self.assertEqual(len(entries), 3)
+        entry = next(item for item in entries if item.profile.model == "qwen/qwen3.8-27b")
         self.assertEqual(entry.profile.provider, "groq")
-        self.assertEqual(entry.profile.model, "qwen/qwen3.8-27b")
         self.assertEqual(entry.profile.minute_request_limit, 30)
         self.assertEqual(entry.profile.minute_token_limit, 8000)
         self.assertEqual(entry.profile.daily_request_limit, 1000)
@@ -32,6 +31,26 @@ class ProviderProfileConfigTests(unittest.TestCase):
         self.assertEqual(entry.profile.output_cost_per_million_usd, 0.0)
         self.assertTrue(entry.profile.commercial_use_allowed)
         self.assertFalse(entry.profile.production_use_allowed)
+
+
+    def test_production_gpt_oss_profiles_are_staged_with_priority_and_limits(self):
+        entries = load_provider_profile_registry(self.source)
+        by_model = {entry.profile.model: entry for entry in entries}
+        for model, priority in (("openai/gpt-oss-20b", 10), ("openai/gpt-oss-120b", 20)):
+            with self.subTest(model=model):
+                entry = by_model[model]
+                self.assertEqual(entry.model_stage, "production")
+                self.assertTrue(entry.production_use_allowed)
+                self.assertTrue(entry.profile.production_use_allowed)
+                self.assertFalse(entry.enabled)
+                self.assertFalse(entry.ready_for_routing)
+                self.assertEqual(entry.profile.priority, priority)
+                self.assertEqual(entry.profile.minute_request_limit, 30)
+                self.assertEqual(entry.profile.minute_token_limit, 8000)
+                self.assertEqual(entry.profile.daily_request_limit, 1000)
+                self.assertEqual(entry.profile.daily_token_limit, 200000)
+                self.assertEqual(entry.profile.input_cost_per_million_usd, 0.0)
+                self.assertIn("openai/gpt-oss", entry.model_terms_source_url)
 
     def test_registry_rejects_enabled_mode_or_route(self):
         data = json.loads(self.source.read_text(encoding="utf-8"))
