@@ -1,6 +1,7 @@
 """Policy-enforced model gateway with persistent usage accounting and no live adapters."""
 from __future__ import annotations
 import sqlite3
+import math
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -36,7 +37,12 @@ class UsageLedger:
         return {"daily_usd":float(daily),"monthly_usd":float(monthly)}
     def record(self, provider: str, model: str, task_kind: str, input_tokens: int,
                output_tokens: int, cost_usd: float):
-        if cost_usd < 0: raise ValueError("cost cannot be negative")
+        if type(input_tokens) is not int or type(output_tokens) is not int:
+            raise ValueError("token counts must be integers")
+        if input_tokens < 0 or output_tokens < 0:
+            raise ValueError("token counts cannot be negative")
+        if not math.isfinite(cost_usd) or cost_usd < 0:
+            raise ValueError("cost must be a finite non-negative number")
         with self._connect() as db:
             db.execute("INSERT INTO model_usage(provider,model,task_kind,input_tokens,output_tokens,cost_usd,created_at) VALUES(?,?,?,?,?,?,?)",
                 (provider,model,task_kind,input_tokens,output_tokens,cost_usd,datetime.now(timezone.utc).isoformat()))
