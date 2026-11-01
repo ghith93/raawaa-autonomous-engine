@@ -68,7 +68,7 @@ function normalizeResearchCandidate(item) {
       published: typeof item.published === "string" ? item.published.slice(0, 30) : null,
       container_title: typeof item.container_title === "string" ? item.container_title.slice(0, 300) : null,
       citation_count: Number.isInteger(item.citation_count) && item.citation_count >= 0 ? Math.min(item.citation_count, 1000000000) : 0,
-      license_urls: Array.isArray(item.license_urls) ? item.license_urls.filter(x => typeof x === "string" && x.startsWith("https://")).slice(0, 5).map(x => x.slice(0, 1000)) : [],
+      license_urls: Array.isArray(item.license_urls) ? item.license_urls.filter(x => typeof x === "string" && x.startsWith("https://")).slice(0, 3).map(x => x.slice(0, 300)) : [],
       work_type: typeof item.work_type === "string" ? item.work_type.slice(0, 100) : null,
       abstract_retrieved: false,
     };
