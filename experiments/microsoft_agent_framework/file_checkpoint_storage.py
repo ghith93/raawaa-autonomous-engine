@@ -93,6 +93,8 @@ class FileEnvelopeCheckpointStorage(InMemoryEnvelopeCheckpointStorage):
             raise
 
     async def save(self, checkpoint: WorkflowCheckpoint) -> str:
+        if not isinstance(checkpoint, WorkflowCheckpoint):
+            raise TypeError("checkpoint must be a WorkflowCheckpoint")
         async with self._file_lock:
             previous = self._records.get(checkpoint.checkpoint_id)
             checkpoint_id = await super().save(checkpoint)
