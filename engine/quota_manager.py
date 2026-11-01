@@ -38,13 +38,20 @@ class QuotaLedger:
                 route_id TEXT NOT NULL,
                 requests INTEGER NOT NULL,
                 tokens INTEGER NOT NULL,
-                occurred_at TEXT NOT NULL
+                occurred_at TEXT NOT NULL,
+                settled_at TEXT
             )""")
             db.execute("""CREATE TABLE IF NOT EXISTS quota_cooldowns (
                 route_id TEXT PRIMARY KEY,
                 until_at TEXT NOT NULL,
                 reason TEXT NOT NULL
             )""")
+            # Existing databases predate settlement idempotency. Keep existing
+            # rows unsettled rather than guessing whether an interrupted request
+            # had reached its provider.
+            columns = {row["name"] for row in db.execute("PRAGMA table_info(quota_usage)")}
+            if "settled_at" not in columns:
+                db.execute("ALTER TABLE quota_usage ADD COLUMN settled_at TEXT")
 
     def _connect(self):
         db = sqlite3.connect(self.db_path, timeout=10)
@@ -85,22 +92,38 @@ class QuotaLedger:
             return int(cur.lastrowid)
 
     def settle(self, reservation_id: int, actual_tokens: int) -> None:
-        """Replace estimated token reservation with actual usage; request count remains consumed."""
+        """Settle once; an identical retry is safe, conflicting retries fail closed."""
         if actual_tokens < 0:
             raise ValueError("actual_tokens cannot be negative")
+        stamp = datetime.now(timezone.utc).isoformat()
         with self._connect() as db:
-            cur = db.execute("UPDATE quota_usage SET tokens=? WHERE id=?", (actual_tokens, reservation_id))
-            if cur.rowcount != 1:
+            db.execute("BEGIN IMMEDIATE")
+            row = db.execute(
+                "SELECT tokens, settled_at FROM quota_usage WHERE id=?",
+                (reservation_id,),
+            ).fetchone()
+            if row is None:
                 raise KeyError("quota reservation not found")
+            if row["settled_at"] is not None:
+                if int(row["tokens"]) == actual_tokens:
+                    return
+                raise RuntimeError("quota reservation already settled with different usage")
+            changed = db.execute(
+                "UPDATE quota_usage SET tokens=?, settled_at=? WHERE id=? AND settled_at IS NULL",
+                (actual_tokens, stamp, reservation_id),
+            ).rowcount
+            if changed != 1:
+                raise RuntimeError("quota reservation settlement state changed")
 
     def record(self, route_id: str, tokens: int, now: datetime | None = None) -> None:
         if tokens < 0:
             raise ValueError("tokens cannot be negative")
         now = now or datetime.now(timezone.utc)
+        stamp = now.astimezone(timezone.utc).isoformat()
         with self._connect() as db:
             db.execute(
-                "INSERT INTO quota_usage(route_id,requests,tokens,occurred_at) VALUES(?,?,?,?)",
-                (route_id, 1, tokens, now.astimezone(timezone.utc).isoformat()),
+                "INSERT INTO quota_usage(route_id,requests,tokens,occurred_at,settled_at) VALUES(?,?,?,?,?)",
+                (route_id, 1, tokens, stamp, stamp),
             )
 
     def cool_down(self, route_id: str, seconds: int, reason: str = "rate_limited",
