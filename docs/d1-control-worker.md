@@ -19,12 +19,13 @@ The D1 binding and database identifier are declared in `wrangler.toml`. The Work
 requires a separate `ENGINE_API_TOKEN` secret; do not reuse the Cloudflare account
 API token as an application bearer token.
 
-Before deployment:
+Deployment lifecycle:
 
-1. Apply `migrations/0001_initial.sql` to the configured D1 database using the
-   reviewed manual migration workflow.
-2. Set `ENGINE_API_TOKEN` as a Worker secret using Wrangler.
-3. Deploy with Wrangler using the repository's Cloudflare API token.
+- `.github/workflows/deploy-worker.yml` deploys automatically after reviewed changes to `worker/` or `wrangler.toml` reach `main`; it can also be dispatched manually for the initial deployment.
+- It installs the dedicated `ENGINE_API_TOKEN` as a Worker secret from the GitHub Actions secret of the same name, then deploys with Wrangler.
+- The D1 schema is now applied automatically by `.github/workflows/d1-auto-migrate.yml` after migration changes are merged to `main`.
+
+One-time setup required before the first deployment: create a strong, random application bearer token and add it as the repository Actions secret `ENGINE_API_TOKEN`. Never reuse `CLOUDFLARE_API_TOKEN`. The deployment workflow checks that this secret exists and stops before deployment if it is missing. The Cloudflare API token must have Workers Scripts write permission in addition to the D1 permissions already used by migrations.
 
 No secret is stored in source control. Do not enable public enqueue routes without
 setting the Worker secret. Keep task execution, external writes, and model inference
