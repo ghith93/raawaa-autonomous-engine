@@ -129,6 +129,31 @@ class QuotaAwareGatewayTests(unittest.TestCase):
                 with self.assertRaises(ProviderUnavailable):
                     gateway.generate(self.request)
 
+
+    def test_utf8_byte_estimate_prevents_under_reserving_unicode_prompts(self):
+        adapter = FakeAdapter("groq")
+        profile = self.profile(daily_token_limit=25)
+        manager = QuotaManager([profile], self.quota)
+        gateway = QuotaAwareLiveGateway(manager, {"groq": adapter}, self.usage, True)
+        request = GenerationRequest("research", "مرحبا", 20)
+        with self.assertRaises(ProviderUnavailable):
+            gateway.generate(request)
+        self.assertEqual(adapter.calls, 0)
+
+    def test_unexpected_nonzero_cost_is_recorded_and_route_quarantined(self):
+        class ChargedAdapter:
+            def generate(self, model, request):
+                return GenerationResponse("groq", model, "result", 6, 8, 0.02, mocked=False)
+
+        profile = self.profile()
+        manager = QuotaManager([profile], self.quota)
+        gateway = QuotaAwareLiveGateway(manager, {"groq": ChargedAdapter()}, self.usage, True)
+        with self.assertRaisesRegex(ProviderUnavailable, "non-zero cost"):
+            gateway.generate(self.request)
+        self.assertTrue(self.quota.cooldown_active(profile.route_id))
+        self.assertEqual(manager.snapshot()[0]["daily_tokens_used"], 14)
+        self.assertEqual(self.usage.totals()["daily_usd"], 0.02)
+
     def test_no_paid_or_unknown_quota_fallback(self):
         adapter = FakeAdapter("groq")
         manager = QuotaManager([self.profile(daily_token_limit=None)], self.quota)
