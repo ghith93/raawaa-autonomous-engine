@@ -6,7 +6,7 @@ An independent, cost-controlled AI operating-system foundation. This repository 
 
 **Core v1 is merged to `main`.** The repository now contains:
 
-- A dependency-free Python core, conservative action policy, and specialist-agent roster.
+- A dependency-free Python core, conservative action policy, and specialist-agent roster with deterministic task-to-agent assignment contracts.
 - A SQLite task store with idempotency, task lifecycle management, bounded retries, and stale-task recovery.
 - Structured local memory with search and archive operations.
 - Deterministic workflow planning and validation.
