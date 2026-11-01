@@ -3,6 +3,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "test:worker": "node --test tests/worker.test.js"
+    "test:worker": "node --test tests/worker.test.js",
+    "test:workflow-spike": "node --test tests/cloudflare_workflows_spike.test.js"
   }
 }
