@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import argparse
 import datetime as dt
+import fcntl
 import hashlib
 import io
 import json
@@ -207,6 +208,24 @@ class AndroidHarnessIssueBridge:
             return json.loads(result.stdout)
         except json.JSONDecodeError as exc:
             raise BridgeError("GitHub API returned invalid JSON") from exc
+
+    def acquire_single_instance_lock(self) -> int:
+        directory = self.audit_path.parent
+        directory.mkdir(mode=0o700, parents=True, exist_ok=True)
+        if os.name == "posix" and stat.S_IMODE(directory.stat().st_mode) & 0o077:
+            raise BridgeError("local bridge directory permissions must be private (0700)")
+        lock_path = directory / "bridge.lock"
+        descriptor = os.open(lock_path, os.O_WRONLY | os.O_CREAT, 0o600)
+        try:
+            if os.name == "posix" and stat.S_IMODE(lock_path.stat().st_mode) & 0o077:
+                raise BridgeError("local bridge lock permissions must be private (0600)")
+            fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except (OSError, BridgeError) as exc:
+            os.close(descriptor)
+            if isinstance(exc, BridgeError):
+                raise
+            raise BridgeError("another AndroidHarness bridge instance is already running") from exc
+        return descriptor
 
     def _audit(self, record: dict[str, Any]) -> None:
         directory = self.audit_path.parent
@@ -451,6 +470,7 @@ def main() -> int:
     if args.max_tasks < 0:
         parser.error("--max-tasks cannot be negative")
 
+    lock_descriptor = None
     try:
         auth = subprocess.run(
             ["gh", "auth", "status", "--hostname", "github.com"],
@@ -460,6 +480,7 @@ def main() -> int:
             raise BridgeError("GitHub CLI is not authenticated; no task was claimed")
         bridge = AndroidHarnessIssueBridge()
         verify_policy_files(bridge.root)
+        lock_descriptor = bridge.acquire_single_instance_lock()
         if args.once:
             print("processed" if bridge.run_once() else "no eligible tasks")
         else:
@@ -469,6 +490,9 @@ def main() -> int:
     except BridgeError as exc:
         print(f"AndroidHarness bridge stopped safely: {exc}", file=sys.stderr)
         return 2
+    finally:
+        if lock_descriptor is not None:
+            os.close(lock_descriptor)
     return 0
 
 
