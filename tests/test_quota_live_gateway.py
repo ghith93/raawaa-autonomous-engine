@@ -100,6 +100,35 @@ class QuotaAwareGatewayTests(unittest.TestCase):
         self.assertEqual(snapshot[first.route_id]["daily_requests_used"], 1)
         self.assertEqual(snapshot[first.route_id]["daily_tokens_used"], 0)
 
+    def test_mismatched_provider_response_is_rejected_before_accounting(self):
+        class WrongProvider:
+            def generate(self, model, request):
+                return GenerationResponse("other-provider", model, "ok", 1, 1, 0.0, mocked=False)
+
+        profile = self.profile()
+        manager = QuotaManager([profile], self.quota)
+        gateway = QuotaAwareLiveGateway(manager, {"groq": WrongProvider()}, self.usage, True)
+        with self.assertRaises(ProviderUnavailable):
+            gateway.generate(self.request)
+        row = manager.snapshot()[0]
+        self.assertEqual(row["daily_requests_used"], 1)
+        self.assertEqual(row["daily_tokens_used"], 0)
+
+    def test_negative_tokens_and_non_finite_cost_are_rejected(self):
+        for response in [
+            GenerationResponse("groq", "model-x", "ok", -1, 1, 0.0, mocked=False),
+            GenerationResponse("groq", "model-x", "ok", 1, 1, float("nan"), mocked=False),
+        ]:
+            class MalformedAdapter:
+                def generate(self, model, request):
+                    return response
+
+            manager = QuotaManager([self.profile()], self.quota)
+            gateway = QuotaAwareLiveGateway(manager, {"groq": MalformedAdapter()}, self.usage, True)
+            with self.subTest(response=response):
+                with self.assertRaises(ProviderUnavailable):
+                    gateway.generate(self.request)
+
     def test_no_paid_or_unknown_quota_fallback(self):
         adapter = FakeAdapter("groq")
         manager = QuotaManager([self.profile(daily_token_limit=None)], self.quota)
