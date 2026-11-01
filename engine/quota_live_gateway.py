@@ -73,7 +73,10 @@ class QuotaAwareLiveGateway:
                     raise ValueError("adapter response cost is invalid")
             except LiveAdapterError as exc:
                 last_error = exc
-                self.quota_manager.ledger.settle(reservation_id, 0)
+                # The provider may have processed the request before a timeout,
+                # transport failure, or malformed response. Retain the full token
+                # reservation conservatively; request count is already consumed.
+                self.quota_manager.ledger.settle(reservation_id, estimated_tokens)
                 if exc.status_code == 429:
                     self.quota_manager.ledger.cool_down(
                         profile.route_id, self.cooldown_seconds, "http_429"
@@ -82,7 +85,9 @@ class QuotaAwareLiveGateway:
                 continue
             except Exception as exc:
                 # Do not silently rotate after an unknown adapter/programming error.
-                self.quota_manager.ledger.settle(reservation_id, 0)
+                # Unknown adapter failures have ambiguous remote execution status.
+                # Keep the reservation rather than making possibly-used quota reusable.
+                self.quota_manager.ledger.settle(reservation_id, estimated_tokens)
                 raise ProviderUnavailable(
                     "Live adapter failed unexpectedly; route rotation was stopped."
                 ) from exc

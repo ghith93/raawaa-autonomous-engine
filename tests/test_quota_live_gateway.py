@@ -98,7 +98,10 @@ class QuotaAwareGatewayTests(unittest.TestCase):
         self.assertEqual(backup.calls, 0)
         snapshot = {row["route_id"]: row for row in manager.snapshot()}
         self.assertEqual(snapshot[first.route_id]["daily_requests_used"], 1)
-        self.assertEqual(snapshot[first.route_id]["daily_tokens_used"], 0)
+        self.assertEqual(
+            snapshot[first.route_id]["daily_tokens_used"],
+            len(self.request.prompt.encode("utf-8")) + self.request.max_output_tokens,
+        )
 
     def test_mismatched_provider_response_is_rejected_before_accounting(self):
         class WrongProvider:
@@ -112,7 +115,10 @@ class QuotaAwareGatewayTests(unittest.TestCase):
             gateway.generate(self.request)
         row = manager.snapshot()[0]
         self.assertEqual(row["daily_requests_used"], 1)
-        self.assertEqual(row["daily_tokens_used"], 0)
+        self.assertEqual(
+            row["daily_tokens_used"],
+            len(self.request.prompt.encode("utf-8")) + self.request.max_output_tokens,
+        )
 
     def test_negative_tokens_and_non_finite_cost_are_rejected(self):
         for response in [
