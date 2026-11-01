@@ -1,3 +1,4 @@
+import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -29,8 +30,14 @@ class QuotaAwareGatewayTests(unittest.TestCase):
         self.quota = QuotaLedger(root / "quota.db")
         self.usage = UsageLedger(root / "usage.db")
         self.request = GenerationRequest("research", "hello world", 20, task_id="task-1")
+        self._previous_kill_switch = os.environ.get("RAAWAA_ENGINE_LIVE_INFERENCE")
+        os.environ["RAAWAA_ENGINE_LIVE_INFERENCE"] = "enabled"
 
     def tearDown(self):
+        if self._previous_kill_switch is None:
+            os.environ.pop("RAAWAA_ENGINE_LIVE_INFERENCE", None)
+        else:
+            os.environ["RAAWAA_ENGINE_LIVE_INFERENCE"] = self._previous_kill_switch
         self.tmp.cleanup()
 
     def profile(self, provider="groq", account="main", **changes):
@@ -79,6 +86,18 @@ class QuotaAwareGatewayTests(unittest.TestCase):
             gateway.generate(self.request)
         self.assertEqual(adapter.calls, 1)
         self.assertEqual(self.quota.usage_for_task("task-1")["requests"], 1)
+
+    def test_operator_kill_switch_required_even_when_programmatic_flag_is_true(self):
+        adapter = FakeAdapter("groq")
+        manager = QuotaManager([self.profile()], self.quota)
+        gateway = QuotaAwareLiveGateway(
+            manager, {"groq": adapter}, self.usage,
+            network_calls_enabled=True, environ={},
+        )
+        with self.assertRaises(ProviderUnavailable):
+            gateway.generate(self.request)
+        self.assertEqual(adapter.calls, 0)
+        self.assertEqual(self.quota.audit_events()[0]["event"], "live_request_blocked")
 
     def test_network_disabled_by_default(self):
         adapter = FakeAdapter("groq")
