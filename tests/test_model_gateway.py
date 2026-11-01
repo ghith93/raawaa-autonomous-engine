@@ -1,0 +1,41 @@
+import tempfile
+import unittest
+from pathlib import Path
+from engine.model_router import ModelOption
+from engine.provider import GenerationRequest, MockAdapter
+from engine.model_gateway import BudgetExceeded, ModelGateway, ProviderUnavailable, UsageLedger
+
+
+class ModelGatewayTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp=tempfile.TemporaryDirectory()
+        self.ledger=UsageLedger(Path(self.tmp.name)/"usage.db")
+    def tearDown(self): self.tmp.cleanup()
+    def test_mock_offline_path(self):
+        gateway=ModelGateway([ModelOption("mock","offline","free",True,0.0)],
+            {"mock":MockAdapter()},self.ledger,network_calls_enabled=False)
+        result=gateway.generate(GenerationRequest("offline_test","test prompt"))
+        self.assertTrue(result.mocked)
+        self.assertEqual(result.cost_usd,0.0)
+        self.assertEqual(self.ledger.totals()["daily_usd"],0.0)
+    def test_live_task_blocked_by_default(self):
+        gateway=ModelGateway([ModelOption("mock","offline","free",True,0.0)],
+            {"mock":MockAdapter()},self.ledger)
+        with self.assertRaises(ProviderUnavailable):
+            gateway.generate(GenerationRequest("research","test"))
+    def test_no_model_fails_closed(self):
+        gateway=ModelGateway([],{"mock":MockAdapter()},self.ledger,network_calls_enabled=True)
+        with self.assertRaises(ProviderUnavailable):
+            gateway.generate(GenerationRequest("research","test"))
+    def test_zero_budget_blocks_even_free_mock(self):
+        gateway=ModelGateway([ModelOption("mock","offline","free",True,0.0)],
+            {"mock":MockAdapter()},self.ledger,network_calls_enabled=True,
+            daily_budget_usd=0.0,monthly_budget_usd=0.0)
+        with self.assertRaises(BudgetExceeded):
+            gateway.generate(GenerationRequest("research","test"))
+    def test_status_exposes_no_live_adapter(self):
+        gateway=ModelGateway([],{},self.ledger)
+        self.assertFalse(gateway.status()["live_provider_adapters_enabled"])
+
+
+if __name__=="__main__": unittest.main()
