@@ -25,9 +25,9 @@ function dbMock() {
         async first() {
           calls.push({ kind: "first", sql, values: this.values });
           if (sql.includes("SELECT 1")) return { ok: 1 };
+          if (sql.includes("INSERT INTO quota_usage")) return { id: this.values[0] };
           if (sql.includes("SUM(requests)")) return { requests: 0, tokens: 0 };
           if (sql.includes("SELECT until_at FROM quota_cooldowns")) return null;
-          if (sql.includes("INSERT INTO quota_usage")) return { id: this.values[0] };
           if (sql.includes("SELECT id,tokens,settled_at FROM quota_usage")) {
             return { id: this.values[0], tokens: 100, settled_at: null };
           }
