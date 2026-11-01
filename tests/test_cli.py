@@ -47,6 +47,14 @@ class CliTests(unittest.TestCase):
         self.assertFalse(profile["commercial_use_allowed"])
         self.assertNotIn("gsk_", output.getvalue())
 
+
+    def test_audit_reports_staged_provider_registry_without_enabling_inference(self):
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            self.assertEqual(cli.audit(), 0)
+        self.assertIn("1 staged provider profiles", output.getvalue())
+        self.assertIn("inference disabled", output.getvalue())
+
     def test_memory_cli_lifecycle(self):
         with tempfile.TemporaryDirectory() as tmp:
             output = io.StringIO()
