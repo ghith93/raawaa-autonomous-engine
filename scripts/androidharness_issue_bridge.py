@@ -337,7 +337,6 @@ class AndroidHarnessIssueBridge:
             original_title = issue["title"]
             try:
                 task = parse_task(issue.get("body") or "")
-                policy = verify_policy_files(self.root)
             except BridgeError as exc:
                 self._api("PATCH", f"repos/{REPOSITORY}/issues/{number}", {
                     "title": f"{REJECTED_PREFIX} {original_title[len(TASK_PREFIX):].strip()}"
@@ -346,6 +345,9 @@ class AndroidHarnessIssueBridge:
                     "body": f"AndroidHarness bridge rejected this task before execution: {exc}"
                 })
                 return True
+            # A missing or invalid policy is a fail-closed operational fault, not
+            # a malformed task: leave the issue pending so it can be retried safely.
+            policy = verify_policy_files(self.root)
 
             started = dt.datetime.now(dt.timezone.utc)
             self._audit({
@@ -428,8 +430,9 @@ class AndroidHarnessIssueBridge:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Run the bounded AndroidHarness GitHub issue bridge.")
-    parser.add_argument("--once", action="store_true", help="process at most one eligible issue and exit")
-    parser.add_argument("--poll", action="store_true", help="poll GitHub continuously")
+    mode = parser.add_mutually_exclusive_group(required=True)
+    mode.add_argument("--once", action="store_true", help="process at most one eligible issue and exit")
+    mode.add_argument("--poll", action="store_true", help="poll GitHub continuously")
     parser.add_argument("--poll-interval", type=int, default=30)
     parser.add_argument("--max-tasks", type=int, default=0, help="0 means no limit while polling")
     args = parser.parse_args()
@@ -437,8 +440,6 @@ def main() -> int:
         parser.error("--poll-interval must be between 15 and 300 seconds")
     if args.max_tasks < 0:
         parser.error("--max-tasks cannot be negative")
-    if not args.once and not args.poll:
-        parser.error("choose --once or --poll")
 
     try:
         auth = subprocess.run(
