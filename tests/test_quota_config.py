@@ -24,8 +24,14 @@ class ProviderProfileConfigTests(unittest.TestCase):
         self.assertEqual(entry.api_key_env, "GROQ_API_KEY")
         self.assertFalse(entry.enabled)
         self.assertFalse(entry.ready_for_routing)
-        self.assertIsNone(entry.profile.input_cost_per_million_usd)
-        self.assertFalse(entry.profile.commercial_use_allowed)
+        self.assertEqual(entry.model_stage, "preview")
+        self.assertFalse(entry.production_use_allowed)
+        self.assertTrue(entry.profile.commercial_use_allowed)
+        self.assertEqual(entry.profile.input_cost_per_million_usd, 0.0)
+        self.assertEqual(entry.profile.input_cost_per_million_usd, 0.0)
+        self.assertEqual(entry.profile.output_cost_per_million_usd, 0.0)
+        self.assertTrue(entry.profile.commercial_use_allowed)
+        self.assertFalse(entry.profile.production_use_allowed)
 
     def test_registry_rejects_enabled_mode_or_route(self):
         data = json.loads(self.source.read_text(encoding="utf-8"))

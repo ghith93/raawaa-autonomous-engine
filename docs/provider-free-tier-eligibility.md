@@ -68,6 +68,34 @@ Groq Free is now **account-plan and model-catalog verified**, not merely a publi
 
 Before any live call, separately verify the model-specific terms and the exact Free-plan pricing/data-handling terms applicable to this organization. Keep live inference disabled until the minute-window enforcement is merged, all profile evidence is complete, and the operator explicitly enables the existing kill switch. No real inference request has been made as part of this verification.
 
+
+## Qwen 3.8-27B model-specific review (2026-11-01)
+
+### Licence and service terms
+- The Qwen3.8-27B model card identifies the model weights as Apache-2.0. This supports commercial use of the model artifacts subject to the licence conditions; it does not replace Groq's API agreement or any model-specific terms.
+- Groq's Services Agreement permits use of its APIs to integrate Cloud Services and AI Model Services into a Customer Application and make them available to end users, subject to the Agreement, AUP, and applicable AI Model Terms.
+- Groq states it does not use customer Inputs/Outputs for model training or fine-tuning unless the customer explicitly grants permission or instructs it to do so.
+- Inference data is not retained by default. Groq may temporarily log inputs/outputs for reliability or abuse investigations for up to 30 days. The current documentation says customers may enable Zero Data Retention in Data Controls settings. Customer data is stored in US GCP buckets.
+- Do not send Raawaa's confidential formulae, customer records, credentials, or other sensitive data through the current route. If sensitive-data use is ever proposed, first review the applicable DPA, data location, ZDR configuration, and the user's own confidentiality requirements.
+
+### Important model-stage restriction
+Groq's supported-models page labels Qwen 3.8-27B as a **Preview Model** and says preview models are intended for evaluation and should not be used in production environments because they may be discontinued at short notice. Therefore this route must remain unavailable for production, customer-facing, or unattended business workflows. At most, a future explicitly isolated internal evaluation could be considered after the engine has task-kind allowlisting for evaluation-only routes. The current engine does not yet enforce such a model-stage restriction at the task level, so the profile remains disabled.
+
+### Free-plan cost interpretation
+- The operator confirmed the account is on Groq Free and supplied account-visible quotas for Qwen: 30 RPM, 8,000 TPM, 1,000 RPD, 200,000 TPD.
+- Groq's Services Agreement says some services are fee-free based on usage limits. Groq's Free-plan support FAQ says Free-plan usage within the tier limits is not charged and exceeding a limit returns a rate-limit response rather than a charge.
+- Groq's model pages show $0.80/M input and $4.00/M output pricing for the Developer tier; those figures must not be copied into a Free-plan profile as though they were the Free-plan charge. They are the paid-tier reference rates.
+- Keep the profile disabled. Zero-price fields describe the verified Free-plan usage only; they do not authorise a Developer-tier upgrade or paid use.
+
+Sources:
+- Groq Qwen model page: https://console.groq.com/docs/model/qwen/qwen3.8-27b
+- Groq supported models and Preview classification: https://console.groq.com/docs/models
+- Qwen model card / Apache-2.0: https://huggingface.co/Qwen/Qwen3.8-27B
+- Groq Services Agreement: https://console.groq.com/docs/legal/services-agreement
+- Groq data handling: https://console.groq.com/docs/your-data
+- Groq rate limits: https://console.groq.com/docs/rate-limits
+- Groq Free-plan billing FAQ: https://community.groq.com/t/do-i-get-charged-for-anything-on-the-groq-free-plan/832
+
 ## Required evidence before enabling any route
 
 1. Provider account is accessible and its exact plan/tier is visible.

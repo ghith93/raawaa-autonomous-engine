@@ -48,6 +48,7 @@ class QuotaProfile:
     model: str
     free_verified: bool
     commercial_use_allowed: bool
+    production_use_allowed: bool = False
     minute_request_limit: int | None = None
     minute_token_limit: int | None = None
     daily_request_limit: int | None = None
@@ -329,7 +330,9 @@ class QuotaManager:
 
     def eligible(self, profile: QuotaProfile, estimated_tokens: int = 1,
                  now: datetime | None = None) -> bool:
-        if not profile.free_verified or not profile.commercial_use_allowed:
+        if (not profile.free_verified or not profile.commercial_use_allowed
+                or type(profile.production_use_allowed) is not bool
+                or not profile.production_use_allowed):
             return False
         # This runtime is zero-spend by policy. Unknown or non-zero prices must
         # be rejected before network I/O; a post-response cost check is too late
@@ -415,6 +418,7 @@ class QuotaManager:
                 "route_id": profile.route_id,
                 "free_verified": profile.free_verified,
                 "commercial_use_allowed": profile.commercial_use_allowed,
+                "production_use_allowed": profile.production_use_allowed,
                 "minute_requests_used": minute["requests"],
                 "minute_tokens_used": minute["tokens"],
                 "minute_request_limit": profile.minute_request_limit,

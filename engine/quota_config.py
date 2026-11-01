@@ -17,6 +17,8 @@ class ProviderProfileEntry:
     account_tier: str
     api_key_env: str
     verification_note: str
+    production_use_allowed: bool
+    model_stage: str
     profile: QuotaProfile
 
     @property
@@ -26,6 +28,7 @@ class ProviderProfileEntry:
             self.enabled
             and p.free_verified
             and p.commercial_use_allowed
+            and self.production_use_allowed
             and p.input_cost_per_million_usd == 0.0
             and p.output_cost_per_million_usd == 0.0
             and p.minute_request_limit
@@ -72,6 +75,10 @@ def load_provider_profile_registry(path: str | Path) -> list[ProviderProfileEntr
         if not isinstance(api_key_env, str) or not re.fullmatch(r"[A-Z][A-Z0-9_]*", api_key_env):
             raise ValueError("provider API key environment variable name is invalid")
         note = item.get("verification_note", "")
+        production_use_allowed = item.get("production_use_allowed") is True
+        model_stage = item.get("model_stage", "unknown")
+        if not isinstance(model_stage, str) or not model_stage.strip():
+            raise ValueError("model_stage must be non-empty text")
         if not isinstance(note, str):
             raise ValueError("verification_note must be text")
         profile = QuotaProfile(
@@ -80,6 +87,7 @@ def load_provider_profile_registry(path: str | Path) -> list[ProviderProfileEntr
             model=item["model"],
             free_verified=item["free_verified"],
             commercial_use_allowed=item["commercial_use_allowed"],
+            production_use_allowed=item.get("production_use_allowed", False),
             minute_request_limit=item.get("minute_request_limit"),
             minute_token_limit=item.get("minute_token_limit"),
             daily_request_limit=item.get("daily_request_limit"),
@@ -104,6 +112,8 @@ def load_provider_profile_registry(path: str | Path) -> list[ProviderProfileEntr
             account_tier=str(item.get("account_tier", "unknown")),
             api_key_env=api_key_env,
             verification_note=note,
+            production_use_allowed=production_use_allowed,
+            model_stage=model_stage,
             profile=profile,
         ))
     return entries

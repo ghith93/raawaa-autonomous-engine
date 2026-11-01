@@ -18,7 +18,7 @@ class QuotaManagerTests(unittest.TestCase):
 
     def profile(self, **changes):
         values = dict(provider="groq", account="primary", model="model-a",
-                      free_verified=True, commercial_use_allowed=True,
+                      free_verified=True, commercial_use_allowed=True, production_use_allowed=True,
                       minute_request_limit=30, minute_token_limit=8000,
                       daily_request_limit=10, daily_token_limit=1000,
                       monthly_request_limit=100, monthly_token_limit=10000,
@@ -58,6 +58,11 @@ class QuotaManagerTests(unittest.TestCase):
             )):
                 self.assertFalse(manager.eligible(route, 1, self.now))
         self.assertIsNone(manager.select(1, self.now))
+
+    def test_preview_or_nonproduction_profile_is_never_eligible(self):
+        route = self.profile(production_use_allowed=False)
+        self.assertFalse(QuotaManager([route], self.ledger).eligible(route, 1, self.now))
+        self.assertIsNone(QuotaManager([route], self.ledger).select(1, self.now))
 
     def test_commercial_restriction_blocks_route(self):
         route = self.profile(commercial_use_allowed=False)
@@ -221,6 +226,7 @@ class QuotaManagerTests(unittest.TestCase):
         self.assertEqual(row["daily_tokens_used"], 25)
         self.assertEqual(row["monthly_requests_used"], 1)
         self.assertEqual(row["monthly_tokens_used"], 25)
+        self.assertTrue(row["production_use_allowed"])
 
     def test_existing_quota_database_migrates_without_losing_reservation(self):
         path = self.tmp.name + "/legacy-quota.db"
