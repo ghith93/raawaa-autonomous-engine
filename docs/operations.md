@@ -113,7 +113,7 @@ The preflight does not prove that `/v1/tasks/recover`, claim, heartbeat, or fini
 
 ## Quota ledger and live-adapter safety
 
-The optional quota-aware live gateway is disabled by default. When explicitly enabled in a controlled test or approved deployment, it selects only a route whose free-tier status, commercial-use permission, daily request limit, and daily token limit are explicitly verified. Missing or unknown quota data is not eligible.
+The optional quota-aware live gateway is disabled by default. When explicitly enabled in a controlled test or approved deployment, it selects only a route with an HTTPS endpoint, separate HTTPS pricing/quota/terms evidence URLs (valid hostnames, no embedded credentials), a timezone-aware verification timestamp no more than 30 days old, verified free-tier and commercial-use eligibility, daily request/token caps, and a maximum output-token ceiling. Missing, malformed, future-dated, stale, or unknown profile data is not eligible. The gateway enforces the output ceiling before reserving quota or contacting an adapter. No real provider profile is currently configured by this repository.
 
 Before provider I/O, the gateway reserves one request and a conservative token estimate in SQLite using an immediate write transaction. Concurrent reservations therefore compete against the same persisted daily caps. On a valid response, the reservation is settled to actual token usage. Settlement is idempotent only when a repeated call reports the same actual token count; a conflicting second settlement fails closed. Existing quota databases are migrated additively.
 
