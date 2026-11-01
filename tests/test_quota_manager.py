@@ -1,3 +1,4 @@
+import sqlite3
 import tempfile
 import unittest
 from concurrent.futures import ThreadPoolExecutor
@@ -57,6 +58,52 @@ class QuotaManagerTests(unittest.TestCase):
         row = QuotaManager([route], self.ledger).snapshot(self.now)[0]
         self.assertEqual(row["daily_requests_used"], 1)
         self.assertEqual(row["daily_tokens_used"], 25)
+
+    def test_existing_quota_database_migrates_without_losing_reservation(self):
+        path = self.tmp.name + "/legacy-quota.db"
+        with sqlite3.connect(path) as db:
+            db.execute("""CREATE TABLE quota_usage (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                route_id TEXT NOT NULL,
+                requests INTEGER NOT NULL,
+                tokens INTEGER NOT NULL,
+                occurred_at TEXT NOT NULL
+            )""")
+            db.execute(
+                "INSERT INTO quota_usage(route_id,requests,tokens,occurred_at) VALUES(?,?,?,?)",
+                ("groq:primary:model-a", 1, 100, self.now.isoformat()),
+            )
+
+        migrated = QuotaLedger(path)
+        migrated.settle(1, 25)
+        self.assertEqual(
+            migrated.usage_today("groq:primary:model-a", self.now),
+            {"requests": 1, "tokens": 25},
+        )
+        with sqlite3.connect(path) as db:
+            columns = {row[1] for row in db.execute("PRAGMA table_info(quota_usage)")}
+        self.assertIn("settled_at", columns)
+
+    def test_settlement_is_idempotent_for_same_usage(self):
+        route = self.profile()
+        reservation = self.ledger.reserve(route.route_id, 100, 10, 1000, self.now)
+        self.ledger.settle(reservation, 25)
+        self.ledger.settle(reservation, 25)
+        self.assertEqual(self.ledger.usage_today(route.route_id, self.now),
+                         {"requests": 1, "tokens": 25})
+
+    def test_conflicting_second_settlement_fails_closed(self):
+        route = self.profile()
+        reservation = self.ledger.reserve(route.route_id, 100, 10, 1000, self.now)
+        self.ledger.settle(reservation, 25)
+        with self.assertRaisesRegex(RuntimeError, "already settled"):
+            self.ledger.settle(reservation, 26)
+        self.assertEqual(self.ledger.usage_today(route.route_id, self.now),
+                         {"requests": 1, "tokens": 25})
+
+    def test_settlement_rejects_unknown_reservation(self):
+        with self.assertRaises(KeyError):
+            self.ledger.settle(99999, 25)
 
     def test_concurrent_reservations_cannot_overspend_last_request(self):
         route = self.profile(daily_request_limit=1, daily_token_limit=100)
