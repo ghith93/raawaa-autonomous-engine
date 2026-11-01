@@ -1,5 +1,6 @@
 import tempfile
 import unittest
+import math
 from pathlib import Path
 from engine.model_router import ModelOption
 from engine.provider import GenerationRequest, MockAdapter
@@ -40,6 +41,17 @@ class ModelGatewayTests(unittest.TestCase):
             daily_budget_usd=1.0,monthly_budget_usd=1.0,allow_paid_calls=False)
         with self.assertRaises(ProviderUnavailable):
             gateway.generate(GenerationRequest("research","test"))
+
+    def test_usage_ledger_rejects_invalid_tokens_and_non_finite_costs(self):
+        for kwargs in [
+            {"input_tokens": -1, "output_tokens": 1, "cost_usd": 0.0},
+            {"input_tokens": 1, "output_tokens": -1, "cost_usd": 0.0},
+            {"input_tokens": 1, "output_tokens": 1, "cost_usd": float("nan")},
+            {"input_tokens": 1, "output_tokens": 1, "cost_usd": float("inf")},
+        ]:
+            with self.subTest(kwargs=kwargs):
+                with self.assertRaises(ValueError):
+                    self.ledger.record("provider", "model", "task", **kwargs)
 
     def test_status_exposes_no_live_adapter(self):
         gateway=ModelGateway([],{},self.ledger)
