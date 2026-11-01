@@ -90,7 +90,7 @@ Agents may research and propose changes. Policy gates must control execution. Ke
 - No unattended autonomous agent loop.
 - No notification channel.
 - No production deployment.
-- Side-effecting task handlers still need heartbeat/ownership fencing and handler-level idempotency before activation.
+- Long-running task handlers still need periodic heartbeat renewal; the stores already enforce lease-token ownership fencing, and external side effects need handler-level idempotency before activation.
 - Local SQLite memory and task state need an explicit backup/retention strategy for production.
 
 Recommended next work: harden task ownership and concurrent recovery, add side-effect handler contracts, then implement a bounded scheduler/worker on a verified free persistent host.
