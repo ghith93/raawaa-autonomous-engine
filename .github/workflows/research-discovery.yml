@@ -1,0 +1,38 @@
+name: Scheduled Open-Source Research Discovery
+
+on:
+  schedule:
+    - cron: "31 5 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: scheduled-research-discovery
+  cancel-in-progress: true
+
+jobs:
+  discover:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      GITHUB_TOKEN: ${{ github.token }}
+    steps:
+      - name: Check out reviewed main
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Validate engine policy
+        run: python -m engine.cli audit
+      - name: Discover public research candidates
+        run: python -m engine.cli research-discover --max-per-query 5 > research-candidates.json
+      - name: Upload bounded research snapshot
+        uses: actions/upload-artifact@v4
+        with:
+          name: research-candidates-${{ github.run_id }}
+          path: research-candidates.json
+          if-no-files-found: error
+          retention-days: 30
