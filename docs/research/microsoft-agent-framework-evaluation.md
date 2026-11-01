@@ -59,6 +59,19 @@ The prototype is not connected to D1, does not create a migration, does not call
 4. Verify every agent/provider execution path reuses engine.operating_policy.load_operating_policy() and the existing quota/data-classification gateway.
 5. Only then design a D1 adapter. Any migration/deployment remains behind the existing production approval gate.
 
+## Pinned Python checkpoint codec and in-memory adapter evaluation (2026-11-02)
+
+Inspection of the exact `python-1.24.0` source confirms:
+
+- `WorkflowCheckpoint.to_dict()` is explicitly shallow; nested event/message/state values are not recursively converted.
+- The supported internal storage boundary is `_encode_checkpoint_for_storage()`, which calls `encode_checkpoint_value()` and immediately validates the result with `decode_checkpoint_value(..., allowed_types=...)` before persistence.
+- `encode_checkpoint_value()` produces JSON-serializable data but pickles non-JSON-native values into base64 marker strings. The matching decoder uses a restricted allowlist by default when an explicit `allowed_types` set is supplied.
+- The framework explicitly treats checkpoint storage as trusted data and warns that its restricted unpickler is defense in depth, not a security boundary. A custom storage must not accept attacker-controlled checkpoint blobs.
+
+The branch now adds `InMemoryEnvelopeCheckpointStorage`, an ephemeral adapter implementing the six `CheckpointStorage` operations against in-memory bytes. It uses the pinned framework codec, an explicit restricted type allowlist, the bounded envelope, and workflow lineage/sequence checks. Its tests cover datetime state round-trip, ordered listing/latest selection, delete, workflow isolation, duplicate IDs, tampering, and rejection of unapproved application-defined types.
+
+This remains an isolated test adapter, not durable storage. The adapter imports private framework modules and is valid only for the pinned package versions; any version change requires a fresh source/API review. It stores pickle-bearing encoded values in memory only. Do not connect it to D1 or any externally writable store. The SHA-256 envelope checksum remains unauthenticated and cannot protect against a malicious writer who can recompute it.
+
 ## Decision and safety
 
 Do not replace the current runtime or add these dependencies to default engine requirements yet. The experiment remains isolated and optional. The evaluation sends zero provider requests, uses zero paid services, requires no credentials, and does not change production data or deployment state.
