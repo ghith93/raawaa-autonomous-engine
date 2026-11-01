@@ -166,6 +166,8 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_parser("model-status")
     sub.add_parser("provider-profile-status", help="Inspect provider profiles; never enables inference")
     sub.add_parser("quota-status", help="Inspect local provider quota usage and threshold alerts; no network calls")
+    research = sub.add_parser("research-discover", help="Read-only discovery of public GitHub research candidates")
+    research.add_argument("--max-per-query", type=int, default=None)
     return parser
 
 
