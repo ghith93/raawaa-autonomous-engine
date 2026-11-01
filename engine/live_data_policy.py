@@ -65,8 +65,12 @@ def validate_live_payload(title: str, payload: dict, policy: dict) -> tuple[bool
         elif isinstance(current, list):
             stack.extend(current)
         elif isinstance(current, str):
-            if EMAIL_PATTERN.search(current) or any(pattern.search(current) for pattern in SECRET_PATTERNS):
+            if EMAIL_PATTERN.search(current):
+                return False, "personal_data_detected"
+            if any(pattern.search(current) for pattern in SECRET_PATTERNS):
                 return False, "secret_pattern_detected"
-    if EMAIL_PATTERN.search(title) or any(pattern.search(title) for pattern in SECRET_PATTERNS):
+    if EMAIL_PATTERN.search(title):
+        return False, "personal_data_detected"
+    if any(pattern.search(title) for pattern in SECRET_PATTERNS):
         return False, "secret_pattern_detected"
     return True, "allowed"
