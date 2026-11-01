@@ -20,6 +20,12 @@ The default posture remains conservative:
 - Live inference adapters are opt-in code paths; do not enable them until provider eligibility, quota limits, and credentials are explicitly configured and verified.
 - Safe task types are now assigned to a named specialist role and required capability through a deterministic contract. This remains a dry-run assignment: it does not mean a persistent multi-agent team or model inference is running.
 
+## AndroidHarness runtime
+
+AndroidHarness is registered as an optional Android/Linux execution environment. Read [AndroidHarness runtime profile](android-harness.md) before using it and inspect `config/runtime_backends.json` for its declared status and default-deny settings. The supplied readiness report is a dated snapshot, not a live health check. Re-probe tool versions, ABI, available RAM/disk, session state, and network access before each new class of workload.
+
+Use AndroidHarness for bounded compatibility experiments, local tests, and device-specific validation when an authenticated session is actually available. It is not yet wired as a callable engine tool: do not claim autonomous remote execution until a narrow adapter is implemented, tested, and integrated with `load_operating_policy()` and audit logging. Keep root off by default, avoid Shizuku unless a specific task requires it, do not expose local services publicly, and never transfer secrets into prompts or logs. LiteLLM, local LLM runtimes, and other projects must pass independent smoke tests and resource limits before being marked supported. The detailed contract and snapshot synchronization instructions are in `android-harness.md`.
+
 ## Requirements and checks
 
 Python 3.11 or later is required. Runtime dependencies are kept minimal.
