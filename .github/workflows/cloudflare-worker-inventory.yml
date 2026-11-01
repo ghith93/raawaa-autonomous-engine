@@ -128,8 +128,10 @@ jobs:
               raise SystemExit(0)
 
           result = payload.get("result") or {}
-          enabled = str(bool(result.get("enabled"))).lower()
-          previews = str(bool(result.get("previews_enabled"))).lower()
+          enabled_value = result.get("enabled")
+          previews_value = result.get("previews_enabled")
+          enabled = str(enabled_value).lower() if isinstance(enabled_value, bool) else "unknown"
+          previews = str(previews_value).lower() if isinstance(previews_value, bool) else "unknown"
           print(f"WORKERS_DEV_ENABLED={enabled}")
           print(f"WORKER_PREVIEWS_ENABLED={previews}")
           with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
