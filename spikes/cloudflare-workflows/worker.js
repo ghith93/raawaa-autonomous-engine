@@ -44,7 +44,7 @@ function fakeAdapters() {
       return { checkpoint_id: "spike:" + input.task_id, review_decision: input.review.decision };
     },
     async complete(input) {
-      return { task_id: input.task_id, status: "completed", checkpoint_id: input.checkpoint_id };
+      return { task_id: input.task_id, status: "completed", checkpoint_id: input.checkpoint_id, completed_at: new Date().toISOString() };
     },
   };
 }
