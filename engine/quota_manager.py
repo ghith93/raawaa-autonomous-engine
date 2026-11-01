@@ -49,6 +49,7 @@ class QuotaProfile:
     free_verified: bool
     commercial_use_allowed: bool
     production_use_allowed: bool = False
+    enabled: bool = False
     minute_request_limit: int | None = None
     minute_token_limit: int | None = None
     daily_request_limit: int | None = None
@@ -330,6 +331,8 @@ class QuotaManager:
 
     def eligible(self, profile: QuotaProfile, estimated_tokens: int = 1,
                  now: datetime | None = None) -> bool:
+        if (type(profile.enabled) is not bool or not profile.enabled):
+            return False
         if (not profile.free_verified or not profile.commercial_use_allowed
                 or type(profile.production_use_allowed) is not bool
                 or not profile.production_use_allowed):
@@ -416,6 +419,7 @@ class QuotaManager:
             minute = self.ledger.usage_minute(profile.route_id, now)
             rows.append({
                 "route_id": profile.route_id,
+                "enabled": profile.enabled,
                 "free_verified": profile.free_verified,
                 "commercial_use_allowed": profile.commercial_use_allowed,
                 "production_use_allowed": profile.production_use_allowed,

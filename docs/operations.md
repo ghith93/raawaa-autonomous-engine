@@ -101,7 +101,7 @@ Agents may research and propose changes. Policy gates must control execution. Ke
 - Local SQLite memory and model-usage state need an explicit backup/retention strategy for production.
 - The former `workers.dev` HTTP 403 was Cloudflare Error 1010 / Browser Integrity Check: Cloudflare rejects Python's default `urllib` User-Agent on `workers.dev`. The remote task client and both Task Runner probes now send a descriptive `RaawaaAutonomousEngine/1.0` User-Agent. Do not disable Browser Integrity Check, Access, or WAF to solve this class of issue. The separate Access inventory API error says Access is not enabled; it was not the cause of the Worker 403.
 
-Recommended next work: complete model-specific commercial/data-term verification and stage a disabled Groq profile from the operator-confirmed account quotas; implement monetary accounting before any non-zero-cost route; then continue with side-effect idempotency and a genuinely free persistent host assessment.
+Recommended next work: wire the disabled production GPT-OSS 20B/120B profiles through the existing quota gateway only after the operator explicitly authorizes live inference and data-classification controls are in place; implement monetary accounting before any non-zero-cost route; then continue with side-effect idempotency and a genuinely free persistent host assessment.
 
 ## Diagnosing the authenticated D1 task API
 

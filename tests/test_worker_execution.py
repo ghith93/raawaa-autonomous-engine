@@ -44,7 +44,7 @@ class WorkerExecutionTests(unittest.TestCase):
     def gateway(self, adapter):
         profile = QuotaProfile(
             provider="groq", account="test", model="verified-test-model",
-            free_verified=True, commercial_use_allowed=True, production_use_allowed=True,
+            free_verified=True, commercial_use_allowed=True, production_use_allowed=True, enabled=True,
             minute_request_limit=30, minute_token_limit=8000,
             daily_request_limit=10, daily_token_limit=2000,
             monthly_request_limit=100, monthly_token_limit=20000,

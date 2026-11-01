@@ -69,6 +69,26 @@ Groq Free is now **account-plan and model-catalog verified**, not merely a publi
 Before any live call, separately verify the model-specific terms and the exact Free-plan pricing/data-handling terms applicable to this organization. Keep live inference disabled until the minute-window enforcement is merged, all profile evidence is complete, and the operator explicitly enables the existing kill switch. No real inference request has been made as part of this verification.
 
 
+
+## Production-grade Groq candidates: OpenAI GPT-OSS (2026-11-01)
+
+The operator's account-visible model list includes both OpenAI open-weight models. Groq's supported-models page classifies GPT-OSS 20B and GPT-OSS 120B as **Production Models** (unlike Qwen 3.8-27B, which is Preview/evaluation-only).
+
+- Preferred first candidate: openai/gpt-oss-20b — Groq reports ~1,000 tokens/second, 131,072 context, tool use, browser search, code execution, JSON/JSON Schema outputs, and reasoning.
+- Higher-capacity fallback: openai/gpt-oss-120b — Groq reports ~500 tokens/second with similar agentic/tool capabilities.
+- The OpenAI gpt-oss models are Apache-2.0 open-weight models, subject to the separate gpt-oss usage policy.
+- The operator supplied Free-account limits for both: 30 RPM, 8,000 TPM, 1,000 RPD, and 200,000 TPD. The account console showed both as allowed.
+- Groq's public model pages show Developer-tier rates of $0.075/M input and $0.30/M output for GPT-OSS 20B, and $0.15/M input and $0.60/M output for GPT-OSS 120B. These are not the Free-plan charges; the staged profiles record zero cost only for the operator-confirmed Free plan within its quotas.
+- Both profiles are configured with internal monthly/per-task safety caps, explicitly distinguished from provider-published quotas.
+
+These models are better candidates than Qwen Preview for future production workflows. Both remain disabled; no inference is sent until the engine is deliberately wired, the operator enables the live-inference switch, and all data-handling/approval requirements are satisfied.
+
+Sources:
+- Groq supported models and production classification: https://console.groq.com/docs/models
+- Groq GPT-OSS 20B model page: https://console.groq.com/docs/model/openai/gpt-oss-20b
+- OpenAI gpt-oss licence and usage policy: https://github.com/openai/gpt-oss
+- OpenAI model card: https://openai.com/index/gpt-oss-model-card/
+
 ## Qwen 3.8-27B model-specific review (2026-11-01)
 
 ### Licence and service terms
