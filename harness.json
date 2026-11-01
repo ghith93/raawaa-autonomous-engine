@@ -8,7 +8,6 @@
     { "title": "Provider free-tier eligibility", "path": "docs/provider-free-tier-eligibility.md" }
   ],
   "skills": {
-    "paths": [".harness/skills"],
     "auto_load": ["raawaa-engine-androidharness"]
   },
   "agents": {
