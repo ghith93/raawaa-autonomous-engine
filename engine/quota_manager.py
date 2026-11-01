@@ -48,6 +48,8 @@ class QuotaProfile:
     model: str
     free_verified: bool
     commercial_use_allowed: bool
+    minute_request_limit: int | None = None
+    minute_token_limit: int | None = None
     daily_request_limit: int | None = None
     daily_token_limit: int | None = None
     monthly_request_limit: int | None = None
@@ -123,6 +125,18 @@ class QuotaLedger:
             ).fetchone()
         return {"requests": int(row["requests"]), "tokens": int(row["tokens"])}
 
+    def usage_minute(self, route_id: str, now: datetime | None = None) -> dict[str, int]:
+        """Return rolling 60-second usage, including unsettled reservations."""
+        now = (now or datetime.now(timezone.utc)).astimezone(timezone.utc)
+        cutoff = (now - timedelta(seconds=60)).isoformat()
+        with self._connect() as db:
+            row = db.execute(
+                "SELECT COALESCE(SUM(requests),0) requests, COALESCE(SUM(tokens),0) tokens "
+                "FROM quota_usage WHERE route_id=? AND occurred_at>?",
+                (route_id, cutoff),
+            ).fetchone()
+        return {"requests": int(row["requests"]), "tokens": int(row["tokens"])}
+
     def usage_month(self, route_id: str, now: datetime | None = None) -> dict[str, int]:
         now = now or datetime.now(timezone.utc)
         start = now.astimezone(timezone.utc).replace(
@@ -152,22 +166,28 @@ class QuotaLedger:
                 monthly_token_limit: int | None = None,
                 task_id: str | None = None,
                 per_task_request_limit: int | None = None,
-                per_task_token_limit: int | None = None) -> int:
+                per_task_token_limit: int | None = None,
+                minute_request_limit: int | None = None,
+                minute_token_limit: int | None = None) -> int:
         """Atomically reserve one request and its estimated tokens before network I/O."""
         if (type(estimated_tokens) is not int or type(request_limit) is not int
                 or type(token_limit) is not int or type(monthly_request_limit) is not int
                 or type(monthly_token_limit) is not int
                 or type(per_task_request_limit) is not int
                 or type(per_task_token_limit) is not int
+                or type(minute_request_limit) is not int
+                or type(minute_token_limit) is not int
                 or not isinstance(task_id, str) or not task_id.strip()
                 or min(estimated_tokens, request_limit, token_limit,
                        monthly_request_limit, monthly_token_limit,
-                       per_task_request_limit, per_task_token_limit) < 1):
+                       per_task_request_limit, per_task_token_limit,
+                       minute_request_limit, minute_token_limit) < 1):
             raise ValueError("reservation limits and estimated tokens must be positive integers")
         now = now or datetime.now(timezone.utc)
         current = now.astimezone(timezone.utc)
         start = current.replace(hour=0, minute=0, second=0, microsecond=0).isoformat()
         month_start = current.replace(day=1, hour=0, minute=0, second=0, microsecond=0).isoformat()
+        minute_start = (current - timedelta(seconds=60)).isoformat()
         stamp = current.isoformat()
         with self._connect() as db:
             db.execute("BEGIN IMMEDIATE")
@@ -179,6 +199,10 @@ class QuotaLedger:
                 "SELECT COALESCE(SUM(requests),0) requests, COALESCE(SUM(tokens),0) tokens "
                 "FROM quota_usage WHERE route_id=? AND occurred_at>=?", (route_id, month_start)
             ).fetchone()
+            minute = db.execute(
+                "SELECT COALESCE(SUM(requests),0) requests, COALESCE(SUM(tokens),0) tokens "
+                "FROM quota_usage WHERE route_id=? AND occurred_at>?", (route_id, minute_start)
+            ).fetchone()
             task = db.execute(
                 "SELECT COALESCE(SUM(requests),0) requests, COALESCE(SUM(tokens),0) tokens "
                 "FROM quota_usage WHERE task_id=?", (task_id,)
@@ -187,6 +211,8 @@ class QuotaLedger:
                     or int(daily["tokens"]) + estimated_tokens > token_limit
                     or int(monthly["requests"]) >= monthly_request_limit
                     or int(monthly["tokens"]) + estimated_tokens > monthly_token_limit
+                    or int(minute["requests"]) >= minute_request_limit
+                    or int(minute["tokens"]) + estimated_tokens > minute_token_limit
                     or int(task["requests"]) >= per_task_request_limit
                     or int(task["tokens"]) + estimated_tokens > per_task_token_limit):
                 raise RuntimeError("quota reservation unavailable")
@@ -333,6 +359,10 @@ class QuotaManager:
         if (type(profile.max_output_tokens) is not int
                 or not 1 <= profile.max_output_tokens <= 4096):
             return False
+        if (type(profile.minute_request_limit) is not int
+                or type(profile.minute_token_limit) is not int
+                or min(profile.minute_request_limit, profile.minute_token_limit) < 1):
+            return False
         if (type(profile.daily_request_limit) is not int
                 or type(profile.daily_token_limit) is not int
                 or type(profile.monthly_request_limit) is not int
@@ -346,6 +376,10 @@ class QuotaManager:
         if type(estimated_tokens) is not int or estimated_tokens < 1:
             return False
         if self.ledger.cooldown_active(profile.route_id, now):
+            return False
+        minute = self.ledger.usage_minute(profile.route_id, now)
+        if (minute["requests"] >= profile.minute_request_limit
+                or minute["tokens"] + estimated_tokens > profile.minute_token_limit):
             return False
         daily = self.ledger.usage_today(profile.route_id, now)
         monthly = self.ledger.usage_month(profile.route_id, now)
@@ -379,6 +413,10 @@ class QuotaManager:
                 "route_id": profile.route_id,
                 "free_verified": profile.free_verified,
                 "commercial_use_allowed": profile.commercial_use_allowed,
+                "minute_requests_used": self.ledger.usage_minute(profile.route_id, now)["requests"],
+                "minute_tokens_used": self.ledger.usage_minute(profile.route_id, now)["tokens"],
+                "minute_request_limit": profile.minute_request_limit,
+                "minute_token_limit": profile.minute_token_limit,
                 "daily_requests_used": usage["requests"],
                 "daily_tokens_used": usage["tokens"],
                 "monthly_requests_used": monthly["requests"],
