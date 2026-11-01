@@ -66,6 +66,18 @@ def bounded_text(text: str, limit: int) -> str:
     return clipped + suffix
 
 
+def summarize_unittest_output(text: str) -> dict[str, Any]:
+    """Return only aggregate unittest status; never publish raw test output."""
+    ran = re.search(r"(?m)^Ran (\\d+) tests? in [0-9.]+s$", text)
+    failed = re.search(r"(?m)^FAILED \\(([^)]+)\\)$", text)
+    passed = bool(re.search(r"(?m)^OK(?: \\([^)]*\\))?$", text))
+    return {
+        "tests_run": int(ran.group(1)) if ran else None,
+        "status": "failed" if failed else ("passed" if passed else "incomplete"),
+        "failure_summary": failed.group(1) if failed else None,
+    }
+
+
 def parse_task(body: str) -> dict[str, Any]:
     if TASK_MARKER not in body:
         raise BridgeError("task marker is missing")
@@ -208,7 +220,7 @@ def safe_extract_git_archive(archive_bytes: bytes, destination: Path) -> None:
                 raise BridgeError("archive contains a symlink or unsupported file type")
 
 
-def safe_python_environment(workspace: Path) -> dict[str, str]:
+def minimal_python_environment(workspace: Path) -> dict[str, str]:
     sandbox_home = workspace / ".androidharness-home"
     temporary = workspace / ".androidharness-tmp"
     for directory in (
@@ -373,11 +385,14 @@ class AndroidHarnessIssueBridge:
             with tempfile.TemporaryDirectory(prefix="raawaa-androidharness-") as temporary:
                 workspace = Path(temporary)
                 safe_extract_git_archive(archive.stdout, workspace)
+                # Validate the policy documents from the exact commit being tested,
+                # not only the possibly older checkout running this bridge.
+                target_policy = verify_policy_files(workspace)
                 try:
                     result = subprocess.run(
                         [sys.executable, "-m", "unittest", "discover", "-s", "tests", "-v"],
                         cwd=workspace,
-                        env=safe_python_environment(workspace),
+                        env=minimal_python_environment(workspace),
                         text=True,
                         capture_output=True,
                         timeout=task["timeout_seconds"],
@@ -473,7 +488,6 @@ class AndroidHarnessIssueBridge:
             self._audit(audit_record)
             final_prefix = COMPLETE_PREFIX if success else FAILED_PREFIX
             final_title = f"{final_prefix} {original_title[len(TASK_PREFIX):].strip()}"
-            output = result.get("output")
             comment = {
                 "task_id": number,
                 "status": status,
@@ -482,8 +496,7 @@ class AndroidHarnessIssueBridge:
                 "duration_seconds": round(elapsed, 3),
                 "exit_code": result.get("exit_code"),
                 "policy_sha256": policy,
-                "result": {key: value for key, value in result.items() if key != "output"},
-                "output": output,
+                "result": result,
             }
             self._api("PATCH", f"repos/{REPOSITORY}/issues/{number}", {"title": final_title})
             self._api("POST", f"repos/{REPOSITORY}/issues/{number}/comments", {
