@@ -41,8 +41,9 @@ migration is deliberately not run by CI or by the scheduled maintenance workflow
 
 ## Next steps
 
-1. Add an explicit, manually dispatched migration workflow with a separate
-   environment approval gate.
+1. The manually dispatched workflow `.github/workflows/d1-migrate.yml` now
+   lists remote migration state and applies reviewed migrations only after the
+   operator types the exact target database name. It is never run by CI.
 2. Add disposable-database integration tests for D1 semantics.
 3. Introduce storage protocols and D1 repositories without changing the local
    SQLite implementation used by existing unit tests.
