@@ -1,6 +1,6 @@
 # AndroidHarness 3.2 Workspace Integration Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [x]`) syntax for tracking.
 
 **Goal:** Prepare Raawaa Engine's project workspace for AndroidHarness 3.2 with scoped agent profiles, project skills, safe diagnostics and accurate setup guidance.
 
@@ -42,10 +42,10 @@
 - The skill is auto-loaded as `raawaa-engine-androidharness`.
 - Read-only profiles are selected through `task(agent="researcher" | "reviewer" | "security_reviewer", ...)`.
 
-- [ ] Write tests validating config references, skill auto-load, scoped profiles, and absence of unconfigured MCP endpoints.
-- [ ] Run the tests and verify they fail because the configuration files do not exist.
-- [ ] Add the project config and skill with shell/edit/network allowed within normal app checks, delete ask-gated, outside-workspace denied, and no root/MCP override.
-- [ ] Re-run tests and verify they pass.
+- [x] Write tests validating config references, skill auto-load, scoped profiles, and absence of unconfigured MCP endpoints.
+- [x] Run the tests and verify they fail because the configuration files do not exist.
+- [x] Add the project config and skill with shell/edit/network allowed within normal app checks, delete ask-gated, outside-workspace denied, and no root/MCP override.
+- [x] Re-run tests and verify they pass.
 
 ### Task 2: Add a read-only AndroidHarness doctor
 
@@ -58,10 +58,10 @@
 - Output: JSON containing runtime/device facts, available tools, resource observations, project branch/commit/dirty count, and boolean environment markers.
 - The script must not print environment-variable values, access token files, make network requests, install packages, or change files.
 
-- [ ] Add tests for JSON output, safe secret handling, and the `mutations_performed=false` invariant.
-- [ ] Run tests and verify the expected failure.
-- [ ] Implement the standard-library-only diagnostic using bounded read-only probes.
-- [ ] Run the diagnostic and the complete Python test suite.
+- [x] Add tests for JSON output, safe secret handling, and the `mutations_performed=false` invariant.
+- [x] Run tests and verify the expected failure.
+- [x] Implement the standard-library-only diagnostic using bounded read-only probes.
+- [x] Run the diagnostic and the complete Python test suite.
 
 ### Task 3: Update AndroidHarness 3.2 runbook and runtime registry
 
@@ -75,18 +75,29 @@
 - Document the v3.2 project config, skills, nested agent profiles, MCP capability boundary, built-in keyless model routing, local GGUF option, SDK installer, Shizuku/Wireless Debugging and long-run limits.
 - Record upstream release/version as verified metadata; do not mark device setup or live adapter as complete.
 
-- [ ] Update the runbook with source-backed, version-specific guidance.
-- [ ] Update the runtime registry to record AndroidHarness 3.2 as the verified upstream app version and keep device capabilities as operator-reported.
-- [ ] Add links to the doctor and project skill.
-- [ ] Validate JSON and Markdown references.
+- [x] Update the runbook with source-backed, version-specific guidance.
+- [x] Update the runtime registry to record AndroidHarness 3.2 as the verified upstream app version and keep device capabilities as operator-reported.
+- [x] Add links to the doctor and project skill.
+- [x] Validate JSON and Markdown references.
 
 ### Task 4: Verify and prepare the PR
 
 **Files:**
 - No additional files unless tests reveal a defect.
 
-- [ ] Run `python -m unittest discover -s tests -v`.
-- [ ] Run `python -m engine.cli audit`.
-- [ ] Review the complete diff for secrets, scope creep and invalid AndroidHarness schema fields.
-- [ ] Open a PR and verify exact-head Engine CI.
-- [ ] Do not claim tablet-side setup, model download or Shizuku startup; those require the actual AndroidHarness session and explicit device-side approvals.
+- [x] Run `python -m unittest discover -s tests -v`.
+- [x] Run `python -m engine.cli audit`.
+- [x] Review the complete diff for secrets, scope creep and invalid AndroidHarness schema fields.
+- [x] Open a PR and verify exact-head Engine CI.
+- [x] Do not claim tablet-side setup, model download or Shizuku startup; those require the actual AndroidHarness session and explicit device-side approvals.
+
+
+## Execution record
+
+- Test-first red run: the initial configuration/doctor contract failed as expected because the new files were absent.
+- Green run: project config, scoped agent profiles, project skill, memory seed and read-only doctor passed all new tests.
+- A follow-up path assertion caught the research note missing from the feature branch; the note was copied onto the branch and the final exact head passed twice.
+- Final head: `6aa12e5d50190d8291b8f3db0f23d7f7382fd304`.
+- Exact-head CI: [41360402924](https://github.com/ghith93/raawaa-autonomous-engine/actions/runs/41360402924) and [41360405546](https://github.com/ghith93/raawaa-autonomous-engine/actions/runs/41360405546); policy audit, Python tests and Worker tests all passed.
+- Manual review confirmed AndroidHarness v3.2 schema/tool-group names against upstream config documentation. The project config does not declare an MCP server or enable Full access/root/Shizuku.
+- Device-side AndroidHarness actions remain pending because this GitHub session has no tablet UI/session control. The project skill contains the exact one-time on-device procedure.
