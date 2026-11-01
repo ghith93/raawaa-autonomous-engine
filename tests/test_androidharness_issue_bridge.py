@@ -42,7 +42,7 @@ class AndroidHarnessBridgeTests(unittest.TestCase):
         self.assertEqual(parsed["operation"], "run_python_tests")
         self.assertEqual(parsed["commit_sha"], COMMIT)
         with self.assertRaisesRegex(BridgeError, "allowlisted"):
-            parse_task(task_body({"schema_version": 1, "operation": "run_shell", "command": "id"}))
+            parse_task(task_body({"schema_version": 1, "operation": "run_shell"}))
         with self.assertRaisesRegex(BridgeError, "unsupported fields"):
             parse_task(task_body({"schema_version": 1, "operation": "git_status", "command": "id"}))
         with self.assertRaisesRegex(BridgeError, "full 40-character"):
