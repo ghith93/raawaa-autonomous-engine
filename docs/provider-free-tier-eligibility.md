@@ -66,7 +66,7 @@ The operator confirmed that the connected Groq organization is on the **Free** p
 
 Groq Free is now **account-plan and model-catalog verified**, not merely a public candidate. It is not yet an enabled inference route. The quota ledger must enforce the supplied rolling minute limits atomically before any provider request. Daily limits must also be configured conservatively from the console. Monthly and per-task limits remain engine-side safety caps and must be explicitly chosen; they must not be represented as provider-published limits.
 
-Before any live call, separately verify the model-specific terms and the exact Free-plan pricing/data-handling terms applicable to this organization. Keep live inference disabled until the minute-window enforcement is merged, all profile evidence is complete, and the operator explicitly enables the existing kill switch. No real inference request has been made as part of this verification.
+Before any live call, review the current model-specific profile and data classification for the intended task. The operator confirmed the Groq Free plan and supplied account-visible model availability and quotas. Rolling-minute enforcement is merged and tested. All routes remain staged-disabled, and no inference request has been made.
 
 
 
@@ -130,4 +130,13 @@ Sources:
 
 ## Current state
 
-No provider profile, API credential, or live inference route was enabled as part of this review. The next practical candidate is Groq Free for non-confidential tasks, but it remains **unverified for this account** until its exact Free Plan limits and model terms are confirmed in the user's console.
+Current verified state (2026-11-01):
+
+- `GROQ_API_KEY` is configured as a GitHub Actions secret. A read-only authenticated `/models` request succeeded; no inference request was sent.
+- The operator confirmed the Groq account is on the Free plan and supplied the account-visible model list and limits: 30 RPM, 8,000 TPM, 1,000 RPD, and 200,000 TPD for the listed chat-completion models. These are the account's observed limits, not the larger Developer-plan limits shown on public model pages.
+- `openai/gpt-oss-20b` is the preferred staged production-model candidate; `openai/gpt-oss-120b` is the higher-capacity staged fallback. Groq classifies both as Production Models. Their open weights are Apache-2.0 subject to the gpt-oss usage policy.
+- `qwen/qwen3.8-27b` remains staged as Preview/evaluation-only and is blocked from production routing.
+- All three routes have `enabled=false`; the registry itself is `staged_disabled`; the CLI audit and profile loader enforce that state. The quota gateway independently requires an enabled profile and the explicit live-inference kill switch.
+- Minute, daily, monthly, and per-task request/token controls are implemented and tested. The monthly/per-task values in the registry are conservative engine-side limits, not provider-published account limits.
+- No inference request has been sent. No paid route, automatic upgrade, publishing, messaging, or other external write is enabled.
+- Remaining gates before any inference: operator's explicit live-inference opt-in, task/data-classification restrictions, confirmation that the chosen workload contains no secrets/confidential/customer-sensitive data, and review of applicable Groq data-handling terms. Paid routing additionally requires a monetary ledger and explicit approval.
