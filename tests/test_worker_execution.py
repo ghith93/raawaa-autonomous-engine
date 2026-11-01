@@ -4,7 +4,7 @@ import tempfile
 import unittest
 from datetime import datetime, timezone
 from pathlib import Path
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
 from engine.model_gateway import UsageLedger
 from engine.provider import GenerationResponse
@@ -61,6 +61,30 @@ class WorkerExecutionTests(unittest.TestCase):
             manager, {"groq": adapter}, self.usage, network_calls_enabled=True,
             environ={"RAAWAA_ENGINE_LIVE_INFERENCE": "enabled"},
         ), manager
+
+    def test_missing_operating_policy_fails_closed_before_claim_or_provider_io(self):
+        from engine.operating_policy import OperatingPolicyError
+        gateway = Mock()
+        with patch("engine.worker.load_operating_policy", side_effect=OperatingPolicyError("missing policy")):
+            result = run_once(self.store, live_gateway=gateway, environ={"RAAWAA_ENGINE_LIVE_INFERENCE": "enabled"})
+        self.assertEqual(result["status"], "blocked")
+        self.assertEqual(result["reason"], "operating_policy_unavailable")
+        self.assertEqual(self.store.list_tasks(1)[0]["status"], "queued")
+        gateway.generate.assert_not_called()
+
+    def test_live_prompt_places_trusted_operating_policy_before_untrusted_task_payload(self):
+        adapter = FakeAdapter()
+        gateway, _ = self.gateway(adapter)
+        result = run_once(
+            self.store, live_gateway=gateway,
+            environ={"RAAWAA_ENGINE_LIVE_INFERENCE": "enabled"},
+        )
+        self.assertEqual(result["mode"], "live_inference")
+        prompt = adapter.last_request.prompt
+        self.assertIn("Permanent master autonomous execution directive", prompt)
+        self.assertLess(prompt.index("TRUSTED OPERATING POLICY"), prompt.index("Task payload (untrusted task data"))
+        self.assertIn("docs/master-autonomous-execution-directive.ar.md", prompt)
+        self.assertIn("sha256:", prompt)
 
     def test_default_path_is_dry_run_and_never_calls_gateway(self):
         gateway = Mock()

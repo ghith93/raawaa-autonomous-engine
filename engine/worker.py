@@ -10,6 +10,7 @@ from engine.lease_heartbeat import LeaseHeartbeat, LeaseHeartbeatLost
 from engine.provider import GenerationRequest
 from engine.task_store import TaskStore
 from engine.live_data_policy import validate_live_payload
+from engine.operating_policy import OperatingPolicyError, load_operating_policy
 
 
 SAFE_TASKS = {"research_brief", "code_review", "content_draft", "system_audit"}
@@ -22,10 +23,13 @@ def _live_requested(environ=None) -> bool:
     return source.get(LIVE_SWITCH, "").strip().lower() == "enabled"
 
 
-def _build_prompt(contract: dict) -> str:
-    """Build the bounded task input; credentials and runtime environment are never included."""
+def _build_prompt(contract: dict, operating_policy: dict) -> str:
+    """Build a trusted-policy-first prompt; queued task data remains untrusted."""
     payload = contract["payload_received"]
     return (
+        "TRUSTED OPERATING POLICY — read and follow before task execution.\n"
+        f"{operating_policy['prompt_context']}\n"
+        "END TRUSTED OPERATING POLICY.\n\n"
         "You are the assigned specialist for this task. Follow the task capability and "
         "return a concise, useful result. Do not claim to have performed external actions.\n"
         f"Task type: {contract['task_type']}\n"
@@ -36,8 +40,15 @@ def _build_prompt(contract: dict) -> str:
         f"{json.dumps(payload, ensure_ascii=False, sort_keys=True)}"
     )
 
-
 def run_once(store: TaskStore, live_gateway=None, environ=None) -> dict | None:
+    # Load repository policy before claiming work or allowing any provider I/O.
+    try:
+        operating_policy = load_operating_policy()
+    except OperatingPolicyError as exc:
+        return {"status": "blocked", "reason": "operating_policy_unavailable",
+                "detail": str(exc)}
+
+
     # Recover abandoned work before claiming another item.
     recovery = store.recover_stale()
     task = store.claim_next()
@@ -89,7 +100,7 @@ def run_once(store: TaskStore, live_gateway=None, environ=None) -> dict | None:
 
             request = GenerationRequest(
                 task_kind=contract["required_capability"],
-                prompt=_build_prompt(contract),
+                prompt=_build_prompt(contract, operating_policy),
                 max_output_tokens=LIVE_MAX_OUTPUT_TOKENS,
                 task_id=task["id"],
             )
