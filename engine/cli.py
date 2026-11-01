@@ -110,8 +110,23 @@ def main() -> int:
     if args.command == "audit":
         return audit()
     if args.command == "free-models":
-        result = (discover_all() if args.provider == "all"
-                  else {args.provider: discover(args.provider)})
+        if args.provider == "all":
+            result = discover_all()
+        else:
+            try:
+                result = {
+                    "discovery_only": True,
+                    "generation_requests": 0,
+                    "models": {args.provider: discover(args.provider)},
+                    "unavailable": {},
+                }
+            except DiscoveryError as exc:
+                result = {
+                    "discovery_only": True,
+                    "generation_requests": 0,
+                    "models": {},
+                    "unavailable": {args.provider: str(exc)},
+                }
         print(json.dumps(result, indent=2, ensure_ascii=False))
     elif args.command == "enqueue":
         payload = json.loads(args.payload)
