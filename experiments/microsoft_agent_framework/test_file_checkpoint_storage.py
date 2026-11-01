@@ -14,6 +14,7 @@ from agent_framework.exceptions import WorkflowCheckpointException
 
 from experiments.microsoft_agent_framework.checkpoint_envelope import CheckpointEnvelopeError
 from experiments.microsoft_agent_framework.file_checkpoint_storage import FileEnvelopeCheckpointStorage
+from experiments.microsoft_agent_framework.framework_checkpoint_storage import FrameworkCheckpointStorageError
 
 
 TEST_INTEGRITY_KEY = b"test-only-checkpoint-integrity-key-32-bytes"
@@ -77,6 +78,27 @@ class FileCheckpointStorageTests(unittest.TestCase):
                 FileEnvelopeCheckpointStorage(directory, integrity_key=TEST_INTEGRITY_KEY)
         with tempfile.TemporaryDirectory() as directory:
             asyncio.run(scenario(directory))
+
+
+    def test_shared_directory_and_symlink_records_are_rejected(self):
+        if os.name != "posix":
+            self.skipTest("POSIX permission and symlink checks are platform-specific")
+        with tempfile.TemporaryDirectory() as root:
+            shared = Path(root) / "shared"
+            shared.mkdir(mode=0o755)
+            shared.chmod(0o755)
+            with self.assertRaisesRegex(FrameworkCheckpointStorageError, "permissions"):
+                FileEnvelopeCheckpointStorage(shared, integrity_key=TEST_INTEGRITY_KEY)
+
+        with tempfile.TemporaryDirectory() as root:
+            private = Path(root) / "private"
+            private.mkdir(mode=0o700)
+            outside = Path(root) / "outside"
+            outside.write_bytes(b"not a checkpoint")
+            link = private / FileEnvelopeCheckpointStorage._filename("linked-checkpoint")
+            link.symlink_to(outside)
+            with self.assertRaisesRegex(FrameworkCheckpointStorageError, "symbolic links"):
+                FileEnvelopeCheckpointStorage(private, integrity_key=TEST_INTEGRITY_KEY)
 
     def test_delete_is_persisted_across_restart(self):
         async def scenario(directory: str):
