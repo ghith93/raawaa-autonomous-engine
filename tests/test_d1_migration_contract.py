@@ -88,7 +88,8 @@ class D1MigrationContractTests(unittest.TestCase):
             )
 
     def test_operations_and_usage_constraints(self):
-        self.db.executescript(self.sql)
+        for migration in self.sql:
+            self.db.executescript(migration)
         with self.assertRaises(sqlite3.IntegrityError):
             self.db.execute(
                 """INSERT INTO operations
@@ -104,7 +105,8 @@ class D1MigrationContractTests(unittest.TestCase):
             )
 
     def test_audit_foreign_key_is_enforced(self):
-        self.db.executescript(self.sql)
+        for migration in self.sql:
+            self.db.executescript(migration)
         with self.assertRaises(sqlite3.IntegrityError):
             self.db.execute(
                 """INSERT INTO audit_log
