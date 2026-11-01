@@ -175,7 +175,13 @@ def main() -> int:
     elif args.command == "memory-archive":
         print(json.dumps({"archived": memory_store().archive(args.id)}))
     elif args.command == "research-discover":
-        print(json.dumps(discover_repositories(max_per_query=args.max_per_query), indent=2, ensure_ascii=False))
+        research_config = load_json(ROOT / "config" / "research_sources.json")
+        result = discover_repositories(
+            queries=research_config["queries"],
+            max_per_query=(research_config["max_results_per_query"] if args.max_per_query is None else args.max_per_query),
+            max_queries=research_config["max_queries_per_run"],
+        )
+        print(json.dumps(result, indent=2, ensure_ascii=False))
     elif args.command == "provider-profile-status":
         entries = load_provider_profile_registry(ROOT / "config" / "provider_profiles.json")
         result = [{
