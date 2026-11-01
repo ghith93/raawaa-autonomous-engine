@@ -27,6 +27,7 @@ class CliTests(unittest.TestCase):
             ["memory-archive", "--id", "memory-id"],
             ["model-status"],
             ["provider-profile-status"],
+            ["research-discover"],
             ["quota-status"],
         ]
         for command in commands:
