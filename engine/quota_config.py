@@ -55,8 +55,8 @@ def load_provider_profile_registry(path: str | Path) -> list[ProviderProfileEntr
         data = json.load(stream)
     if not isinstance(data, dict) or data.get("schema_version") != 1:
         raise ValueError("unsupported provider profile registry schema")
-    if data.get("mode") != "staged_disabled" or data.get("network_calls_enabled") is not False:
-        raise ValueError("provider profile registry must remain staged_disabled")
+    if data.get("mode") != "managed_opt_in":
+        raise ValueError("provider profile registry must use managed_opt_in mode")
     routes = data.get("routes")
     if not isinstance(routes, list):
         raise ValueError("provider profile registry routes must be a list")
@@ -70,8 +70,8 @@ def load_provider_profile_registry(path: str | Path) -> list[ProviderProfileEntr
         if not isinstance(profile_id, str) or not profile_id.strip() or profile_id in seen:
             raise ValueError("provider profile IDs must be non-empty and unique")
         seen.add(profile_id)
-        if item.get("enabled") is not False:
-            raise ValueError("staged provider profiles must explicitly set enabled=false")
+        if type(item.get("enabled")) is not bool:
+            raise ValueError("provider profile enabled must be an explicit boolean")
         api_key_env = item.get("api_key_env")
         if not isinstance(api_key_env, str) or not re.fullmatch(r"[A-Z][A-Z0-9_]*", api_key_env):
             raise ValueError("provider API key environment variable name is invalid")
@@ -111,7 +111,7 @@ def load_provider_profile_registry(path: str | Path) -> list[ProviderProfileEntr
         )
         entries.append(ProviderProfileEntry(
             profile_id=profile_id,
-            enabled=False,
+            enabled=item["enabled"],
             account_tier=str(item.get("account_tier", "unknown")),
             api_key_env=api_key_env,
             verification_note=note,
