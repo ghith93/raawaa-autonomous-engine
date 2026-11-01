@@ -45,6 +45,8 @@ class AndroidHarnessBridgeTests(unittest.TestCase):
         }))
         self.assertEqual(parsed["operation"], "run_python_tests")
         self.assertEqual(parsed["commit_sha"], COMMIT)
+        doctor_task = parse_task(task_body({"schema_version": 1, "operation": "run_androidharness_doctor"}))
+        self.assertEqual(doctor_task["operation"], "run_androidharness_doctor")
         with self.assertRaisesRegex(BridgeError, "allowlisted"):
             parse_task(task_body({"schema_version": 1, "operation": "run_shell"}))
         with self.assertRaisesRegex(BridgeError, "unsupported fields"):
@@ -112,6 +114,38 @@ class AndroidHarnessBridgeTests(unittest.TestCase):
             with patch("scripts.androidharness_issue_bridge.subprocess.run", side_effect=outputs):
                 with self.assertRaisesRegex(BridgeError, "origin does not match"):
                     verify_repository_root(root)
+
+
+    def test_read_only_androidharness_doctor_is_exposed_with_safety_assertions(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            doctor = root / "scripts" / "androidharness" / "doctor.py"
+            doctor.parent.mkdir(parents=True)
+            doctor.write_text("# read-only test fixture")
+            report = {
+                "schema_version": 1,
+                "workspace": {"root": str(root)},
+                "mutations_performed": False,
+                "network_requests_performed": False,
+                "secret_values_emitted": False,
+                "tools": {"python": {"available": True}},
+            }
+            completed = SimpleNamespace(returncode=0, stdout=json.dumps(report), stderr="")
+            bridge = AndroidHarnessIssueBridge(root=root)
+            with patch("scripts.androidharness_issue_bridge.subprocess.run", return_value=completed) as run:
+                result = bridge._execute({"operation": "run_androidharness_doctor", "max_output_bytes": 4096})
+            self.assertEqual(result["exit_code"], 0)
+            self.assertIn('"secret_values_emitted": false', result["output"])
+            self.assertEqual(run.call_args.args[0][-1], "--json")
+            self.assertEqual(run.call_args.kwargs["timeout"], 120)
+
+            unsafe = {**report, "network_requests_performed": True}
+            with patch(
+                "scripts.androidharness_issue_bridge.subprocess.run",
+                return_value=SimpleNamespace(returncode=0, stdout=json.dumps(unsafe), stderr=""),
+            ):
+                with self.assertRaisesRegex(BridgeError, "safety contract"):
+                    bridge._execute({"operation": "run_androidharness_doctor", "max_output_bytes": 4096})
 
     def test_candidate_issue_requires_owner_prefix_and_open_issue(self):
         issue = {
