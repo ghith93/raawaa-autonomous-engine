@@ -138,6 +138,7 @@ jobs:
               output.write(f"enabled={enabled}\npreviews={previews}\n")
 
       - name: Check the public Worker health endpoint
+        id: health
         if: success() || failure()
         env:
           WORKER_URL: https://raawaa-autonomous-engine-control.ghith-shikhkhaled.workers.dev
@@ -145,10 +146,20 @@ jobs:
           CF_ACCESS_CLIENT_SECRET: ${{ secrets.CF_ACCESS_CLIENT_SECRET }}
         run: |
           python - <<'PY'
+          import json
           import os
+          import re
           import urllib.error
           import urllib.request
 
+          def write_output(name, value):
+              value = " ".join(str(value or "unknown").split())[:240]
+              with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
+                  output.write(f"{name}={value}\n")
+
+          write_output("status", "unknown")
+          write_output("ray", "not_supplied")
+          write_output("detail", "not_available")
           headers = {"Accept": "application/json"}
           client_id = os.environ.get("CF_ACCESS_CLIENT_ID", "")
           client_secret = os.environ.get("CF_ACCESS_CLIENT_SECRET", "")
@@ -162,16 +173,48 @@ jobs:
           request = urllib.request.Request(os.environ["WORKER_URL"].rstrip("/") + "/health", headers=headers)
           try:
               with urllib.request.urlopen(request, timeout=15) as response:
+                  body = response.read(4096).decode("utf-8", errors="replace")
                   print(f"Worker /health: HTTP {response.status}.")
+                  write_output("status", response.status)
+                  write_output("ray", response.headers.get("CF-Ray", "not_supplied"))
+                  write_output("detail", "success response")
                   print("Response body withheld.")
           except urllib.error.HTTPError as error:
+              raw = error.read(4096).decode("utf-8", errors="replace")
               print(f"Worker /health: HTTP {error.code}.")
-              for name in ("CF-Ray", "cf-mitigated", "server"):
+              ray = error.headers.get("CF-Ray", "not_supplied")
+              print(f"CF-Ray: {ray}")
+              write_output("status", error.code)
+              write_output("ray", ray)
+              detail = "non-JSON response"
+              try:
+                  payload = json.loads(raw)
+                  errors = payload.get("errors") or []
+                  if errors:
+                      detail = "; ".join(
+                          f"{item.get('code', 'unknown')}: {item.get('message', 'no message')}"
+                          for item in errors[:3]
+                      )
+                  else:
+                      detail = "JSON error response without structured errors"
+              except ValueError:
+                  match = re.search(r"<title[^>]*>(.*?)</title>", raw, re.IGNORECASE | re.DOTALL)
+                  if match:
+                      detail = "HTML title: " + re.sub(r"\s+", " ", match.group(1))
+              for secret_name in ("CF_ACCESS_CLIENT_ID", "CF_ACCESS_CLIENT_SECRET"):
+                  secret = os.environ.get(secret_name, "")
+                  if secret:
+                      detail = detail.replace(secret, "[REDACTED]")
+              write_output("detail", detail)
+              print(f"Response detail: {' '.join(detail.split())[:240]}")
+              for name in ("cf-mitigated", "server", "content-type"):
                   value = error.headers.get(name)
                   if value:
                       print(f"{name}: {value}")
           except (urllib.error.URLError, TimeoutError, OSError) as error:
               print(f"Worker /health request failed: {type(error).__name__}.")
+              write_output("status", "request_failed")
+              write_output("detail", type(error).__name__)
           PY
       - name: Publish workers.dev route status to tracking issue
         if: always()
@@ -179,11 +222,17 @@ jobs:
         env:
           WORKERS_DEV_ENABLED: ${{ steps.subdomain.outputs.enabled }}
           WORKER_PREVIEWS_ENABLED: ${{ steps.subdomain.outputs.previews }}
+          WORKER_HEALTH_STATUS: ${{ steps.health.outputs.status }}
+          WORKER_HEALTH_RAY: ${{ steps.health.outputs.ray }}
+          WORKER_HEALTH_DETAIL: ${{ steps.health.outputs.detail }}
         with:
           script: |
             const body = "## Worker route diagnostic\n\n" +
               "Run: " + context.serverUrl + "/" + context.repo.owner + "/" + context.repo.repo + "/actions/runs/" + context.runId + "\n\n" +
               "workers.dev enabled: `" + (process.env.WORKERS_DEV_ENABLED || "unknown") + "`\n" +
-              "Preview URLs enabled: `" + (process.env.WORKER_PREVIEWS_ENABLED || "unknown") + "`\n\n" +
+              "Preview URLs enabled: `" + (process.env.WORKER_PREVIEWS_ENABLED || "unknown") + "`\n" +
+              "Health status: `" + (process.env.WORKER_HEALTH_STATUS || "unknown") + "`\n" +
+              "Health Ray ID: `" + (process.env.WORKER_HEALTH_RAY || "not supplied") + "`\n" +
+              "Sanitized response detail: " + (process.env.WORKER_HEALTH_DETAIL || "not available") + "\n\n" +
               "Read-only inspection; no Cloudflare settings were changed.";
             await github.rest.issues.createComment({ owner: context.repo.owner, repo: context.repo.repo, issue_number: 34, body });
