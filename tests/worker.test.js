@@ -231,3 +231,13 @@ test("research candidate review rejects unsupported state changes", async () => 
   const response = await worker.fetch(request("/v1/research/candidates/review", { method: "POST", body: { source_key: "github:org/agent", review_status: "auto_install" } }), { DB: dbMock(), ENGINE_API_TOKEN: TOKEN });
   assert.equal(response.status, 400);
 });
+
+test("research ingestion rejects unauthenticated callers", async () => {
+  const response = await worker.fetch(request("/v1/research/candidates", { method: "POST", token: null, body: { candidates: [{ source: "github", full_name: "org/repo", url: "https://github.com/org/repo" }] } }), { DB: dbMock(), ENGINE_API_TOKEN: TOKEN });
+  assert.equal(response.status, 401);
+});
+
+test("research candidate listing rejects invalid filters", async () => {
+  const response = await worker.fetch(request("/v1/research/candidates?limit=1000&status=unknown"), { DB: dbMock(), ENGINE_API_TOKEN: TOKEN });
+  assert.equal(response.status, 400);
+});
