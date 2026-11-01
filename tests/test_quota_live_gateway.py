@@ -80,6 +80,26 @@ class QuotaAwareGatewayTests(unittest.TestCase):
         self.assertEqual(limited.calls, 1)
         self.assertEqual(backup.calls, 1)
 
+
+    def test_unexpected_adapter_error_stops_rotation_and_releases_tokens(self):
+        class BrokenAdapter:
+            def generate(self, model, request):
+                raise RuntimeError("internal failure")
+
+        first = self.profile()
+        second = self.profile(provider="cerebras", account="backup", priority=20)
+        backup = FakeAdapter("cerebras")
+        manager = QuotaManager([first, second], self.quota)
+        gateway = QuotaAwareLiveGateway(
+            manager, {"groq": BrokenAdapter(), "cerebras": backup}, self.usage, True
+        )
+        with self.assertRaises(ProviderUnavailable):
+            gateway.generate(self.request)
+        self.assertEqual(backup.calls, 0)
+        snapshot = {row["route_id"]: row for row in manager.snapshot()}
+        self.assertEqual(snapshot[first.route_id]["daily_requests_used"], 1)
+        self.assertEqual(snapshot[first.route_id]["daily_tokens_used"], 0)
+
     def test_no_paid_or_unknown_quota_fallback(self):
         adapter = FakeAdapter("groq")
         manager = QuotaManager([self.profile(daily_token_limit=None)], self.quota)
