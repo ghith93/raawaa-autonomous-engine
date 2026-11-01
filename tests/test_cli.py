@@ -47,6 +47,10 @@ class CliTests(unittest.TestCase):
         self.assertTrue(profile["commercial_use_allowed"])
         self.assertEqual(profile["model_stage"], "production")
         self.assertTrue(profile["production_use_allowed"])
+        preview = next(item for item in result["profiles"] if item["model"] == "qwen/qwen3.8-27b")
+        self.assertEqual(preview["model_stage"], "preview")
+        self.assertFalse(preview["production_use_allowed"])
+        self.assertFalse(preview["ready_for_routing"])
         self.assertNotIn("gsk_", output.getvalue())
 
 
