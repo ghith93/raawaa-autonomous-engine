@@ -59,6 +59,23 @@ class RemoteTaskStoreTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             RemoteTaskStore("https://engine.example", "")
 
+
+    def test_forbidden_error_includes_safe_cloudflare_metadata_only(self):
+        from urllib.error import HTTPError
+        from email.message import Message
+        headers = Message()
+        headers["CF-Ray"] = "abc123-IAD"
+        headers["cf-mitigated"] = "challenge"
+        error = HTTPError("https://engine.example/v1/tasks/recover", 403,
+                          "forbidden", headers, None)
+        with patch("engine.remote_task_store.urlopen", side_effect=error):
+            with self.assertRaisesRegex(RemoteTaskStoreError, "HTTP 403") as caught:
+                self.store.recover_stale()
+        message = str(caught.exception)
+        self.assertIn("CF-Ray abc123-IAD", message)
+        self.assertIn("cf-mitigated challenge", message)
+        self.assertNotIn("secret-test-token", message)
+
     def test_rate_limit_has_safe_retry_later_error(self):
         with patch("engine.remote_task_store.urlopen",
                    side_effect=__import__("urllib.error", fromlist=["HTTPError"]).HTTPError(
