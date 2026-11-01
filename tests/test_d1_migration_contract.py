@@ -5,21 +5,23 @@ import unittest
 
 
 ROOT = Path(__file__).resolve().parents[1]
-MIGRATION = ROOT / "migrations" / "0001_initial.sql"
+MIGRATIONS = sorted((ROOT / "migrations").glob("*.sql"))
 
 
 class D1MigrationContractTests(unittest.TestCase):
     def setUp(self):
         self.db = sqlite3.connect(":memory:")
         self.db.execute("PRAGMA foreign_keys = ON")
-        self.sql = MIGRATION.read_text(encoding="utf-8")
+        self.sql = [path.read_text(encoding="utf-8") for path in MIGRATIONS]
 
     def tearDown(self):
         self.db.close()
 
     def test_migration_executes_and_is_idempotent(self):
-        self.db.executescript(self.sql)
-        self.db.executescript(self.sql)
+        for migration in self.sql:
+            self.db.executescript(migration)
+        for migration in self.sql:
+            self.db.executescript(migration)
         tables = {
             row[0] for row in self.db.execute(
                 "SELECT name FROM sqlite_master WHERE type = 'table'"
@@ -27,15 +29,34 @@ class D1MigrationContractTests(unittest.TestCase):
         }
         self.assertTrue(
             {"schema_migrations", "tasks", "audit_log", "operations",
-             "memories", "model_usage"}.issubset(tables)
+             "memories", "model_usage", "quota_usage", "quota_cooldowns",
+             "quota_audit_events"}.issubset(tables)
         )
         versions = self.db.execute(
             "SELECT version FROM schema_migrations"
         ).fetchall()
-        self.assertEqual(versions, [("0001_initial",)])
+        self.assertEqual(versions, [("0001_initial",), ("0002_quota_ledger",)])
+
+
+    def test_quota_ledger_indexes_and_constraints(self):
+        for migration in self.sql:
+            self.db.executescript(migration)
+        indexes = {row[1] for row in self.db.execute("PRAGMA index_list(quota_usage)")}
+        self.assertIn("idx_quota_usage_route_time", indexes)
+        self.assertIn("idx_quota_usage_task", indexes)
+        self.db.execute(
+            "INSERT INTO quota_usage(id,route_id,requests,tokens,occurred_at,task_id) VALUES(?,?,?,?,?,?)",
+            ("reservation-1", "groq:account:model", 1, 10, "2026-11-01T00:00:00Z", "task-1")
+        )
+        with self.assertRaises(sqlite3.IntegrityError):
+            self.db.execute(
+                "INSERT INTO quota_usage(id,route_id,requests,tokens,occurred_at,task_id) VALUES(?,?,?,?,?,?)",
+                ("reservation-2", "groq:account:model", 0, 10, "2026-11-01T00:00:00Z", "task-1")
+            )
 
     def test_task_idempotency_and_status_constraints(self):
-        self.db.executescript(self.sql)
+        for migration in self.sql:
+            self.db.executescript(migration)
         task = ("task-1", "idem-1", "research_brief", "Test", "{}",
                 "pending", 0, 2, "2026-01-01T00:00:00Z",
                 "2026-01-01T00:00:00Z")
