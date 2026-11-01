@@ -6,6 +6,7 @@ from pathlib import Path
 
 from engine.task_store import TaskStore
 from engine.memory import MemoryStore
+from engine.model_gateway import ModelGateway, UsageLedger
 from engine.worker import run_once
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -91,6 +92,14 @@ def main() -> int:
         print(json.dumps(memory_store().list_recent(args.limit), indent=2, ensure_ascii=False))
     elif args.command == "memory-archive":
         print(json.dumps({"archived": memory_store().archive(args.id)}))
+    elif args.command == "model-status":
+        policy = load_json(ROOT / "config" / "policy.json")
+        gateway = ModelGateway([], {}, UsageLedger(db_path()),
+            daily_budget_usd=policy.get("daily_budget_usd", 0),
+            monthly_budget_usd=policy.get("monthly_budget_usd", 0),
+            allow_paid_calls=policy.get("allow_paid_model_calls", False),
+            network_calls_enabled=False)
+        print(json.dumps(gateway.status(), indent=2))
     return 0
 
 
