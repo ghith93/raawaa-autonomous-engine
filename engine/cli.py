@@ -39,6 +39,11 @@ def audit() -> int:
     policy = load_json(ROOT / "config" / "policy.json")
     roster = load_json(ROOT / "config" / "agents.json")
     errors = []
+    try:
+        provider_profiles = load_provider_profile_registry(ROOT / "config" / "provider_profiles.json")
+    except (OSError, ValueError, KeyError, TypeError) as exc:
+        provider_profiles = []
+        errors.append(f"Provider profile registry failed closed: {type(exc).__name__}.")
     if policy.get("mode") != "safe_dry_run":
         errors.append("Initial release must remain in safe_dry_run mode.")
     if policy.get("daily_budget_usd", 0) != 0 or policy.get("monthly_budget_usd", 0) != 0:
@@ -56,7 +61,7 @@ def audit() -> int:
         for error in errors:
             print(f"FAIL: {error}")
         return 1
-    print(f"Audit passed: {len(ids)} agent roles; safe dry-run; zero spend; external writes disabled.")
+    print(f"Audit passed: {len(ids)} agent roles; {len(provider_profiles)} staged provider profiles; inference disabled; safe dry-run; zero spend; external writes disabled.")
     return 0
 
 
