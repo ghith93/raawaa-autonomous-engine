@@ -1,0 +1,63 @@
+{
+  "$schema": "https://raw.githubusercontent.com/Sanuu7/AndroidHarness/main/docs/harness.schema.json",
+  "references": [
+    { "title": "AndroidHarness runtime profile", "path": "docs/android-harness.md" },
+    { "title": "Engine architecture", "path": "docs/architecture.md" },
+    { "title": "Engine operations", "path": "docs/operations.md" },
+    { "title": "Continuous improvement charter", "path": "docs/continuous-improvement-charter.md" },
+    { "title": "Provider free-tier eligibility", "path": "docs/provider-free-tier-eligibility.md" },
+    { "title": "Agent runtime and memory project evaluation", "path": "docs/research/agent-runtime-platforms-2026-11.md" }
+  ],
+  "skills": {
+    "auto_load": ["raawaa-engine-androidharness"]
+  },
+  "agents": {
+    "researcher": {
+      "description": "Read-only research across official documentation, public repositories, model cards and project evidence. Return sourced findings and compatibility risks.",
+      "tools": {
+        "read": true,
+        "network": true,
+        "write": false,
+        "edit": false,
+        "delete": false,
+        "shell": false
+      }
+    },
+    "reviewer": {
+      "description": "Independent read-only code, test, policy and documentation reviewer. Identify defects and missing evidence without changing files.",
+      "tools": {
+        "read": true,
+        "network": false,
+        "write": false,
+        "edit": false,
+        "delete": false,
+        "shell": false
+      }
+    },
+    "security_reviewer": {
+      "description": "Read-only security and privacy reviewer for secrets, dependency provenance, tool scopes, network exposure and policy boundaries.",
+      "tools": {
+        "read": true,
+        "network": true,
+        "write": false,
+        "edit": false,
+        "delete": false,
+        "shell": false
+      }
+    }
+  },
+  "default_agent": "default",
+  "permissions": {
+    "shell": "allow",
+    "edit": "allow",
+    "delete": "ask",
+    "network": "allow",
+    "outside_workspace": "deny"
+  },
+  "memory": {
+    "file": ".harness/memory.md",
+    "topics_dir": ".harness/memory",
+    "auto_recall": true,
+    "max_core_lines": 120
+  }
+}

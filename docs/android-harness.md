@@ -2,6 +2,20 @@
 
 ## Purpose and status
 
+### Upstream AndroidHarness 3.2 verification
+
+The upstream repository's latest release was verified as `v3.2-release`, published 2026-10-31. APK SHA-256:
+`e6607cd7a70bf555cfd3fb7ce8b66d77efd5461c083e9f4585e16f57c36f6261`.
+This verifies the public upstream release, **not** the installed version on the operator's tablet. Confirm the app's About/Settings screen before relying on v3.2-specific features.
+
+Version 3.2 adds native project configuration (`harness.json`), project skill/plugin bundles, named Code agent profiles, workspace-scoped MCP configuration, plugin review, improved local-model management, and an on-device `android_sdk_install` tool. The project now supplies:
+- [Project configuration](../harness.json)
+- [Raawaa AndroidHarness operating skill](../.harness/skills/raawaa-engine-androidharness/SKILL.md)
+- [Read-only environment doctor](../scripts/androidharness/doctor.py)
+- [Detailed 3.2 research and model evaluation](research/androidharness-3.2-evaluation.md)
+
+The project config defines read-only researcher/reviewer/security-reviewer profiles and auto-loads the project skill. It allows routine shell/edit/network operations within normal app permissions, asks before deletion, denies outside-workspace access in ordinary app modes, and does not configure an MCP endpoint. AndroidHarness Full access is a separate user-controlled app setting that can override project permission rules; it is not enabled or requested here. These profiles are nested-agent profiles, not persistent autonomous agents.
+
 AndroidHarness is registered as an optional external Android/Linux execution environment for this project. It complements GitHub Actions and Cloudflare; it does not replace the repository's control plane, task ledger, policy enforcement, or CI.
 
 **Integration status:** documented and registered as a candidate execution backend. The repository does not yet contain a live AndroidHarness MCP/client adapter, and GitHub Actions cannot reach a private tablet session merely because this profile exists. An agent may execute through AndroidHarness only when a real, authenticated tool/session is exposed to that agent. Never claim a device command ran unless the harness returns its result.
@@ -17,6 +31,22 @@ The operator supplied a readiness snapshot dated 2026-11-01 22:40 UTC. It report
 - Cloudflare deployment secrets absent.
 
 These are a dated operator-reported snapshot, not a live health check. Re-probe before relying on any capability. Never copy, print, upload, or commit `.gh-token` or other secrets.
+
+The snapshot predates this v3.2 capability review. In particular, Java/D8 absence no longer requires hand-provisioning JDK/Gradle tarballs: v3.2 exposes `android_sdk_install`, which can install OpenJDK 21, D8, aapt2, apksigner, a selected Android SDK platform's `android.jar`, and optional Gradle behind one explicit approval card. It skips installed components. The SDK platform download is from Google's SDK repository and is subject to Google's Android SDK License Agreement. For this Python-first engine, the native Android build toolchain is optional and does not block Python development/tests.
+
+The active harness environment owns `HARNESS_SCRATCH`; inspect it through `env_status` and the diagnostic rather than provisioning tarballs or guessing paths. OpenSSH is not needed for the current HTTPS GitHub workflow.
+
+## AndroidHarness 3.2 operating model
+
+Use **Code** for project work because it has the workspace, shell, Git, task/subagent and project tools. **Chat** is a separate research/conversation area with no project shell or file access. A Chat research result can be handed to Code, but that handoff does not run commands until a Code message is sent.
+
+The project `harness.json` auto-loads the root `AGENTS.md`, project skill and selected references. The skill guides one-time SDK setup, model selection, tests, Shizuku boundaries and long-run recovery. Use bundled skills on demand: `androidharness-environment`, `linux-env`, `git`, `doctor`, `test-driven-development`, `systematic-debugging`, `review`, `web-docs`, and `android-build` only when a native Android build is actually needed.
+
+The plugin manager supports npm, GitHub and local plugin bundles. Community plugins are author-published, not verified endorsements. Review source, license, instructions, MCP definitions, hooks and dependencies before installation. Installation does not automatically approve or execute MCP servers/hooks. CodeGraph is optional and must be installed/enabled and indexed before its tools can be relied on.
+
+AndroidHarness is an MCP client, not an MCP server. No engine MCP endpoint is currently configured. Do not add a fake or unauthenticated endpoint. A future bridge must have authentication, bounded operations, task IDs, audit logging, workspace allowlists, output/time limits and explicit privilege gates.
+
+The upstream app has a foreground service, persistent message queue, resume cards and optional auto-continue. These improve session resilience but do not make the tablet a guaranteed 24/7 worker. Optional Telegram remote control can be paired to steer a tablet session from another device, but it is not configured and does not give ChatGPT this conversation direct device access.
 
 ## Intended role in the execution architecture
 
@@ -41,11 +71,21 @@ Prefer AndroidHarness for interactive or device-specific validation; prefer GitH
 | Small local LLM inference | Possible for selected quantized models | ARM64 ABI, runtime support, model format, RAM headroom, CPU performance and thermal throttling |
 | llama.cpp / GGUF | Candidate, not assumed working | Android/Termux build path, compiler/toolchain, supported backend and model memory |
 | Ollama | Unverified; Android support is not assumed | Supported Linux environment/architecture, daemon lifecycle, storage, memory, network binding |
-| Java/Gradle/Android builds | Not ready in supplied snapshot | Install a compatible JDK/Android SDK only when a concrete build requires it |
-| SSH-based remote execution | Not ready in supplied snapshot | Install and harden OpenSSH only for a documented remote workflow |
-| Root-only tools | Not enabled by default | Demonstrated need, explicit per-operation authorization, reversible scope and audit |
+| Java/Gradle/Android builds | Not ready in supplied snapshot; v3.2 includes a consolidated installer | If native builds are required, call `android_sdk_install(platform=35, gradle=true)` once after checking `env_status`; approve the single card, then verify each executable and android.jar |
+| SSH-based remote execution | Not ready in supplied snapshot; unnecessary for HTTPS GitHub | Install OpenSSH only if a concrete SSH workspace/host is selected |
+| Root-only tools | Direct root unverified; not required | Keep disabled; require a demonstrated need, explicit per-operation authorization, reversible scope and audit |
 
 No workload should be marked supported based on package installation alone. Record an executable smoke test and resource measurements.
+
+## Models and inference strategy
+
+The upstream Harness keyless provider fetches a live Kilo catalog and filters to models explicitly marked free and advertising tool support. Its default router is `kilo-auto/free`. The implementation currently notes approximately 200 Kilo requests/hour/IP and approximately 4 Pollinations `openai-fast` requests/minute/IP; these are code notes, not guaranteed quotas or terms. Refresh the catalog and check the actual model metadata before use. Anonymous endpoints are fallback options, not durable worker infrastructure.
+
+For the Lenovo TB370FU (operator-reported 8 GB RAM, Dimensity 7050), first local candidate is Qwen3 1.7B GGUF Q4_K_M (~1.28 GB), pinned by AndroidHarness to a fixed revision and SHA-256. SmolLM2 1.7B Q4_K_M (~1.06 GB, Apache-2.0 in the app catalog) is the lower-size alternative. Start with context 2048, input 1536, output 512, four CPU threads and at least 2.5 GB currently available RAM. Measure latency, available RAM, temperature and tool reliability. Do not begin with a 4B model. A local model is initially for offline helper tasks, not the primary coding/orchestration agent.
+
+Gemini, Grok, OpenRouter, Groq and ChatGPT-connected accounts are optional only when configured in the app and their current account-specific free quotas/terms are verified. Keys belong in AndroidHarness encrypted settings, never in project files. Engine live inference remains independently disabled until its own explicit opt-in and quota/data-classification gates pass.
+
+See [the detailed model and runtime evaluation](research/androidharness-3.2-evaluation.md).
 
 ## Safe operating contract
 
@@ -77,14 +117,15 @@ Until this adapter exists, this document is an integration specification and cap
 
 ## Initial enablement sequence
 
-1. Re-probe the environment and confirm local repository HEAD is synchronized with GitHub `main`.
-2. Run read-only environment inventory and repository audit.
-3. Run existing Python tests without secrets or provider calls.
-4. Establish a per-project scratch/workspace quota and artifact cleanup policy.
-5. Add one candidate workload at a time, beginning with a Python-only smoke test.
-6. Evaluate LiteLLM in no-provider/no-key mode; test only local health and configuration parsing.
-7. Evaluate local inference separately with a small quantized model and strict memory/thermal limits.
-8. Add a reviewed AndroidHarness adapter only after the host's actual tool interface and authentication model are documented and testable.
+1. Confirm AndroidHarness 3.2 in the device app and select the writable `raawaa-autonomous-engine` Code workspace.
+2. Run `/doctor`, `env_status`, and `python scripts/androidharness/doctor.py --json`; compare the local SHA with GitHub `main`.
+3. Run `python -m engine.cli audit` and `python -m unittest discover -s tests -v` without secrets or provider calls.
+4. If native Android build capability is requested and any component is missing, call `android_sdk_install(platform=35, gradle=true)` once. Approve the single install card and verify Java/D8/aapt2/apksigner/Gradle/android.jar. This is not required for the Python engine.
+5. Keep SSH and Shizuku inactive unless a concrete task needs them; keep direct root off.
+6. Select a currently listed Kilo free model with tool support for Code. Optionally benchmark Qwen3 1.7B Q4_K_M locally after checking available RAM and network suitability.
+7. Establish per-project scratch/workspace quotas and artifact cleanup. Use the harness-provided paths.
+8. Add one candidate workload at a time and record exact tool versions, model ID, latency, RAM, thermal behavior, exit status and artifact checksums.
+9. Add a reviewed AndroidHarness adapter only after the host's actual tool interface and authentication model are documented and testable.
 
 ## Snapshot drift and synchronization
 
