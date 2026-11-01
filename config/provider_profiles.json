@@ -1,7 +1,6 @@
 {
   "schema_version": 1,
-  "mode": "staged_disabled",
-  "network_calls_enabled": false,
+  "mode": "managed_opt_in",
   "routes": [
     {
       "id": "groq-free-gpt-oss-20b-primary",

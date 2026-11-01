@@ -27,7 +27,6 @@ class ProviderProfileConfigTests(unittest.TestCase):
         self.assertFalse(entry.production_use_allowed)
         self.assertTrue(entry.profile.commercial_use_allowed)
         self.assertEqual(entry.profile.input_cost_per_million_usd, 0.0)
-        self.assertEqual(entry.profile.input_cost_per_million_usd, 0.0)
         self.assertEqual(entry.profile.output_cost_per_million_usd, 0.0)
         self.assertTrue(entry.profile.commercial_use_allowed)
         self.assertFalse(entry.profile.production_use_allowed)
@@ -52,18 +51,25 @@ class ProviderProfileConfigTests(unittest.TestCase):
                 self.assertEqual(entry.profile.input_cost_per_million_usd, 0.0)
                 self.assertIn("openai/gpt-oss", entry.model_terms_source_url)
 
-    def test_registry_rejects_enabled_mode_or_route(self):
+    def test_registry_requires_managed_opt_in_mode_and_boolean_enablement(self):
         data = json.loads(self.source.read_text(encoding="utf-8"))
-        data["network_calls_enabled"] = True
+        data["mode"] = "staged_disabled"
         self.path.write_text(json.dumps(data), encoding="utf-8")
-        with self.assertRaisesRegex(ValueError, "staged_disabled"):
+        with self.assertRaisesRegex(ValueError, "managed_opt_in"):
             load_provider_profile_registry(self.path)
 
-        data["network_calls_enabled"] = False
+        data["mode"] = "managed_opt_in"
+        data["routes"][0]["enabled"] = "yes"
+        self.path.write_text(json.dumps(data), encoding="utf-8")
+        with self.assertRaisesRegex(ValueError, "explicit boolean"):
+            load_provider_profile_registry(self.path)
+
         data["routes"][0]["enabled"] = True
         self.path.write_text(json.dumps(data), encoding="utf-8")
-        with self.assertRaisesRegex(ValueError, "enabled=false"):
-            load_provider_profile_registry(self.path)
+        enabled = load_provider_profile_registry(self.path)[0]
+        self.assertTrue(enabled.enabled)
+        self.assertTrue(enabled.profile.enabled)
+        self.assertTrue(enabled.ready_for_routing)
 
     def test_registry_rejects_duplicate_ids(self):
         data = json.loads(self.source.read_text(encoding="utf-8"))

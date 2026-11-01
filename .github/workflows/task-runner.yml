@@ -190,6 +190,8 @@ jobs:
 
       - name: Process bounded D1 task batch
         id: batch
+        env:
+          RAAWAA_ENGINE_LIVE_INFERENCE: ${{ vars.RAAWAA_ENGINE_LIVE_INFERENCE }}
         run: |
           python - <<'PY'
           import json

@@ -3,10 +3,12 @@ import io
 import json
 import os
 import tempfile
+from pathlib import Path
 import unittest
 from unittest.mock import patch
 
 from engine import cli
+from engine.task_store import TaskStore
 
 
 class CliTests(unittest.TestCase):
@@ -37,7 +39,7 @@ class CliTests(unittest.TestCase):
             with contextlib.redirect_stdout(output):
                 self.assertEqual(cli.main(), 0)
         result = json.loads(output.getvalue())
-        self.assertFalse(result["network_calls_enabled"])
+        self.assertEqual(result["network_calls_performed"], 0)
         self.assertEqual(len(result["profiles"]), 3)
         profile = next(item for item in result["profiles"] if item["model"] == "openai/gpt-oss-20b")
         self.assertEqual(profile["model"], "openai/gpt-oss-20b")
@@ -54,8 +56,40 @@ class CliTests(unittest.TestCase):
         output = io.StringIO()
         with contextlib.redirect_stdout(output):
             self.assertEqual(cli.audit(), 0)
-        self.assertIn("3 staged provider profiles", output.getvalue())
-        self.assertIn("inference disabled", output.getvalue())
+        self.assertIn("3 provider profiles", output.getvalue())
+        self.assertIn("safe dry-run", output.getvalue())
+
+
+    def test_run_once_uses_live_runtime_factory_but_default_remains_dry_run(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = os.path.join(tmp, "engine.db")
+            TaskStore(db_path).enqueue(
+                "research_brief", "Test task", {"topic": "safe test"}
+            )
+            output = io.StringIO()
+            with patch.dict(os.environ, {"RAAWAA_ENGINE_DB": db_path}, clear=True):
+                with patch("engine.cli.build_live_gateway", return_value=None) as factory:
+                    with patch("sys.argv", ["engine", "run-once"]):
+                        with contextlib.redirect_stdout(output):
+                            self.assertEqual(cli.main(), 0)
+                    factory.assert_called_once()
+            result = json.loads(output.getvalue())
+            self.assertEqual(result["mode"], "dry_run")
+
+    def test_audit_rejects_enabled_provider_profile_in_safe_dry_run(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "config").mkdir()
+            for name in ("policy.json", "agents.json", "provider_profiles.json"):
+                source = Path(cli.ROOT) / "config" / name
+                (root / "config" / name).write_text(source.read_text(encoding="utf-8"), encoding="utf-8")
+            profiles = json.loads((root / "config" / "provider_profiles.json").read_text(encoding="utf-8"))
+            profiles["routes"][0]["enabled"] = True
+            (root / "config" / "provider_profiles.json").write_text(json.dumps(profiles), encoding="utf-8")
+            output = io.StringIO()
+            with patch.object(cli, "ROOT", root), contextlib.redirect_stdout(output):
+                self.assertEqual(cli.audit(), 1)
+            self.assertIn("disabled in safe_dry_run", output.getvalue())
 
     def test_memory_cli_lifecycle(self):
         with tempfile.TemporaryDirectory() as tmp:
