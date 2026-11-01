@@ -58,17 +58,21 @@ class OperationStore:
 
     def prepare(self, operation_type: str, idempotency_key: str,
                 payload: dict[str, Any]) -> dict[str, Any]:
-        """Create intent once; reuse is allowed only for identical operation input."""
-        if not operation_type.strip() or not idempotency_key.strip():
-            raise ValueError("operation_type and idempotency_key are required")
+        if not isinstance(operation_type, str) or not operation_type.strip():
+            raise ValueError("operation_type is required")
+        if not isinstance(idempotency_key, str) or not idempotency_key.strip():
+            raise ValueError("idempotency_key is required")
         if not isinstance(payload, dict):
             raise ValueError("operation payload must be a JSON object")
-        payload_json = json.dumps(payload, sort_keys=True, separators=(",", ":"))
+        try:
+            payload_json = json.dumps(payload, sort_keys=True, separators=(",", ":"),
+                                      allow_nan=False)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("operation payload must contain finite JSON values") from exc
         with self._connect() as db:
             db.execute("BEGIN IMMEDIATE")
             row = db.execute(
-                "SELECT * FROM operations WHERE idempotency_key=?",
-                (idempotency_key,),
+                "SELECT * FROM operations WHERE idempotency_key=?", (idempotency_key,)
             ).fetchone()
             if row:
                 if row["operation_type"] != operation_type or row["payload_json"] != payload_json:
@@ -87,9 +91,7 @@ class OperationStore:
         """Claim pending intent once. Executing/unknown records are never auto-replayed."""
         with self._connect() as db:
             db.execute("BEGIN IMMEDIATE")
-            row = db.execute(
-                "SELECT * FROM operations WHERE id=?", (operation_id,)
-            ).fetchone()
+            row = db.execute("SELECT * FROM operations WHERE id=?", (operation_id,)).fetchone()
             if row is None:
                 raise KeyError(operation_id)
             if row["status"] != "pending":
@@ -111,38 +113,43 @@ class OperationStore:
                        external_ref: str | None = None) -> None:
         self._finish(operation_id, claim_token, "succeeded", result, external_ref, None)
 
-    def mark_failed(self, operation_id: str, claim_token: str,
-                    error_code: str) -> None:
-        if not error_code.strip():
+    def mark_failed(self, operation_id: str, claim_token: str, error_code: str) -> None:
+        if not isinstance(error_code, str) or not error_code.strip():
             raise ValueError("error_code is required")
         self._finish(operation_id, claim_token, "failed", None, None, error_code)
 
     def mark_unknown(self, operation_id: str, claim_token: str) -> None:
-        """Use when the external outcome may have happened but cannot be confirmed."""
+        """Call only after the attempt has ended and its external outcome is uncertain."""
         self._finish(operation_id, claim_token, "unknown", None, None, "outcome_unconfirmed")
 
     def _finish(self, operation_id: str, claim_token: str, status: str,
                 result: dict[str, Any] | None, external_ref: str | None,
                 error_code: str | None) -> None:
-        if not claim_token:
+        if not isinstance(claim_token, str) or not claim_token:
             raise ValueError("claim token is required")
         if result is not None and not isinstance(result, dict):
             raise ValueError("result must be a JSON object")
+        result_json = None
+        if result is not None:
+            try:
+                result_json = json.dumps(result, sort_keys=True, allow_nan=False)
+            except (TypeError, ValueError) as exc:
+                raise ValueError("result must contain finite JSON values") from exc
         with self._connect() as db:
             db.execute("BEGIN IMMEDIATE")
             changed = db.execute("""
                 UPDATE operations SET status=?, result_json=?, external_ref=?,
                     error_code=?, claim_token=NULL, updated_at=CURRENT_TIMESTAMP
                 WHERE id=? AND status='executing' AND claim_token=?
-            """, (status, json.dumps(result, sort_keys=True) if result is not None else None,
-                  external_ref, error_code, operation_id, claim_token)).rowcount
+            """, (status, result_json, external_ref, error_code,
+                  operation_id, claim_token)).rowcount
             if changed != 1:
                 raise ValueError("operation claim lost or already finalized")
 
     def reconcile(self, operation_id: str, outcome: str,
                   result: dict[str, Any] | None = None,
                   external_ref: str | None = None) -> None:
-        """Resolve an ambiguous operation after checking the downstream system.
+        """Resolve only an explicitly unknown operation after external verification.
 
         outcome='succeeded' confirms it happened.
         outcome='not_performed' confirms it did not happen and permits a fresh claim.
@@ -151,17 +158,22 @@ class OperationStore:
             raise ValueError("outcome must be succeeded or not_performed")
         if result is not None and not isinstance(result, dict):
             raise ValueError("result must be a JSON object")
+        result_json = None
+        if result is not None:
+            try:
+                result_json = json.dumps(result, sort_keys=True, allow_nan=False)
+            except (TypeError, ValueError) as exc:
+                raise ValueError("result must contain finite JSON values") from exc
         status = "succeeded" if outcome == "succeeded" else "pending"
         with self._connect() as db:
             db.execute("BEGIN IMMEDIATE")
             changed = db.execute("""
                 UPDATE operations SET status=?, result_json=?, external_ref=?,
                     error_code=NULL, claim_token=NULL, updated_at=CURRENT_TIMESTAMP
-                WHERE id=? AND status IN ('executing','unknown')
-            """, (status, json.dumps(result, sort_keys=True) if result is not None else None,
-                  external_ref, operation_id)).rowcount
+                WHERE id=? AND status='unknown'
+            """, (status, result_json, external_ref, operation_id)).rowcount
             if changed != 1:
-                raise ValueError("operation is not awaiting reconciliation")
+                raise ValueError("operation must be marked unknown before reconciliation")
 
     def get(self, operation_id: str) -> dict[str, Any]:
         with self._connect() as db:
