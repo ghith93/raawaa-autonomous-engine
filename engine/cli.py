@@ -178,6 +178,8 @@ def main() -> int:
             "provider": entry.profile.provider,
             "model": entry.profile.model,
             "account_tier": entry.account_tier,
+            "model_stage": entry.model_stage,
+            "production_use_allowed": entry.production_use_allowed,
             "enabled": entry.enabled,
             "ready_for_routing": entry.ready_for_routing,
             "api_key_env_configured_by_name_only": entry.api_key_env,
