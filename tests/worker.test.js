@@ -15,6 +15,7 @@ function request(path, { method = "GET", token = TOKEN, body } = {}) {
 
 function dbMock() {
   const calls = [];
+  let insertedId = null;
   return {
     calls,
     prepare(sql) {
@@ -25,7 +26,7 @@ function dbMock() {
           calls.push({ kind: "first", sql, values: this.values });
           if (sql.includes("SELECT 1")) return { ok: 1 };
           if (sql.includes("WHERE idempotency_key")) {
-            return { id: this.values[0] === "same-key" ? "existing-id" : this.values[0] };
+            return { id: insertedId || "existing-id" };
           }
           return null;
         },
@@ -37,6 +38,7 @@ function dbMock() {
     },
     async batch(statements) {
       calls.push({ kind: "batch", statements: statements.map(x => ({ sql: x.sql, values: x.values })) });
+      insertedId = statements[0].values[0];
       return [];
     },
   };
