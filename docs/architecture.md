@@ -2,7 +2,7 @@
 
 ## Current implementation
 
-The repository currently contains a small Python core, JSON configuration, policy evaluator, CLI audit, unit tests, and GitHub Actions CI. This is intentionally not yet an autonomous agent runtime.
+The repository currently contains a Python core, JSON configuration, policy evaluator, task/memory stores, deterministic workflow planner, quota-aware provider routing, opt-in live-runtime wiring, data-classification gate, CLI, unit tests, and GitHub Actions CI. A bounded daily GitHub repository discovery workflow is implemented as the first proactive research source; its output is unreviewed metadata, not an autonomous research/recommendation agent. The roster and planner remain declarative/deterministic rather than a persistent multi-agent runtime.
 
 ## Target architecture
 
