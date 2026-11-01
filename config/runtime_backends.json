@@ -15,7 +15,16 @@
         "node20",
         "npm",
         "pip",
-        "android_device_access_auto_fallback"
+        "android_device_access_auto_fallback",
+        "androidharness_3_2_project_configuration",
+        "named_nested_agent_profiles",
+        "mcp_client",
+        "plugin_manager",
+        "project_skills_and_memory",
+        "optional_codegraph",
+        "local_gguf_model_support",
+        "foreground_service_resume",
+        "one_approval_android_sdk_installer"
       ],
       "capabilities_not_ready_or_unverified": [
         "java_d8",
@@ -24,7 +33,10 @@
         "direct_root",
         "persistent_always_on_execution",
         "remote_agent_tool_adapter",
-        "cloudflare_deployment_secrets"
+        "cloudflare_deployment_secrets",
+        "device_installed_version_3_2_not_verified",
+        "local_model_benchmark",
+        "engine_authenticated_mcp_server"
       ],
       "execution_defaults": {
         "root": false,
@@ -35,9 +47,29 @@
         "production_deployment": false,
         "bounded_runtime_required": true,
         "task_id_required": true,
-        "audit_log_required": true
+        "audit_log_required": true,
+        "shizuku": false,
+        "full_access": false,
+        "mcp_servers": false,
+        "paid_inference": false
       },
-      "documentation": "docs/android-harness.md"
+      "documentation": "docs/android-harness.md",
+      "upstream_version": "3.2-release",
+      "upstream_release_published_at_utc": "2026-10-31T19:23:44Z",
+      "upstream_apk_sha256": "e6607cd7a70bf555cfd3fb7ce8b66d77efd5461c083e9f4585e16f57c36f6261",
+      "upstream_release_url": "https://github.com/Sanuu7/AndroidHarness/releases/tag/v3.2-release",
+      "project_configuration": "harness.json",
+      "project_skill": ".harness/skills/raawaa-engine-androidharness/SKILL.md",
+      "read_only_doctor": "scripts/androidharness/doctor.py",
+      "research_report": "docs/research/androidharness-3.2-evaluation.md",
+      "notes": [
+        "Upstream v3.2-release metadata and APK SHA-256 verified from the official GitHub release on 2026-11-02; this does not verify the app version installed on the device.",
+        "Operator-reported device snapshot is dated 2026-11-01T22:40:00Z and is not a live health check.",
+        "Android SDK/JDK/Gradle are optional for this Python-first engine; v3.2 android_sdk_install can install OpenJDK 21, D8, aapt2, apksigner, android.jar and optional Gradle behind one explicit approval.",
+        "OpenSSH is not required for HTTPS GitHub operations. Shizuku and direct root remain disabled unless a concrete Android system task requires them.",
+        "Harness is an MCP client. No authenticated engine MCP endpoint or remote device adapter exists yet.",
+        "Foreground service and resume support do not constitute guaranteed 24/7 execution."
+      ]
     }
   ]
 }
