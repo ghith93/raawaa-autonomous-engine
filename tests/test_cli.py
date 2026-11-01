@@ -52,6 +52,17 @@ class CliTests(unittest.TestCase):
                         self.assertEqual(cli.main(), 0)
                 self.assertEqual(json.loads(output.getvalue()), {"archived": True})
 
+    def test_single_provider_discovery_missing_key_is_structured(self):
+        output = io.StringIO()
+        with patch.dict(os.environ, {}, clear=True):
+            with patch("sys.argv", ["engine", "free-models", "--provider", "gemini"]):
+                with contextlib.redirect_stdout(output):
+                    self.assertEqual(cli.main(), 0)
+        result = json.loads(output.getvalue())
+        self.assertEqual(result["generation_requests"], 0)
+        self.assertIn("gemini", result["unavailable"])
+        self.assertNotIn("models", result["unavailable"]["gemini"])
+
     def test_model_status_is_offline(self):
         with tempfile.TemporaryDirectory() as tmp:
             output = io.StringIO()
