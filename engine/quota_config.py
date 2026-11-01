@@ -1,4 +1,4 @@
-"""Load staged provider quota profiles without enabling provider execution."""
+"""Load provider quota profiles; runtime activation is separately gated."""
 from __future__ import annotations
 
 import json
@@ -44,6 +44,7 @@ class ProviderProfileEntry:
             and p.pricing_source_url
             and p.quota_source_url
             and p.terms_source_url
+            and self.model_terms_source_url.startswith("https://")
             and p.verified_at
             and p.max_output_tokens
         )
