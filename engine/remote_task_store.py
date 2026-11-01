@@ -1,7 +1,8 @@
 """Authenticated HTTP adapter for the Cloudflare D1 task queue.
 
-Set RAAWAA_ENGINE_API_URL and RAAWAA_ENGINE_API_TOKEN to opt in. The local
-SQLite TaskStore remains the default and memory continues to use local SQLite.
+Set RAAWAA_ENGINE_API_URL and RAAWAA_ENGINE_API_TOKEN to opt in. Optional
+Cloudflare Access service-token headers are supported for protected Workers.
+The local SQLite TaskStore remains the default and memory continues to use local SQLite.
 """
 from __future__ import annotations
 
@@ -18,21 +19,36 @@ class RemoteTaskStoreError(RuntimeError):
 
 class RemoteTaskStore:
     def __init__(self, base_url: str | None = None, token: str | None = None,
-                 timeout: float = 15.0):
+                 timeout: float = 15.0, access_client_id: str | None = None,
+                 access_client_secret: str | None = None):
         self.base_url = (base_url or os.environ.get("RAAWAA_ENGINE_API_URL", "")).rstrip("/")
         self.token = token or os.environ.get("RAAWAA_ENGINE_API_TOKEN", "")
+        self.access_client_id = (
+            access_client_id if access_client_id is not None
+            else os.environ.get("RAAWAA_ENGINE_CF_ACCESS_CLIENT_ID", "")
+        )
+        self.access_client_secret = (
+            access_client_secret if access_client_secret is not None
+            else os.environ.get("RAAWAA_ENGINE_CF_ACCESS_CLIENT_SECRET", "")
+        )
         self.timeout = timeout
         if not self.base_url.startswith("https://") or not self.token:
             raise ValueError("Remote task store requires an HTTPS API URL and token")
+        if bool(self.access_client_id) != bool(self.access_client_secret):
+            raise ValueError("Cloudflare Access requires both service-token credentials")
 
     def _request(self, path: str, method: str = "GET",
                  payload: dict[str, Any] | None = None) -> dict[str, Any]:
         body = None if payload is None else json.dumps(payload).encode("utf-8")
-        request = Request(self.base_url + path, data=body, method=method, headers={
+        headers = {
             "Authorization": "Bearer " + self.token,
             "Accept": "application/json",
             **({"Content-Type": "application/json"} if body is not None else {}),
-        })
+        }
+        if self.access_client_id and self.access_client_secret:
+            headers["CF-Access-Client-Id"] = self.access_client_id
+            headers["CF-Access-Client-Secret"] = self.access_client_secret
+        request = Request(self.base_url + path, data=body, method=method, headers=headers)
         try:
             with urlopen(request, timeout=self.timeout) as response:
                 data = response.read(64 * 1024 + 1)
@@ -47,9 +63,6 @@ class RemoteTaskStore:
             if exc.code == 401:
                 raise RemoteTaskStoreError("Remote task API authentication failed") from None
             if exc.code == 403:
-                # Cloudflare edge responses commonly include CF-Ray and may
-                # include cf-mitigated. Log only these non-secret identifiers;
-                # never include response bodies, request headers, or tokens.
                 metadata = []
                 ray_id = exc.headers.get("CF-Ray") if exc.headers else None
                 mitigated = exc.headers.get("cf-mitigated") if exc.headers else None
