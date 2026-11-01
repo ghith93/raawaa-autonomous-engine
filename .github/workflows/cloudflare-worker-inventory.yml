@@ -160,7 +160,10 @@ jobs:
           write_output("status", "unknown")
           write_output("ray", "not_supplied")
           write_output("detail", "not_available")
-          headers = {"Accept": "application/json"}
+          headers = {
+              "Accept": "application/json",
+              "User-Agent": "RaawaaAutonomousEngine/1.0 (+https://github.com/ghith93/raawaa-autonomous-engine)",
+          }
           client_id = os.environ.get("CF_ACCESS_CLIENT_ID", "")
           client_secret = os.environ.get("CF_ACCESS_CLIENT_SECRET", "")
           if bool(client_id) != bool(client_secret):
