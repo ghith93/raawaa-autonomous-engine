@@ -36,7 +36,8 @@ class QuotaAwareGatewayTests(unittest.TestCase):
     def profile(self, provider="groq", account="main", **changes):
         values = dict(provider=provider, account=account, model="model-x",
                       free_verified=True, commercial_use_allowed=True,
-                      daily_request_limit=10, daily_token_limit=1000, priority=10,
+                      daily_request_limit=10, daily_token_limit=1000,
+                      monthly_request_limit=100, monthly_token_limit=10000, priority=10,
                       endpoint_url="https://provider.example/v1",
                       pricing_source_url="https://provider.example/pricing",
                       quota_source_url="https://provider.example/limits",
@@ -224,6 +225,18 @@ class QuotaAwareGatewayTests(unittest.TestCase):
             gateway.generate(self.request)
         self.assertEqual(adapter.calls, 0)
         self.assertEqual(manager.snapshot()[0]["daily_requests_used"], 0)
+
+    def test_monthly_caps_are_reserved_before_provider_call(self):
+        adapter = FakeAdapter("groq")
+        profile = self.profile(monthly_request_limit=1, monthly_token_limit=100)
+        manager = QuotaManager([profile], self.quota)
+        gateway = QuotaAwareLiveGateway(manager, {"groq": adapter}, self.usage, True)
+        gateway.generate(self.request)
+        with self.assertRaises(ProviderUnavailable):
+            gateway.generate(self.request)
+        self.assertEqual(adapter.calls, 1)
+        row = manager.snapshot()[0]
+        self.assertEqual(row["monthly_requests_used"], 1)
 
     def test_no_paid_or_unknown_quota_fallback(self):
         adapter = FakeAdapter("groq")

@@ -58,6 +58,8 @@ class QuotaAwareLiveGateway:
                     estimated_tokens,
                     profile.daily_request_limit,
                     profile.daily_token_limit,
+                    monthly_request_limit=profile.monthly_request_limit,
+                    monthly_token_limit=profile.monthly_token_limit,
                 )
             except RuntimeError:
                 # Another worker may have reserved the remaining capacity.

@@ -19,7 +19,8 @@ class QuotaManagerTests(unittest.TestCase):
     def profile(self, **changes):
         values = dict(provider="groq", account="primary", model="model-a",
                       free_verified=True, commercial_use_allowed=True,
-                      daily_request_limit=10, daily_token_limit=1000, priority=10,
+                      daily_request_limit=10, daily_token_limit=1000,
+                      monthly_request_limit=100, monthly_token_limit=10000, priority=10,
                       endpoint_url="https://provider.example/v1",
                       pricing_source_url="https://provider.example/pricing",
                       quota_source_url="https://provider.example/limits",
@@ -34,7 +35,7 @@ class QuotaManagerTests(unittest.TestCase):
         self.assertEqual(QuotaManager([route], self.ledger).select(100, self.now), route)
 
     def test_unknown_or_unverified_quota_is_not_selected(self):
-        unknown = self.profile(daily_request_limit=None)
+        unknown = self.profile(monthly_token_limit=None)
         unverified = self.profile(account="other", free_verified=False)
         self.assertIsNone(QuotaManager([unknown, unverified], self.ledger).select(10, self.now))
 
@@ -65,7 +66,8 @@ class QuotaManagerTests(unittest.TestCase):
     def test_invalid_quota_limit_types_are_rejected(self):
         bool_request_limit = self.profile(daily_request_limit=True)
         bool_token_limit = self.profile(daily_token_limit=True)
-        manager = QuotaManager([bool_request_limit, bool_token_limit], self.ledger)
+        bool_monthly_limit = self.profile(monthly_request_limit=True)
+        manager = QuotaManager([bool_request_limit, bool_token_limit, bool_monthly_limit], self.ledger)
         for route in manager.profiles:
             self.assertFalse(manager.eligible(route, 1, self.now))
 
@@ -86,6 +88,16 @@ class QuotaManagerTests(unittest.TestCase):
         route = self.profile(daily_token_limit=50)
         self.assertIsNone(QuotaManager([route], self.ledger).select(51, self.now))
 
+    def test_monthly_token_limit_blocks_route(self):
+        route = self.profile(monthly_token_limit=50)
+        self.ledger.record(route.route_id, 40, self.now)
+        self.assertFalse(QuotaManager([route], self.ledger).eligible(route, 11, self.now))
+
+    def test_monthly_request_limit_blocks_route(self):
+        route = self.profile(monthly_request_limit=1)
+        self.ledger.record(route.route_id, 1, self.now)
+        self.assertFalse(QuotaManager([route], self.ledger).eligible(route, 1, self.now))
+
     def test_rate_limit_cooldown_skips_provider(self):
         route = self.profile()
         self.ledger.cool_down(route.route_id, 600, now=self.now)
@@ -97,6 +109,8 @@ class QuotaManagerTests(unittest.TestCase):
         row = QuotaManager([route], self.ledger).snapshot(self.now)[0]
         self.assertEqual(row["daily_requests_used"], 1)
         self.assertEqual(row["daily_tokens_used"], 25)
+        self.assertEqual(row["monthly_requests_used"], 1)
+        self.assertEqual(row["monthly_tokens_used"], 25)
 
     def test_existing_quota_database_migrates_without_losing_reservation(self):
         path = self.tmp.name + "/legacy-quota.db"
@@ -125,7 +139,8 @@ class QuotaManagerTests(unittest.TestCase):
 
     def test_settlement_is_idempotent_for_same_usage(self):
         route = self.profile()
-        reservation = self.ledger.reserve(route.route_id, 100, 10, 1000, self.now)
+        reservation = self.ledger.reserve(route.route_id, 100, 10, 1000, self.now,
+                                    monthly_request_limit=100, monthly_token_limit=10000)
         self.ledger.settle(reservation, 25)
         self.ledger.settle(reservation, 25)
         self.assertEqual(self.ledger.usage_today(route.route_id, self.now),
@@ -133,7 +148,8 @@ class QuotaManagerTests(unittest.TestCase):
 
     def test_conflicting_second_settlement_fails_closed(self):
         route = self.profile()
-        reservation = self.ledger.reserve(route.route_id, 100, 10, 1000, self.now)
+        reservation = self.ledger.reserve(route.route_id, 100, 10, 1000, self.now,
+                                    monthly_request_limit=100, monthly_token_limit=10000)
         self.ledger.settle(reservation, 25)
         with self.assertRaisesRegex(RuntimeError, "already settled"):
             self.ledger.settle(reservation, 26)
@@ -145,12 +161,14 @@ class QuotaManagerTests(unittest.TestCase):
             self.ledger.settle(99999, 25)
 
     def test_concurrent_reservations_cannot_overspend_last_request(self):
-        route = self.profile(daily_request_limit=1, daily_token_limit=100)
+        route = self.profile(daily_request_limit=10, daily_token_limit=1000,
+                             monthly_request_limit=1, monthly_token_limit=100)
         attempts = 8
 
         def reserve():
             try:
-                self.ledger.reserve(route.route_id, 10, 1, 100, self.now)
+                self.ledger.reserve(route.route_id, 10, 10, 1000, self.now,
+                                    monthly_request_limit=1, monthly_token_limit=100)
                 return "reserved"
             except RuntimeError:
                 return "denied"
@@ -162,6 +180,8 @@ class QuotaManagerTests(unittest.TestCase):
         self.assertEqual(outcomes.count("denied"), attempts - 1)
         usage = self.ledger.usage_today(route.route_id, self.now)
         self.assertEqual(usage, {"requests": 1, "tokens": 10})
+        self.assertEqual(self.ledger.usage_month(route.route_id, self.now),
+                         {"requests": 1, "tokens": 10})
 
 
 if __name__ == "__main__":
