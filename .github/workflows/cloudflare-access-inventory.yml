@@ -1,0 +1,87 @@
+name: Cloudflare Access Inventory
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/cloudflare-access-inventory.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: cloudflare-access-inventory
+  cancel-in-progress: false
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: Read-only Access applications and service-token inventory
+        env:
+          CF_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CF_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          import urllib.error
+          import urllib.request
+
+          token = os.environ.get("CF_API_TOKEN", "")
+          account = os.environ.get("CF_ACCOUNT_ID", "")
+          if not token or not account:
+              print("Cloudflare API token or account ID is missing from repository secrets.")
+              raise SystemExit(1)
+
+          base = f"https://api.cloudflare.com/client/v4/accounts/{account}"
+          headers = {"Authorization": f"Bearer {token}", "Accept": "application/json"}
+
+          def get_inventory(label, path, relevant):
+              request = urllib.request.Request(base + path, headers=headers, method="GET")
+              try:
+                  with urllib.request.urlopen(request, timeout=20) as response:
+                      payload = json.loads(response.read().decode("utf-8"))
+                      status = response.status
+              except urllib.error.HTTPError as error:
+                  print(f"{label}: HTTP {error.code}; API read not available (check token permission).")
+                  return
+              except (urllib.error.URLError, TimeoutError, OSError, ValueError) as error:
+                  print(f"{label}: request failed ({type(error).__name__}).")
+                  return
+
+              if not payload.get("success"):
+                  codes = [str(item.get("code", "unknown")) for item in payload.get("errors", [])]
+                  print(f"{label}: API success=false; error codes: " + (", ".join(codes) or "not supplied"))
+                  return
+
+              items = payload.get("result") or []
+              print(f"{label}: HTTP {status}; API success=true; records={len(items)}.")
+              matches = [item for item in items if relevant(item)]
+              if not matches:
+                  print(f"{label}: no matching Raawaa Worker/app/token record found.")
+              for item in matches:
+                  name = item.get("name") or item.get("id") or "unnamed"
+                  domain = item.get("domain") or ""
+                  domains = item.get("self_hosted_domains") or []
+                  print(f"{label} match: {name}")
+                  if domain:
+                      print(f"  domain: {domain}")
+                  for entry in domains:
+                      print(f"  protected domain: {entry}")
+                  # Deliberately never print token IDs, client IDs, client secrets, or policy secrets.
+
+          get_inventory(
+              "Access applications",
+              "/access/apps?per_page=1000&page=1",
+              lambda item: "raawaa" in (item.get("name", "") + " " + item.get("domain", "") + " " + " ".join(item.get("self_hosted_domains", []))).lower()
+                  or "ghith-shikhkhaled.workers.dev" in (item.get("domain", "") + " " + " ".join(item.get("self_hosted_domains", []))).lower(),
+          )
+          get_inventory(
+              "Access service tokens",
+              "/access/service_tokens?per_page=1000&page=1",
+              lambda item: "raawaa" in (item.get("name", "")).lower(),
+          )
+          PY
