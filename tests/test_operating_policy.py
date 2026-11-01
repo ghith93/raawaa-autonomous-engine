@@ -14,7 +14,7 @@ class OperatingPolicyTests(unittest.TestCase):
         policy = load_operating_policy()
         self.assertEqual(policy["documents_loaded"], list(REQUIRED_POLICY_FILES))
         self.assertEqual(set(policy["fingerprints"]), set(REQUIRED_POLICY_FILES))
-        self.assertIn("Permanent master autonomous execution directive", policy["prompt_context"])
+        self.assertIn("TRUSTED EXECUTION POLICY SUMMARY", policy["prompt_context"])
         self.assertIn("sha256:", policy["prompt_context"])
         self.assertGreater(policy["prompt_context_bytes"], 1000)
         self.assertLess(policy["prompt_context_bytes"], 4000)
