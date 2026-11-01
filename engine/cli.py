@@ -8,6 +8,7 @@ from engine.task_store import TaskStore
 from engine.memory import MemoryStore
 from engine.model_gateway import ModelGateway, UsageLedger
 from engine.worker import run_once
+from engine.free_provider_discovery import discover_all
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -58,6 +59,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Raawaa Autonomous Engine")
     sub = parser.add_subparsers(dest="command", required=True)
     sub.add_parser("audit")
+    sub.add_parser("free-models", help="Explicitly discover provider model catalogs (read-only; no inference)")
     enqueue = sub.add_parser("enqueue")
     enqueue.add_argument("--type", required=True, dest="task_type")
     enqueue.add_argument("--title", required=True)
