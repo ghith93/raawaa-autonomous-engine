@@ -29,7 +29,10 @@ class ResearchDiscoveryTests(unittest.TestCase):
     def test_query_and_limit_validation(self):
         with self.assertRaises(ValueError): discover_repositories({}, {})
         with self.assertRaises(ValueError): discover_repositories({"x": "y"}, {}, max_per_query=11)
-        with self.assertRaises(ValueError): discover_repositories({"x": "y", "z": "q"}, {}, max_queries=1, request_fn=lambda q, token: {"items": []})
+        calls = []
+        bounded = discover_repositories({"x": "y", "z": "q"}, {}, max_queries=1, request_fn=lambda q, token: (calls.append(q) or {"items": []}))
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(bounded["queries_attempted"], 1)
 
     def test_query_count_is_bounded(self):
         calls = []
