@@ -156,6 +156,16 @@ test("expired lease stops before research or review", async () => {
   assert.equal(adapters.calls.complete, 0);
 });
 
+test("normalizes a local WorkflowEvent wrapper without weakening approval validation", async () => {
+  const adapters = makeAdapters();
+  const step = mockStep({
+    approval: { type: "approval", payload: { approved: true, approval_id: "wrapped-approval" } },
+  });
+  const result = await runTaskWorkflow({ ...basePayload, await_approval: true }, step, adapters);
+  assert.equal(result.status, "completed");
+  assert.equal(result.approval_id, "wrapped-approval");
+});
+
 test("approval rejection blocks completion", async () => {
   const adapters = makeAdapters();
   const step = mockStep({ approval: { approved: false, approval_id: "approval-no" } });
