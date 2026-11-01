@@ -10,11 +10,14 @@ from __future__ import annotations
 import hashlib
 import hmac
 import json
+import math
 import re
 from typing import Any
 
 SCHEMA_VERSION = 1
 MAX_ENVELOPE_BYTES = 256 * 1024
+MAX_PAYLOAD_DEPTH = 64
+MAX_PAYLOAD_ITEMS = 20000
 _ID_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$")
 _SHA256_PATTERN = re.compile(r"^[0-9a-f]{64}$")
 _REQUIRED_KEYS = {
@@ -33,6 +36,42 @@ def _validate_id(value: Any, field: str, optional: bool = False) -> None:
         return
     if not isinstance(value, str) or not _ID_PATTERN.fullmatch(value):
         raise CheckpointEnvelopeError(f"{field} must be a stable identifier")
+
+
+def _validate_json_value(root: Any) -> None:
+    """Reject cycles, excessive nesting, oversized structures, and non-JSON values."""
+    stack = [(root, 0)]
+    seen_containers = set()
+    visited = 0
+    while stack:
+        value, depth = stack.pop()
+        visited += 1
+        if visited > MAX_PAYLOAD_ITEMS:
+            raise CheckpointEnvelopeError("checkpoint payload exceeds the item limit")
+        if depth > MAX_PAYLOAD_DEPTH:
+            raise CheckpointEnvelopeError("checkpoint payload exceeds the nesting limit")
+        if isinstance(value, dict):
+            identity = id(value)
+            if identity in seen_containers:
+                raise CheckpointEnvelopeError("checkpoint payload contains a cycle or shared container")
+            seen_containers.add(identity)
+            for key, child in value.items():
+                if not isinstance(key, str):
+                    raise CheckpointEnvelopeError("checkpoint object keys must be strings")
+                stack.append((child, depth + 1))
+        elif isinstance(value, list):
+            identity = id(value)
+            if identity in seen_containers:
+                raise CheckpointEnvelopeError("checkpoint payload contains a cycle or shared container")
+            seen_containers.add(identity)
+            stack.extend((child, depth + 1) for child in value)
+        elif value is None or type(value) in (str, int, bool):
+            continue
+        elif type(value) is float:
+            if not math.isfinite(value):
+                raise CheckpointEnvelopeError("non-finite JSON numbers are not permitted")
+        else:
+            raise CheckpointEnvelopeError("checkpoint payload contains a non-JSON value")
 
 
 def _canonical_json(value: dict[str, Any]) -> bytes:
@@ -74,6 +113,7 @@ def encode_checkpoint_envelope(
         raise CheckpointEnvelopeError("sequence must be a non-negative integer")
     if not isinstance(payload, dict):
         raise CheckpointEnvelopeError("payload must be a JSON object")
+    _validate_json_value(payload)
 
     unsigned = {
         "schema_version": SCHEMA_VERSION,
@@ -121,6 +161,7 @@ def decode_checkpoint_envelope(encoded: bytes | bytearray | memoryview) -> dict[
         raise CheckpointEnvelopeError("sequence must be a non-negative integer")
     if not isinstance(envelope["payload"], dict):
         raise CheckpointEnvelopeError("payload must be a JSON object")
+    _validate_json_value(envelope["payload"])
     digest = envelope["sha256"]
     if not isinstance(digest, str) or not _SHA256_PATTERN.fullmatch(digest):
         raise CheckpointEnvelopeError("sha256 must be a lowercase hexadecimal digest")
