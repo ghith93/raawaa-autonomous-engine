@@ -125,6 +125,25 @@ class QuotaManagerTests(unittest.TestCase):
         self.assertEqual(self.ledger.usage_for_task("task-one"),
                          {"requests": 1, "tokens": 40})
 
+    def test_per_task_limits_aggregate_across_provider_routes(self):
+        first = self.profile(provider="groq", per_task_request_limit=5,
+                             per_task_token_limit=50)
+        backup = self.profile(provider="cerebras", account="backup",
+                              per_task_request_limit=5, per_task_token_limit=50)
+        self.ledger.reserve(
+            first.route_id, 40, 10, 1000, self.now,
+            monthly_request_limit=100, monthly_token_limit=10000,
+            task_id="shared-task", per_task_request_limit=5, per_task_token_limit=50,
+        )
+        with self.assertRaises(RuntimeError):
+            self.ledger.reserve(
+                backup.route_id, 11, 10, 1000, self.now,
+                monthly_request_limit=100, monthly_token_limit=10000,
+                task_id="shared-task", per_task_request_limit=5, per_task_token_limit=50,
+            )
+        self.assertEqual(self.ledger.usage_for_task("shared-task"),
+                         {"requests": 1, "tokens": 40})
+
     def test_rate_limit_cooldown_skips_provider(self):
         route = self.profile()
         self.ledger.cool_down(route.route_id, 600, now=self.now)
