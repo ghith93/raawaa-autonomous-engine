@@ -9,6 +9,22 @@ import sqlite3
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from urllib.parse import urlsplit
+
+
+def _valid_https_url(value: str | None) -> bool:
+    if not isinstance(value, str):
+        return False
+    try:
+        parsed = urlsplit(value)
+        return (
+            parsed.scheme == "https"
+            and bool(parsed.hostname)
+            and parsed.username is None
+            and parsed.password is None
+        )
+    except ValueError:
+        return False
 
 
 @dataclass(frozen=True)
@@ -170,9 +186,10 @@ class QuotaManager:
             profile.endpoint_url, profile.pricing_source_url,
             profile.quota_source_url, profile.terms_source_url,
         )
-        if any(not isinstance(url, str) or not url.startswith("https://") for url in evidence_urls):
+        if any(not _valid_https_url(url) for url in evidence_urls):
             return False
-        if (profile.verified_at is None or profile.verified_at.tzinfo is None
+        if (not isinstance(profile.verified_at, datetime)
+                or profile.verified_at.tzinfo is None
                 or profile.verified_at.utcoffset() is None):
             return False
         current = (now or datetime.now(timezone.utc)).astimezone(timezone.utc)
@@ -182,9 +199,11 @@ class QuotaManager:
         if (type(profile.max_output_tokens) is not int
                 or not 1 <= profile.max_output_tokens <= 4096):
             return False
-        if profile.daily_request_limit is None or profile.daily_token_limit is None:
+        if (type(profile.daily_request_limit) is not int
+                or type(profile.daily_token_limit) is not int
+                or profile.daily_request_limit < 1 or profile.daily_token_limit < 1):
             return False
-        if profile.daily_request_limit < 1 or profile.daily_token_limit < 1:
+        if type(estimated_tokens) is not int or estimated_tokens < 1:
             return False
         if self.ledger.cooldown_active(profile.route_id, now):
             return False
