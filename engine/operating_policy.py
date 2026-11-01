@@ -54,12 +54,13 @@ def load_operating_policy(root: Path | None = None) -> dict[str, Any]:
         for name in REQUIRED_POLICY_FILES
     )
     prompt_context = (
-        "Repository-wide trusted startup rules (AGENTS.md):\n"
-        f"{agents}\n\n"
+        "Trusted repository startup policy: AGENTS.md was read and validated in full. "
+        "Every cycle must follow the permanent directive, architecture, continuous-improvement "
+        "charter, operations guide, and applicable subsystem policies.\n\n"
         "Permanent master autonomous execution directive (full text):\n"
         f"{directive}\n\n"
-        "The following governing documents were also fully read and validated by the runtime "
-        "for this task cycle. Their exact content fingerprints are:\n"
+        "The complete governing documents below were also read and validated by the runtime "
+        "for this task cycle; fingerprints identify their exact contents:\n"
         f"{fingerprint_lines}\n"
         "Precedence: established architecture/contracts and accepted decisions; then security, "
         "privacy, legal/service terms, explicit approvals, zero-cost policy and runtime gates; "
