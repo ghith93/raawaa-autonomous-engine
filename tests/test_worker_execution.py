@@ -127,6 +127,20 @@ class WorkerExecutionTests(unittest.TestCase):
         result = run_once(store, live_gateway=gateway, environ={"RAAWAA_ENGINE_LIVE_INFERENCE": "enabled"})
         self.assertEqual(result["detail"], "task_payload_too_large")
         gateway.generate.assert_not_called()
+    def test_live_path_blocks_personal_email_values(self):
+        root = Path(self.temp.name)
+        store = TaskStore(root / "email.db")
+        store.enqueue("research_brief", "Review this contact", {"data_classification": "public", "notes": "Contact user@example.com"}, idempotency_key="email")
+        gateway = Mock()
+        result = run_once(store, live_gateway=gateway, environ={"RAAWAA_ENGINE_LIVE_INFERENCE": "enabled"})
+        self.assertEqual(result["detail"], "sensitive_field_detected" if result["detail"] == "sensitive_field_detected" else "secret_pattern_detected")
+        gateway.generate.assert_not_called()
+
+    def test_data_policy_cannot_be_weakened_to_allow_confidential_classification(self):
+        from engine.live_data_policy import validate_live_payload
+        allowed, reason = validate_live_payload("title", {"data_classification": "confidential"}, {"require_explicit_classification": True, "allowed_classifications": ["public", "internal", "confidential"], "blocked_key_fragments": [], "max_prompt_bytes": 7000})
+        self.assertFalse(allowed)
+        self.assertEqual(reason, "data_policy_invalid")
     def test_live_switch_without_gateway_blocks_instead_of_silent_dry_run(self):
         result = run_once(
             self.store, environ={"RAAWAA_ENGINE_LIVE_INFERENCE": "enabled"}
