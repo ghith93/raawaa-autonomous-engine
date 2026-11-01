@@ -77,10 +77,18 @@ export default {
 
     if (url.pathname !== "/v1/tasks" && url.pathname !== "/v1/tasks/enqueue" &&
         url.pathname !== "/v1/tasks/claim" && url.pathname !== "/v1/tasks/recover" &&
+        url.pathname !== "/v1/diagnostics/auth" &&
         !/^\/v1\/tasks\/[A-Za-z0-9-]+\/(heartbeat|finish|retry)$/.test(url.pathname)) {
       return json({ error: "not_found" }, 404);
     }
     if (!(await authorized(request, env))) return json({ error: "unauthorized" }, 401);
+
+    // Authenticated, read-only POST probe used to distinguish application auth
+    // from edge blocks before the runner mutates task state.
+    if (url.pathname === "/v1/diagnostics/auth") {
+      if (request.method !== "POST") return json({ error: "method_not_allowed" }, 405);
+      return json({ ok: true, authenticated: true });
+    }
 
     if (request.method === "GET" && url.pathname === "/v1/tasks") {
       const rawLimit = Number(url.searchParams.get("limit") || 50);
