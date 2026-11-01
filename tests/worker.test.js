@@ -180,3 +180,64 @@ test("diagnostic probe allows only POST", async () => {
   }), { DB: dbMock(), ENGINE_API_TOKEN: TOKEN });
   assert.equal(response.status, 405);
 });
+
+test("research ingestion is authenticated and stores normalized GitHub metadata", async () => {
+  const DB = dbMock();
+  const response = await worker.fetch(request("/v1/research/candidates", { method: "POST", body: { candidates: [{ source: "github", full_name: "org/agent", url: "https://github.com/org/agent", description: "agent", stars: 12, license_spdx: "MIT", topics: ["agents"] }] } }), { DB, ENGINE_API_TOKEN: TOKEN });
+  assert.equal(response.status, 201);
+  assert.deepEqual(await response.json(), { accepted_count: 1, sources: ["github"] });
+  const batch = DB.calls.find(x => x.kind === "batch");
+  assert.match(batch.statements[0].sql, /INSERT INTO research_candidates/);
+  assert.match(batch.statements[0].sql, /ON CONFLICT\(source_key\) DO UPDATE/);
+  assert.equal(batch.statements[0].values[0], "github:org/agent");
+  assert.match(batch.statements[0].sql, /\x27unreviewed\x27/);
+});
+
+test("research ingestion normalizes Crossref DOI and rejects arbitrary URL targets", async () => {
+  const DB = dbMock();
+  const response = await worker.fetch(request("/v1/research/candidates", { method: "POST", body: { candidates: [{ source: "crossref", doi: "10.1234/agent-paper", title: "Agent research", url: "https://evil.example/article", authors: ["A Researcher"], license_urls: ["https://creativecommons.org/licenses/by/4.0/"] }] } }), { DB, ENGINE_API_TOKEN: TOKEN });
+  assert.equal(response.status, 201);
+  const batch = DB.calls.find(x => x.kind === "batch");
+  assert.equal(batch.statements[0].values[0], "crossref:10.1234/agent-paper");
+  assert.equal(batch.statements[0].values[3], "https://doi.org/10.1234/agent-paper");
+});
+
+test("research ingestion rejects invalid repository URL before database writes", async () => {
+  const DB = dbMock();
+  const response = await worker.fetch(request("/v1/research/candidates", { method: "POST", body: { candidates: [{ source: "github", full_name: "org/agent", url: "https://evil.example/org/agent" }] } }), { DB, ENGINE_API_TOKEN: TOKEN });
+  assert.equal(response.status, 400);
+  assert.deepEqual(await response.json(), { error: "invalid_candidate" });
+  assert.equal(DB.calls.length, 0);
+});
+
+test("research candidate listing is authenticated and bounded", async () => {
+  const DB = dbMock();
+  const response = await worker.fetch(request("/v1/research/candidates?limit=20&status=unreviewed"), { DB, ENGINE_API_TOKEN: TOKEN });
+  assert.equal(response.status, 200);
+  assert.deepEqual(await response.json(), { candidates: [] });
+  assert.ok(DB.calls.some(x => x.kind === "all" && x.sql.includes("WHERE review_status=?") && x.values[0] === "unreviewed"));
+});
+
+test("research candidate review is explicit and audited", async () => {
+  const DB = dbMock();
+  const response = await worker.fetch(request("/v1/research/candidates/review", { method: "POST", body: { source_key: "github:org/agent", review_status: "accepted", note: "Licence and security reviewed." } }), { DB, ENGINE_API_TOKEN: TOKEN });
+  assert.equal(response.status, 200);
+  assert.equal((await response.json()).review_status, "accepted");
+  assert.ok(DB.calls.some(x => x.kind === "run" && x.sql.startsWith("UPDATE research_candidates")));
+  assert.ok(DB.calls.some(x => x.kind === "run" && x.sql.includes("INSERT INTO audit_log") && x.values[0] === "research_candidate_reviewed"));
+});
+
+test("research candidate review rejects unsupported state changes", async () => {
+  const response = await worker.fetch(request("/v1/research/candidates/review", { method: "POST", body: { source_key: "github:org/agent", review_status: "auto_install" } }), { DB: dbMock(), ENGINE_API_TOKEN: TOKEN });
+  assert.equal(response.status, 400);
+});
+
+test("research ingestion rejects unauthenticated callers", async () => {
+  const response = await worker.fetch(request("/v1/research/candidates", { method: "POST", token: null, body: { candidates: [{ source: "github", full_name: "org/repo", url: "https://github.com/org/repo" }] } }), { DB: dbMock(), ENGINE_API_TOKEN: TOKEN });
+  assert.equal(response.status, 401);
+});
+
+test("research candidate listing rejects invalid filters", async () => {
+  const response = await worker.fetch(request("/v1/research/candidates?limit=1000&status=unknown"), { DB: dbMock(), ENGINE_API_TOKEN: TOKEN });
+  assert.equal(response.status, 400);
+});

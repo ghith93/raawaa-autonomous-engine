@@ -34,10 +34,19 @@ Discovery does not imply endorsement, installation, execution, or permission to 
 ## Current limitations
 
 - GitHub and Crossref are initial sources, not a complete web/official-documentation/scientific/MCP/plugin research engine.
-- Snapshots are workflow artifacts with 30-day retention; durable cross-run candidate memory and deduplication over time are future work.
+- Snapshots are workflow artifacts with 30-day retention and candidate metadata is also upserted into the authenticated Cloudflare D1 research_candidates table. Rediscovery updates last_seen_at and discovery_count while preserving human review_status. The authenticated review endpoint records accepted/rejected/deferred decisions. The D1 store is durable cross-run memory; artifacts remain convenient per-run snapshots.
 - No autonomous agent reads and evaluates candidates yet. Results require engineering/security/licence review.
-- The schedule is daily and bounded, not always-on.
+- The schedule is daily and bounded, not always-on. D1 ingestion uses the existing Worker application token and accepts only normalized GitHub/Crossref metadata.
 
 Official Crossref references:
 - REST API: https://www.crossref.org/documentation/retrieve-metadata/rest-api/
 - Access and rate limits: https://www.crossref.org/documentation/retrieve-metadata/rest-api/access-and-authentication/
+
+## Persistent D1 research memory
+
+- Authenticated ingestion: POST /v1/research/candidates (batch size is capped at 25 by the Worker; the workflow sends chunks of five).
+- Authenticated listing: GET /v1/research/candidates?status=unreviewed&limit=50.
+- Explicit review: POST /v1/research/candidates/review with source_key and review_status set to accepted, rejected, or deferred.
+- Re-ingestion is idempotent by normalized GitHub repository name or Crossref DOI. It updates last-seen/discovery count but does not overwrite a prior review decision.
+- Only an allowlisted metadata subset is stored. No source code, abstracts, full text, secrets, or model outputs are stored.
+- Migration 0002 is additive and applied by the existing D1 migration workflow after merge to main. Worker deployment is handled by the existing deploy workflow.
