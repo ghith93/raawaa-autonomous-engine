@@ -65,14 +65,14 @@ class AndroidHarnessBridgeTests(unittest.TestCase):
 
 
     def test_unittest_summary_exposes_only_aggregate_counts(self):
-        passed = summarize_unittest_output("Ran 42 tests in 1.234s\\n\\nOK\\n")
+        passed = summarize_unittest_output("Ran 42 tests in 1.234s\n\nOK\n")
         self.assertEqual(passed, {
             "tests_run": 42,
             "status": "passed",
             "failure_summary": None,
         })
         failed = summarize_unittest_output(
-            "Ran 42 tests in 1.234s\\n\\nFAILED (failures=2, errors=1)\\n"
+            "Ran 42 tests in 1.234s\n\nFAILED (failures=2, errors=1)\n"
         )
         self.assertEqual(failed["tests_run"], 42)
         self.assertEqual(failed["status"], "failed")
@@ -91,7 +91,7 @@ class AndroidHarnessBridgeTests(unittest.TestCase):
             ):
                 path = root / relative
                 path.parent.mkdir(parents=True, exist_ok=True)
-                path.write_text("required policy\\n", encoding="utf-8")
+                path.write_text("required policy\n", encoding="utf-8")
             fingerprints = verify_policy_files(root)
             self.assertEqual(len(fingerprints), 5)
             (root / "docs/operations.md").write_text("", encoding="utf-8")
@@ -195,7 +195,7 @@ class AndroidHarnessBridgeTests(unittest.TestCase):
                 "OPENROUTER_API_KEY": "secret-value",
                 "CLOUDFLARE_API_TOKEN": "another-secret",
             }, clear=True):
-                env = safe_python_environment(Path(temporary))
+                env = minimal_python_environment(Path(temporary))
             self.assertEqual(env["PATH"], "/usr/bin")
             self.assertNotIn("OPENROUTER_API_KEY", env)
             self.assertNotIn("CLOUDFLARE_API_TOKEN", env)
