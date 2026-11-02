@@ -8,6 +8,7 @@ from decimal import Decimal
 
 from .dexscreener import DexScreenerClient, MarketDataError
 from .flash_swap_cli import run_flash_swap_simulation
+from .paper_observer import observe_flash_swap_outcome
 from .onchain_v2_scan import scan_onchain_v2_candidates
 from .fork_sim import AnvilForkSimulator, ForkSimulationError
 from .ledger import OpportunityLedger
@@ -146,6 +147,13 @@ def main() -> None:
     flash_parser.add_argument("--native-quote-fee-bps", type=int, help="required with --native-quote-pair unless a venue is supplied")
     flash_parser.add_argument("--record-paper", action="store_true", help="opt in to local append-only research event recording")
     flash_parser.add_argument("--ledger", default="data/paper-trading.sqlite3")
+    observer_parser = sub.add_parser(
+        "paper-observe",
+        help="record a read-only forward observation at a later canonical block",
+    )
+    observer_parser.add_argument("--candidate-id", required=True)
+    observer_parser.add_argument("--rpc-url", default=DEFAULT_ETHEREUM_RPC)
+    observer_parser.add_argument("--ledger", default="data/paper-trading.sqlite3")
 
     onchain_parser = sub.add_parser(
         "onchain-v2-scan",
@@ -431,6 +439,16 @@ def main() -> None:
             print(json.dumps(result, indent=2))
         except (RpcReadError, ValueError, ArithmeticError, OSError, RuntimeError, sqlite3.Error) as exc:
             parser.exit(2, f"flash-swap-sim failed: {exc}\n")
+    elif args.command == "paper-observe":
+        try:
+            result = observe_flash_swap_outcome(
+                args.candidate_id,
+                ledger_path=args.ledger,
+                rpc_url=args.rpc_url,
+            )
+            print(json.dumps(result, indent=2))
+        except (RpcReadError, ValueError, ArithmeticError, OSError, RuntimeError, sqlite3.Error) as exc:
+            parser.exit(2, f"paper-observe failed: {exc}\n")
     elif args.command == "onchain-v2-scan":
         try:
             result = scan_onchain_v2_candidates(
