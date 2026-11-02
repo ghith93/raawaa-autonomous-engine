@@ -15,12 +15,15 @@ The CI workflow obtains a current block number, block hash and parent hash from 
 
 ```bash
 RPC_URL=https://ethereum-rpc.publicnode.com
-BLOCK="$(cast block-number --rpc-url "$RPC_URL")"
-BLOCK_JSON="$(cast block "$BLOCK" --rpc-url "$RPC_URL" --json)"
+BLOCK_RESPONSE="$(curl --fail --silent --show-error --retry 4 --retry-all-errors --retry-delay 1 --max-time 15 -H "Content-Type: application/json" --data '{"jsonrpc":"2.0","id":1,"method":"eth_blockNumber","params":[]}' "$RPC_URL")"
+BLOCK_HEX="$(jq -r '.result' <<< "$BLOCK_RESPONSE")"
+BLOCK_DIGITS="${BLOCK_HEX#0x}"
+BLOCK="$((16#$BLOCK_DIGITS))"
+BLOCK_JSON="$(curl --fail --silent --show-error --retry 4 --retry-all-errors --retry-delay 1 --max-time 15 -H "Content-Type: application/json" --data "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"eth_getBlockByNumber\",\"params\":[\"$BLOCK_HEX\",false]}" "$RPC_URL")"
 MAINNET_RPC_URL="$RPC_URL" \
 FORK_BLOCK="$BLOCK" \
-FORK_BLOCK_HASH="$(jq -r '.hash' <<< "$BLOCK_JSON")" \
-FORK_PARENT_HASH="$(jq -r '.parentHash' <<< "$BLOCK_JSON")" \
+FORK_BLOCK_HASH="$(jq -r '.result.hash' <<< "$BLOCK_JSON")" \
+FORK_PARENT_HASH="$(jq -r '.result.parentHash' <<< "$BLOCK_JSON")" \
 forge test --match-path test/AnvilForkFlashSwap.t.sol -vvv
 ```
 
