@@ -294,7 +294,7 @@ def kraken_book(*, asks=None, bids=None, fetched_at=NOW):
     )
 
 
-def four_venue_registry(*, coinbase_quote=USDT):
+def four_venue_registry(*, coinbase_quote="currency:canonical:USD"):
     return InstrumentRegistry([
         InstrumentSpec("bybit", "BTCUSDT", BTC, USDT, "0.001"),
         InstrumentSpec("binance", "BTCUSDT", BTC, USDT, "0.001"),
@@ -312,7 +312,7 @@ def all_pair_costs(venue_ids):
     }
 
 
-def test_multi_venue_comparison_compares_all_four_cex_sources_pairwise():
+def test_multi_venue_comparison_never_equates_coinbase_usd_with_usdt():
     books = [bybit_book(), binance_book(), coinbase_book(), kraken_book()]
     venue_ids = ["bybit", "binance", "coinbase", "kraken"]
     result = compare_cex_spot_orderbook_universe(
@@ -322,19 +322,23 @@ def test_multi_venue_comparison_compares_all_four_cex_sources_pairwise():
         costs_by_direction=all_pair_costs(venue_ids),
         now=NOW,
     )
-    assert result.status == "complete"
+    assert result.status == "partial"
     assert result.venue_ids == tuple(venue_ids)
-    assert result.compared_pair_count == 6
-    assert len(result.opportunities) == 12
-    assert result.skipped_pairs == ()
+    assert result.compared_pair_count == 3
+    assert len(result.opportunities) == 6
+    assert result.skipped_pairs == (
+        ("bybit", "coinbase", "canonical_base_or_quote_identity_mismatch"),
+        ("binance", "coinbase", "canonical_base_or_quote_identity_mismatch"),
+        ("coinbase", "kraken", "canonical_base_or_quote_identity_mismatch"),
+    )
     assert result.source_failures == ()
     assert {
         (item.buy_venue_id, item.sell_venue_id)
         for item in result.opportunities
     } == {
         (buy, sell)
-        for buy in venue_ids
-        for sell in venue_ids
+        for buy in ("bybit", "binance", "kraken")
+        for sell in ("bybit", "binance", "kraken")
         if buy != sell
     }
     assert all(item.evaluation is not None for item in result.opportunities)
