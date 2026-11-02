@@ -202,6 +202,8 @@ def simulate_v3_swap(
             else min(sqrt_at_tick, sqrt_price_limit_x96)
         )
 
+        previous_price = current_price
+        previous_tick = current_tick
         next_price, amount_in, amount_out, fee = compute_swap_step(
             current_price, target_price, liquidity, remaining, snapshot.fee_pips,
         )
@@ -213,7 +215,7 @@ def simulate_v3_swap(
             remaining += amount_out
             if remaining > 0:
                 raise ArithmeticError("exact-output step exceeded the requested output")
-        total_in += amount_in + fee
+        total_in += amount_in
         total_out += amount_out
         total_fee += fee
         steps += 1
@@ -232,7 +234,7 @@ def simulate_v3_swap(
         elif next_price != current_price:
             current_tick = get_tick_at_sqrt_ratio(next_price)
 
-        if next_price == current_price and current_tick == snapshot.tick:
+        if next_price == previous_price and current_tick == previous_tick:
             raise ArithmeticError("swap simulation made no price or tick progress")
         current_price = next_price
 
