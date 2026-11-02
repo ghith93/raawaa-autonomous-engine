@@ -31,7 +31,7 @@ def signed_arg(data: str, bits: int) -> int:
 
 
 def make_fake_rpc(*, bitmap=None, liquidity_net=None, pool_factory=FACTORY,
-                  registered_pool=POOL, factory_spacing=60, unlocked=1,
+                  registered_pool=POOL, factory_spacing=60, unlocked=1, slot0_tick=0,
                   reorg=False, code="0x6001"):
     calls = []
     bitmap = {0: (1 << 1) | (1 << 2)} if bitmap is None else bitmap
@@ -72,7 +72,7 @@ def make_fake_rpc(*, bitmap=None, liquidity_net=None, pool_factory=FACTORY,
             if target == FACTORY and data.startswith("0x22afcccb"):
                 return "0x" + word(factory_spacing)
             if target == POOL and data == "0x3850c7bd":
-                return "0x" + "".join(word(value) for value in (Q96, 0, 0, 0, 0, 0, unlocked))
+                return "0x" + "".join(word(value) for value in (Q96, slot0_tick, 0, 0, 0, 0, unlocked))
             if target == POOL and data == "0x1a686502":
                 return "0x" + word(100_000)
             if target == POOL and data.startswith("0x5339c296"):
@@ -309,3 +309,23 @@ def test_default_ethereum_factory_is_official_deployment():
     from arb_engine.v3_rpc import UNISWAP_V3_FACTORY_ETHEREUM
 
     assert UNISWAP_V3_FACTORY_ETHEREUM == "0x1f98431c8ad98523631ae4a59f267346ea31f984"
+
+def test_read_slot0_returns_block_context_and_current_tick(monkeypatch):
+    rpc = reader()
+    fake, calls = make_fake_rpc()
+    monkeypatch.setattr(rpc, "_rpc", fake)
+    context, sqrt_price_x96, tick = rpc.read_slot0(POOL)
+    assert context.chain_id == 1
+    assert context.block_number == 100
+    assert context.block_hash == BLOCK_HASH
+    assert sqrt_price_x96 == Q96
+    assert tick == 0
+    assert [method for method, _ in calls].count("eth_getBlockByNumber") == 2
+
+
+def test_read_slot0_rejects_inconsistent_tick_and_price(monkeypatch):
+    rpc = reader()
+    fake, _ = make_fake_rpc(slot0_tick=1)
+    monkeypatch.setattr(rpc, "_rpc", fake)
+    with pytest.raises(RpcReadError, match="inconsistent"):
+        rpc.read_slot0(POOL)
