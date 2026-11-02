@@ -373,7 +373,10 @@ def test_bsc_v2_scan_uses_chain_specific_venues_and_pinned_chain_context():
 
 
 def test_bsc_scanner_rejects_network_slug_mismatch_and_wrong_rpc_chain():
-    dex = FakeDexScreener([])
+    dex = FakeDexScreener([
+        candidate("pancakeswap", PANCAKE_PAIR, chain="bsc"),
+        candidate("apeswap", APESWAP_PAIR, chain="bsc"),
+    ])
     with pytest.raises(ValueError, match="chain_slug does not match"):
         scan_onchain_v2_candidates(
             token_address=BASE, quote_token_address=QUOTE, capital_quote="1000",
