@@ -39,5 +39,7 @@ jobs:
         run: npm run test:workflow-spike
       - name: Install pinned Wrangler CLI without credentials
         run: npx --yes wrangler@4.156.1 --version
+      - name: Run local Cloudflare D1 Worker integration smoke test
+        run: npm run test:d1-local
       - name: Run local Cloudflare Workflows runtime smoke test
         run: npm run test:workflow-local
