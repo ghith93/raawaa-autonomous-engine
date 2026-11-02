@@ -64,6 +64,10 @@ def _validate_pool(pool: V2PoolState) -> None:
         raise ValueError("Invalid block number")
     if not isinstance(pool.observed_at, datetime) or pool.observed_at.tzinfo is None or pool.observed_at.utcoffset() is None:
         raise ValueError("Pool observation timestamp must be timezone-aware")
+    now = datetime.now(timezone.utc)
+    observed = pool.observed_at.astimezone(timezone.utc)
+    if observed > now or (now - observed).total_seconds() > 30:
+        raise ValueError("Pool state is future-dated or stale (older than 30 seconds)")
 
 
 def quote_exact_input(pool: V2PoolState, token_in: str, amount_in_raw: int) -> V2SwapQuote:
@@ -111,6 +115,8 @@ def simulate_round_trip(
     _validate_pool(sell_pool)
     if buy_pool.chain_id != sell_pool.chain_id:
         raise ValueError("Cross-chain pools cannot form an atomic round trip")
+    if buy_pool.pair_address.casefold() == sell_pool.pair_address.casefold():
+        raise ValueError("Round trip requires two different pools")
     if buy_pool.block_number != sell_pool.block_number or buy_pool.block_hash.casefold() != sell_pool.block_hash.casefold():
         raise ValueError("Both pools must be read at the same canonical block")
     if not isinstance(quote_token, str) or not isinstance(base_token, str) or not quote_token.strip() or not base_token.strip():
