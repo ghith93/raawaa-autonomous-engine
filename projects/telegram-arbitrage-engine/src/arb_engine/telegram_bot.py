@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import sqlite3
 import time
 from dataclasses import dataclass, field
 from typing import Any
@@ -133,7 +134,7 @@ class TelegramController:
         if command == "/report":
             try:
                 rows = OpportunityLedger(self.ledger_path).summarize(100)
-            except (OSError, ValueError):
+            except (OSError, ValueError, sqlite3.Error):
                 return chat_id, "Local observation ledger is unavailable."
             if not rows:
                 return chat_id, "No recorded observations yet."
@@ -152,7 +153,7 @@ class TelegramController:
                 return chat_id, "Search query is too long (maximum 120 characters)."
             try:
                 result = scan(query, Decimal("10000"), Decimal("1000"), self.ledger_path)
-            except (MarketDataError, ValueError, OSError):
+            except (MarketDataError, ValueError, OSError, sqlite3.Error):
                 return chat_id, "Market scan failed safely. Retry later; no trade was placed."
             opportunities = result["opportunities"][:5]
             if not opportunities:
@@ -184,14 +185,16 @@ class TelegramController:
     def run_forever(self) -> None:
         ledger = OpportunityLedger(self.ledger_path)
         stored_offset = ledger.get_state("telegram_update_offset")
-        offset = int(stored_offset) if stored_offset and stored_offset.isdigit() else 0
+        if stored_offset is not None and not stored_offset.isdigit():
+            raise ValueError("Stored Telegram polling offset is corrupt; refusing to reset it")
+        offset = int(stored_offset) if stored_offset is not None else 0
         while True:
             try:
                 next_offset = self.poll_once(offset)
                 if next_offset != offset:
                     ledger.set_state("telegram_update_offset", str(next_offset))
                 offset = next_offset
-            except (TelegramApiError, OSError, ValueError):
+            except (TelegramApiError, OSError, ValueError, sqlite3.Error):
                 time.sleep(3)
 
 
