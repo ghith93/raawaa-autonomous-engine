@@ -61,7 +61,7 @@ Source: https://arxiv.org/abs/2105.02784
 **Paper:** Burak Öz et al., *Cross-Chain Arbitrage: The Next Frontier of MEV in Decentralized Finance* (arXiv:2501.17335).
 
 - Measures one year of activity (September 2023 to August 2024) across nine chains.
-- Identifies 242,535 executed arbitrages with USD 868.64 billion? **Correction:** the abstract reports USD 868.64 million in total arbitrage volume, not profit.
+- Identifies 242,535 executed arbitrages with USD 868.64 million in total arbitrage volume, not profit.
 - 66.96% of trades use pre-positioned inventory rather than transferring assets through bridges.
 - The paper reports approximately 9 seconds for inventory-based execution versus 242 seconds for bridge-based arbitrage.
 - The five largest addresses account for more than half of trades, with one address near 40% of daily volume post-Dencun.
