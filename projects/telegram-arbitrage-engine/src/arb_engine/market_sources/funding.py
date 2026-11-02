@@ -148,9 +148,9 @@ class PublicPerpetualFundingClient:
             raise ValueError("timeout_seconds must be between 1 and 30")
         if (
             isinstance(min_interval_seconds, bool) or not isinstance(min_interval_seconds, (int, float))
-            or not math.isfinite(min_interval_seconds) or not 0.5 <= min_interval_seconds <= 60
+            or not math.isfinite(min_interval_seconds) or not 1 <= min_interval_seconds <= 60
         ):
-            raise ValueError("min_interval_seconds must be between 0.5 and 60")
+            raise ValueError("min_interval_seconds must be between 1 and 60")
         self.venue_id = venue_id
         self.base_url = base_url.rstrip("/")
         self.timeout_seconds = float(timeout_seconds)
