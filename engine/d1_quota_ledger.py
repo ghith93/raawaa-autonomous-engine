@@ -139,5 +139,5 @@ class D1QuotaLedger:
         return int(result["id"])
 
     def audit_events(self, limit: int = 100) -> list[dict]:
-        result = self._request("GET", f"/v1/quota?route_id=__no_route__&limit={max(1, min(int(limit), 500))}")
+        result = self._request("GET", f"/v1/quota?limit={max(1, min(int(limit), 500))}")
         return result.get("audit", [])
