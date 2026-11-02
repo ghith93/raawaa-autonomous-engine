@@ -115,6 +115,8 @@ class EthereumV2PoolReader:
     def _pool_address(value: str) -> str:
         if not isinstance(value, str) or not re.fullmatch(r"0x[0-9a-fA-F]{40}", value):
             raise ValueError("Pool address must be a 20-byte hexadecimal EVM address")
+        if int(value[2:], 16) == 0:
+            raise ValueError("Zero address is not a valid pool, token, router, or factory")
         return value.lower()
 
     def read_pools(self, pools: list[tuple[str, int]]) -> list[EvmPoolSnapshot]:
