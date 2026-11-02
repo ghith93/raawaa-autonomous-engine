@@ -197,7 +197,7 @@ def main() -> None:
                     "gross_profit_quote": human(sell_amounts[-1] - result.capital_quote_raw, quote_decimals),
                     "buy_router_vs_reserve_math_raw": buy_amounts[-1] - result.buy.amount_out_raw,
                     "sell_router_vs_reserve_math_raw": sell_amounts[-1] - result.sell.amount_out_raw,
-                    "chain_id": result.buy.block_number and buy_snapshot.state.chain_id,
+                    "chain_id": buy_snapshot.state.chain_id,
                     "block_number": result.buy.block_number,
                     "block_hash": result.buy.block_hash,
                     "warning": "Router getAmountsOut is still a read-only quote, not a full transaction simulation; it does not prove balance, allowance, gas, transfer-tax, or inclusion success.",
