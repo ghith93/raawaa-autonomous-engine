@@ -8,6 +8,7 @@ from decimal import Decimal
 
 from .dexscreener import DexScreenerClient, MarketDataError
 from .flash_swap_cli import run_flash_swap_simulation
+from .onchain_v2_scan import scan_onchain_v2_candidates
 from .fork_sim import AnvilForkSimulator, ForkSimulationError
 from .ledger import OpportunityLedger
 from .models import MarketQuote, Opportunity
@@ -133,8 +134,23 @@ def main() -> None:
     flash_parser.add_argument("--native-quote-pair", help="same-block V2 pair for native/repayment-token valuation")
     flash_parser.add_argument("--native-quote-venue", help="source-documented V2 venue for the native quote pair")
     flash_parser.add_argument("--native-quote-fee-bps", type=int, help="required with --native-quote-pair unless a venue is supplied")
-    flash_parser.add_argument("--record-paper", action="store_true", help="opt in to append-only research event capture (SQLite by default; D1 only when explicitly configured)")
-    flash_parser.add_argument("--ledger", default="data/paper-trading.sqlite3", help="local SQLite ledger path; ignored when the D1 backend is selected")
+    flash_parser.add_argument("--record-paper", action="store_true", help="opt in to local append-only research event recording")
+    flash_parser.add_argument("--ledger", default="data/paper-trading.sqlite3")
+
+    onchain_parser = sub.add_parser(
+        "onchain-v2-scan",
+        help="discover V2 pairs with DEX Screener and quote both verified Ethereum routes on-chain",
+    )
+    onchain_parser.add_argument("--token-address", required=True, help="base-token contract address")
+    onchain_parser.add_argument("--quote-token-address", required=True, help="explicit quote-token contract address; never inferred from symbols")
+    onchain_parser.add_argument("--capital-quote", required=True, help="input amount in quote-token units, e.g. 1000")
+    onchain_parser.add_argument("--rpc-url", default=DEFAULT_ETHEREUM_RPC)
+    onchain_parser.add_argument("--max-candidate-pairs", type=int, default=4)
+    onchain_parser.add_argument("--max-rpc-requests", type=int, default=32)
+    onchain_parser.add_argument(
+        "--min-request-interval", type=float, default=0.55,
+        help="minimum seconds between Ethereum RPC requests (default 0.55 for public eth_call limits)",
+    )
 
     token_parser = sub.add_parser(
         "token-check", help="read-only contract-code and ERC-20 metadata preflight at one pinned block"
@@ -387,6 +403,20 @@ def main() -> None:
             print(json.dumps(result, indent=2))
         except (RpcReadError, ValueError, ArithmeticError, OSError, RuntimeError, sqlite3.Error) as exc:
             parser.exit(2, f"flash-swap-sim failed: {exc}\n")
+    elif args.command == "onchain-v2-scan":
+        try:
+            result = scan_onchain_v2_candidates(
+                token_address=args.token_address,
+                quote_token_address=args.quote_token_address,
+                capital_quote=args.capital_quote,
+                rpc_url=args.rpc_url,
+                max_candidate_pairs=args.max_candidate_pairs,
+                max_rpc_requests=args.max_rpc_requests,
+                min_request_interval=args.min_request_interval,
+            )
+            print(json.dumps(result, indent=2))
+        except (MarketDataError, RpcReadError, ValueError, ArithmeticError, RuntimeError) as exc:
+            parser.exit(2, f"onchain-v2-scan failed: {exc}\n")
     elif args.command == "token-check":
         try:
             reader = EthereumV2PoolReader(args.rpc_url, expected_chain_id=args.chain_id)

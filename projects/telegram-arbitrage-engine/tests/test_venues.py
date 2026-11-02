@@ -4,7 +4,7 @@ import sys
 import pytest
 
 from arb_engine import cli
-from arb_engine.venues import get_venue, list_venues, resolve_venue_config
+from arb_engine.venues import get_venue, get_venue_by_dexscreener_id, list_venues, resolve_venue_config
 
 
 def test_registry_contains_only_source_documented_ethereum_v2_venues():
@@ -16,6 +16,7 @@ def test_registry_contains_only_source_documented_ethereum_v2_venues():
     assert all(venue.swap_fee_bps == 30 for venue in venues)
     assert all(venue.source_status == "source_documented_not_live_verified" for venue in venues)
     assert all(venue.deployment_source.startswith("https://") for venue in venues)
+    assert {venue.dexscreener_id for venue in venues} == {"uniswap", "sushiswap"}
 
 
 def test_registry_rejects_unknown_venues_and_wrong_chain():
@@ -53,7 +54,7 @@ def test_manual_venue_requires_explicit_fee():
     assert resolve_venue_config(None, 1, 25, None, None) == (
         25, None, None, None,
     )
-    with pytest.raises(ValueError, match="explicit --\*-fee-bps"):
+    with pytest.raises(ValueError, match=r"explicit --\*-fee-bps"):
         resolve_venue_config(None, 1, None, None, None)
 
 
@@ -116,3 +117,11 @@ def test_live_rpc_client_rejects_credentials_and_query_parameters():
         JsonRpcClient("https://example.com/rpc?api-key=secret")
     with pytest.raises(ValueError, match="HTTPS RPC"):
         JsonRpcClient("http://127.0.0.1:8545")
+
+
+
+def test_dexscreener_ids_resolve_only_to_registered_ethereum_v2_venues():
+    assert get_venue_by_dexscreener_id("uniswap", 1).id == "uniswap_v2_ethereum"
+    assert get_venue_by_dexscreener_id("sushiswap", 1).id == "sushiswap_v2_ethereum"
+    with pytest.raises(ValueError, match="No unique registered V2 venue"):
+        get_venue_by_dexscreener_id("unknown-dex", 1)

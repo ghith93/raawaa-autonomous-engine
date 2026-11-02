@@ -20,6 +20,10 @@ class RpcReadError(RuntimeError):
     """Raised when a read-only JSON-RPC request cannot be trusted."""
 
 
+class RpcExecutionReverted(RpcReadError):
+    """Raised when a read-only EVM call explicitly reports execution reverted."""
+
+
 @dataclass(frozen=True, slots=True)
 class EvmTokenPreflight:
     chain_id: int
@@ -43,6 +47,18 @@ class EvmPoolSnapshot:
     seconds_since_last_reserve_update: int = 0
 
 
+@dataclass(frozen=True, slots=True)
+class EvmBlockContext:
+    chain_id: int
+    block_number: int
+    block_hash: str
+    timestamp: int
+
+
+class PoolFactoryMismatch(RpcReadError):
+    """Raised when a discovered pair is not registered by the expected V2 factory."""
+
+
 class EthereumV2PoolReader:
     """Read-only EVM V2 pool reader. It has no transaction or signing methods."""
 
@@ -53,6 +69,7 @@ class EthereumV2PoolReader:
         expected_chain_id: int = 1,
         timeout_seconds: float = 8.0,
         min_request_interval: float = 0.25,
+        max_rpc_requests: int | None = None,
     ):
         parsed = urlsplit(endpoint)
         if (
@@ -64,14 +81,28 @@ class EthereumV2PoolReader:
             raise ValueError("expected_chain_id must be a positive integer")
         if timeout_seconds <= 0 or min_request_interval < 0:
             raise ValueError("Invalid RPC timing configuration")
+        if max_rpc_requests is not None and (
+            not isinstance(max_rpc_requests, int) or isinstance(max_rpc_requests, bool)
+            or max_rpc_requests < 1
+        ):
+            raise ValueError("max_rpc_requests must be a positive integer when supplied")
         self.endpoint = endpoint
         self.expected_chain_id = expected_chain_id
         self.timeout_seconds = timeout_seconds
         self.min_request_interval = min_request_interval
+        self.max_rpc_requests = max_rpc_requests
+        self._rpc_request_count = 0
         self._last_request = 0.0
         self._next_id = 1
 
+    @property
+    def rpc_request_count(self) -> int:
+        return self._rpc_request_count
+
     def _rpc(self, method: str, params: list[Any]) -> Any:
+        if self.max_rpc_requests is not None and self._rpc_request_count >= self.max_rpc_requests:
+            raise RpcReadError(f"RPC request budget exceeded ({self.max_rpc_requests})")
+        self._rpc_request_count += 1
         wait = self.min_request_interval - (time.monotonic() - self._last_request)
         if wait > 0:
             time.sleep(wait)
@@ -103,6 +134,9 @@ class EthereumV2PoolReader:
         if payload.get("error") is not None:
             error = payload["error"]
             code = error.get("code") if isinstance(error, dict) else None
+            message = error.get("message", "") if isinstance(error, dict) else ""
+            if isinstance(message, str) and "execution reverted" in message.casefold():
+                raise RpcExecutionReverted("EVM eth_call execution reverted")
             raise RpcReadError(f"EVM RPC returned an error (code={code})")
         if "result" not in payload:
             raise RpcReadError("JSON-RPC response has no result")
@@ -238,7 +272,37 @@ class EthereumV2PoolReader:
             raise RpcReadError("Gas price is zero or exceeds the safety ceiling")
         return value
 
-    def read_pools(self, pools: list[tuple[str, int]]) -> list[EvmPoolSnapshot]:
+    def _block_context_at(
+        self, block_number: int, chain_id: int, *, expected_hash: str | None = None,
+    ) -> EvmBlockContext:
+        block = self._rpc("eth_getBlockByNumber", [hex(block_number), False])
+        if not isinstance(block, dict) or not isinstance(block.get("hash"), str):
+            raise RpcReadError("Pinned block response is missing its hash")
+        block_hash = block["hash"].lower()
+        if not re.fullmatch(r"0x[0-9a-f]{64}", block_hash):
+            raise RpcReadError("Pinned block hash is invalid")
+        if expected_hash is not None and block_hash != expected_hash.lower():
+            raise RpcReadError("Pinned block hash changed before snapshot collection")
+        timestamp = self._uint(block.get("timestamp"), "block timestamp")
+        now_timestamp = int(datetime.now(timezone.utc).timestamp())
+        if timestamp > now_timestamp + 30 or now_timestamp - timestamp > 60:
+            raise RpcReadError("Pinned block timestamp is future-dated or stale")
+        return EvmBlockContext(chain_id, block_number, block_hash, timestamp)
+
+    def latest_block_context(self) -> EvmBlockContext:
+        """Capture a fresh block context for factory verification and same-block pool reads."""
+        chain_id = self._uint(self._rpc("eth_chainId", []), "chain ID")
+        if chain_id != self.expected_chain_id:
+            raise RpcReadError(
+                f"Unexpected chain ID: expected {self.expected_chain_id}, received {chain_id}"
+            )
+        block_number = self._uint(self._rpc("eth_blockNumber", []), "block number")
+        return self._block_context_at(block_number, chain_id)
+
+    def read_pools(
+        self, pools: list[tuple[str, int]], *,
+        block_context: EvmBlockContext | None = None,
+    ) -> list[EvmPoolSnapshot]:
         """Read up to four pools against one pinned Ethereum block."""
         if not isinstance(pools, list) or not 1 <= len(pools) <= 4:
             raise ValueError("Provide between one and four pools")
@@ -253,21 +317,33 @@ class EthereumV2PoolReader:
                 raise ValueError("Pool fee must be integer basis points in [0, 10000)")
             normalized.append((address, fee_bps))
 
-        chain_id = self._uint(self._rpc("eth_chainId", []), "chain ID")
-        if chain_id != self.expected_chain_id:
-            raise RpcReadError(f"Unexpected chain ID: expected {self.expected_chain_id}, received {chain_id}")
-        block_number = self._uint(self._rpc("eth_blockNumber", []), "block number")
+        if block_context is None:
+            context = self.latest_block_context()
+        else:
+            if not isinstance(block_context, EvmBlockContext):
+                raise ValueError("block_context must be an EvmBlockContext")
+            if (
+                not isinstance(block_context.chain_id, int)
+                or isinstance(block_context.chain_id, bool)
+                or block_context.chain_id <= 0
+                or not isinstance(block_context.block_number, int)
+                or isinstance(block_context.block_number, bool)
+                or block_context.block_number < 0
+                or not isinstance(block_context.block_hash, str)
+                or not re.fullmatch(r"0x[0-9a-fA-F]{64}", block_context.block_hash)
+            ):
+                raise ValueError("block_context contains an invalid block number or hash")
+            chain_id = self._uint(self._rpc("eth_chainId", []), "chain ID")
+            if chain_id != self.expected_chain_id or chain_id != block_context.chain_id:
+                raise RpcReadError("Pinned block context belongs to a different chain")
+            context = self._block_context_at(
+                block_context.block_number, chain_id, expected_hash=block_context.block_hash,
+            )
+        chain_id = context.chain_id
+        block_number = context.block_number
+        block_hash = context.block_hash
+        block_timestamp = context.timestamp
         block_tag = hex(block_number)
-        block = self._rpc("eth_getBlockByNumber", [block_tag, False])
-        if not isinstance(block, dict) or not isinstance(block.get("hash"), str):
-            raise RpcReadError("Pinned block response is missing its hash")
-        block_hash = block["hash"].lower()
-        if not re.fullmatch(r"0x[0-9a-fA-F]{64}", block_hash):
-            raise RpcReadError("Pinned block hash is not a 32-byte hexadecimal value")
-        block_timestamp = self._uint(block.get("timestamp"), "block timestamp")
-        now_timestamp = int(datetime.now(timezone.utc).timestamp())
-        if block_timestamp > now_timestamp + 30 or now_timestamp - block_timestamp > 60:
-            raise RpcReadError("Latest block timestamp is future-dated or stale")
 
         raw_pools = []
         unique_tokens = set()
@@ -362,6 +438,26 @@ class EthereumV2PoolReader:
         if actual_factory != factory:
             raise RpcReadError("Router factory does not match configured trusted factory")
 
+    def lookup_v2_pair_address(
+        self,
+        factory_address: str,
+        token_a: str,
+        token_b: str,
+        block_number: int,
+    ) -> str | None:
+        """Resolve the canonical pair directly from a trusted V2 factory at a pinned block."""
+        factory = self._pool_address(factory_address)
+        token0 = self._pool_address(token_a)
+        token1 = self._pool_address(token_b)
+        if token0 == token1:
+            raise ValueError("Factory lookup requires two different tokens")
+        if not isinstance(block_number, int) or isinstance(block_number, bool) or block_number < 0:
+            raise ValueError("Factory lookup block must be non-negative")
+        calldata = "0xe6a43905" + ("0" * 24 + token0[2:]) + ("0" * 24 + token1[2:])
+        result = self._rpc("eth_call", [{"to": factory, "data": calldata}, hex(block_number)])
+        pair = self._address(result, "factory getPair")
+        return None if pair == "0x" + "0" * 40 else pair
+
     def verify_v2_pool_factory(
         self,
         pair_address: str,
@@ -380,20 +476,34 @@ class EthereumV2PoolReader:
         if not isinstance(block_number, int) or isinstance(block_number, bool) or block_number < 0:
             raise ValueError("Factory verification block must be non-negative")
         block_tag = hex(block_number)
-        factory_word = self._rpc(
-            "eth_call", [{"to": pair, "data": "0xc45a0155"}, block_tag],
-        )
-        actual_factory = self._address(factory_word, "pair factory")
+        try:
+            factory_word = self._rpc(
+                "eth_call", [{"to": pair, "data": "0xc45a0155"}, block_tag],
+            )
+            actual_factory = self._address(factory_word, "pair factory")
+        except RpcExecutionReverted as exc:
+            raise PoolFactoryMismatch("Candidate pair.factory() call reverted") from exc
+        except RpcReadError as exc:
+            if "Invalid ABI address word" in str(exc):
+                raise PoolFactoryMismatch("Candidate does not expose a valid V2 pair factory()") from exc
+            raise
         if actual_factory != factory:
-            raise RpcReadError("Pair factory does not match configured trusted factory")
+            raise PoolFactoryMismatch("Pair factory does not match configured trusted factory")
         # getPair(address,address) selector; addresses are ABI-padded to 32 bytes.
         calldata = "0xe6a43905" + ("0" * 24 + token_a[2:]) + ("0" * 24 + token_b[2:])
-        pair_word = self._rpc(
-            "eth_call", [{"to": factory, "data": calldata}, block_tag],
-        )
-        registered_pair = self._address(pair_word, "factory getPair")
+        try:
+            pair_word = self._rpc(
+                "eth_call", [{"to": factory, "data": calldata}, block_tag],
+            )
+            registered_pair = self._address(pair_word, "factory getPair")
+        except RpcExecutionReverted as exc:
+            raise PoolFactoryMismatch("Configured factory getPair() call reverted") from exc
+        except RpcReadError as exc:
+            if "Invalid ABI address word" in str(exc):
+                raise PoolFactoryMismatch("Configured factory does not expose a valid V2 getPair() result") from exc
+            raise
         if registered_pair != pair:
-            raise RpcReadError("Configured factory does not register this pair for the supplied tokens")
+            raise PoolFactoryMismatch("Configured factory does not register this pair for the supplied tokens")
 
     def verify_canonical_block(self, block_number: int, expected_hash: str) -> None:
         if not isinstance(block_number, int) or isinstance(block_number, bool) or block_number < 0:
