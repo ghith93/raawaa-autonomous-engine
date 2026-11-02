@@ -145,11 +145,29 @@ def probe_mobile_status(
     headers = build_headers(engine_api_token, cf_access_client_id, cf_access_client_secret)
     request = Request(origin + "/v1/mobile/status", headers=headers, method="GET")
     open_url = opener or build_opener(_RejectRedirects()).open
-    with open_url(request, timeout=15) as response:
-        status = int(response.status)
-        if status != 200:
-            raise RuntimeError(f"mobile status returned HTTP {status}")
-        payload = json.loads(response.read().decode("utf-8"))
+    try:
+        with open_url(request, timeout=15) as response:
+            status = int(response.status)
+            if status != 200:
+                raise RuntimeError(f"mobile status returned HTTP {status}")
+            payload = json.loads(response.read().decode("utf-8"))
+    except HTTPError as error:
+        if error.code != 404:
+            raise
+        # The deployed Worker can lag behind main because production deployment
+        # is separately gated. Report this accurately without blocking D1 tasks.
+        return {
+            "http": "404",
+            "paper_ledger": "route_not_deployed",
+            "provider_usage": "route_not_deployed",
+            "last_scan": "route_not_deployed",
+            "source_freshness": "route_not_deployed",
+            "ci_health": "route_not_deployed",
+            "kill_switch": "route_not_deployed",
+            "tasks_pending": "unknown",
+            "tasks_running": "unknown",
+            "paper_events": "unknown",
+        }
     return summarize_mobile_status(payload, status)
 
 
@@ -172,7 +190,10 @@ def main() -> int:
             os.environ.get("CF_ACCESS_CLIENT_SECRET", ""),
         )
         _write_outputs(values)
-        print("D1 mobile status read succeeded: " + ", ".join(f"{key}={value}" for key, value in values.items()))
+        if values["http"] == "404":
+            print("D1 mobile status route is not deployed; the Task Runner will continue without this optional read.")
+        else:
+            print("D1 mobile status read succeeded: " + ", ".join(f"{key}={value}" for key, value in values.items()))
         return 0
     except HTTPError as error:
         print(f"Mobile status returned HTTP {error.code}.")
