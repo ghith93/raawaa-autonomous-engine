@@ -64,7 +64,7 @@ jobs:
           USDC_MAINNET: "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"
         run: |
           set -euo pipefail
-          result="$(arb-engine onchain-v2-scan --token-address "$WETH_MAINNET" --quote-token-address "$USDC_MAINNET" --capital-quote 1000 --rpc-url https://eth.nodely.dev --max-candidate-pairs 4 --max-rpc-requests 32)"
+          result="$(arb-engine onchain-v2-scan --token-address "$WETH_MAINNET" --quote-token-address "$USDC_MAINNET" --capital-quote 1000 --rpc-url https://eth.nodely.dev --max-candidate-pairs 4 --max-rpc-requests 32 --min-request-interval 0.55)"
           printf '%s\n' "$result"
           python -c 'import json,sys; d=json.loads(sys.stdin.read()); assert d["status"] == "quoted", d; assert d["chain_id"] == 1; assert len(d["routes"]) == 2; assert d["gas_included"] is False and d["net_profit_claim"] is False; assert d["transaction_submitted"] is False; assert len(d["block_hash"]) == 66' <<< "$result"
 
