@@ -151,6 +151,22 @@ def test_stale_or_future_dated_quotes_block_net_profit_label():
     assert result.net_profit_quote is None
 
 
+def test_quote_skew_blocks_net_profit_even_when_both_quotes_are_fresh():
+    result = evaluate(
+        buy_fetched_at=NOW - timedelta(seconds=4),
+        sell_fetched_at=NOW - timedelta(seconds=1),
+    )
+    assert result.status == "unsynchronized_data"
+    assert result.max_quote_age_seconds == Decimal("4")
+    assert result.net_profit_quote is None
+
+    accepted = evaluate(
+        buy_fetched_at=NOW - timedelta(seconds=2),
+        sell_fetched_at=NOW - timedelta(seconds=1),
+    )
+    assert accepted.status == "net_positive_estimate"
+
+
 def test_partial_depth_blocks_net_profit_even_when_costs_are_known():
     result = evaluate(buy_fill_fraction="0.95")
     assert result.status == "insufficient_depth"
@@ -172,6 +188,8 @@ def test_float_costs_naive_timestamps_and_invalid_flags_are_rejected():
         evaluate(buy_fetched_at=datetime(2026, 11, 2, 12, 0))
     with pytest.raises(OpportunityEvaluationError, match="max_quote_age_seconds"):
         evaluate(max_quote_age_seconds=0)
+    with pytest.raises(OpportunityEvaluationError, match="max_quote_skew_seconds"):
+        evaluate(max_quote_skew_seconds=-1)
     with pytest.raises(OpportunityEvaluationError, match="fill fractions"):
         evaluate(sell_fill_fraction="1.1")
 
