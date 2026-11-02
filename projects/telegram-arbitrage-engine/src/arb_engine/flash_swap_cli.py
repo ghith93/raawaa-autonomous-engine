@@ -2,13 +2,12 @@ from __future__ import annotations
 
 import hashlib
 import re
-import uuid
 from datetime import datetime, timezone
 from decimal import Decimal
 
 from .flash_swap import simulate_cross_venue_flash_swap
 from .flash_swap_economics import estimate_flash_swap_economics
-from .paper_ledger import PaperTradingLedger
+from .d1_paper_ledger import create_paper_ledger
 from .rpc import DEFAULT_ETHEREUM_RPC, EthereumV2PoolReader
 from .venues import resolve_venue_config
 
@@ -245,13 +244,13 @@ def run_flash_swap_simulation(
         }
 
     if record_paper:
-        now = datetime.now(timezone.utc)
-        run_id = uuid.uuid4().hex
+        # Stable identity and block-derived time make retries idempotent across local/D1 backends.
         candidate_id = "flashswap-" + hashlib.sha256(
-            f"{run_id}|{source_state.chain_id}|{block_hash}|{source_state.pair_address}|"
+            f"{source_state.chain_id}|{block_hash}|{source_state.pair_address}|"
             f"{destination_state.pair_address}|{borrowed_token.lower()}|{amount_borrowed_raw}".encode()
         ).hexdigest()[:32]
-        ledger = PaperTradingLedger(ledger_path)
+        now = datetime.fromtimestamp(source_snapshot.block_timestamp, timezone.utc)
+        ledger = create_paper_ledger(ledger_path)
         common = {
             "candidate_id": candidate_id,
             "occurred_at": now,
