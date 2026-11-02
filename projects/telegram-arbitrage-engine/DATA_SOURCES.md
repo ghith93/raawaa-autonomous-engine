@@ -211,10 +211,10 @@ No item in this list authorizes live trading.
 ## Chain-aware V2 venue selection
 
 - The read-only V2 scanner resolves its default venue pair from the selected chain ID rather than silently retaining Ethereum venue IDs.
-- The current registry has two source-documented candidates on Ethereum (Uniswap V2 and SushiSwap V2) and two on BNB Smart Chain (PancakeSwap V2 and ApeSwap V2). For these chains, `--venue-ids` is optional and the matching pair is selected automatically.
-- Chains with zero, one, or more than two registered V2 venues fail closed and require an explicit pair of venue IDs. No arbitrary first-two selection is made when registry choice is ambiguous.
+- The current registry has two source-documented candidates on Ethereum (Uniswap V2 and SushiSwap V2), BNB Smart Chain (PancakeSwap V2 and ApeSwap V2), Arbitrum, Optimism, Base, and Avalanche (Uniswap V2 and SushiSwap V2). For these six chains, `--venue-ids` is optional and the matching pair is selected automatically.
+- Chains with zero, one, or more than two registered V2 venues fail closed and require an explicit pair of venue IDs. Polygon is not auto-enabled yet because the current research pass has not established a second independently documented V2 venue/router pair with a verified fee assumption. No arbitrary first-two selection is made when registry choice is ambiguous.
 - Chain ID, DEX Screener network slug, venue factory/router, and the RPC-reported chain ID must still agree. BSC requires an operator-supplied HTTPS RPC endpoint; no paid RPC is enabled or assumed.
-- This is multi-chain configuration reuse of the existing V2 reader and verifier, not support for V3 concentrated-liquidity math, Solana AMMs, or other protocol families.
+- This is multi-chain configuration reuse of the existing V2 reader and verifier, not support for V3 concentrated-liquidity math, Solana AMMs, or other protocol families. Uniswap deployments are taken from the official V2 deployment table; SushiSwap factory/router addresses are taken from its per-chain v2-core deployment artifacts. SushiSwap's pair invariant applies the 3/1000 fee deduction. Registry entries remain source-documented only until their exact chain contracts are checked live at a pinned block.
 
 ## DEX Screener pair-address discovery and on-chain V2 verification
 
