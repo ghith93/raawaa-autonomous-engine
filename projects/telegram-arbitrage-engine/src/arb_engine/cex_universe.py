@@ -212,8 +212,10 @@ def scan_cex_universe(
             request = futures[future]
             try:
                 metadata, book = future.result()
-                if metadata.instrument_id == "" or book.symbol != metadata.instrument_id:
+                if metadata.venue_id != request.venue_id or not metadata.instrument_id or book.symbol != metadata.instrument_id:
                     raise CexUniverseScanError("instrument_identity_mismatch")
+                if metadata.status.upper() != "TRADING":
+                    raise CexUniverseScanError("instrument_not_trading")
                 fetched[request.venue_id] = (request, metadata, book)
             except CexUniverseScanError as exc:
                 failures[request.venue_id] = str(exc)[:120]
