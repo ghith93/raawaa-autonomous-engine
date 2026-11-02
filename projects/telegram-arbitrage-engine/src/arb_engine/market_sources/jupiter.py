@@ -27,11 +27,10 @@ class _KeylessRateLimiter:
     """Thread-safe host-wide pacing and Retry-After deferral for Jupiter keyless calls."""
 
     def __init__(self, *, clock=time.monotonic, sleeper=time.sleep):
-        self._rate_limiter = rate_limiter or (
-            _KeylessRateLimiter(clock=clock, sleeper=sleeper)
-            if clock is not time.monotonic or sleeper is not time.sleep
-            else _SHARED_KEYLESS_RATE_LIMITER
-        )
+        self._clock = clock
+        self._sleeper = sleeper
+        self._lock = threading.Lock()
+        self._next_request_at = 0.0
 
     def acquire(self, interval_seconds: float) -> None:
         with self._lock:
@@ -171,10 +170,11 @@ class JupiterQuoteOnlyClient:
         self.timeout_seconds = float(timeout_seconds)
         self.min_interval_seconds = float(min_interval_seconds)
         self._transport = transport or self._fetch
-        self._clock = clock
-        self._sleeper = sleeper
-        self._lock = threading.Lock()
-        self._next_request_at = 0.0
+        self._rate_limiter = rate_limiter or (
+            _KeylessRateLimiter(clock=clock, sleeper=sleeper)
+            if clock is not time.monotonic or sleeper is not time.sleep
+            else _SHARED_KEYLESS_RATE_LIMITER
+        )
 
     @staticmethod
     def _fetch(url: str, timeout: float) -> bytes:
