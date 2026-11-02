@@ -55,11 +55,11 @@ def test_same_block_two_pool_round_trip_is_calculated_in_raw_units():
 
 def test_cross_chain_or_different_block_pools_are_rejected():
     buy = pool("0x" + "3" * 40, QUOTE, BASE, 1_000_000_000_000, 10**24)
-    other_chain = pool("0x" + "4" * 40, BASE, QUOTE, 10**24, 1_010_000_000_000, chain=137)
+    other_chain = pool("0x" + "4" * 40, QUOTE, BASE, 1_010_000_000_000, 10**24, chain=137)
     with pytest.raises(ValueError, match="Cross-chain"):
         simulate_round_trip(buy, other_chain, quote_token=QUOTE, base_token=BASE, capital_quote_raw=1000)
 
-    other_block = pool("0x" + "4" * 40, BASE, QUOTE, 10**24, 1_010_000_000_000, block=101)
+    other_block = pool("0x" + "4" * 40, QUOTE, BASE, 1_010_000_000_000, 10**24, block=101)
     with pytest.raises(ValueError, match="same canonical block"):
         simulate_round_trip(buy, other_block, quote_token=QUOTE, base_token=BASE, capital_quote_raw=1000)
 
@@ -81,7 +81,7 @@ def test_wrong_input_token_and_non_integer_amount_are_rejected():
     p = pool("0x" + "5" * 40, QUOTE, BASE, 10000, 10000)
     with pytest.raises(ValueError, match="not part"):
         quote_exact_input(p, "0x" + "3" * 40, 100)
-    with pytest.raises(ValueError, match="positive integer"):
+    with pytest.raises(ValueError, match="positive uint256"):
         quote_exact_input(p, QUOTE, 100.0)
 
 
