@@ -26,6 +26,7 @@ def test_summary_groups_repeated_observations_without_calling_them_profit(tmp_pa
     ledger = OpportunityLedger(tmp_path / "summary.sqlite3")
     item = PriceSpread(
         chain="ethereum", base_symbol="AAA", quote_symbol="USDC",
+        base_address="0x" + "1" * 40, quote_address="0x" + "2" * 40,
         buy_venue="dex-a", sell_venue="dex-b", buy_price_usd=Decimal("1"),
         sell_price_usd=Decimal("1.01"), gross_spread_bps=Decimal("100"),
         min_pool_liquidity_usd=Decimal("20000"), total_24h_volume_usd=Decimal("50000"),
@@ -91,7 +92,8 @@ def test_ledger_migrates_legacy_unique_key_and_preserves_rows(tmp_path):
                     'indicative_only_not_executable', '{}')""")
     ledger = OpportunityLedger(path)
     assert len(ledger.recent()) == 1
-    columns = {row[1] for row in sqlite3.connect(path).execute("PRAGMA table_info(observations)")}
+    with sqlite3.connect(path) as db:
+        columns = {row[1] for row in db.execute("PRAGMA table_info(observations)")}
     assert "base_address" in columns and "quote_address" in columns
     unique_columns = []
     with sqlite3.connect(path) as db:
