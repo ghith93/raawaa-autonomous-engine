@@ -220,6 +220,41 @@ def safe_extract_git_archive(archive_bytes: bytes, destination: Path) -> None:
                 raise BridgeError("archive contains a symlink or unsupported file type")
 
 
+def fetch_origin_main(root: Path, attempts: int = 3, timeout_seconds: int = 45) -> str:
+    """Fetch origin/main with bounded backoff for intermittent device connectivity."""
+    if type(attempts) is not int or not 1 <= attempts <= 5:
+        raise ValueError("attempts must be between 1 and 5")
+    if type(timeout_seconds) is not int or not 5 <= timeout_seconds <= 120:
+        raise ValueError("timeout_seconds must be between 5 and 120")
+    command = [
+        "git", "-C", str(root), "fetch", "--quiet", "--no-tags", "origin", "main"
+    ]
+    for attempt in range(attempts):
+        try:
+            fetched = subprocess.run(
+                command, text=True, capture_output=True,
+                timeout=timeout_seconds, check=False
+            )
+        except (OSError, subprocess.TimeoutExpired):
+            fetched = None
+        if fetched is not None and fetched.returncode == 0:
+            break
+        if attempt + 1 < attempts:
+            # Short, deterministic backoff: 2s then 4s, never an unbounded loop.
+            time.sleep(2 ** (attempt + 1))
+    else:
+        raise BridgeError(f"could not fetch origin/main after {attempts} attempts")
+
+    current_main = subprocess.run(
+        ["git", "-C", str(root), "rev-parse", "FETCH_HEAD"],
+        text=True, capture_output=True, timeout=15, check=False
+    )
+    fetched_sha = current_main.stdout.strip()
+    if current_main.returncode != 0 or not re.fullmatch(r"[0-9a-f]{40}", fetched_sha):
+        raise BridgeError("could not verify fetched origin/main commit")
+    return fetched_sha
+
+
 def minimal_python_environment(workspace: Path) -> dict[str, str]:
     sandbox_home = workspace / ".androidharness-home"
     temporary = workspace / ".androidharness-tmp"
@@ -404,17 +439,8 @@ class AndroidHarnessIssueBridge:
 
         if operation == "run_python_tests":
             commit_sha = task["commit_sha"]
-            fetch = subprocess.run(
-                ["git", "-C", str(self.root), "fetch", "--quiet", "--no-tags", "origin", "main"],
-                text=True, capture_output=True, timeout=120, check=False
-            )
-            if fetch.returncode != 0:
-                raise BridgeError("could not fetch origin/main")
-            current_main = subprocess.run(
-                ["git", "-C", str(self.root), "rev-parse", "FETCH_HEAD"],
-                text=True, capture_output=True, timeout=15, check=False
-            )
-            if current_main.returncode != 0 or current_main.stdout.strip() != commit_sha:
+            fetched_main = fetch_origin_main(self.root)
+            if fetched_main != commit_sha:
                 raise BridgeError("requested commit is not the current fetched origin/main")
             archive = subprocess.run(
                 ["git", "-C", str(self.root), "archive", "--format=tar", commit_sha],
