@@ -119,6 +119,19 @@ class ModelGatewayTests(unittest.TestCase):
             self.ledger.reserve("mock", "model", "research", 0.50, 1.0, 2.0, after_midnight)
         self.assertEqual(self.ledger.totals(after_midnight)["daily_reserved_usd"], 0.60)
 
+    def test_estimated_cost_budget_blocks_before_provider_call(self):
+        adapter = CostAdapter(cost_usd=0.0)
+        gateway = ModelGateway(
+            [ModelOption("mock", "paid-model", "paid", True, 1.0)],
+            {"mock": adapter}, self.ledger,
+            daily_budget_usd=0.01, monthly_budget_usd=0.10,
+            allow_paid_calls=True, network_calls_enabled=True,
+        )
+        with self.assertRaises(BudgetExceeded):
+            gateway.generate(GenerationRequest("research", "short prompt", 10))
+        self.assertEqual(adapter.calls, 0)
+        self.assertEqual(self.ledger.totals()["daily_reserved_usd"], 0.0)
+
     def test_ambiguous_adapter_failure_keeps_reservation_consuming_budget(self):
         adapter = CostAdapter(error=TimeoutError("ambiguous"))
         gateway = ModelGateway(
