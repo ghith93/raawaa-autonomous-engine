@@ -154,7 +154,7 @@ def main() -> None:
                 return str(Decimal(raw) / (Decimal(10) ** decimals))
             output = {
                 "mode": "read_only_same_block_v2_reserve_simulation",
-                "source": "Ethereum JSON-RPC eth_call",
+                "source": "EVM JSON-RPC eth_call",
                 "rpc_endpoint": args.rpc_url,
                 "chain_id": buy_snapshot.state.chain_id,
                 "block_number": buy_snapshot.state.block_number,
