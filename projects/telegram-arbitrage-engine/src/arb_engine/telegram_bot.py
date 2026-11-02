@@ -50,9 +50,9 @@ class TelegramBotAPI:
                 result = json.loads(raw)
         except HTTPError as exc:
             # HTTPError carries the full request URL, which contains the bot token.
-            raise TelegramApiError(f"Telegram HTTP error: {exc.code}") from None
+            raise TelegramApiError(f"Telegram HTTP error: {exc.code}") from None from None
         except (URLError, TimeoutError, json.JSONDecodeError, UnicodeDecodeError) as exc:
-            raise TelegramApiError(f"Telegram request failed: {type(exc).__name__}") from None
+            raise TelegramApiError(f"Telegram request failed: {type(exc).__name__}") from None from None
         if not isinstance(result, dict) or result.get("ok") is not True:
             code = result.get("error_code") if isinstance(result, dict) else None
             raise TelegramApiError(f"Telegram API rejected the request (code={code})")
