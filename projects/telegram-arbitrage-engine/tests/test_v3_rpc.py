@@ -329,3 +329,8 @@ def test_read_slot0_rejects_inconsistent_tick_and_price(monkeypatch):
     monkeypatch.setattr(rpc, "_rpc", fake)
     with pytest.raises(RpcReadError, match="inconsistent"):
         rpc.read_slot0(POOL)
+
+def test_default_v3_ethereum_rpc_is_keyless_nodely():
+    from arb_engine.v3_rpc import DEFAULT_V3_ETHEREUM_RPC
+
+    assert DEFAULT_V3_ETHEREUM_RPC == "https://eth.nodely.dev"
