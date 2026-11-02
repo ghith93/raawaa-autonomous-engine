@@ -1,15 +1,18 @@
 """Live read-only smoke test for the Ethereum Uniswap V3 USDC/WETH 0.3% pool.
 
-This performs bounded eth_call reads only. It never builds, signs or submits a
-transaction and does not estimate profit.
+Only public HTTPS JSON-RPC endpoints are used. Each endpoint attempt starts a
+fresh reader and block context; a transport-level outage may fail over, while
+pool identity, ABI, block-canonicality or arithmetic failures stop the smoke.
+No transaction is built, signed or submitted.
 """
 from __future__ import annotations
 
 from decimal import Decimal
 import json
-import re
+import os
+from urllib.parse import urlsplit
 
-from arb_engine.rpc import DEFAULT_ETHEREUM_RPC
+from arb_engine.rpc import DEFAULT_ETHEREUM_RPC, RpcReadError
 from arb_engine.v3_math import MIN_TICK, get_sqrt_ratio_at_tick
 from arb_engine.v3_rpc import EvmV3PoolReader
 from arb_engine.v3_simulator import simulate_v3_swap
@@ -18,11 +21,40 @@ from arb_engine.v3_simulator import simulate_v3_swap
 POOL = "0x8ad599c3a0ff1de082011efddc58f1908eb6e6d8"
 USDC = "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48"
 WETH = "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2"
+FALLBACK_ENDPOINTS = (
+    DEFAULT_ETHEREUM_RPC,
+    "https://eth.drpc.org",
+    "https://public.1rpc.io/eth",
+)
 
 
-def main() -> None:
+def configured_endpoints() -> tuple[str, ...]:
+    configured = os.environ.get("V3_SMOKE_RPC_URLS", "").strip()
+    candidates = tuple(value.strip() for value in configured.split(",") if value.strip()) if configured else FALLBACK_ENDPOINTS
+    # Keep only unique HTTPS endpoints; the reader performs strict URL validation.
+    unique = tuple(dict.fromkeys(candidates))
+    if not unique:
+        raise RuntimeError("No V3 smoke RPC endpoints configured")
+    return unique
+
+
+def is_retryable_transport_error(exc: RpcReadError) -> bool:
+    message = str(exc)
+    if message.startswith("EVM RPC request failed:"):
+        return any(kind in message for kind in ("URLError", "TimeoutError"))
+    prefix = "EVM RPC HTTP error: "
+    if message.startswith(prefix):
+        try:
+            status = int(message[len(prefix):])
+        except ValueError:
+            return False
+        return status in (403, 408, 425, 429) or 500 <= status <= 599
+    return False
+
+
+def run_endpoint(endpoint: str) -> dict[str, object]:
     reader = EvmV3PoolReader(
-        DEFAULT_ETHEREUM_RPC,
+        endpoint,
         expected_chain_id=1,
         timeout_seconds=10,
         min_request_interval=0.05,
@@ -56,19 +88,14 @@ def main() -> None:
     block_tag = hex(snapshot.block_number)
     for token, label in ((USDC, "USDC"), (WETH, "WETH")):
         code = reader._rpc("eth_getCode", [token, block_tag])
-        if (
-            not isinstance(code, str)
-            or not re.fullmatch(r"0x(?:[0-9a-fA-F]{2})+", code)
-            or len(code) > 250_002
-        ):
-            raise RuntimeError(f"{label} token contract has invalid or oversized runtime bytecode at the pinned block")
+        if not isinstance(code, str) or not code.startswith("0x") or len(code) <= 2:
+            raise RuntimeError(f"{label} token contract has no runtime bytecode at the pinned block")
     usdc_decimals = reader._eth_call_uint(USDC, "0x313ce567", block_tag, "USDC decimals")
     weth_decimals = reader._eth_call_uint(WETH, "0x313ce567", block_tag, "WETH decimals")
     if (usdc_decimals, weth_decimals) != (6, 18):
         raise RuntimeError("USDC/WETH decimals do not match the expected 6/18 metadata")
     reader.verify_canonical_block(snapshot.block_number, snapshot.block_hash)
 
-    # One USDC of exact input; raw units avoid floating-point assumptions.
     result = simulate_v3_swap(
         snapshot,
         amount_specified=1_000_000,
@@ -83,9 +110,10 @@ def main() -> None:
     if result.classification != "rpc_snapshot_factory_registered_block_hash_rechecked":
         raise RuntimeError("Simulation provenance did not preserve the verified RPC snapshot classification")
 
-    print(json.dumps({
+    return {
         "mode": "live_read_only_v3_pool_smoke",
         "status": "success",
+        "rpc_endpoint_host": urlsplit(endpoint).hostname,
         "chain_id": snapshot.chain_id,
         "pool": snapshot.pool_address,
         "token0": {"address": snapshot.token0, "symbol": "USDC", "decimals": usdc_decimals},
@@ -109,7 +137,28 @@ def main() -> None:
         "live_execution": False,
         "transaction_submitted": False,
         "profit_claim": False,
-    }, indent=2))
+    }
+
+
+def main() -> None:
+    failures: list[dict[str, str]] = []
+    endpoints = configured_endpoints()
+    for index, endpoint in enumerate(endpoints):
+        try:
+            result = run_endpoint(endpoint)
+            result["rpc_endpoint_attempts"] = index + 1
+            result["previous_endpoint_failures"] = failures
+            print(json.dumps(result, indent=2))
+            return
+        except RpcReadError as exc:
+            if not is_retryable_transport_error(exc) or index == len(endpoints) - 1:
+                raise
+            failures.append({
+                "endpoint_host": urlsplit(endpoint).hostname or "unknown",
+                "error": str(exc),
+            })
+        # Do not fail over on invalid pool state, malformed ABI, reorgs or math errors.
+    raise RuntimeError("All configured V3 smoke RPC endpoints failed")
 
 
 if __name__ == "__main__":
