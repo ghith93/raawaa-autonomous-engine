@@ -29,7 +29,7 @@ class EvmPoolSnapshot:
 
 
 class EthereumV2PoolReader:
-    """Read-only Ethereum V2 pool reader. It has no transaction or signing methods."""
+    """Read-only EVM V2 pool reader. It has no transaction or signing methods."""
 
     def __init__(
         self,
@@ -78,9 +78,9 @@ class EthereumV2PoolReader:
                     raise RpcReadError("RPC response exceeded 500 KB safety limit")
                 payload = json.loads(raw)
         except HTTPError as exc:
-            raise RpcReadError(f"Ethereum RPC HTTP error: {exc.code}") from exc
+            raise RpcReadError(f"EVM RPC HTTP error: {exc.code}") from exc
         except (URLError, TimeoutError, json.JSONDecodeError, UnicodeDecodeError) as exc:
-            raise RpcReadError(f"Ethereum RPC request failed: {type(exc).__name__}") from exc
+            raise RpcReadError(f"EVM RPC request failed: {type(exc).__name__}") from exc
         finally:
             self._last_request = time.monotonic()
         if not isinstance(payload, dict) or payload.get("id") != request_id:
@@ -88,7 +88,7 @@ class EthereumV2PoolReader:
         if payload.get("error") is not None:
             error = payload["error"]
             code = error.get("code") if isinstance(error, dict) else None
-            raise RpcReadError(f"Ethereum RPC returned an error (code={code})")
+            raise RpcReadError(f"EVM RPC returned an error (code={code})")
         if "result" not in payload:
             raise RpcReadError("JSON-RPC response has no result")
         return payload["result"]
@@ -118,6 +118,13 @@ class EthereumV2PoolReader:
         if int(value[2:], 16) == 0:
             raise ValueError("Zero address is not a valid pool, token, router, or factory")
         return value.lower()
+
+    def read_gas_price_wei(self) -> int:
+        """Read the node's current gas-price estimate in wei; not a gas-units estimate."""
+        value = self._uint(self._rpc("eth_gasPrice", []), "gas price")
+        if value <= 0 or value >= 10**15:
+            raise RpcReadError("Gas price is zero or exceeds the safety ceiling")
+        return value
 
     def read_pools(self, pools: list[tuple[str, int]]) -> list[EvmPoolSnapshot]:
         """Read up to four pools against one pinned Ethereum block."""
