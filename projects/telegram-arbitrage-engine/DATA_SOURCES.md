@@ -28,7 +28,7 @@
 
 ## Release gates before paper-trade mode
 
-1. Verify each pool's factory/protocol and fee model; reject unknown pool families and unverified fee settings.
+1. Use the optional factory verification for each pair, then independently verify the protocol's fee model; factory membership alone does not prove the configured fee basis points.
 2. Reject fee-on-transfer/rebasing/blacklisted assets where their behavior cannot be safely simulated.
 3. Estimate gas and convert it to the quote asset using a fresh, independent price source.
 4. Independently verify pool factory/protocol and fee configuration; compare reserve math against router `eth_call` exact-input quotes at the same block.
