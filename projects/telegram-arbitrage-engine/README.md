@@ -122,7 +122,7 @@ Positive `--amount-specified` is exact input; negative is exact output. Values a
 
 This is a read-only pool simulation, not an arbitrage or net-profit result. It does not model gas, token transfer taxes, router behavior, MEV, inclusion, or transaction execution. No wallet, signing, transaction or trade method exists.
 
-The `V3 read-only live pool smoke` workflow checks the Ethereum USDC/WETH 0.3% pool using bounded public RPC reads, verifies token decimals and block provenance, and simulates a one-USDC input without sending a transaction. It runs on V3 code changes to main and once daily. Its output validates reader connectivity and arithmetic on one pool only; it is not a market opportunity signal.
+The `V3 read-only live pool smoke` workflow checks the Ethereum USDC/WETH 0.3% pool using bounded public RPC reads, verifies token decimals and block provenance, and simulates a one-USDC input without sending a transaction. It tries the default public RPC and then a public Nodely fallback; provider failover restarts the entire snapshot and shares one 512-request budget, so state from different endpoints is never mixed. It runs on V3 code changes to main and once daily. Its output validates reader connectivity and arithmetic on one pool only; it is not a market opportunity signal.
 
 See [V3 math foundation](../../docs/research/v3-math-foundation.md), [multi-tick simulator](../../docs/research/v3-multi-tick-simulator.md), and [pinned RPC snapshot reader](../../docs/research/v3-pinned-rpc-snapshot.md).
 
