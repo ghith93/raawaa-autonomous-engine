@@ -72,6 +72,18 @@ def main() -> None:
     args = parser.parse_args()
     if args.command in (None, "demo"):
         print(json.dumps(demo(), indent=2))
+    elif args.command == "report":
+        try:
+            if not 1 <= args.limit <= 500:
+                raise ValueError("limit must be between 1 and 500")
+            ledger = OpportunityLedger(args.ledger)
+            print(json.dumps({
+                "mode": "read_only_observation_summary",
+                "observations": ledger.summarize(args.limit),
+                "warning": "Repeated indicative spreads are not executable opportunities, a backtest, or realized PnL.",
+            }, indent=2))
+        except (ValueError, ArithmeticError) as exc:
+            parser.exit(2, f"report failed: {exc}\\n")
     elif args.command == "scan":
         try:
             result = scan(args.query, Decimal(args.min_liquidity), Decimal(args.min_volume), args.ledger)
