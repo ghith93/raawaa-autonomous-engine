@@ -14,6 +14,7 @@ dev = ["pytest>=8.0", "ruff>=0.6"]
 
 [project.scripts]
 arb-engine = "arb_engine.cli:main"
+arb-telegram = "arb_engine.telegram_bot:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
