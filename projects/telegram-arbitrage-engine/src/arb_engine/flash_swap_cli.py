@@ -54,8 +54,12 @@ def run_flash_swap_simulation(
     if (gas_used is None) != (gas_price_wei is None):
         raise ValueError("Supply both --gas-used and --gas-price-wei, or neither")
     has_gas_scenario = gas_used is not None
-    if has_gas_scenario and not native_token:
-        raise ValueError("A native token address is required for a gas scenario")
+    if has_gas_scenario and (
+        not isinstance(native_token, str)
+        or len(native_token) != 42
+        or not native_token.startswith("0x")
+    ):
+        raise ValueError("A 20-byte native token address is required for a gas scenario")
     if not has_gas_scenario and any((native_token, native_quote_pair, native_quote_venue, native_quote_fee_bps is not None)):
         raise ValueError("Native-token and quote-pool options require a gas scenario")
     if native_quote_pair and not native_token:
@@ -117,6 +121,10 @@ def run_flash_swap_simulation(
     )
     borrowed_decimals = _decimals_for(source_snapshot, borrowed_token)
     profit_decimals = _decimals_for(source_snapshot, simulation.repayment_token)
+    if _decimals_for(destination_snapshot, borrowed_token) != borrowed_decimals:
+        raise ValueError("Borrowed-token decimals disagree between route pools")
+    if _decimals_for(destination_snapshot, simulation.repayment_token) != profit_decimals:
+        raise ValueError("Repayment-token decimals disagree between route pools")
     router_sale_quote_raw = None
     if destination_router:
         amounts = reader.quote_v2_router_exact_input(
@@ -174,6 +182,8 @@ def run_flash_swap_simulation(
         "destination_fee_bps_assumed": destination_state.fee_bps,
         "source_venue_registry_id": source_venue_info.id if source_venue_info else None,
         "destination_venue_registry_id": destination_venue_info.id if destination_venue_info else None,
+        "native_quote_venue_registry_id": native_quote_info.id if native_quote_info else None,
+        "native_quote_fee_bps_assumed": native_quote_fee if native_quote_snapshot else None,
         "source_factory_verification": "passed" if source_factory else "not_requested",
         "destination_factory_verification": "passed" if destination_factory else "not_requested",
         "borrowed_token": borrowed_token.lower(),
