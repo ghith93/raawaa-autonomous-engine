@@ -176,7 +176,7 @@ def test_onchain_scan_handles_reversed_dexscreener_token_orientation():
     assert result["opportunities"][0]["base_token"] == BASE
 
 
-def test_onchain_scan_rejects_block_mismatch_before_factory_or_router_calls():
+def test_onchain_scan_rejects_block_mismatch_before_router_quotes():
     fake = FakeReader({
         UNI_PAIR: snapshot(UNI_PAIR, block=100),
         SUSHI_PAIR: snapshot(SUSHI_PAIR, block=101),
@@ -186,7 +186,8 @@ def test_onchain_scan_rejects_block_mismatch_before_factory_or_router_calls():
             "WETH USDC", quote_token=QUOTE, capital_quote=Decimal("50"),
             rpc_url="https://rpc.example", reader=fake, pairs=candidates(),
         )
-    assert fake.verified_pairs == []
+    assert len(fake.verified_pairs) == 2
+    assert len(fake.verified_routers) == 2
     assert fake.quotes == []
 
 
