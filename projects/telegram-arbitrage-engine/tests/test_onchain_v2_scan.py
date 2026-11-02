@@ -416,7 +416,7 @@ def test_bsc_v2_scan_uses_chain_specific_default_venues_when_not_overridden():
         chain_id=56,
         dex_client=dex,
         reader=reader,
-        min_request_interval=0,
+        min_request_interval=0.1,
     )
     assert dex.calls == [("bsc", BASE)]
     assert result["status"] == "quoted"
