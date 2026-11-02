@@ -13,6 +13,8 @@ class PriceSpread:
     chain: str
     base_symbol: str
     quote_symbol: str
+    base_address: str
+    quote_address: str
     buy_venue: str
     sell_venue: str
     buy_price_usd: Decimal
@@ -87,6 +89,7 @@ def find_spreads(
             )
             spreads.append(PriceSpread(
                 chain=buy.chain, base_symbol=buy.base_symbol, quote_symbol=buy.quote_symbol,
+                base_address=buy.base_address, quote_address=buy.quote_address,
                 buy_venue=buy.dex, sell_venue=sell.dex, buy_price_usd=buy.price_usd,
                 sell_price_usd=sell.price_usd, gross_spread_bps=gross_bps,
                 min_pool_liquidity_usd=min(buy.liquidity_usd, sell.liquidity_usd),
