@@ -262,3 +262,104 @@ def test_gas_price_reader_returns_wei_and_rejects_unsafe_values(monkeypatch):
     monkeypatch.setattr(reader, "_rpc", lambda method, params: hex(10**15))
     with pytest.raises(RpcReadError, match="safety ceiling"):
         reader.read_gas_price_wei()
+
+
+def dynamic_string(value: str) -> str:
+    encoded = value.encode("utf-8")
+    padded = encoded + b"\\x00" * ((32 - len(encoded) % 32) % 32)
+    return "0x" + word(32) + word(len(encoded)) + padded.hex()
+
+
+def test_token_preflight_reads_code_and_optional_metadata_at_one_pinned_block(monkeypatch):
+    reader = EthereumV2PoolReader(min_request_interval=0)
+    calls = []
+    token = "0x" + "5" * 40
+
+    def fake(method, params):
+        calls.append((method, params))
+        if method == "eth_chainId":
+            return "0x1"
+        if method == "eth_blockNumber":
+            return "0x64"
+        if method == "eth_getBlockByNumber":
+            return {"hash": BLOCK_HASH, "timestamp": "0x1"}
+        if method == "eth_getCode":
+            assert params == [token, "0x64"]
+            return "0x6001600055"
+        if method == "eth_call":
+            call, block = params
+            assert block == "0x64"
+            if call["data"] == "0x313ce567":
+                return "0x" + word(18)
+            if call["data"] == "0x95d89b41":
+                return dynamic_string("TKN")
+            if call["data"] == "0x06fdde03":
+                return dynamic_string("Test Token")
+        raise AssertionError((method, params))
+
+    monkeypatch.setattr(reader, "_rpc", fake)
+    result = reader.read_token_preflight(token)
+    assert result.chain_id == 1
+    assert result.block_number == 100
+    assert result.block_hash == BLOCK_HASH
+    assert result.token_address == token
+    assert result.runtime_bytecode_size == 5
+    assert result.decimals == 18
+    assert result.symbol == "TKN"
+    assert result.name == "Test Token"
+    assert result.metadata_status == "metadata_available"
+    assert [method for method, _ in calls].count("eth_getBlockByNumber") == 2
+
+
+def test_token_preflight_rejects_eoa_and_wrong_chain(monkeypatch):
+    import pytest
+
+    reader = EthereumV2PoolReader(min_request_interval=0)
+    token = "0x" + "5" * 40
+    monkeypatch.setattr(reader, "_rpc", lambda method, params: {
+        "eth_chainId": "0x1",
+        "eth_blockNumber": "0x64",
+        "eth_getBlockByNumber": {"hash": BLOCK_HASH, "timestamp": "0x1"},
+        "eth_getCode": "0x",
+    }.get(method))
+    with pytest.raises(RpcReadError, match="no contract bytecode"):
+        reader.read_token_preflight(token)
+
+    monkeypatch.setattr(reader, "_rpc", lambda method, params: "0x89" if method == "eth_chainId" else None)
+    with pytest.raises(RpcReadError, match="Unexpected chain ID"):
+        reader.read_token_preflight(token)
+
+
+def test_token_preflight_reports_missing_optional_metadata_without_guessing(monkeypatch):
+    reader = EthereumV2PoolReader(min_request_interval=0)
+    token = "0x" + "5" * 40
+
+    def fake(method, params):
+        if method == "eth_chainId":
+            return "0x1"
+        if method == "eth_blockNumber":
+            return "0x64"
+        if method == "eth_getBlockByNumber":
+            return {"hash": BLOCK_HASH}
+        if method == "eth_getCode":
+            return "0x6001"
+        if method == "eth_call":
+            raise RpcReadError("optional metadata missing")
+        raise AssertionError(method)
+
+    monkeypatch.setattr(reader, "_rpc", fake)
+    result = reader.read_token_preflight(token)
+    assert result.decimals is None
+    assert result.symbol is None
+    assert result.name is None
+    assert result.metadata_status == "contract_code_only_metadata_incomplete"
+
+
+def test_optional_metadata_decoder_supports_legacy_bytes32_and_rejects_malformed():
+    from arb_engine.rpc import EthereumV2PoolReader
+
+    assert EthereumV2PoolReader._decode_optional_string(
+        "0x" + "USDC".encode().hex() + "00" * 28
+    ) == "USDC"
+    assert EthereumV2PoolReader._decode_optional_string("0x1234") is None
+    assert EthereumV2PoolReader._decode_optional_string("0x" + "ff" * 32) is None
