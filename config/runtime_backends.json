@@ -5,7 +5,7 @@
       "id": "androidharness",
       "display_name": "AndroidHarness",
       "kind": "external_android_linux_runtime",
-      "status": "github_issue_bridge_verified_limited",
+      "status": "optional_diagnostic_only_not_in_critical_path",
       "operator_reported_snapshot_utc": "2026-11-01T22:40:00Z",
       "latest_doctor_verified_utc": "2026-11-02T01:20:33Z",
       "capabilities_reported": [
@@ -73,7 +73,7 @@
         ]
       },
       "documentation": "docs/android-harness.md",
-      "recurring_worker_runbook": "docs/androidharness-workmanager-automation.md (future-version reference; not enabled on installed 3.1)",
+      "recurring_worker_runbook": "docs/androidharness-workmanager-automation.md (retired proposal; do not enable)",
       "upstream_version": "3.2-release",
       "upstream_release_published_at_utc": "2026-10-31T19:23:44Z",
       "upstream_apk_sha256": "e6607cd7a70bf555cfd3fb7ce8b66d77efd5461c083e9f4585e16f57c36f6261",
@@ -89,12 +89,13 @@
         "Android SDK/JDK/Gradle are optional for this Python-first engine.",
         "OpenSSH is not required for HTTPS GitHub operations. Shizuku and direct root remain disabled unless a concrete task requires them.",
         "Harness is an MCP client. No authenticated engine MCP endpoint or direct remote device adapter exists.",
-        "Upstream AndroidHarness supports recurring WorkManager prompt automations, a foreground service, persistent queues and bounded auto-continue. Device-side setup and a successful scheduled-run smoke test remain unverified.",
-        "WorkManager is documented as a future-version option only; it is not configured or assumed available on the installed 3.1 device.",
-        "The bounded GitHub issue bridge returned a successful read-only doctor result on issue #122; the Python test operation on issue #123 failed before tests because git fetch origin/main failed, and retry issue #133 was claimed but had no result at the latest check. This verifies limited device-side execution, not a guaranteed continuously running poller.",
+        "Upstream AndroidHarness has optional recurring WorkManager features, but Raawaa does not use them. Device-side automation is retired and must not be activated for normal engine operations.",
+        "WorkManager automation is explicitly retired; AndroidHarness is optional for operator-initiated diagnostics only.",
+        "The bounded GitHub issue bridge previously returned a successful read-only doctor result, but AndroidHarness is no longer a runtime dependency or release gate. The bridge remains optional and inactive for occasional diagnostics only.",
         "The issue bridge accepts only four fixed read-only operations and is not general remote shell.",
         "The Python test operation runs under the AndroidHarness Linux/app UID and is not an OS sandbox; use only trusted owner-controlled origin/main code.",
-        "The GitHub issue bridge uses existing Code workspace, Python, Git and authenticated gh CLI features and does not depend on 3.2-only project configuration, plugin bundles, WorkManager automation, or android_sdk_install. The 2026-11-02 doctor result verifies the listed device tool snapshot; re-probe before relying on a later session."
+        "The GitHub issue bridge uses existing Code workspace, Python, Git and authenticated gh CLI features and does not depend on 3.2-only project configuration, plugin bundles, WorkManager automation, or android_sdk_install. The 2026-11-02 doctor result verifies the listed device tool snapshot; re-probe before relying on a later session.",
+        "2026-11-02 decision: no tablet poller, WorkManager schedule, recurring prompts, or device-side auto-continue is part of the engine operating model. No further AndroidHarness setup or upgrade is required."
       ],
       "device_installed_version": "3.1",
       "device_installed_version_source": "operator_confirmed_2026-11-02",
