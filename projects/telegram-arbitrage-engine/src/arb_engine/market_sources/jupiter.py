@@ -58,6 +58,14 @@ class JupiterQuoteError(RuntimeError):
     """A safe, quote-only Jupiter public API request failed."""
 
 
+class JupiterQuoteRateLimited(JupiterQuoteError):
+    """Jupiter Swap API returned HTTP 429; the shared limiter has been deferred."""
+
+    def __init__(self, retry_after_seconds: float):
+        self.retry_after_seconds = retry_after_seconds
+        super().__init__(f"Jupiter Swap API rate limited; deferred for {retry_after_seconds:g}s")
+
+
 class _RejectRedirects(urllib.request.HTTPRedirectHandler):
     def redirect_request(self, request, file_pointer, code, message, headers, new_url):
         return None
@@ -191,6 +199,9 @@ class JupiterQuoteOnlyClient:
                     raise JupiterQuoteError("Jupiter response exceeded the size limit")
                 return raw
         except urllib.error.HTTPError as exc:
+            if exc.code == 429:
+                delay = _retry_after_seconds(exc.headers)
+                raise JupiterQuoteRateLimited(delay) from None
             raise JupiterQuoteError(f"Jupiter public API returned HTTP {exc.code}") from None
         except (urllib.error.URLError, TimeoutError, OSError) as exc:
             raise JupiterQuoteError(f"Jupiter public API transport failed: {type(exc).__name__}") from None
@@ -229,7 +240,11 @@ class JupiterQuoteOnlyClient:
             "amount": str(amount),
         })
         self._throttle()
-        raw = self._transport(f"{self.base_url}/swap/v2/order?{params}", self.timeout_seconds)
+        try:
+            raw = self._transport(f"{self.base_url}/swap/v2/order?{params}", self.timeout_seconds)
+        except JupiterQuoteRateLimited as exc:
+            self._rate_limiter.defer(exc.retry_after_seconds)
+            raise
         if not isinstance(raw, bytes) or len(raw) > _MAX_RESPONSE_BYTES:
             raise JupiterQuoteError("invalid or oversized Jupiter response")
         try:
