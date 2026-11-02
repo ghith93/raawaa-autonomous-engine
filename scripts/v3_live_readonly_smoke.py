@@ -52,15 +52,7 @@ def is_endpoint_transport_failure(exc: RpcReadError) -> bool:
     ))
 
 
-def run_smoke(endpoint: str, request_budget: int) -> tuple[dict, int]:
-    reader = EvmV3PoolReader(
-        endpoint,
-        expected_chain_id=1,
-        timeout_seconds=10,
-        # Nodely limits heavy eth_call requests to 2/sec; this interval is below that ceiling.
-        min_request_interval=0.55,
-        max_rpc_requests=request_budget,
-    )
+def run_smoke(reader: EvmV3PoolReader) -> dict:
     context, _, current_tick = reader.read_slot0(POOL)
     limit_tick = max(MIN_TICK + 1, current_tick - 120)
     if limit_tick >= current_tick:
@@ -136,13 +128,13 @@ def run_smoke(endpoint: str, request_budget: int) -> tuple[dict, int]:
         "weth_output": str(Decimal(result.amount_out) / (10 ** weth_decimals)),
         "crossed_ticks": list(result.crossed_ticks),
         "steps": result.steps,
-        "rpc_endpoint": safe_endpoint_label(endpoint),
+        "rpc_endpoint": safe_endpoint_label(reader.endpoint),
         "rpc_requests_used": reader.rpc_request_count,
         "classification": result.classification,
         "live_execution": False,
         "transaction_submitted": False,
         "profit_claim": False,
-    }, reader.rpc_request_count)
+    }
 
 
 def main() -> None:
@@ -152,9 +144,17 @@ def main() -> None:
         remaining_budget = MAX_TOTAL_RPC_REQUESTS - total_requests
         if remaining_budget <= 0:
             break
+        reader = EvmV3PoolReader(
+            endpoint,
+            expected_chain_id=1,
+            timeout_seconds=10,
+            # Nodely limits heavy eth_call requests to 2/sec; this interval is below that ceiling.
+            min_request_interval=0.55,
+            max_rpc_requests=remaining_budget,
+        )
         try:
-            result, used = run_smoke(endpoint, remaining_budget)
-            total_requests += used
+            result = run_smoke(reader)
+            total_requests += reader.rpc_request_count
             result["rpc_requests_used_across_all_endpoints"] = total_requests
             result["rpc_requests_budget"] = MAX_TOTAL_RPC_REQUESTS
             result["rpc_fallback_failures"] = failures
@@ -163,7 +163,7 @@ def main() -> None:
         except RpcReadError as exc:
             if not is_endpoint_transport_failure(exc):
                 raise
-            total_requests += getattr(locals().get("reader"), "rpc_request_count", 0)
+            total_requests += reader.rpc_request_count
             failures.append({
                 "endpoint": safe_endpoint_label(endpoint),
                 "error": str(exc),
