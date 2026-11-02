@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import re
 import uuid
 from datetime import datetime, timezone
 from decimal import Decimal
@@ -51,13 +52,14 @@ def run_flash_swap_simulation(
     This command never constructs calldata, signs, broadcasts, or places a paper/live order.
     Gas inputs are explicit scenarios, not a measured full-transaction gas quote.
     """
+    if not isinstance(chain_id, int) or isinstance(chain_id, bool) or chain_id <= 0:
+        raise ValueError("chain_id must be a positive integer")
     if (gas_used is None) != (gas_price_wei is None):
         raise ValueError("Supply both --gas-used and --gas-price-wei, or neither")
     has_gas_scenario = gas_used is not None
     if has_gas_scenario and (
         not isinstance(native_token, str)
-        or len(native_token) != 42
-        or not native_token.startswith("0x")
+        or not re.fullmatch(r"0x[0-9a-fA-F]{40}", native_token)
     ):
         raise ValueError("A 20-byte native token address is required for a gas scenario")
     if not has_gas_scenario and any((native_token, native_quote_pair, native_quote_venue, native_quote_fee_bps is not None)):
@@ -91,6 +93,8 @@ def run_flash_swap_simulation(
     destination_state = destination_snapshot.state
     block_number = source_state.block_number
     block_hash = source_state.block_hash
+    if source_state.chain_id != chain_id:
+        raise ValueError("RPC returned a different chain ID than requested")
     if any(
         snapshot.state.chain_id != source_state.chain_id
         or snapshot.state.block_number != block_number
@@ -145,6 +149,14 @@ def run_flash_swap_simulation(
         else:
             if native_quote_snapshot is None:
                 raise ValueError("A same-block --native-quote-pair is required when gas token differs from repayment token")
+            native_quote_tokens = {
+                native_quote_snapshot.state.token0.casefold(),
+                native_quote_snapshot.state.token1.casefold(),
+            }
+            if native_quote_tokens != {
+                native_token.casefold(), simulation.repayment_token.casefold(),
+            }:
+                raise ValueError("Native quote pool must contain exactly the native and repayment tokens")
             native_decimals = _decimals_for(native_quote_snapshot, native_token)
             quote_profit_decimals = _decimals_for(native_quote_snapshot, simulation.repayment_token)
             if quote_profit_decimals != profit_decimals:
