@@ -57,3 +57,9 @@ No item in this list authorizes live trading.
 - 0x Swap API provides indicative `/price` and firm `/quote` routes, but its current documentation requires an API key for requests. It is therefore not a dependency in the zero-cost baseline: https://docs.0x.org/docs/introduction/quickstart/swap-tokens-with-0x-swap-api
 - Uniswap's Aggregator Quote API describes route simulation and gas estimates, but it is an external API dependency and must be evaluated for access, key requirements, terms, and cost before integration: https://developers.uniswap.org/docs/api-reference/aggregator_quote
 - A router quote alone does not verify the factory, pair fee, token transfer semantics, allowance, balance, gas sufficiency, or actual transaction execution. Those remain release gates.
+
+
+## Observation ledger identity
+
+- Cross-DEX comparisons and persisted summaries are keyed by chain plus exact base/quote token contract addresses, not token symbols alone.
+- The SQLite migration preserves existing observations and upgrades the legacy symbol-only uniqueness constraint. Older records without contract addresses are retained with empty address fields and are not silently relabelled.
