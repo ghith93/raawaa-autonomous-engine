@@ -41,6 +41,9 @@ def asset_pairs_payload(**overrides):
         "lot_multiplier": 1,
         "ordermin": "0.0001",
         "costmin": "0.5",
+        "fee_volume_currency": "ZUSD",
+        "fees": [[0, 0.26], [50000, 0.24]],
+        "fees_maker": [[0, 0.16], [50000, 0.14]],
         "status": "online",
     }
     item.update(overrides)
@@ -85,6 +88,12 @@ def test_fetch_instrument_resolves_alias_to_internal_id_and_precision():
     assert metadata.min_base_quantity == Decimal("0.0001")
     assert metadata.min_quote_notional == Decimal("0.5")
     assert metadata.status == "TRADING"
+    assert metadata.fee_volume_currency == "ZUSD"
+    assert [(tier.volume_threshold, tier.taker_fee_bps, tier.maker_fee_bps)
+            for tier in metadata.fee_tiers] == [
+        (Decimal("0"), Decimal("26.00"), Decimal("16.00")),
+        (Decimal("50000"), Decimal("24.00"), Decimal("14.00")),
+    ]
     parsed = urlsplit(calls[0][0])
     assert parsed.scheme == "https"
     assert parsed.netloc == "api.kraken.com"
@@ -118,6 +127,10 @@ def test_fetch_instrument_rejects_ambiguous_or_incomplete_metadata():
 
     client, _ = make_client([asset_pairs_payload(base="")])
     with pytest.raises(KrakenMarketDataError, match="asset codes"):
+        client.fetch_instrument(pair="XBTUSDT")
+
+    client, _ = make_client([asset_pairs_payload(fees=[["bad", "0.26"]])])
+    with pytest.raises(KrakenMarketDataError, match="fees volume threshold"):
         client.fetch_instrument(pair="XBTUSDT")
 
 
