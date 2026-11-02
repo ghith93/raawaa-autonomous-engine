@@ -73,6 +73,23 @@ print(perpetual.mark_price, perpetual.index_price, perpetual.funding_rate)
 
 This is a source adapter, not yet a cross-venue strategy or profitability engine. Depth is only a timestamped snapshot; fees, fill probability, latency and account eligibility must be modelled before ranking any opportunity. See [data sources and trust boundaries](DATA_SOURCES.md).
 
+## Read-only Binance Spot market data
+
+A fixture-tested Binance public market-data adapter is available at `arb_engine.market_sources.binance.BinancePublicMarketData`. It uses the official market-data-only HTTPS host, requires no API key, and exposes only depth snapshots and best bid/ask. Decimal precision and the REST `lastUpdateId` are preserved; local retrieval time is recorded separately because the REST depth response has no exchange timestamp.
+
+Example:
+
+```python
+from arb_engine.market_sources.binance import BinancePublicMarketData
+
+market = BinancePublicMarketData()  # public market-data-only host; no API key
+book = market.fetch_orderbook(symbol="BTCUSDT", limit=100)
+ticker = market.fetch_book_ticker(symbol="BTCUSDT")
+print(book.last_update_id, book.bids[0], ticker.ask_price, book.fetched_at)
+```
+
+The adapter enforces one request per second and does not synchronize REST snapshots with WebSocket depth updates. It is a timestamped indicative source, not a guaranteed executable book or net-profit engine. See [data sources and trust boundaries](DATA_SOURCES.md).
+
 ## Read-only flash-swap simulation
 
 The `flash-swap-sim` command reads two V2 pools at one canonical block, models the opposite-token repayment invariant, and optionally applies a caller-supplied gas-used/gas-price scenario. It can optionally record local research events with `--record-paper`.
