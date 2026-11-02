@@ -424,6 +424,11 @@ def compare_cex_spot_orderbook_universe(
         raise InstrumentMappingError("max_venues must be between 2 and 8")
     if len(books) > max_venues:
         raise InstrumentMappingError(f"book count exceeds the {max_venues}-venue comparison bound")
+    quantity = _positive_decimal(base_quantity, "base_quantity")
+    if costs_by_direction is None:
+        costs_by_direction = {}
+    if not isinstance(costs_by_direction, Mapping):
+        raise OpportunityEvaluationError("costs_by_direction must be a mapping")
 
     if source_failures is None:
         source_failures = {}
@@ -466,7 +471,7 @@ def compare_cex_spot_orderbook_universe(
                 book_a=book_a,
                 book_b=book_b,
                 registry=registry,
-                base_quantity=base_quantity,
+                base_quantity=quantity,
                 costs_by_direction=costs_by_direction,
                 now=now,
                 max_quote_age_seconds=max_quote_age_seconds,
