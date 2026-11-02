@@ -60,7 +60,7 @@ function rows(target, values, empty) {
 async function load() {
   $("message").textContent="Loading status…";
   const response=await fetch("/v1/mobile/status",{headers:{authorization:"Bearer "+accessToken},cache:"no-store"});
-  if(response.status===401){accessToken="";$("dashboard").classList.add("hidden");$("message").textContent="Access denied. Check the operator token.";return;}
+  if(response.status===401){accessToken="";$("token").value="";$("dashboard").classList.add("hidden");$("auth").classList.remove("hidden");$("message").textContent="Access denied. Check the operator token.";return;}
   if(!response.ok) throw new Error("Status request failed ("+response.status+")");
   const data=await response.json();
   const tasks=Object.fromEntries((data.tasks||[]).map(x=>[x.status,x.count]));
@@ -95,11 +95,21 @@ export async function handleMobileStatus(request, env, url) {
   if (url.pathname !== "/v1/mobile/status") return null;
   if (request.method !== "GET") return json({ error: "method_not_allowed" }, 405);
   try {
-    const [tasks, paper, latest, usage] = await Promise.all([
+    const [tasks, migrations] = await Promise.all([
       env.DB.prepare("SELECT status,COUNT(*) AS count FROM tasks GROUP BY status").all(),
-      env.DB.prepare("SELECT event_type,COUNT(*) AS count FROM paper_events GROUP BY event_type ORDER BY event_type").all(),
-      env.DB.prepare("SELECT event_type,candidate_id,occurred_at FROM paper_events ORDER BY occurred_at DESC,event_id DESC LIMIT 1").first(),
-      env.DB.prepare("SELECT route_id,COUNT(*) AS requests,COALESCE(SUM(tokens),0) AS tokens FROM quota_usage GROUP BY route_id ORDER BY route_id").all(),
+      env.DB.prepare("SELECT version FROM schema_migrations WHERE version IN ('0003_durable_quota_ledger','0004_paper_event_ledger')").all(),
+    ]);
+    const applied = new Set((migrations.results || []).map(row => row.version));
+    const [paper, latest, usage] = await Promise.all([
+      applied.has("0004_paper_event_ledger")
+        ? env.DB.prepare("SELECT event_type,COUNT(*) AS count FROM paper_events GROUP BY event_type ORDER BY event_type").all()
+        : Promise.resolve({ results: [] }),
+      applied.has("0004_paper_event_ledger")
+        ? env.DB.prepare("SELECT event_type,candidate_id,occurred_at FROM paper_events ORDER BY occurred_at DESC,event_id DESC LIMIT 1").first()
+        : Promise.resolve(null),
+      applied.has("0003_durable_quota_ledger")
+        ? env.DB.prepare("SELECT route_id,COUNT(*) AS requests,COALESCE(SUM(tokens),0) AS tokens FROM quota_usage GROUP BY route_id ORDER BY route_id").all()
+        : Promise.resolve({ results: [] }),
     ]);
     return json({
       generated_at: new Date().toISOString(),
@@ -117,6 +127,8 @@ export async function handleMobileStatus(request, env, url) {
         ci_health: "Not yet ingested from GitHub Actions",
         monetary_costs: "Monetary ledger remains local SQLite; not exposed here",
         kill_switch: "Engine policy state is not yet mirrored to the Worker",
+        paper_ledger: applied.has("0004_paper_event_ledger") ? "Available" : "Migration 0004 is not applied to this database",
+        provider_usage: applied.has("0003_durable_quota_ledger") ? "Available" : "Migration 0003 is not applied to this database",
       },
     });
   } catch {
