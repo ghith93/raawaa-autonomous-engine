@@ -78,7 +78,7 @@ class EthereumV2PoolReader:
                 payload = json.loads(raw)
         except HTTPError as exc:
             raise RpcReadError(f"Ethereum RPC HTTP error: {exc.code}") from exc
-        except (URLError, TimeoutError, json.JSONDecodeError) as exc:
+        except (URLError, TimeoutError, json.JSONDecodeError, UnicodeDecodeError) as exc:
             raise RpcReadError(f"Ethereum RPC request failed: {type(exc).__name__}") from exc
         finally:
             self._last_request = time.monotonic()
@@ -153,10 +153,6 @@ class EthereumV2PoolReader:
         block_hash = block["hash"].lower()
         if len(block_hash) != 66 or not block_hash.startswith("0x"):
             raise RpcReadError("Pinned block hash has an invalid shape")
-        try:
-            int(block_hash[2:], 16)
-        except ValueError as exc:
-            raise RpcReadError("Pinned block hash is not hexadecimal") from exc
         try:
             int(block_hash[2:], 16)
         except ValueError as exc:
