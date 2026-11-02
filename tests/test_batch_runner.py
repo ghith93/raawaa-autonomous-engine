@@ -1,9 +1,12 @@
+import tempfile
 import threading
 import time
 import unittest
+from pathlib import Path
 from unittest.mock import Mock
 
 from engine.batch_runner import run_batch
+from engine.task_store import TaskStore
 
 
 class BatchRunnerTests(unittest.TestCase):
@@ -52,6 +55,27 @@ class BatchRunnerTests(unittest.TestCase):
         self.assertEqual(result["tasks_processed"], 4)
         self.assertEqual(result["stop_reason"], "task_limit")
         self.assertEqual(maximum_active, 2)
+
+    def test_parallel_workers_claim_distinct_real_sqlite_tasks(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            store = TaskStore(Path(tmp) / "tasks.db")
+            for index in range(5):
+                store.enqueue(
+                    "research_brief",
+                    f"Parallel task {index}",
+                    {"topic": f"topic-{index}"},
+                    idempotency_key=f"parallel-{index}",
+                )
+
+            result = run_batch(store, max_tasks=5, max_parallel=3)
+
+            tasks = store.list_tasks()
+            self.assertEqual(result["tasks_processed"], 5)
+            self.assertEqual(result["stop_reason"], "task_limit")
+            self.assertEqual(len(tasks), 5)
+            self.assertTrue(all(task["status"] == "succeeded" for task in tasks))
+            self.assertTrue(all(task["attempts"] == 1 for task in tasks))
+            self.assertEqual(len({task["id"] for task in tasks}), 5)
 
     def test_rejects_unbounded_limits(self):
         for kwargs in ({"max_tasks": 0}, {"max_tasks": 21},
