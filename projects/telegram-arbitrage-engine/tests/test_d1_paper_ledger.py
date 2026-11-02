@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 import pytest
 
 from arb_engine.d1_paper_ledger import D1PaperTradingLedger, create_paper_ledger
-from arb_engine.paper_ledger import METADATA_FIELDS, PaperTradingLedger
+from arb_engine.paper_ledger import PaperTradingLedger
 
 
 def response(data, status=200):
