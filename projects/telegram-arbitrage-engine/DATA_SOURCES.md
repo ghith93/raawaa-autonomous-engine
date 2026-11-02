@@ -73,3 +73,10 @@ No item in this list authorizes live trading.
 - This is not `eth_estimateGas`, a signed transaction simulation, or a guarantee of actual gas used. A future transaction simulator must construct the exact atomic route call and simulate it against the same state before any gas estimate can be considered route-specific.
 - Example: `arb-engine v2-sim ... --gas-units-assumption 350000 --gas-safety-bps 2000`.
 - Ethereum JSON-RPC defines `eth_gasPrice` as a node-provided current gas-price estimate; it does not estimate gas units. The operator-supplied unit assumption and the node fee quote are therefore kept separately visible. Reference: https://ethereum.org/developers/docs/apis/json-rpc/
+
+
+## Slippage-bound reporting
+
+- Optional router validation derives a minimum buy output from the buy quote using `--slippage-bps` (default 50 bps).
+- The second router quote is then requested using that conservative minimum buy output, not the expected buy output. A second minimum quote output is derived using the same per-leg tolerance.
+- These values are read-only scenario bounds. No calldata is signed or submitted, and they do not guarantee execution price or transaction success.
