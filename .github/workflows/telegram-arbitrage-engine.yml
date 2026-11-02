@@ -111,10 +111,37 @@ jobs:
           echo "hash=$block_hash" >> "$GITHUB_OUTPUT"
           echo "parent_hash=$parent_hash" >> "$GITHUB_OUTPUT"
           echo "Pinned Ethereum block: $block ($block_hash)"
+      - name: Start Anvil fork at the pinned block
+        env:
+          RPC_URL: https://ethereum-rpc.publicnode.com
+          FORK_BLOCK: ${{ steps.fork.outputs.block }}
+          FORK_BLOCK_HASH: ${{ steps.fork.outputs.hash }}
+        run: |
+          set -euo pipefail
+          anvil --fork-url "$RPC_URL" --fork-block-number "$FORK_BLOCK" --host 127.0.0.1 --port 8545 --silent > /tmp/raawaa-anvil.log 2>&1 &
+          echo "$!" > /tmp/raawaa-anvil.pid
+          for attempt in $(seq 1 60); do
+            response="$(curl --silent --show-error --max-time 5 -H "Content-Type: application/json" --data '{"jsonrpc":"2.0","id":1,"method":"eth_getBlockByNumber","params":["latest",false]}' http://127.0.0.1:8545 || true)"
+            local_hash="$(jq -r '.result.hash // empty' <<< "$response" 2>/dev/null || true)"
+            if [ "$local_hash" = "$FORK_BLOCK_HASH" ]; then
+              echo "Local Anvil is serving the exact pinned block $FORK_BLOCK ($local_hash)"
+              exit 0
+            fi
+            sleep 1
+          done
+          cat /tmp/raawaa-anvil.log
+          echo "Local Anvil did not serve the expected pinned block hash"
+          exit 1
       - name: Execute real V2 pair callback only on the local fork
         env:
-          MAINNET_RPC_URL: https://ethereum-rpc.publicnode.com
+          MAINNET_RPC_URL: http://127.0.0.1:8545
           FORK_BLOCK: ${{ steps.fork.outputs.block }}
           FORK_BLOCK_HASH: ${{ steps.fork.outputs.hash }}
           FORK_PARENT_HASH: ${{ steps.fork.outputs.parent_hash }}
         run: forge test --match-path test/AnvilForkFlashSwap.t.sol -vvv
+      - name: Stop local Anvil fork
+        if: always()
+        run: |
+          if [ -f /tmp/raawaa-anvil.pid ]; then
+            kill "$(cat /tmp/raawaa-anvil.pid)" 2>/dev/null || true
+          fi
