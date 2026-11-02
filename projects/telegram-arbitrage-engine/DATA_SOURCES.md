@@ -144,3 +144,15 @@ No item in this list authorizes live trading.
 - EIP-20 reference: https://eips.ethereum.org/EIPS/eip-20
 - Example: `arb-engine token-check --token-address 0x... --chain-id 1`
 - No approvals, transfer calls, signing, or transactions are performed.
+
+
+## DEX Screener pair-address discovery and on-chain V2 verification
+
+- Official endpoint: GET /token-pairs/v1/{chainId}/{tokenAddress}; published rate limit is 300 requests/minute. Reference: https://docs.dexscreener.com/api/reference
+- The scanner uses this endpoint only to enumerate candidate pair addresses and token-address metadata for an explicitly supplied base token. It does not use the API's price, USD liquidity, volume, or pair labels as an execution signal.
+- Candidate filtering requires the exact explicitly supplied base/quote contract addresses, Ethereum chain slug, and a DEX ID mapped to the packaged trusted venue registry. Candidate count is bounded (default four); the public API response is capped at 200 entries before parsing.
+- Every accepted candidate must then pass on-chain pair.factory() and factory.getPair(base,quote) checks against the trusted factory at one pinned block. Both venue pools are read at that same block; both Router02 factory() bindings are checked; and both round-trip directions use router getAmountsOut via eth_call at the same block.
+- The reader applies an explicit per-scan RPC request budget (default 32, maximum 64), and the scanner revalidates the pinned block hash after quote collection. Any RPC/ABI failure is surfaced as a failure; a non-V2 or unregistered candidate is classified as a candidate mismatch, not silently accepted.
+- This is a read-only gross router-quote comparison. It is not a flash-swap repayment simulation, gas estimate, net-profit estimate, historical backtest, paper trade, or live execution. No calldata is built, no wallet/signer is used, and no transaction is submitted.
+- The scanner currently requires both registered Ethereum Uniswap V2 and SushiSwap V2 candidates for the exact token pair. If one is absent or fails factory verification, it returns an explicit insufficient-venues status instead of inventing or falling back to unverified routes.
+- DEX Screener documents the endpoint and its rate limit; Uniswap V2 factory source confirms getPair is the factory's canonical pair registry and pair creation emits PairCreated: https://github.com/Uniswap/v2-core/blob/master/contracts/UniswapV2Factory.sol
