@@ -235,21 +235,11 @@ class PublicPerpetualFundingClient:
         if contract_type not in ("linear", "inverse"):
             raise ValueError("contract_type must be linear or inverse")
         if type(limit) is not int or not 1 <= limit <= 200:
-            raise ValueError("limit must be an integer from 1 to 200")
+            raise ValueError("limit must be an integer between 1 and 200")
         if self.venue_id == "binance":
             if contract_type != "linear":
                 raise ValueError("Binance adapter currently supports USD-M linear perpetuals only")
             rows = self._get("/fapi/v1/fundingRate", {"symbol": symbol, "limit": str(limit)})
-            intervals: dict[str, int] = {}
-            try:
-                info = self._get("/fapi/v1/fundingInfo", {})
-                for item in info:
-                    if isinstance(item, dict) and isinstance(item.get("symbol"), str):
-                        hours = item.get("fundingIntervalHours")
-                        if type(hours) is int and 1 <= hours <= 24:
-                            intervals[item["symbol"]] = hours
-            except FundingMarketDataError:
-                intervals = {}
         else:
             result = self._get("/v5/market/funding/history", {
                 "category": contract_type, "symbol": symbol, "limit": str(limit),
@@ -257,20 +247,12 @@ class PublicPerpetualFundingClient:
             if result.get("category") != contract_type or not isinstance(result.get("list"), list):
                 raise FundingMarketDataError("Bybit funding category/list did not match request")
             rows = result["list"]
-            intervals = {}
-            if rows:
-                try:
-                    bybit_interval = self._bybit_funding_interval_hours(
-                        symbol=symbol, contract_type=contract_type,
-                    )
-                except FundingMarketDataError:
-                    bybit_interval = None
-                if bybit_interval is not None:
-                    intervals[symbol] = bybit_interval
         if not isinstance(rows, list) or len(rows) > limit:
             raise FundingMarketDataError("funding response exceeded requested row count")
-        fetched_at = datetime.now(timezone.utc)
-        observations: list[FundingRateObservation] = []
+
+        # Validate and normalize the history before spending another request on
+        # optional interval metadata. Malformed rows fail without extra API calls.
+        parsed_rows: list[tuple[Decimal, int, Decimal | None, str | None]] = []
         seen: set[int] = set()
         for item in rows:
             if not isinstance(item, dict) or item.get("symbol") != symbol:
@@ -278,11 +260,9 @@ class PublicPerpetualFundingClient:
             if self.venue_id == "binance":
                 rate_raw, time_raw = item.get("fundingRate"), item.get("fundingTime")
                 mark_raw, rate_type = item.get("markPrice"), item.get("rateType")
-                interval = intervals.get(symbol)
             else:
                 rate_raw, time_raw = item.get("fundingRate"), item.get("fundingRateTimestamp")
                 mark_raw, rate_type = None, None
-                interval = intervals.get(symbol)
             rate = _decimal(rate_raw, "fundingRate")
             funding_time = _timestamp(time_raw, "fundingTime")
             if funding_time in seen:
@@ -291,11 +271,45 @@ class PublicPerpetualFundingClient:
             mark = _decimal(mark_raw, "markPrice", positive=True) if mark_raw not in (None, "") else None
             if rate_type is not None and rate_type not in ("Regular", "Special"):
                 raise FundingMarketDataError("invalid Binance funding rate type")
-            observations.append(FundingRateObservation(
-                venue_id=self.venue_id, market_family="perpetual",
-                contract_type=contract_type, symbol=symbol, funding_rate=rate,
-                funding_time_ms=funding_time, mark_price=mark,
-                funding_interval_hours=interval, rate_type=rate_type, fetched_at=fetched_at,
-            ))
-        observations.sort(key=lambda item: item.funding_time_ms)
-        return tuple(observations)
+            parsed_rows.append((rate, funding_time, mark, rate_type))
+
+        interval: int | None = None
+        if parsed_rows:
+            if self.venue_id == "binance":
+                try:
+                    info = self._get("/fapi/v1/fundingInfo", {})
+                except FundingMarketDataError:
+                    info = []
+                if isinstance(info, list):
+                    for item in info:
+                        if isinstance(item, dict) and item.get("symbol") == symbol:
+                            hours = item.get("fundingIntervalHours")
+                            if type(hours) is int and 1 <= hours <= 24:
+                                interval = hours
+                            break
+            else:
+                try:
+                    interval = self._bybit_funding_interval_hours(
+                        symbol=symbol, contract_type=contract_type,
+                    )
+                except FundingMarketDataError:
+                    # Historical rows remain valid, but interval-based comparisons
+                    # must stay disabled when the current instrument metadata is unavailable.
+                    interval = None
+
+        fetched_at = datetime.now(timezone.utc)
+        return tuple(
+            FundingRateObservation(
+                venue_id=self.venue_id,
+                market_family="perpetual",
+                contract_type=contract_type,
+                symbol=symbol,
+                funding_rate=rate,
+                funding_time_ms=funding_time,
+                mark_price=mark,
+                funding_interval_hours=interval,
+                rate_type=rate_type,
+                fetched_at=fetched_at,
+            )
+            for rate, funding_time, mark, rate_type in sorted(parsed_rows, key=lambda row: row[1])
+        )
