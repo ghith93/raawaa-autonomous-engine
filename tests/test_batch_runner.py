@@ -33,22 +33,20 @@ class BatchRunnerTests(unittest.TestCase):
         lock = threading.Lock()
         active = 0
         maximum_active = 0
-        completed = 0
         pair_barrier = threading.Barrier(2)
 
         def runner(_store):
-            nonlocal active, maximum_active, completed
+            nonlocal active, maximum_active
             with lock:
                 active += 1
                 maximum_active = max(maximum_active, active)
-                completed += 1
-                position = completed
-            if position % 2 == 0:
+            try:
                 pair_barrier.wait(timeout=2)
-            time.sleep(0.005)
-            with lock:
-                active -= 1
-            return {"status": "succeeded"}
+                time.sleep(0.005)
+                return {"status": "succeeded"}
+            finally:
+                with lock:
+                    active -= 1
 
         result = run_batch(object(), max_tasks=4, max_parallel=2, runner=runner)
         self.assertEqual(result["tasks_processed"], 4)
