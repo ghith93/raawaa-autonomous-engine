@@ -102,7 +102,7 @@ Current configuration deliberately keeps policy mode at safe_dry_run and all pro
 
 ## GitHub Actions and deployment
 
-GitHub Actions runs CI and is configured to invoke a scheduled, bounded D1 queue consumer every 15 minutes. Each invocation runs at most five tasks or admits new tasks for at most 60 seconds, whichever comes first; GitHub schedule delivery can be delayed and is not a real-time SLA. The Cloudflare Worker separately recovers expired leases every 15 minutes. Recent verification confirms the public Worker health GET and authenticated POST preflight both return HTTP 200. A one-time idempotent `system_audit` smoke task was enqueued and successfully processed through D1 claim, specialist dry-run, and lease-fenced finish. Neither scheduler is an always-on process.
+GitHub Actions runs CI and is configured to invoke a scheduled, bounded D1 queue consumer every 5 minutes. Each invocation runs at most five tasks or admits new tasks for at most 60 seconds, whichever comes first; GitHub schedule delivery can be delayed and is not a real-time SLA. The Cloudflare Worker separately recovers expired leases every 15 minutes. Recent verification confirms the public Worker health GET and authenticated POST preflight both return HTTP 200. A one-time idempotent `system_audit` smoke task was enqueued and successfully processed through D1 claim, specialist dry-run, and lease-fenced finish. Neither scheduler is an always-on process.
 
 Before selecting a host, verify free-tier limits, sleep behavior, persistent disk availability, outbound network rules, and whether the service can run without a payment method. Do not assume a free trial is a recurring free tier.
 
