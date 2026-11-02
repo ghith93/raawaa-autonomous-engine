@@ -264,7 +264,6 @@ def run_flash_swap_simulation(
             **common, event_id=f"{candidate_id}:snapshot",
             event_type="snapshot_captured",
             payload={
-                "rpc_endpoint": rpc_url,
                 "pool_addresses": [item.state.pair_address for item in snapshots],
                 "token_decimals": {
                     item.state.token0: item.token0_decimals for item in snapshots
