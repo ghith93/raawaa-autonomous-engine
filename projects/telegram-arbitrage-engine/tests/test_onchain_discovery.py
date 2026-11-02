@@ -66,9 +66,16 @@ class FakeReader:
         return [self.states[address] for address, _fee in pools]
 
     def verify_v2_pool_factory(self, pair_address, factory, token0, token1, block):
+        expected_factory = UNI_FACTORY if pair_address == UNI_PAIR else SUSHI_FACTORY
+        assert factory == expected_factory
+        assert {token0, token1} == {QUOTE, BASE}
+        assert block == 100
         self.verified_pairs.append((pair_address, factory, block))
 
     def verify_v2_router_factory(self, router, factory, block):
+        expected_factory = UNI_FACTORY if router == UNI_ROUTER else SUSHI_FACTORY
+        assert factory == expected_factory
+        assert block == 100
         self.verified_routers.append((router, factory, block))
 
     def quote_v2_router_exact_input(self, router, amount, path, block):
@@ -212,3 +219,19 @@ def test_onchain_scan_returns_empty_without_a_verified_pair():
     assert result["candidate_pairs_discovered"] == 0
     assert result["candidate_pairs_verified"] == 0
     assert result["opportunities"] == []
+
+
+
+def test_invalid_candidate_limit_is_rejected_before_dexscreener_network_call(monkeypatch):
+    import arb_engine.dexscreener as dexscreener
+
+    class NeverCall:
+        def search_pairs(self, query):
+            raise AssertionError("network must not be called for invalid bounds")
+
+    monkeypatch.setattr(dexscreener, "DexScreenerClient", NeverCall)
+    with pytest.raises(ValueError, match="max_candidates"):
+        scan_onchain_v2(
+            "WETH USDC", quote_token=QUOTE, capital_quote=Decimal("50"),
+            rpc_url="https://rpc.example", max_candidates=11,
+        )
