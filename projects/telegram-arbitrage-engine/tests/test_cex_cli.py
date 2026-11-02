@@ -1,3 +1,4 @@
+import json
 from datetime import datetime, timezone
 from decimal import Decimal
 from types import SimpleNamespace
@@ -94,7 +95,7 @@ def test_cex_cli_sweeps_both_public_books_and_reports_operator_cost_estimate(mon
     )
 
     cli.main()
-    output = __import__("json").loads(capsys.readouterr().out)
+    output = json.loads(capsys.readouterr().out)
 
     assert output["mode"] == "read_only_cex_spot_depth_comparison"
     assert output["live_execution"] is False
