@@ -26,3 +26,22 @@ This is **not** an executable arbitrage strategy or a paper-trading result. It d
 ## Next validation gate
 
 Compare this pure model against a local Anvil fork using a dedicated test harness that executes the exact atomic callback route with pinned contracts, funded test balances, and complete state-diff/revert inspection. Keep all fork interactions local/read-only unless a separately reviewed test contract and local state mutation are explicitly part of the test harness. Never broadcast a transaction.
+
+## Gas-cost scenario economics
+
+The separate `arb_engine.flash_swap_economics` helper applies an explicitly supplied
+`gas_used` estimate and `gas_price_wei` scenario to the gross raw-unit surplus. It
+returns native-token gas cost, repayment-token gas cost, net raw-unit surplus, and the
+integer break-even gas price separately. It does not silently select a gas price or
+query an oracle.
+
+For non-native repayment, callers must provide a same-chain, same-block native/repayment
+V2 pool and both token decimal counts. The conversion maps raw native-token units directly to raw repayment-token units using
+the raw reserve ratio (decimal scales cancel algebraically) and rounds gas cost upward. For example, WETH/USDC requires
+18 and 6 decimals respectively. A pool's spot ratio is only a rough valuation and can
+be stale or manipulable; this helper is not a substitute for an executable route quote.
+
+The pinned fork harness emits `RouteCallGas` for the isolated call to
+`FlashSwapHarness.execute`. This measurement excludes transaction intrinsic gas,
+the external transaction envelope, and contract deployment/test setup. Treat it as a
+route-call measurement, not total transaction gas or a production gas estimate.

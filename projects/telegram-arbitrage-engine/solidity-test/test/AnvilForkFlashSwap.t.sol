@@ -45,6 +45,14 @@ contract PinnedEthereumV2FlashSwapForkTest {
     uint256 private constant BPS = 10_000;
     uint256 private constant FEE_BPS = 30;
 
+    event RouteCallGas(
+        uint256 indexed blockNumber,
+        address indexed borrowedToken,
+        uint256 amountBorrowed,
+        uint256 harnessCallGas,
+        bool succeeded
+    );
+
     event ForkSnapshot(
         uint256 indexed blockNumber,
         bytes32 indexed blockHash,
@@ -125,27 +133,29 @@ contract PinnedEthereumV2FlashSwapForkTest {
         (uint112 source0Before, uint112 source1Before,) = sourcePair.getReserves();
         (uint112 destination0Before, uint112 destination1Before,) = destinationPair.getReserves();
 
+        bytes memory executeCall = abi.encodeWithSelector(
+            harness.execute.selector,
+            sourcePairAddress,
+            destinationPairAddress,
+            borrowedToken,
+            bestAmount,
+            1,
+            block.timestamp + 60
+        );
+        uint256 gasBeforeCall = gasleft();
+        (bool callSucceeded, bytes memory returnData) = address(harness).call(executeCall);
+        uint256 harnessCallGas = gasBeforeCall - gasleft();
+        emit RouteCallGas(
+            forkBlock, borrowedToken, bestAmount, harnessCallGas, callSucceeded
+        );
+
         if (bestProfit > 0) {
-            uint256 actualProfit = harness.execute(
-                sourcePairAddress,
-                destinationPairAddress,
-                borrowedToken,
-                bestAmount,
-                1,
-                block.timestamp + 60
-            );
+            require(callSucceeded, "FORK_ROUTE_EXECUTION_FAILED");
+            uint256 actualProfit = abi.decode(returnData, (uint256));
             require(actualProfit == bestProfit, "FORK_PROFIT_MISMATCH");
             require(actualProfit > 0, "FORK_ROUTE_NOT_PROFITABLE");
         } else {
-            vm.expectRevert();
-            harness.execute(
-                sourcePairAddress,
-                destinationPairAddress,
-                borrowedToken,
-                bestAmount,
-                1,
-                block.timestamp + 60
-            );
+            require(!callSucceeded, "EXPECTED_UNPROFITABLE_ROUTE_TO_REVERT");
             (uint112 source0After, uint112 source1After,) = sourcePair.getReserves();
             (uint112 destination0After, uint112 destination1After,) = destinationPair.getReserves();
             require(
@@ -153,8 +163,7 @@ contract PinnedEthereumV2FlashSwapForkTest {
                 "SOURCE_PAIR_PARTIAL_STATE"
             );
             require(
-                destination0After == destination0Before
-                    && destination1After == destination1Before,
+                destination0After == destination0Before && destination1After == destination1Before,
                 "DESTINATION_PAIR_PARTIAL_STATE"
             );
         }

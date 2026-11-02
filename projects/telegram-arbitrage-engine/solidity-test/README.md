@@ -27,7 +27,7 @@ FORK_PARENT_HASH="$(jq -r '.result.parentHash' <<< "$BLOCK_JSON")" \
 forge test --match-path test/AnvilForkFlashSwap.t.sol -vvv
 ```
 
-The fork test resolves the real Uniswap V2 and SushiSwap V2 WETH/USDC pairs, checks deployed code, factory/router bindings and token order, then searches a bounded range of borrow sizes. If a positive raw-USDC or raw-WETH surplus exists, it executes the callback harness against the actual pair bytecode inside the ephemeral fork and checks the exact result. If no positive route exists, it expects the swap to revert and verifies that neither pair's reserves changed. The test emits the pinned block number/hash, parent hash, selected route and expected gross raw-unit surplus.
+The fork test resolves the real Uniswap V2 and SushiSwap V2 WETH/USDC pairs, checks deployed code, factory/router bindings and token order, then searches a bounded range of borrow sizes. If a positive raw-USDC or raw-WETH surplus exists, it executes the callback harness against the actual pair bytecode inside the ephemeral fork and checks the exact result. If no positive route exists, it expects the swap to revert and verifies that neither pair's reserves changed. The test emits the pinned block number/hash, parent hash, selected route and expected gross raw-unit surplus. It also emits `RouteCallGas`, measuring the isolated low-level call to `FlashSwapHarness.execute` (not transaction intrinsic gas, deployment, or setup).
 
 ## Coverage
 
@@ -43,7 +43,7 @@ The fork test resolves the real Uniswap V2 and SushiSwap V2 WETH/USDC pairs, che
 
 Everything here is **test-only**. The harness is not a production trading contract. There is no deployment script, wallet, signer, approval flow, external transaction submission, or live trading path. The fork test reads remote state through a public RPC but all simulated transactions execute only in the ephemeral local fork. It does not broadcast or alter Ethereum mainnet.
 
-The fork test's gross surplus is not net profitability: it excludes gas valuation, builder/MEV costs, inclusion risk, transfer-tax/rebase/blacklist behavior, and any token-specific restrictions. A positive local fork result is not authorization to deploy or trade. The configured 30 bps fee is a source-backed assumption for these two V2 deployments and must be revalidated if the venues or pair implementations change.
+The fork test's gross surplus is not net profitability: it excludes gas valuation, builder/MEV costs, inclusion risk, transfer-tax/rebase/blacklist behavior, and any token-specific restrictions. The emitted harness-call gas is a component measurement only; it is not total transaction gas. The Python `flash_swap_economics` helper can apply a caller-supplied gas-used and gas-price scenario, but it requires explicit native/repayment token decimals and same-block pool reserves, and remains an indicative spot-ratio estimate. A positive local fork result is not authorization to deploy or trade. The configured 30 bps fee is a source-backed assumption for these two V2 deployments and must be revalidated if the venues or pair implementations change.
 
 Protocol references:
 - [Uniswap v2 flash swaps](https://developers.uniswap.org/docs/protocols/v2/guides/flash-swaps)
