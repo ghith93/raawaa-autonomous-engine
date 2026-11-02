@@ -173,3 +173,12 @@ def test_zero_amount_is_a_complete_noop() -> None:
 
 def test_amount1_delta_helper_is_used_for_fixture_sanity() -> None:
     assert get_amount1_delta(Q96, get_sqrt_ratio_at_tick(60), 100_000, True) > 0
+
+def test_snapshot_rejects_zero_pool_or_token_address() -> None:
+    with pytest.raises(V3SnapshotError):
+        V3PoolSnapshot(
+            chain_id=1, pool_address="0x" + "00" * 20, token0=TOKEN0, token1=TOKEN1,
+            fee_pips=3000, tick_spacing=60, sqrt_price_x96=Q96, tick=0,
+            liquidity=100_000, block_number=1, block_hash=BLOCK_HASH,
+            bitmap_words={0: 0}, initialized_ticks={},
+        )
