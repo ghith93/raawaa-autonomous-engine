@@ -131,7 +131,7 @@ See [INSTRUMENT_METADATA.md](INSTRUMENT_METADATA.md). This provides verified lot
 
 ## CEX cross-venue spot depth scanner
 
-The read-only compare_cex_spot_orderbooks component compares both directions between Bybit/Binance spot books using full depth sweeps at one base quantity. An explicit InstrumentRegistry must map each venue instrument to the same canonical base and quote IDs; symbol equality alone is never sufficient. The result is passed through the Decimal cost evaluator, so unknown fees/latency leave net profit unset and partial depth blocks profit labels.
+The read-only compare_cex_spot_orderbooks component compares both directions between registered CEX spot books using full depth sweeps at one base quantity. An explicit InstrumentRegistry must map each venue instrument to the same canonical base and quote IDs; symbol equality alone is never sufficient. Instrument minimum base quantity and minimum quote notional are propagated from public metadata and enforced before an estimate can be produced. The result is passed through the Decimal cost evaluator, so unknown fees/latency leave net profit unset, partial depth blocks profit labels, and below-minimum orders are explicitly rejected.
 
 See CEX_CROSS_VENUE.md. This is a read-only comparison component, not an order executor or automated strategy loop.
 
