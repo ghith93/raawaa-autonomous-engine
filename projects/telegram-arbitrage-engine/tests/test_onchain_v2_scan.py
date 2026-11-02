@@ -124,8 +124,12 @@ def test_scan_uses_dexscreener_only_for_discovery_and_quotes_both_routes_onchain
     assert result["routes"][0]["sell_venue_id"] == SUSHI.id
     assert result["routes"][0]["gross_quote_surplus_raw"] == "10000000"
     assert result["routes"][0]["positive_gross_surplus"] is True
+    assert result["routes"][0]["gross_return_bps"] == "100"
     assert result["routes"][1]["gross_quote_surplus_raw"] == "-20000000"
+    assert result["routes"][1]["gross_return_bps"] == "-200"
     assert result["routes"][1]["positive_gross_surplus"] is False
+    assert result["best_route"] == result["routes"][0]
+    assert result["best_route_positive_gross_surplus"] is True
     assert result["gas_included"] is False
     assert result["net_profit_claim"] is False
     assert result["live_execution"] is False
