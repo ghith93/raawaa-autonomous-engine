@@ -1,4 +1,4 @@
-from arb_engine.rpc import EthereumV2PoolReader, RpcReadError
+from arb_engine.rpc import EvmBlockContext, EthereumV2PoolReader, PoolFactoryMismatch, RpcReadError
 
 
 TOKEN0 = "0x" + "1" * 40
@@ -377,3 +377,103 @@ def test_token_preflight_rejects_stale_pinned_block(monkeypatch):
     }.get(method))
     with pytest.raises(RpcReadError, match="stale"):
         reader.read_token_preflight(token)
+
+
+
+def test_latest_block_context_returns_one_canonical_chain_snapshot(monkeypatch):
+    import time
+
+    reader = EthereumV2PoolReader(min_request_interval=0)
+    calls = []
+
+    def fake(method, params):
+        calls.append(method)
+        if method == "eth_chainId":
+            return "0x1"
+        if method == "eth_blockNumber":
+            return "0x64"
+        if method == "eth_getBlockByNumber":
+            return {"hash": BLOCK_HASH, "timestamp": hex(int(time.time()))}
+        raise AssertionError((method, params))
+
+    monkeypatch.setattr(reader, "_rpc", fake)
+    context = reader.latest_block_context()
+    assert context == EvmBlockContext(1, 100, BLOCK_HASH, int(time.time()))
+    assert calls == ["eth_chainId", "eth_blockNumber", "eth_getBlockByNumber"]
+
+
+def test_read_pools_reuses_supplied_block_context_and_rejects_hash_change(monkeypatch):
+    import time
+    import pytest
+
+    reader = EthereumV2PoolReader(min_request_interval=0)
+    context = EvmBlockContext(1, 100, BLOCK_HASH, int(time.time()))
+    calls = []
+
+    def fake(method, params):
+        calls.append((method, params))
+        if method == "eth_chainId":
+            return "0x1"
+        if method == "eth_getBlockByNumber":
+            return {"hash": BLOCK_HASH, "timestamp": hex(int(time.time()))}
+        return fake_rpc(method, params)
+
+    monkeypatch.setattr(reader, "_rpc", fake)
+    snapshots = reader.read_pools([(POOL_A, 30)], block_context=context)
+    assert snapshots[0].state.block_hash == BLOCK_HASH
+    assert not any(method == "eth_blockNumber" for method, _ in calls)
+
+    def reorged(method, params):
+        if method == "eth_chainId":
+            return "0x1"
+        if method == "eth_getBlockByNumber":
+            return {"hash": "0x" + "b" * 64, "timestamp": hex(int(time.time()))}
+        raise AssertionError((method, params))
+
+    monkeypatch.setattr(reader, "_rpc", reorged)
+    with pytest.raises(RpcReadError, match="hash changed"):
+        reader.read_pools([(POOL_A, 30)], block_context=context)
+
+
+def test_rpc_request_budget_stops_before_the_next_network_request(monkeypatch):
+    import json
+    import pytest
+    from io import BytesIO
+    from unittest.mock import patch
+
+    reader = EthereumV2PoolReader(min_request_interval=0, max_rpc_requests=1)
+    responses = []
+
+    def fake_urlopen(request, timeout):
+        body = json.loads(request.data)
+        responses.append(body["method"])
+        return BytesIO(json.dumps({
+            "jsonrpc": "2.0", "id": body["id"], "result": "0x1",
+        }).encode())
+
+    with patch("arb_engine.rpc.urlopen", fake_urlopen):
+        with pytest.raises(RpcReadError, match="request budget exceeded"):
+            reader.latest_block_context()
+    assert responses == ["eth_chainId"]
+    assert reader.rpc_request_count == 1
+
+
+def test_non_v2_pair_factory_is_a_candidate_mismatch_not_a_transport_failure(monkeypatch):
+    import pytest
+
+    reader = EthereumV2PoolReader(min_request_interval=0)
+    monkeypatch.setattr(reader, "_rpc", lambda method, params: address_word("0x" + "7" * 40))
+    with pytest.raises(PoolFactoryMismatch, match="does not match"):
+        reader.verify_v2_pool_factory(
+            POOL_A, "0x" + "8" * 40, TOKEN0, TOKEN1, 100,
+        )
+
+    def transport_failure(method, params):
+        raise RpcReadError("EVM RPC request failed: timeout")
+
+    monkeypatch.setattr(reader, "_rpc", transport_failure)
+    with pytest.raises(RpcReadError, match="timeout") as exc:
+        reader.verify_v2_pool_factory(
+            POOL_A, "0x" + "8" * 40, TOKEN0, TOKEN1, 100,
+        )
+    assert not isinstance(exc.value, PoolFactoryMismatch)
