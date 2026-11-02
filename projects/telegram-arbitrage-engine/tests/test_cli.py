@@ -212,3 +212,34 @@ def test_v2_sim_cli_rejects_excessive_slippage_tolerance(monkeypatch):
     with pytest.raises(SystemExit) as exc:
         cli.main()
     assert exc.value.code == 2
+
+
+def test_fork_call_cli_reports_estimate_without_submission(monkeypatch, capsys):
+    class FakeSimulator:
+        def __init__(self, endpoint):
+            assert endpoint == "http://127.0.0.1:8545"
+
+        def simulate_call(self, **kwargs):
+            assert kwargs["expected_chain_id"] == 1
+            assert kwargs["fork_block"] == 100
+            assert kwargs["to"] == POOL_A
+            assert kwargs["data"] == "0x12345678"
+            assert kwargs["include_trace"] is True
+            from arb_engine.fork_sim import ForkCallResult
+            return ForkCallResult(
+                chain_id=1, fork_block=100, block_hash=HASH,
+                client_version="anvil/v1", call_output="0x",
+                estimated_gas=123456, trace={"gasUsed": "0x1"},
+            )
+
+    monkeypatch.setattr(cli, "AnvilForkSimulator", FakeSimulator)
+    monkeypatch.setattr(sys, "argv", [
+        "arb-engine", "fork-call", "--chain-id", "1", "--fork-block", "100",
+        "--to", POOL_A, "--data", "0x12345678", "--trace",
+    ])
+    cli.main()
+    result = json.loads(capsys.readouterr().out)
+    assert result["mode"] == "read_only_local_anvil_fork_call_simulation"
+    assert result["estimated_gas"] == 123456
+    assert result["transaction_submitted"] is False
+    assert result["wallet_or_signer_used"] is False
