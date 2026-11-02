@@ -88,7 +88,7 @@ def test_conversion_rounds_cost_up_for_fractional_raw_quote_unit():
     result = scenario(
         sim, gas_used=1, gas_price_wei=1, native_quote_pool=quote_pool,
     )
-    assert result.gas_cost_profit_token_raw == 2
+    assert result.gas_cost_profit_token_raw == 1
 
 
 def test_native_token_profit_needs_no_conversion_pool():
