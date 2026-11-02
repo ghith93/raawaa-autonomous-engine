@@ -243,3 +243,35 @@ def test_fork_call_cli_reports_estimate_without_submission(monkeypatch, capsys):
     assert result["estimated_gas"] == 123456
     assert result["transaction_submitted"] is False
     assert result["wallet_or_signer_used"] is False
+
+
+def test_token_check_cli_reports_metadata_preflight_without_claiming_safety(monkeypatch, capsys):
+    class FakeReader:
+        def __init__(self, endpoint, expected_chain_id=1):
+            assert endpoint == "https://rpc.example"
+            assert expected_chain_id == 1
+
+        def read_token_preflight(self, token):
+            from arb_engine.rpc import EvmTokenPreflight
+            assert token == BASE
+            return EvmTokenPreflight(
+                chain_id=1, block_number=123, block_hash=HASH,
+                token_address=BASE, runtime_bytecode_size=4200,
+                decimals=18, symbol="TKN", name="Test Token",
+                metadata_status="metadata_available",
+            )
+
+    monkeypatch.setattr(cli, "EthereumV2PoolReader", FakeReader)
+    monkeypatch.setattr(sys, "argv", [
+        "arb-engine", "token-check", "--token-address", BASE,
+        "--rpc-url", "https://rpc.example", "--chain-id", "1",
+    ])
+    cli.main()
+    result = json.loads(capsys.readouterr().out)
+    assert result["mode"] == "read_only_token_contract_preflight"
+    assert result["contract_code_present"] is True
+    assert result["runtime_bytecode_size"] == 4200
+    assert result["decimals"] == 18
+    assert result["symbol"] == "TKN"
+    assert result["transfer_tax_or_blacklist_checks"] == "not_performed"
+    assert result["live_execution"] is False
