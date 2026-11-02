@@ -310,7 +310,7 @@ test("quota reservation is one conditional parameterized insert", async () => {
   assert.match(calls[0].sql, /^\s*INSERT INTO quota_usage/);
   assert.match(calls[0].sql, /NOT EXISTS \(SELECT 1 FROM quota_cooldowns/);
   assert.match(calls[0].sql, /RETURNING id/);
-  assert.equal(calls[0].values.length, 28);
+  assert.equal(calls[0].values.length, 32);
 });
 
 test("quota settlement retries identical usage and rejects conflicting usage", async () => {
