@@ -178,8 +178,6 @@ export default {
 
     const telegramResponse = await handleTelegramWebhook(request, env, url);
     if (telegramResponse) return telegramResponse;
-    const mobileStatusResponse = await handleMobileStatus(request, env, url);
-    if (mobileStatusResponse) return mobileStatusResponse;
 
     if (url.pathname !== "/v1/tasks" && url.pathname !== "/v1/tasks/enqueue" &&
         url.pathname !== "/v1/tasks/claim" && url.pathname !== "/v1/tasks/recover" &&
@@ -193,6 +191,9 @@ export default {
       return json({ error: "not_found" }, 404);
     }
     if (!(await authorized(request, env))) return json({ error: "unauthorized" }, 401);
+
+    const mobileStatusResponse = await handleMobileStatus(request, env, url);
+    if (mobileStatusResponse) return mobileStatusResponse;
 
     const quotaResponse = await handleQuota(request, env, url);
     if (quotaResponse) return quotaResponse;
