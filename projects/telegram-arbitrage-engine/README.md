@@ -241,7 +241,22 @@ See [INSTRUMENT_METADATA.md](INSTRUMENT_METADATA.md). This provides verified lot
 
 The read-only compare_cex_spot_orderbooks component compares both directions between two registered CEX spot books using full depth sweeps at one base quantity. The new compare_cex_spot_orderbook_universe component compares every pair across up to eight available venues, preserving source-failure codes and skipping canonical identity mismatches without symbol-based joins. The same generic book contract accepts Binance, Bybit, Kraken and Coinbase snapshots. An explicit InstrumentRegistry must map each venue instrument to the same canonical base and quote IDs; symbol equality alone is never sufficient. Instrument minimum base quantity and minimum quote notional are propagated from public metadata and enforced before an estimate can be produced. The result is passed through the Decimal cost evaluator, so unknown fees/latency leave net profit unset, partial depth blocks profit labels, and below-minimum orders are explicitly rejected.
 
-See CEX_CROSS_VENUE.md. This is a read-only comparison component, not an order executor or automated strategy loop.
+A read-only `cex-scan` CLI now composes public instrument metadata, bounded order-book snapshots and this comparator for Bybit, Binance, Kraken, Coinbase Exchange and OKX. It requires exact instrument IDs, explicit canonical base/quote IDs for each venue, a base quantity aligned to both lot steps, and optional operator-supplied taker-fee/latency assumptions. Missing costs keep net estimates unset; the CLI never infers account fees or joins assets by symbol.
+
+Example (replace the canonical IDs and fee assumptions with independently verified values):
+
+```bash
+arb-engine cex-scan \
+  --venue-a bybit --instrument-a BTCUSDT \
+  --a-base-asset-id asset:canonical:BTC --a-quote-currency-id currency:canonical:USDT \
+  --fee-a-bps 10 \
+  --venue-b binance --instrument-b BTCUSDT \
+  --b-base-asset-id asset:canonical:BTC --b-quote-currency-id currency:canonical:USDT \
+  --fee-b-bps 10 --latency-cost-bps 2 \
+  --base-quantity 0.001
+```
+
+See CEX_CROSS_VENUE.md. This is a read-only manual comparison command, not a scheduler, order executor or automated strategy loop.
 
 ## Read-only flash-swap simulation
 
