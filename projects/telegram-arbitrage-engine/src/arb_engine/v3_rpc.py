@@ -25,6 +25,7 @@ from .v3_simulator import V3PoolSnapshot, V3SnapshotError
 
 
 DEFAULT_V3_ETHEREUM_RPC = "https://eth.nodely.dev"
+DEFAULT_V3_MIN_REQUEST_INTERVAL = 0.55
 UNISWAP_V3_FACTORY_ETHEREUM = "0x1f98431c8ad98523631ae4a59f267346ea31f984"
 
 
@@ -41,7 +42,7 @@ class EvmV3PoolReader(EthereumV2PoolReader):
         *,
         expected_chain_id: int = 1,
         timeout_seconds: float = 8.0,
-        min_request_interval: float = 0.1,
+        min_request_interval: float = DEFAULT_V3_MIN_REQUEST_INTERVAL,
         max_rpc_requests: int = 256,
     ) -> None:
         super().__init__(
