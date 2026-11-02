@@ -27,13 +27,7 @@ def main() -> None:
         min_request_interval=0.05,
         max_rpc_requests=512,
     )
-    context = reader.latest_block_context()
-    slot0_raw = reader._rpc(
-        "eth_call",
-        [{"to": POOL, "data": "0x3850c7bd"}, hex(context.block_number)],
-    )
-    slot0 = reader._abi_words(slot0_raw, 7, "live smoke pool.slot0()")
-    current_tick = reader._signed_word(slot0[1], 24, "live smoke slot0.tick")
+    context, _, current_tick = reader.read_slot0(POOL)
     limit_tick = max(MIN_TICK + 1, current_tick - 120)
     if limit_tick >= current_tick:
         raise RuntimeError("Unable to construct a valid lower price limit from current pool tick")
