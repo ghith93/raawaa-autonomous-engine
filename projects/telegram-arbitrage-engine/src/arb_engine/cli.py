@@ -467,6 +467,10 @@ def main() -> None:
         try:
             if args.chain_id != 1 and not args.rpc_url:
                 raise ValueError("--rpc-url is required for non-Ethereum networks")
+            if not -(1 << 255) <= args.amount_specified < (1 << 255):
+                raise ValueError("--amount-specified must fit int256 raw units")
+            if not 1 <= args.max_steps <= 2048:
+                raise ValueError("--max-steps must be between 1 and 2048")
             rpc_url = args.rpc_url or DEFAULT_ETHEREUM_RPC
             zero_for_one = args.direction == "token0_to_token1"
             sqrt_price_limit_x96 = get_sqrt_ratio_at_tick(args.limit_tick)
@@ -530,7 +534,7 @@ def main() -> None:
                 ),
             }, indent=2))
         except (RpcReadError, ValueError, ArithmeticError, RuntimeError) as exc:
-            parser.exit(2, f"v3-sim failed: {exc}\\n")
+            parser.exit(2, f"v3-sim failed: {exc}\n")
     elif args.command == "flash-swap-sim":
         try:
             result = run_flash_swap_simulation(
