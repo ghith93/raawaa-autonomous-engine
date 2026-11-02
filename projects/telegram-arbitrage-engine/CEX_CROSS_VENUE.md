@@ -1,6 +1,6 @@
 CEX cross-venue spot depth scanner
 
-Status: deterministic read-only comparison component with a manual CLI entry point; not connected to a scheduler or live strategy loop.
+Status: deterministic read-only comparison component with two manual CLI entry points; not connected to a scheduler or live strategy loop.
 
 CLI entry point
 
@@ -63,3 +63,12 @@ Depth and cost behavior
 - Missing fees or latency assumptions leave net_profit_quote unset. The scanner never assumes zero fees.
 
 This component does not fetch account-specific fee tiers, instrument metadata, deposits/withdrawals, transfer time, custody risk or execute orders. Canonical asset IDs and fee profiles must be independently verified. Even a positive result is an estimate with execution_verified=false.
+
+
+Multi-venue universe CLI
+
+The separate `arb-engine cex-universe-scan` command composes the existing five public adapters with `compare_cex_spot_orderbook_universe`. It fetches two to five venue metadata/order-book pairs concurrently and compares every compatible venue pair in both directions. Repeat `--venue`, `--instrument`, `--base-asset-id`, and `--quote-currency-id` in matching order. Optional `--fee-bps VENUE=BPS` entries supply explicit per-venue taker-fee assumptions; `--latency-cost-bps` is a combined operator-supplied risk cost.
+
+The operator must map each venue's base/quote asset codes to canonical IDs. This permits an explicit base alias such as Kraken XBT -> canonical BTC. Quote asset codes must match exactly across selected sources: USD, USDT and USDC are not converted or treated as interchangeable. If a source uses a different quote code, it is reported as `quote_asset_code_mismatch` and excluded rather than silently joined.
+
+The command fetches at most five sources concurrently, applies each adapter's own process-local pacing, and preserves sanitized source failures. Two compatible books are required; otherwise the result is `insufficient_sources`. Partial coverage remains usable for the healthy pairwise comparisons. Missing fee or latency values leave net estimates unset. No account-specific fee tier, inventory, transfer/settlement, custody, or coordinated-fill capability is inferred. The command is manually invoked and read-only; it is not a scheduled strategy loop.
