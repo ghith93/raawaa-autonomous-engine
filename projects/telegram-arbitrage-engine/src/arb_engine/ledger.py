@@ -90,6 +90,12 @@ class OpportunityLedger:
                 value TEXT NOT NULL,
                 updated_at TEXT NOT NULL
             )""")
+            db.execute("""CREATE TABLE IF NOT EXISTS telegram_scan_receipts (
+                update_id INTEGER PRIMARY KEY,
+                chat_id INTEGER NOT NULL,
+                response_text TEXT NOT NULL,
+                created_at TEXT NOT NULL
+            )""")
 
     def _connect(self) -> sqlite3.Connection:
         db = sqlite3.connect(self.path, timeout=10)
@@ -122,6 +128,61 @@ class OpportunityLedger:
                  min_liquidity_usd, total_volume_24h_usd, classification, payload_json)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""", rows)
             return db.total_changes - before
+
+
+    def get_telegram_scan_receipt(self, update_id: int) -> tuple[int, str] | None:
+        if not isinstance(update_id, int) or isinstance(update_id, bool) or update_id < 0:
+            raise ValueError("Telegram update ID must be a non-negative integer")
+        with self._connect() as db:
+            row = db.execute(
+                "SELECT chat_id, response_text FROM telegram_scan_receipts WHERE update_id = ?",
+                (update_id,),
+            ).fetchone()
+        return (int(row[0]), str(row[1])) if row else None
+
+    def record_telegram_scan(
+        self, update_id: int, chat_id: int, response_text: str, spreads: list[PriceSpread],
+    ) -> bool:
+        """Atomically persist scan observations and a replayable update response."""
+        if not isinstance(update_id, int) or isinstance(update_id, bool) or update_id < 0:
+            raise ValueError("Telegram update ID must be a non-negative integer")
+        if not isinstance(chat_id, int) or isinstance(chat_id, bool):
+            raise ValueError("Telegram chat ID must be an integer")
+        if not isinstance(response_text, str) or not response_text or len(response_text) > 4000:
+            raise ValueError("Telegram scan response must contain 1 to 4000 characters")
+        observed_at = datetime.now(timezone.utc).isoformat()
+        rows = []
+        for item in spreads:
+            payload = {
+                "buy_pair_url": item.buy_pair_url,
+                "sell_pair_url": item.sell_pair_url,
+                "retrieval_age_seconds": str(item.retrieval_age_seconds),
+                "quote_timestamp_status": item.quote_timestamp_status,
+            }
+            rows.append((observed_at, item.chain, item.base_symbol, item.quote_symbol,
+                         item.base_address, item.quote_address, item.buy_venue, item.sell_venue,
+                         str(item.buy_price_usd), str(item.sell_price_usd),
+                         str(item.gross_spread_bps), str(item.min_pool_liquidity_usd),
+                         str(item.total_24h_volume_usd), item.classification,
+                         json.dumps(payload, separators=(",", ":"))))
+        with self._connect() as db:
+            existing = db.execute(
+                "SELECT 1 FROM telegram_scan_receipts WHERE update_id = ?", (update_id,),
+            ).fetchone()
+            if existing:
+                return False
+            if rows:
+                db.executemany("""INSERT OR IGNORE INTO observations
+                    (observed_at, chain, base_symbol, quote_symbol, base_address, quote_address,
+                     buy_venue, sell_venue, buy_price, sell_price, gross_spread_bps,
+                     min_liquidity_usd, total_volume_24h_usd, classification, payload_json)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""", rows)
+            db.execute(
+                """INSERT INTO telegram_scan_receipts
+                   (update_id, chat_id, response_text, created_at) VALUES (?, ?, ?, ?)""",
+                (update_id, chat_id, response_text, datetime.now(timezone.utc).isoformat()),
+            )
+        return True
 
     def recent(self, limit: int = 20) -> list[dict[str, str]]:
         if not 1 <= limit <= 500:
