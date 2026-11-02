@@ -5,6 +5,7 @@ from datetime import datetime
 from decimal import Decimal, InvalidOperation, localcontext
 from typing import Mapping
 
+from .instruments import InstrumentMetadata
 from ..opportunity_costs import (
     OpportunityCosts,
     OpportunityEvaluation,
@@ -48,6 +49,43 @@ class InstrumentRegistry:
         self._instruments: dict[tuple[str, str], InstrumentSpec] = {}
         for instrument in instruments:
             self.register(instrument)
+
+    @classmethod
+    def from_metadata(
+        cls,
+        metadata: tuple[InstrumentMetadata, ...] | list[InstrumentMetadata],
+        canonical_asset_ids: Mapping[tuple[str, str], str],
+    ) -> "InstrumentRegistry":
+        """Build explicit venue instrument mappings from public metadata plus caller-approved asset IDs."""
+        if not isinstance(metadata, (tuple, list)):
+            raise InstrumentMappingError("metadata must be a list or tuple")
+        if not isinstance(canonical_asset_ids, Mapping):
+            raise InstrumentMappingError("canonical_asset_ids must be a mapping")
+        registry = cls()
+        for item in metadata:
+            if not isinstance(item, InstrumentMetadata):
+                raise InstrumentMappingError("metadata entries must be InstrumentMetadata")
+            if item.status.upper() != "TRADING":
+                continue
+            base_id = canonical_asset_ids.get((item.venue_id, item.base_asset_code))
+            quote_id = canonical_asset_ids.get((item.venue_id, item.quote_asset_code))
+            if not isinstance(base_id, str) or not base_id.strip():
+                raise InstrumentMappingError(
+                    f"missing explicit canonical mapping for {item.venue_id}:{item.base_asset_code}"
+                )
+            if not isinstance(quote_id, str) or not quote_id.strip():
+                raise InstrumentMappingError(
+                    f"missing explicit canonical mapping for {item.venue_id}:{item.quote_asset_code}"
+                )
+            registry.register(InstrumentSpec(
+                venue_id=item.venue_id,
+                instrument_id=item.instrument_id,
+                base_asset_id=base_id,
+                quote_currency_id=quote_id,
+                base_step_size=item.base_step_size,
+                market_family=item.market_family,
+            ))
+        return registry
 
     def register(self, instrument: InstrumentSpec) -> None:
         if not isinstance(instrument, InstrumentSpec):
