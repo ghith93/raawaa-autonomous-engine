@@ -48,3 +48,8 @@ Positive `--amount-specified` means exact input; negative means exact output. Th
 - [Uniswap V3 factory interface](https://github.com/Uniswap/v3-core/blob/main/contracts/interfaces/IUniswapV3Factory.sol) — getPool and feeAmountTickSpacing.
 - [Uniswap V3 pool immutables](https://github.com/Uniswap/v3-core/blob/main/contracts/interfaces/pool/IUniswapV3PoolImmutables.sol).
 - [Uniswap V3 pool state interface](https://github.com/Uniswap/v3-core/blob/main/contracts/interfaces/pool/IUniswapV3PoolState.sol).
+
+
+## Live smoke RPC endpoint policy
+
+The scheduled smoke defaults to a small ordered list of public Ethereum JSON-RPC endpoints: the project's default PublicNode endpoint, dRPC, then 1RPC. Set `V3_SMOKE_RPC_URLS` to a comma-separated list of HTTPS endpoints to override it. Each endpoint attempt creates a fresh reader and block context. Failover is permitted only for transport outages (HTTP 403/408/425/429/5xx, URL errors or timeouts); malformed ABI, factory mismatch, reorg, unexpected token metadata or simulation errors stop the run rather than being hidden by a different provider. No endpoint is trusted for transaction submission.
