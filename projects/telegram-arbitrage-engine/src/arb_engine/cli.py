@@ -75,6 +75,8 @@ def main() -> None:
     v2_parser.add_argument("--base-token", required=True)
     v2_parser.add_argument("--capital-quote", required=True, help="human quote-token amount, e.g. 50")
     v2_parser.add_argument("--rpc-url", default=DEFAULT_ETHEREUM_RPC)
+    v2_parser.add_argument("--buy-router", help="optional V2 router contract for same-block getAmountsOut validation")
+    v2_parser.add_argument("--sell-router", help="optional V2 router contract for same-block getAmountsOut validation")
     scan_parser = sub.add_parser("scan", help="read-only indicative DEX price-spread scan")
     scan_parser.add_argument("query", help="token symbol, pair, or address accepted by DEX Screener")
     scan_parser.add_argument("--min-liquidity", default="10000")
@@ -97,7 +99,10 @@ def main() -> None:
             parser.exit(2, f"report failed: {exc}\\n")
     elif args.command == "v2-sim":
         try:
-            snapshots = EthereumV2PoolReader(args.rpc_url).read_pools([
+            if bool(args.buy_router) != bool(args.sell_router):
+                raise ValueError("Supply both --buy-router and --sell-router, or neither")
+            reader = EthereumV2PoolReader(args.rpc_url)
+            snapshots = reader.read_pools([
                 (args.buy_pair, args.buy_fee_bps),
                 (args.sell_pair, args.sell_fee_bps),
             ])
@@ -129,7 +134,7 @@ def main() -> None:
             )
             def human(raw, decimals):
                 return str(Decimal(raw) / (Decimal(10) ** decimals))
-            print(json.dumps({
+            output = {
                 "mode": "read_only_same_block_v2_reserve_simulation",
                 "source": "Ethereum JSON-RPC eth_call",
                 "rpc_endpoint": args.rpc_url,
@@ -145,7 +150,29 @@ def main() -> None:
                 "classification": result.classification,
                 "live_execution": False,
                 "warning": "Excludes gas, transfer taxes, dynamic fees, reverts, MEV, and execution. Not paper PnL or a trade recommendation.",
-            }, indent=2))
+            }
+            if args.buy_router and args.sell_router:
+                buy_amounts = reader.quote_v2_router_exact_input(
+                    args.buy_router, result.capital_quote_raw,
+                    [quote_address, base_address], result.buy.block_number,
+                )
+                sell_amounts = reader.quote_v2_router_exact_input(
+                    args.sell_router, buy_amounts[-1],
+                    [base_address, quote_address], result.sell.block_number,
+                )
+                output["router_validation"] = {
+                    "mode": "read_only_router_eth_call",
+                    "buy_router": args.buy_router.lower(),
+                    "sell_router": args.sell_router.lower(),
+                    "buy_base_out": human(buy_amounts[-1], base_decimals),
+                    "sell_quote_out": human(sell_amounts[-1], quote_decimals),
+                    "gross_profit_quote": human(sell_amounts[-1] - result.capital_quote_raw, quote_decimals),
+                    "buy_router_vs_reserve_math_raw": buy_amounts[-1] - result.buy.amount_out_raw,
+                    "sell_router_vs_reserve_math_raw": sell_amounts[-1] - result.sell.amount_out_raw,
+                    "block_number": result.buy.block_number,
+                    "warning": "Router getAmountsOut is still a read-only quote, not a full transaction simulation; it does not prove balance, allowance, gas, transfer-tax, or inclusion success.",
+                }
+            print(json.dumps(output, indent=2))
         except (RpcReadError, ValueError, ArithmeticError) as exc:
             parser.exit(2, f"v2-sim failed: {exc}\\n")
     elif args.command == "scan":
