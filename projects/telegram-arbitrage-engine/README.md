@@ -9,7 +9,7 @@ Simulation-first spot-arbitrage research module, isolated inside the autonomous-
 - No wallet connection, signing, approvals, swaps, exchange orders, or live trading code.
 - DEX Screener USD marks are indicative only, not executable quotes or proof of available depth. Its search response does not provide an on-chain quote timestamp; retrieval age must not be mistaken for pool-state freshness.
 - No AI decision can authorize a trade. Any future AI use is restricted to research and explanation.
-- A separate V2 constant-product calculator uses integer raw units and requires two distinct pools at the same block; it is reserve math only and excludes gas, transfer taxes, dynamic fees, reverts, and execution.
+- A read-only Ethereum JSON-RPC adapter retrieves two V2 pool states and token decimals at one pinned block. The V2 constant-product calculator uses integer raw units and requires two distinct pools at the same block; it is reserve math only and excludes gas, transfer taxes, dynamic fees, reverts, MEV, and execution. Pool fee basis points must be supplied explicitly and independently verified.
 
 ## Run in isolation
 Requires Python 3.11+.
@@ -21,6 +21,7 @@ pytest
 arb-engine demo
 arb-engine report --limit 500
 arb-engine scan WETH/USDC --min-liquidity 10000 --min-volume 1000
+arb-engine v2-sim --buy-pair 0x... --buy-fee-bps 30 --sell-pair 0x... --sell-fee-bps 30 --quote-token 0x... --base-token 0x... --capital-quote 50
 ```
 
 Scan snapshots are saved to `data/opportunities.sqlite3`. Avoid tight polling and respect upstream rate limits.
@@ -31,4 +32,4 @@ See [data sources and trust boundaries](DATA_SOURCES.md) for source rate limits,
 The next mandatory layer is exact-size router quotes, pool-state/block freshness, route price impact, fee and gas estimation, token transfer-tax/blacklist checks, revert/failure simulation, and chain atomicity analysis. Cross-chain spreads remain informational only and require bridge cost, settlement delay, and custody/bridge risk modelling.
 
 ## Current milestone
-0.3: hardened fail-closed input parsing, explicit retrieval-vs-quote freshness provenance, public read-only DEX scanner, local SQLite observation ledger, repeated-observation summary, and same-block V2 reserve-math simulation. A live RPC pool-state reader and router-level execution simulation are not implemented yet. Live market connectivity must be verified in the deployment environment; local CI uses fixtures and does not prove live API availability.
+0.4: hardened fail-closed input parsing, explicit retrieval-vs-quote freshness provenance, public read-only DEX scanner, local SQLite observation ledger, repeated-observation summary, read-only Ethereum V2 pool reader pinned to a canonical block, and exact-input reserve-math simulation. Router-level quote comparison, gas valuation, and token-behavior checks remain unimplemented. Live market connectivity must be verified in the deployment environment; local CI uses fixtures and does not prove live API availability.
