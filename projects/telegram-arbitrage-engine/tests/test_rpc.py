@@ -1,4 +1,4 @@
-from arb_engine.rpc import EvmBlockContext, EthereumV2PoolReader, PoolFactoryMismatch, RpcReadError
+from arb_engine.rpc import EvmBlockContext, EthereumV2PoolReader, PoolFactoryMismatch, RpcExecutionReverted, RpcReadError
 
 
 TOKEN0 = "0x" + "1" * 40
@@ -480,3 +480,24 @@ def test_non_v2_pair_factory_is_a_candidate_mismatch_not_a_transport_failure(mon
             POOL_A, "0x" + "8" * 40, TOKEN0, TOKEN1, 100,
         )
     assert not isinstance(exc.value, PoolFactoryMismatch)
+
+
+def test_factory_verification_classifies_only_explicit_evm_reverts_as_candidate_mismatch(monkeypatch):
+    import pytest
+
+    reader = EthereumV2PoolReader(min_request_interval=0)
+
+    def rate_limited(method, params):
+        raise RpcReadError("EVM RPC returned an error (code=-32005)")
+
+    monkeypatch.setattr(reader, "_rpc", rate_limited)
+    with pytest.raises(RpcReadError, match="code=-32005") as exc:
+        reader.verify_v2_pool_factory(POOL_A, "0x" + "8" * 40, TOKEN0, TOKEN1, 100)
+    assert not isinstance(exc.value, PoolFactoryMismatch)
+
+    def reverted(method, params):
+        raise RpcExecutionReverted("EVM eth_call execution reverted")
+
+    monkeypatch.setattr(reader, "_rpc", reverted)
+    with pytest.raises(PoolFactoryMismatch, match="call reverted"):
+        reader.verify_v2_pool_factory(POOL_A, "0x" + "8" * 40, TOKEN0, TOKEN1, 100)
