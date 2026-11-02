@@ -144,3 +144,69 @@ No item in this list authorizes live trading.
 - EIP-20 reference: https://eips.ethereum.org/EIPS/eip-20
 - Example: `arb-engine token-check --token-address 0x... --chain-id 1`
 - No approvals, transfer calls, signing, or transactions are performed.
+
+
+## DEX Screener pair-address discovery and on-chain V2 verification
+
+- Official endpoint: GET /token-pairs/v1/{chainId}/{tokenAddress}; published rate limit is 300 requests/minute. Reference: https://docs.dexscreener.com/api/reference
+- The scanner uses this endpoint only to enumerate candidate pair addresses and token-address metadata for an explicitly supplied base token. It does not use the API's price, USD liquidity, volume, or pair labels as an execution signal.
+- Candidate filtering requires the exact explicitly supplied base/quote contract addresses, Ethereum chain slug, and a DEX ID mapped to the packaged trusted venue registry. Candidate count is bounded (default four); the public API response is capped at 200 entries before parsing.
+- Every accepted candidate must then pass on-chain pair.factory() and factory.getPair(base,quote) checks against the trusted factory at one pinned block. Both venue pools are read at that same block; both Router02 factory() bindings are checked; and both round-trip directions use router getAmountsOut via eth_call at the same block.
+- The reader applies an explicit per-scan RPC request budget (default 32, maximum 64), and the scanner revalidates the pinned block hash after quote collection. Any RPC/ABI failure is surfaced as a failure; a non-V2 or unregistered candidate is classified as a candidate mismatch, not silently accepted.
+- This is a read-only gross router-quote comparison. It is not a flash-swap repayment simulation, gas estimate, net-profit estimate, historical backtest, paper trade, or live execution. No calldata is built, no wallet/signer is used, and no transaction is submitted.
+- The scanner first uses DEX Screener candidates, then queries any missing registered venue's trusted factory `getPair(tokenA,tokenB)` directly at the same pinned block. A factory-discovered pair is still required to pass `pair.factory()` and `factory.getPair()` verification before it is quoted. This avoids a ranked discovery API silently excluding a lower-volume venue; if a trusted factory has no pair, the scanner returns an explicit insufficient-venues status.
+- DEX Screener documents the endpoint and its rate limit; Uniswap V2 factory source confirms getPair is the factory's canonical pair registry and pair creation emits PairCreated: https://github.com/Uniswap/v2-core/blob/master/contracts/UniswapV2Factory.sol
+
+## On-chain V2 cross-venue candidate scan
+
+- DEX Screener API reference: https://docs.dexscreener.com/api/reference
+- Discovery uses `GET /token-pairs/v1/{chainId}/{tokenAddress}` for the explicit base-token contract. The response contributes pair addresses, chain/DEX identifiers, token addresses, and optional display metadata only. DEX Screener price, USD liquidity, and volume fields are not read or used by the scanner.
+- The DEX Screener endpoint family is documented at up to 300 requests/minute; the client still enforces a one-second minimum interval between sequential requests. The scanner caps the response at 200 candidate rows, filters by the exact explicit quote-token contract, and rejects more than four relevant pair candidates rather than silently truncating them.
+- The operator must provide both exact base-token and quote-token contract addresses plus a quote-token capital amount. Symbols are display metadata only; stablecoins are never inferred from symbols.
+- DEX IDs map through the versioned trusted venue registry. A DEX label is only a discovery hint: each candidate must pass on-chain pair `factory()` and factory `getPair(tokenA,tokenB)` checks at the pinned block. Non-V2 candidates are skipped; transport/provider errors remain fatal.
+- Both verified pools are read at the exact same `EvmBlockContext`; the reader checks chain ID, block hash, block freshness, and canonicality. Both Router02 `factory()` relationships are verified at that block, then `getAmountsOut(uint256,address[])` is called for both buy/sell directions using the same block tag.
+- The Ethereum reader enforces a per-invocation RPC request budget (default 32; configurable up to 64) and a conservative 0.55-second minimum request interval by default. Nodely documents a 2 requests/second limit for heavy methods such as `eth_call`; the default pacing stays below that ceiling. With four candidates, the scanner's fixed path is bounded below the default budget.
+- Output contains raw token units, on-chain token decimals, human-readable amounts, gross quote-token surplus, and gross return basis points. It is a same-block router round-trip quote only—not net profit, a flash-swap repayment proof, a paper order, or an execution guarantee.
+- Gas, flash-swap repayment mechanics, MEV/builder payments, inclusion/revert risk, transfer taxes, state changes after the pinned block, and execution overhead are excluded. No calldata is built, no wallet or signer is used, and no transaction is submitted.
+- Uniswap V2 Router02 reference: https://developers.uniswap.org/docs/protocols/v2/reference/smart-contracts/router-02
+- Uniswap V2 pricing reference: https://developers.uniswap.org/docs/protocols/v2/concepts/pricing
+- Uniswap V2 flash-swap repayment guide: https://developers.uniswap.org/docs/protocols/v2/guides/flash-swaps
+
+## Open-source implementation references
+
+- [BowTiedDevil/degenbot](https://github.com/BowTiedDevil/degenbot) (MIT) is a useful reference for deterministic AMM pool math and protocol adapters across Uniswap V2/V3/V4, Curve, Balancer, Solidly, and Aave V3. Prefer selective, version-pinned math/test reuse over adopting a complete bot.
+- [gardennn/arb-rewind](https://github.com/gardennn/arb-rewind) (MIT) is a reference for historical fork replay and route research. Its public maintenance/activity level is limited; treat it as a design reference, not production evidence.
+- [flashbots/mev-share](https://github.com/flashbots/mev-share) documents a later-stage private order-flow/MEV research path. It is not a dependency for the read-only scanner and should only be evaluated after route economics and execution simulation are proven.
+- No external bot, RPC provider, wallet, or paid aggregator is required by this read-only discovery path.
+
+
+
+## Open-source project review for the next research milestones
+
+### degenbot (BowTiedDevil/degenbot)
+- Repository: https://github.com/BowTiedDevil/degenbot ; MIT license stated by the project.
+- Strong candidate for a later protocol-math and state-engine reference: its Rust core/Python driver covers Uniswap V2/V3/V4, Curve, Solidly, Balancer V2, and Aave V3; it includes pool state, event decoding, swap math, cyclic arbitrage solving, and an in-process revm simulation engine.
+- Do not import its live runner or signing/submission path into this project. The current engine intentionally remains Python/stdlib-first and read-only. First compare its exact V2 integer math and fork-test fixtures against our existing implementation; only consider a pinned optional dependency after a reproducible parity suite and supply-chain review.
+- Repository activity and API surface are substantial, but this is a complex Rust/PyO3 stack with a higher operational/build burden than the present lightweight scanner.
+### arb-rewind (gardennn/arb-rewind)
+- Repository: https://github.com/gardennn/arb-rewind ; MIT license stated by the project.
+- Useful reference for historical fork replay across Uniswap V2/V3, Curve, and Balancer V2, log-space triangular-cycle detection, and end-to-end simulated Balancer flash-loan settlement inside Foundry tests.
+- Its README explicitly lists important limitations: triangular cycles only, greedy per-hop venue choice, fixed probe size, no mempool awareness, and not a production searcher. Treat historical positive results as block-specific backtest evidence, not forward returns.
+- Recommended next use: port the concept of replaying captured candidate snapshots at pinned historical blocks and testing multiple input sizes; do not adopt its executor as live trading code.
+### Envio HyperIndex Uniswap V2 indexer
+- Repository: https://github.com/enviodev/uniswap-v2-indexer ; a multichain migration of the Uniswap V2 subgraph with PairCreated, Sync, Swap, Mint/Burn, and LP Transfer indexing.
+- It advertises support for Ethereum, Optimism, Arbitrum, Base, Polygon, BSC, Avalanche, and additional networks. Its README requires Node.js 22+, pnpm, Docker, an Envio API token, and RPC URLs for its historical E2E replay; this is not a zero-configuration/free-tier assumption.
+- Defer integration until the scanner needs continuous multi-chain pair discovery. A self-operated indexer introduces infrastructure and maintenance cost; compare with direct bounded RPC logs and The Graph before choosing.
+### The Graph / Uniswap subgraphs
+- Official Uniswap guidance says public endpoints are examples that may not be actively maintained, hosted subgraphs have been deprecated, and production users should verify deployment/schema/chain versions or operate their own subgraph. Gateway access uses an API key associated with billing.
+- This makes a public subgraph a poor hard dependency for the current zero-cost baseline. It remains an optional discovery/backfill source only after endpoint health, freshness, schema, cost, and rate limits are independently checked.
+### MEV-Share
+- Specification repository: https://github.com/flashbots/mev-share . It describes an open-source order-flow auction protocol with privacy/validity conditions and searcher/builder interactions; it is not a simple free quote API or a profitability guarantee.
+- Consider only after historical backtesting, complete atomic-route simulation, risk controls, and a separately reviewed execution architecture. Private orderflow, builder competition, and inclusion economics are advanced operational concerns, not prerequisites for proving the scanner's correctness.
+
+
+### Independent public Ethereum RPC backstop
+
+- Nodely documents a no-account/no-key Ethereum mainnet HTTPS JSON-RPC endpoint at https://eth.nodely.dev, served by two European nodes with automatic failover. Its nodes are pruned and retain state for roughly 100,800 blocks (about 14 days); historical calls older than that window are not supported. Nodely documents a 2 requests/second per-IP limit for heavy methods such as `eth_call` (burst 5), so the scanner defaults to a 0.55-second interval. Reference: https://nodely.io/docs/ethereum
+- This endpoint is used by the live cross-venue scanner smoke as an independent read-only provider, while the existing venue-deployment smoke continues to use PublicNode. This reduces dependence on a single RPC operator; it is not an SLA or a guarantee against shared public-endpoint throttling.
+- The scanner's --rpc-url option permits an operator-selected HTTPS endpoint. Do not assume a public endpoint supports archive history, trace/debug namespaces, WebSockets, or high request volume unless its operator documents those capabilities.
