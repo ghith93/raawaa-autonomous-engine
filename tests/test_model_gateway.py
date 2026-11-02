@@ -20,9 +20,7 @@ class CostAdapter:
         self.calls += 1
         if self.error:
             raise self.error
-        return GenerationResponse(
-            "mock", model, "generated", 10, 5, self.cost_usd, mocked=False
-        )
+        return GenerationResponse("mock", model, "generated", 10, 5, self.cost_usd, mocked=False)
 
 
 class ModelGatewayTests(unittest.TestCase):
@@ -94,8 +92,8 @@ class ModelGatewayTests(unittest.TestCase):
 
     def test_reservations_atomically_enforce_daily_and_monthly_budgets(self):
         now = datetime(2026, 11, 2, 12, tzinfo=timezone.utc)
-        first = self.ledger.reserve("mock", "model", "research", 0.60, 1.0, 2.0, now)
-        self.assertGreater(first, 0)
+        reservation = self.ledger.reserve("mock", "model", "research", 0.60, 1.0, 2.0, now)
+        self.assertGreater(reservation, 0)
         self.assertEqual(self.ledger.totals(now)["daily_reserved_usd"], 0.60)
         with self.assertRaises(BudgetExceeded):
             self.ledger.reserve("mock", "model", "research", 0.41, 1.0, 2.0, now)
@@ -112,6 +110,14 @@ class ModelGatewayTests(unittest.TestCase):
         self.assertEqual(self.ledger.totals(now)["daily_usd"], 0.25)
         with self.assertRaisesRegex(RuntimeError, "different usage"):
             self.ledger.settle(reservation, 10, 5, 0.26, now)
+
+    def test_ambiguous_reservation_is_counted_across_date_boundaries(self):
+        before_midnight = datetime(2026, 11, 2, 23, 59, tzinfo=timezone.utc)
+        after_midnight = datetime(2026, 11, 3, 0, 1, tzinfo=timezone.utc)
+        self.ledger.reserve("mock", "model", "research", 0.60, 1.0, 2.0, before_midnight)
+        with self.assertRaises(BudgetExceeded):
+            self.ledger.reserve("mock", "model", "research", 0.50, 1.0, 2.0, after_midnight)
+        self.assertEqual(self.ledger.totals(after_midnight)["daily_reserved_usd"], 0.60)
 
     def test_ambiguous_adapter_failure_keeps_reservation_consuming_budget(self):
         adapter = CostAdapter(error=TimeoutError("ambiguous"))
@@ -182,7 +188,9 @@ class ModelGatewayTests(unittest.TestCase):
                 ("mock", "model", "research", 10, 5, 0.25, "2026-11-02T12:00:00+00:00"),
             )
         migrated = UsageLedger(path)
-        self.assertAlmostEqual(migrated.totals(datetime(2026, 11, 2, 13, tzinfo=timezone.utc))["daily_usd"], 0.25)
+        self.assertAlmostEqual(
+            migrated.totals(datetime(2026, 11, 2, 13, tzinfo=timezone.utc))["daily_usd"], 0.25
+        )
         with sqlite3.connect(path) as db:
             columns = {row[1] for row in db.execute("PRAGMA table_info(model_usage)")}
         self.assertIn("cost_nanos", columns)
