@@ -29,7 +29,14 @@ class D1QuotaLedger:
 
     def _request(self, method: str, path: str, payload: dict[str, Any] | None = None) -> dict:
         data = None if payload is None else json.dumps(payload, separators=(",", ":")).encode()
-        headers = {"Accept": "application/json", "Authorization": f"Bearer {self.token}"}
+        # workers.dev Browser Integrity Check has rejected urllib's default
+        # Python User-Agent in this project. Match the already-verified task
+        # client identity so the new quota endpoint uses the same edge path.
+        headers = {
+            "Accept": "application/json",
+            "Authorization": f"Bearer {self.token}",
+            "User-Agent": "RaawaaAutonomousEngine/1.0",
+        }
         access_id = os.getenv("RAAWAA_ENGINE_CF_ACCESS_CLIENT_ID", "")
         access_secret = os.getenv("RAAWAA_ENGINE_CF_ACCESS_CLIENT_SECRET", "")
         if bool(access_id) != bool(access_secret):
