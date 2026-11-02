@@ -64,6 +64,9 @@ def audit() -> int:
         errors.append("Paid model calls must remain disabled.")
     if policy.get("allow_external_writes") is not False:
         errors.append("External writes must remain disabled.")
+    parallel_limit = policy.get("max_parallel_agents")
+    if type(parallel_limit) is not int or not 1 <= parallel_limit <= 5:
+        errors.append("max_parallel_agents must be an integer between 1 and 5.")
     ids = [agent.get("id") for agent in roster.get("agents", [])]
     if len(ids) != len(set(ids)):
         errors.append("Agent IDs must be unique.")
@@ -223,10 +226,13 @@ def main() -> int:
         runner = lambda current_store: run_once(
             current_store, live_gateway=gateway, environ=os.environ
         )
-        max_parallel = args.max_parallel
-        if max_parallel is None:
-            execution_policy = load_json(ROOT / "config" / "policy.json")
-            max_parallel = execution_policy.get("max_parallel_agents", 1)
+        execution_policy = load_json(ROOT / "config" / "policy.json")
+        policy_parallel_limit = execution_policy.get("max_parallel_agents")
+        if type(policy_parallel_limit) is not int or not 1 <= policy_parallel_limit <= 5:
+            raise ValueError("max_parallel_agents policy must be an integer between 1 and 5")
+        max_parallel = policy_parallel_limit if args.max_parallel is None else args.max_parallel
+        if type(max_parallel) is not int or not 1 <= max_parallel <= policy_parallel_limit:
+            raise ValueError("max_parallel must be between 1 and the configured max_parallel_agents policy")
         print(json.dumps(run_batch(
             store(), args.max_tasks, args.max_seconds,
             runner=runner, max_parallel=max_parallel,
