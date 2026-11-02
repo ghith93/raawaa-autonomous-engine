@@ -1,4 +1,4 @@
-# AndroidHarness runtime profile
+# AndroidHarness runtime profile (optional)
 
 ## Purpose and status
 
@@ -16,7 +16,7 @@ Version 3.2 adds native project configuration (`harness.json`), project skill/pl
 
 The project config defines read-only researcher/reviewer/security-reviewer profiles and auto-loads the project skill. It allows routine shell/edit/network operations within normal app permissions, asks before deletion, denies outside-workspace access in ordinary app modes, and does not configure an MCP endpoint. AndroidHarness Full access is a separate user-controlled app setting that can override project permission rules; it is not enabled or requested here. These profiles are nested-agent profiles, not persistent autonomous agents.
 
-AndroidHarness is registered as an optional external Android/Linux execution environment for this project. It complements GitHub Actions and Cloudflare; it does not replace the repository's control plane, task ledger, policy enforcement, or CI.
+AndroidHarness is an optional external Android/Linux diagnostic and compatibility environment. It is not required for project execution and is deliberately outside the critical path. GitHub Actions, the Cloudflare Worker, and D1 provide the normal CI and cloud task path; the device never owns the only copy of a task or recovery state.
 
 **Integration status:** the repository has no direct AndroidHarness MCP/client adapter. The bounded GitHub issue bridge has now returned a successful read-only doctor result from the AndroidHarness 3.1 Code workspace (issue #122), so its device-side execution path is verified for that allowlisted operation. A separate Python test task (issue #123) failed before tests began because the device could not fetch `origin/main`. PR #139 merged bounded retry/backoff for that fetch. Stale retry #133 was superseded and closed after main advanced; exact-head task #140 now awaits a device-side result. The existing 3.1 checkout and foreground poller must pull the latest main and restart before using the retry fix. This is limited task-bridge evidence, not proof of a continuously running poller, general remote shell, or always-on device worker. GitHub Actions and this ChatGPT conversation cannot start a private tablet process. Never claim a device command ran unless the bridge posts its result to the corresponding GitHub issue.
 

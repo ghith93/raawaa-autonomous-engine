@@ -24,9 +24,15 @@ Every task should have an owner, objective, bounded scope, deadline, retry limit
 
 The Python worker calls `engine.operating_policy.load_operating_policy()` at the beginning of every `run_once` cycle, before claiming a task. The loader reads and validates `AGENTS.md`, the permanent master directive, continuous-improvement charter, architecture, and operations guide, computes SHA-256 fingerprints, and fails closed if any required document is missing, unreadable, empty, or invalid. For live model requests, a compact trusted policy summary and the fingerprints are inserted before untrusted task payload; full source documents are read locally rather than copied wholesale into the prompt, preserving existing provider quota limits. This is enforced for the Python worker and CLI Task Runner path only. Any additional agent/provider execution path must reuse this loader and prove integration with tests.
 
-## GitHub Actions versus a persistent worker
+## Cloud execution and device independence
 
-GitHub Actions is used first for CI and bounded scheduled jobs. It is event-driven and ephemeral: it does not provide a continuously running process or a durable task queue. A persistent worker and database are later phases, and must not be deployed until the hosting plan, free-tier limits, data persistence, and billing risks are verified.
+The Cloudflare control Worker + D1 task ledger is the remote control plane and durable source of truth. The GitHub Actions Task Runner is a bounded, ephemeral consumer (five tasks / 60 seconds per run) scheduled every 15 minutes; it is useful for low-cost unattended batches, but GitHub documents that scheduled runs can be delayed or dropped under load and public-repository schedules can be disabled after 60 days without activity. It is not a persistent process or a 24/7 guarantee.
+
+AndroidHarness is an optional operator-side diagnostic and compatibility environment only. No task, CI, recovery, or core engine capability may require the tablet poller or WorkManager. Device unavailability must never block cloud queue progress.
+
+Durable Objects SQLite + Alarms are not an immediate replacement for the current runner. The existing Worker Cron already performs stale-lease recovery, while actual task handlers currently execute in the Python GitHub Actions runner; an alarm cannot execute that Python code by itself. A Durable Object would add little value unless the handlers are deliberately ported into the Worker or an existing safe remote runner is provided. Defer adoption; if reconsidered, use it only as a wake-up, retain D1 as the canonical task ledger, and prove restart recovery, single-consumer safety, idempotency, and zero-cost operation before adding a binding. Cloudflare free-tier limits are hard failure thresholds, not permission to incur charges.
+
+References: [GitHub scheduled workflow caveats](https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows), [Durable Object alarms](https://developers.cloudflare.com/durable-objects/api/alarms/), [Durable Objects pricing](https://developers.cloudflare.com/durable-objects/platform/pricing/).
 
 ## Model/provider integration
 
