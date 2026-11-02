@@ -108,3 +108,14 @@ No item in this list authorizes live trading.
 - Evaluated `shottah/tracer` (Rust; MIT OR Apache-2.0) as a candidate for richer call-tree, token-balance-delta, fund-flow, and historical transaction replay reports: https://github.com/shottah/tracer
 - It can use an Anvil-fork backend to replay an already-mined transaction and compare the replay with the original receipt. This is useful for later audit/replay tooling, but it does not directly replace the current exact-calldata `fork-call` interface for a hypothetical, not-yet-submitted route.
 - Not added as a dependency in this release: it introduces a Rust toolchain and a separate multi-crate executable, while the Python adapter is intentionally small, stdlib-only, loopback-restricted, and read-only. Reconsider only when trace decoding, ERC-20 balance deltas, or historical receipt replay become a concrete requirement.
+
+
+## ERC-20 token contract preflight
+
+- The read-only `token-check` command verifies chain ID, pins the latest block number/hash, checks that the address has runtime bytecode at that block, and reads `decimals()`, `symbol()`, and `name()` where available.
+- ERC-20 `name`, `symbol`, and `decimals` are optional metadata methods under EIP-20. The tool never invents defaults: missing or malformed metadata is reported as unavailable/incomplete.
+- Common ABI dynamic-string and legacy bytes32 metadata encodings are decoded with strict length bounds.
+- A successful check only establishes that bytecode exists and that some metadata calls returned parseable values. It does not prove ERC-20 transfer compliance, truthful metadata, safe proxy implementation, no transfer tax, no blacklist/pause logic, no rebasing, or absence of honeypot behavior.
+- EIP-20 reference: https://eips.ethereum.org/EIPS/eip-20
+- Example: `arb-engine token-check --token-address 0x... --chain-id 1`
+- No approvals, transfer calls, signing, or transactions are performed.
