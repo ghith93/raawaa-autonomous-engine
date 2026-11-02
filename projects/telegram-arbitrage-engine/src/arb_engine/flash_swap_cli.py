@@ -255,8 +255,10 @@ def run_flash_swap_simulation(
             ledger = D1PaperTradingLedger()
         else:
             raise ValueError("RAAWAA_PAPER_LEDGER_BACKEND must be either 'sqlite' or 'd1'")
+        # Version the candidate identity so legacy events without forward-observer
+        # parameters remain immutable and are not silently reinterpreted.
         candidate_key = "|".join((
-            str(source_state.chain_id), block_hash.casefold(),
+            "observer-schema-1", str(source_state.chain_id), block_hash.casefold(),
             source_state.pair_address.casefold(), destination_state.pair_address.casefold(),
             borrowed_token.casefold(), str(amount_borrowed_raw),
             str(source_state.fee_bps), str(destination_state.fee_bps),
@@ -276,7 +278,26 @@ def run_flash_swap_simulation(
         ledger.append_event(
             **common, event_id=f"{candidate_id}:detected",
             event_type="candidate_detected",
-            payload={"source": "flash-swap-sim", "classification": "read_only_research_candidate"},
+            payload={
+                "source": "flash-swap-sim",
+                "classification": "read_only_research_candidate",
+                "observer_schema": 1,
+                "route_parameters": {
+                    "source_fee_bps": source_state.fee_bps,
+                    "destination_fee_bps": destination_state.fee_bps,
+                    "borrowed_token": borrowed_token,
+                    "amount_borrowed_raw": str(amount_borrowed_raw),
+                },
+                "gas_scenario": None if economics is None else {
+                    "gas_used": economics.gas_used,
+                    "gas_price_wei": str(economics.gas_price_wei),
+                    "native_token": economics.native_token,
+                    "native_quote_pair": (
+                        native_quote_snapshot.state.pair_address if native_quote_snapshot else None
+                    ),
+                    "native_quote_fee_bps": native_quote_fee if native_quote_snapshot else None,
+                },
+            },
         )
         ledger.append_event(
             **common, event_id=f"{candidate_id}:snapshot",
