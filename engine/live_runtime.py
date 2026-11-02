@@ -11,9 +11,11 @@ from pathlib import Path
 
 from engine.live_adapters import OpenAICompatibleAdapter
 from engine.model_gateway import UsageLedger
+from engine.quota_backend import open_quota_ledger, remote_ledger_configured
 from engine.quota_config import load_provider_profile_registry
 from engine.quota_live_gateway import QuotaAwareLiveGateway
-from engine.quota_manager import QuotaLedger, QuotaManager
+from engine.quota_manager import QuotaManager
+from engine.remote_task_store import RemoteTaskStoreError
 
 
 LIVE_SWITCH = "RAAWAA_ENGINE_LIVE_INFERENCE"
@@ -28,6 +30,12 @@ def build_live_gateway(
     """Build an adapter map only after policy, operator, profile, quota and key checks."""
     source = os.environ if environ is None else environ
     if source.get(LIVE_SWITCH, "").strip().lower() != "enabled":
+        return None
+    # GitHub Actions runners are ephemeral: a local SQLite quota ledger would be
+    # empty on every run, so quota limits and 429 cooldowns would never hold.
+    # Refuse live inference there unless the durable D1 ledger is configured.
+    if (str(source.get("GITHUB_ACTIONS", "")).strip().lower() == "true"
+            and not remote_ledger_configured(source)):
         return None
 
     with Path(policy_path).open(encoding="utf-8") as stream:
@@ -50,25 +58,29 @@ def build_live_gateway(
     if not candidates:
         return None
 
-    quota_ledger = QuotaLedger(db_path)
+    quota_ledger = open_quota_ledger(db_path, source)
     manager = QuotaManager([entry.profile for entry in candidates], quota_ledger)
     adapters = {}
     eligible_profiles = []
-    for entry in candidates:
-        profile = entry.profile
-        # Never resolve, print, or persist key values; only test presence.
-        if not source.get(entry.api_key_env, "").strip():
-            continue
-        if not manager.eligible(profile, estimated_tokens=1):
-            continue
-        adapter = OpenAICompatibleAdapter(
-            provider=profile.provider,
-            base_url=profile.endpoint_url,
-            api_key_env=entry.api_key_env,
-            environ=source,
-        )
-        adapters[profile.route_id] = adapter
-        eligible_profiles.append(profile)
+    try:
+        for entry in candidates:
+            profile = entry.profile
+            # Never resolve, print, or persist key values; only test presence.
+            if not source.get(entry.api_key_env, "").strip():
+                continue
+            if not manager.eligible(profile, estimated_tokens=1):
+                continue
+            adapter = OpenAICompatibleAdapter(
+                provider=profile.provider,
+                base_url=profile.endpoint_url,
+                api_key_env=entry.api_key_env,
+                environ=source,
+            )
+            adapters[profile.route_id] = adapter
+            eligible_profiles.append(profile)
+    except RemoteTaskStoreError:
+        # The durable ledger is unreachable: fail closed, no live inference.
+        return None
 
     if not eligible_profiles:
         return None
