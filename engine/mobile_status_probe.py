@@ -9,7 +9,7 @@ import json
 import os
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlsplit
-from urllib.request import HTTPRedirectHandler, Request, build_opener, urlopen
+from urllib.request import HTTPRedirectHandler, Request, build_opener
 
 
 class _RejectRedirects(HTTPRedirectHandler):
