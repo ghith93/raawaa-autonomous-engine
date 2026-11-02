@@ -561,11 +561,12 @@ def test_json_rpc_rate_limit_error_is_retryable_transport_failure(monkeypatch):
         def __exit__(self, *args):
             return False
 
-        def read(self):
-            return (
+        def read(self, size=-1):
+            payload = (
                 b'{"jsonrpc":"2.0","id":1,"error":'
                 b'{"code":-32005,"message":"rate limit exceeded"}}'
             )
+            return payload if size < 0 else payload[:size]
 
     monkeypatch.setattr("arb_engine.rpc.urlopen", lambda *args, **kwargs: FakeResponse())
     reader = EthereumV2PoolReader(min_request_interval=0)
