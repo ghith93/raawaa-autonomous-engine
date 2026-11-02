@@ -16,7 +16,6 @@
         "npm",
         "pip",
         "android_device_access_auto_fallback",
-        "androidharness_3_2_project_configuration",
         "named_nested_agent_profiles",
         "mcp_client",
         "plugin_manager",
@@ -24,9 +23,7 @@
         "optional_codegraph",
         "local_gguf_model_support",
         "foreground_service_resume",
-        "one_approval_android_sdk_installer",
-        "github_issue_task_bridge_code",
-        "upstream_workmanager_recurring_automation_support"
+        "github_issue_task_bridge_code"
       ],
       "capabilities_not_ready_or_unverified": [
         "java_d8",
@@ -35,13 +32,13 @@
         "direct_root",
         "persistent_always_on_execution",
         "cloudflare_deployment_secrets",
-        "device_installed_version_3_2_not_verified",
         "local_model_benchmark",
         "engine_authenticated_mcp_server",
         "github_issue_task_bridge_running_on_device",
         "direct_remote_mcp_adapter",
         "workmanager_automation_created_on_device",
-        "scheduled_device_run_smoke_test"
+        "scheduled_device_run_smoke_test",
+        "androidharness_3_2_only_features_not_available_on_current_device"
       ],
       "execution_defaults": {
         "root": false,
@@ -77,6 +74,7 @@
       "read_only_doctor": "scripts/androidharness/doctor.py",
       "research_report": "docs/research/androidharness-3.2-evaluation.md",
       "notes": [
+        "Operator confirmed AndroidHarness 3.1 is installed on 2026-11-02 and chose to stay on it; do not prompt for an upgrade. The 3.2 release is upstream information only, not the installed device version.",
         "Upstream v3.2-release metadata and APK SHA-256 verified from the official GitHub release on 2026-11-02; this does not verify the app version installed on the device.",
         "Operator-reported device snapshot is dated 2026-11-01T22:40:00Z and is not a live health check.",
         "Android SDK/JDK/Gradle are optional for this Python-first engine.",
@@ -86,8 +84,12 @@
         "WorkManager scheduling is opportunistic and subject to Android power, battery, connectivity and OEM restrictions; it is not guaranteed 24/7 execution.",
         "A bounded GitHub issue task bridge is implemented but remains inactive unless its local poller is started; prefer native recurring automation for routine cycles.",
         "The issue bridge accepts only four fixed read-only operations and is not general remote shell.",
-        "The Python test operation runs under the AndroidHarness Linux/app UID and is not an OS sandbox; use only trusted owner-controlled origin/main code."
-      ]
+        "The Python test operation runs under the AndroidHarness Linux/app UID and is not an OS sandbox; use only trusted owner-controlled origin/main code.",
+        "The GitHub issue bridge uses existing Code workspace, Python, Git and authenticated gh CLI features and does not depend on 3.2-only project configuration, plugin bundles, WorkManager automation, or android_sdk_install. Device-side availability still requires a live doctor result."
+      ],
+      "device_installed_version": "3.1",
+      "device_installed_version_source": "operator_confirmed_2026-11-02",
+      "device_upgrade_policy": "remain_on_installed_version_until_operator_changes"
     }
   ]
 }

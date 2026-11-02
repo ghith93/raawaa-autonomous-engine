@@ -2,13 +2,13 @@
 
 ## Purpose and status
 
-### Upstream AndroidHarness 3.2 verification
+### Upstream release and installed-device version
 
 The upstream repository's latest release was verified as `v3.2-release`, published 2026-10-31. APK SHA-256:
 `e6607cd7a70bf555cfd3fb7ce8b66d77efd5461c083e9f4585e16f57c36f6261`.
-This verifies the public upstream release, **not** the installed version on the operator's tablet. Confirm the app's About/Settings screen before relying on v3.2-specific features.
+This verifies the public upstream release, **not** the installed version on the operator's tablet. On 2026-11-02 the operator confirmed that the tablet is running AndroidHarness 3.1 and explicitly chose to remain on that version for now. Do not prompt for or perform an app upgrade. Treat v3.2 features as unavailable on this device unless separately verified; the GitHub issue bridge below does not require a 3.2-only project feature.
 
-Version 3.2 adds native project configuration (`harness.json`), project skill/plugin bundles, named Code agent profiles, workspace-scoped MCP configuration, plugin review, improved local-model management, and an on-device `android_sdk_install` tool. The project now supplies:
+Version 3.2 adds native project configuration (`harness.json`), project skill/plugin bundles, named Code agent profiles, workspace-scoped MCP configuration, plugin review, improved local-model management, and an on-device `android_sdk_install` tool. These are optional 3.2 capabilities, not prerequisites for the Python-first engine or the bounded 3.1-compatible GitHub issue bridge. The project supplies:
 - [Project configuration](../harness.json)
 - [Raawaa AndroidHarness operating skill](../.harness/skills/raawaa-engine-androidharness/SKILL.md)
 - [Read-only environment doctor](../scripts/androidharness/doctor.py)
@@ -32,17 +32,17 @@ The operator supplied a readiness snapshot dated 2026-11-01 22:40 UTC. It report
 
 These are a dated operator-reported snapshot, not a live health check. Re-probe before relying on any capability. Never copy, print, upload, or commit `.gh-token` or other secrets.
 
-The snapshot predates this v3.2 capability review. In particular, Java/D8 absence no longer requires hand-provisioning JDK/Gradle tarballs: v3.2 exposes `android_sdk_install`, which can install OpenJDK 21, D8, aapt2, apksigner, a selected Android SDK platform's `android.jar`, and optional Gradle behind one explicit approval card. It skips installed components. The SDK platform download is from Google's SDK repository and is subject to Google's Android SDK License Agreement. For this Python-first engine, the native Android build toolchain is optional and does not block Python development/tests.
+Java/D8 absence does not block this Python-first engine. The consolidated `android_sdk_install` flow is a 3.2 feature and is not available by assumption on the current 3.1 device; do not attempt to use it there. Native Android build tooling is optional and not required for the current Python development/tests.
 
 The active harness environment owns `HARNESS_SCRATCH`; inspect it through `env_status` and the diagnostic rather than provisioning tarballs or guessing paths. OpenSSH is not needed for the current HTTPS GitHub workflow.
 
-## AndroidHarness 3.2 operating model
+## AndroidHarness operating model — 3.1 current-device baseline
 
 Use **Code** for project work because it has the workspace, shell, Git, task/subagent and project tools. **Chat** is a separate research/conversation area with no project shell or file access. A Chat research result can be handed to Code, but that handoff does not run commands until a Code message is sent.
 
-The project `harness.json` auto-loads the root `AGENTS.md`, project skill and selected references. The skill guides one-time SDK setup, model selection, tests, Shizuku boundaries and long-run recovery. Use bundled skills on demand: `androidharness-environment`, `linux-env`, `git`, `doctor`, `test-driven-development`, `systematic-debugging`, `review`, `web-docs`, and `android-build` only when a native Android build is actually needed.
+On 3.2, the project `harness.json` can auto-load the root `AGENTS.md`, project skill and selected references. Do not assume this auto-loading exists on the current 3.1 device; use the Code workspace and read the repository instructions explicitly. Use bundled skills on demand: `androidharness-environment`, `linux-env`, `git`, `doctor`, `test-driven-development`, `systematic-debugging`, `review`, `web-docs`, and `android-build` only when a native Android build is actually needed.
 
-The plugin manager supports npm, GitHub and local plugin bundles. Community plugins are author-published, not verified endorsements. Review source, license, instructions, MCP definitions, hooks and dependencies before installation. Installation does not automatically approve or execute MCP servers/hooks. CodeGraph is optional and must be installed/enabled and indexed before its tools can be relied on.
+Plugin bundle management and project-level auto-loading described by the 3.2 release are not assumed on the current 3.1 device. If any plugin capability is present in 3.1, review its source, license, instructions, MCP definitions, hooks and dependencies before use. Installation does not automatically authorize hooks or MCP servers. CodeGraph is optional and must be installed/enabled and indexed before its tools can be relied on.
 
 AndroidHarness is an MCP client, not an MCP server. No engine MCP endpoint is currently configured. Do not add a fake or unauthenticated endpoint. A future bridge must have authentication, bounded operations, task IDs, audit logging, workspace allowlists, output/time limits and explicit privilege gates.
 
@@ -127,7 +127,7 @@ Allowed operations are fixed in code:
 
 The bridge never accepts shell commands, arbitrary paths, package installation, root, SSH, provider calls, Cloudflare access, production writes, or deployments. Test execution uses a minimal environment that does not inherit provider, Cloudflare, or GitHub credential environment variables and uses a temporary HOME. It verifies all five mandatory policy documents before claiming each task. Task output and runtime are bounded. A private local audit log is written under `~/.cache/raawaa-autonomous-engine/`; a file lock prevents multiple pollers. **This is not an OS sandbox:** Python tests run as the AndroidHarness Linux/app UID and can still access files and network resources available to that UID. Use the bridge only with trusted, owner-controlled `origin/main` code; do not mistake environment filtering or a temporary HOME for filesystem/network isolation. Successful tasks are closed after their result is posted; failed tasks remain open with a failed title. A task interrupted after claim remains marked Running and must be inspected/requeued manually to avoid accidental duplicate execution.
 
-### One-time activation on the tablet
+### One-time activation on the tablet (AndroidHarness 3.1)
 
 The supplied AndroidHarness clone is at `/workspace/raawaa-autonomous-engine`. After the bridge is merged, the operator only needs to start one long-running foreground terminal session in AndroidHarness:
 
@@ -160,7 +160,7 @@ For `run_python_tests`, include `"commit_sha":"<full 40-character current main S
 
 ## Initial enablement sequence
 
-1. Confirm AndroidHarness 3.2 in the device app and select the writable `raawaa-autonomous-engine` Code workspace.
+1. Keep the installed AndroidHarness 3.1 version. Select the writable `raawaa-autonomous-engine` Code workspace; do not rely on 3.2-only project auto-loading, plugin bundles, WorkManager features, or SDK installer.
 2. Run `/doctor`, `env_status`, and `python scripts/androidharness/doctor.py --json`; compare the local SHA with GitHub `main`.
 3. Run `python -m engine.cli audit` and `python -m unittest discover -s tests -v` without secrets or provider calls.
 4. If native Android build capability is requested and any component is missing, call `android_sdk_install(platform=35, gradle=true)` once. Approve the single install card and verify Java/D8/aapt2/apksigner/Gradle/android.jar. This is not required for the Python engine.
@@ -198,12 +198,8 @@ The expected commit must be the current GitHub main SHA or a descendant, not a h
 - [ ] Agent invocation still passes policy and audit gates
 
 
-## Preferred recurring worker: native WorkManager automation
+## Future recurring worker: WorkManager automation (3.2 capability)
 
-For recurring project work, use the native AndroidHarness scheduled-message automation described in [the WorkManager runbook](androidharness-workmanager-automation.md). It is preferred over keeping scripts/androidharness_issue_bridge.py running as a manual infinite terminal process.
+The WorkManager runbook documents the newer AndroidHarness recurring-message path. The device is intentionally remaining on 3.1, so do not assume this 3.2-era workflow is available or configure it now. For the current 3.1 setup, use the bounded GitHub issue bridge only when its foreground poller is explicitly started. Keep the cloud queue and task ledger durable in Cloudflare D1, and GitHub Actions as the reproducible CI gate. Do not run two device workers concurrently. If the device later moves to a version with verified WorkManager support, assess it as a separate migration.
 
-AndroidHarness upstream documents recurring/interval prompt tasks through Android WorkManager, persistent message queues, a foreground service for active work, resume cards, and optional bounded auto-continue. Configure one dedicated Code conversation and one hourly recurrence initially. The runbook includes the complete recurring prompt, policy limits, recovery steps, and one-time device setup.
-
-This mode removes the need to keep a terminal session manually open. It is still opportunistic Android background work, not a 24/7 guarantee: device power, force-stop, network, battery restrictions, and OEM scheduling can delay or stop it. Keep the cloud queue and task ledger durable in Cloudflare D1, and keep GitHub Actions as the reproducible CI gate. Do not run the legacy issue poller concurrently with the scheduled Code automation unless a reviewed need exists.
-
-Backend activation requires a successful device-side scheduled run and a verified next occurrence in Automation history. Repository documentation alone is not proof that the tablet schedule has been created or is running.
+Any Android background schedule remains opportunistic, not a 24/7 guarantee. Backend activation requires device-side evidence; repository documentation alone is not proof that a schedule or poller is running.
