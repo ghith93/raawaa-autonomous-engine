@@ -157,7 +157,14 @@ class EthereumV2PoolReader:
             int(block_hash[2:], 16)
         except ValueError as exc:
             raise RpcReadError("Pinned block hash is not hexadecimal") from exc
+        try:
+            int(block_hash[2:], 16)
+        except ValueError as exc:
+            raise RpcReadError("Pinned block hash is not hexadecimal") from exc
         block_timestamp = self._uint(block.get("timestamp"), "block timestamp")
+        now_timestamp = int(datetime.now(timezone.utc).timestamp())
+        if block_timestamp > now_timestamp + 30 or now_timestamp - block_timestamp > 60:
+            raise RpcReadError("Latest block timestamp is future-dated or stale")
 
         raw_pools = []
         unique_tokens = set()
@@ -198,6 +205,12 @@ class EthereumV2PoolReader:
             if value > 36:
                 raise RpcReadError("Token decimals exceed supported safety bound (36)")
             decimals_by_token[token] = value
+
+        # Re-check the pinned block after all eth_call reads to detect a reorg
+        # that replaced the canonical block number while the snapshot was collected.
+        final_block = self._rpc("eth_getBlockByNumber", [block_tag, False])
+        if not isinstance(final_block, dict) or str(final_block.get("hash", "")).lower() != block_hash:
+            raise RpcReadError("Pinned block changed during snapshot collection (possible reorg)")
 
         observed_at = datetime.now(timezone.utc)
         snapshots = []
