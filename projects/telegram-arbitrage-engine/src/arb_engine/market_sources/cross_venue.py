@@ -5,7 +5,7 @@ from datetime import datetime
 from decimal import Decimal, InvalidOperation, localcontext
 from typing import Mapping
 
-from .opportunity_costs import (
+from ..opportunity_costs import (
     OpportunityCosts,
     OpportunityEvaluation,
     OpportunityEvaluationError,
