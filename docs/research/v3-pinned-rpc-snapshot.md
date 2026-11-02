@@ -54,3 +54,19 @@ Positive `--amount-specified` means exact input; negative means exact output. Th
 The scheduled Ethereum smoke tries Nodely, dRPC, 1RPC and PublicNode in order. Nodely documents a 2 heavy `eth_call` requests/second limit; the smoke and V3 reader use a 0.55-second minimum interval. Only transport failures (HTTP access errors, timeouts, URL failures or invalid transport payloads) trigger fallback; contract identity, ABI, chain, tick and snapshot-validation failures remain hard failures.
 
 Each provider attempt gets only the remaining share of a single 512-request total budget. A failed attempt is discarded and the entire read starts again against the next endpoint; the reader never combines slot0, bitmap, tick or token metadata from different providers or block contexts. The selected endpoint and total requests across attempts are included in the smoke output. No API key or paid endpoint is configured.
+
+## Live read-only validation record
+
+The scheduled/push-triggered smoke completed successfully on 2026-11-02 at 22:09 UTC:
+
+- Workflow run: [41534649199](https://github.com/ghith93/raawaa-autonomous-engine/actions/runs/41534649199), main commit `0f68f9b2`.
+- Network and pool: Ethereum mainnet, Uniswap V3 USDC/WETH 0.30% pool `0x8ad599c3a0ff1de082011efddc58f1908eb6e6d8`.
+- Token order: USDC (6 decimals) / WETH (18 decimals); fee 3000 pips; tick spacing 60.
+- Pinned block: `26329984`; hash `0x186c8fad2f2d5972b7a0540f4320ac69ed558e8bc604eec9ae9e2814eaa28b38`.
+- Snapshot classification: `rpc_snapshot_factory_registered_block_hash_rechecked`.
+- Provider: `https://eth.nodely.dev`; 28 RPC requests used from the shared 512-request budget.
+- Exact-input simulation: gross input 1 USDC; fee 0.003 USDC; net input 0.997 USDC; simulated output 0.000442872712093267 WETH.
+- The run crossed zero initialized ticks and completed in one simulation step. This validates a real pinned-block snapshot and a small one-step quote only; it does not validate live tick crossing under market size, gas, transfer taxes, MEV, route execution, or net profitability.
+- `live_execution=false`, `transaction_submitted=false`, and `profit_claim=false`.
+
+This is empirical read-only connectivity evidence, not an executable trade or profitability claim. A later run must be recorded separately if provider, block, pool, or simulator behavior changes.
