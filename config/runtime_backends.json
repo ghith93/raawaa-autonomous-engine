@@ -7,14 +7,18 @@
       "kind": "external_android_linux_runtime",
       "status": "github_issue_bridge_verified_limited",
       "operator_reported_snapshot_utc": "2026-11-01T22:40:00Z",
+      "latest_doctor_verified_utc": "2026-11-02T01:20:33Z",
       "capabilities_reported": [
         "bash",
         "git",
         "gh",
         "python3",
-        "node20",
-        "npm",
-        "pip",
+        "node26",
+        "python314",
+        "java21",
+        "d8",
+        "aapt2",
+        "apksigner",
         "android_device_access_auto_fallback",
         "named_nested_agent_profiles",
         "mcp_client",
@@ -27,7 +31,6 @@
         "github_issue_task_bridge_verified_for_doctor_operation"
       ],
       "capabilities_not_ready_or_unverified": [
-        "java_d8",
         "openssh_binary",
         "shizuku_running",
         "direct_root",
@@ -38,7 +41,13 @@
         "direct_remote_mcp_adapter",
         "workmanager_automation_created_on_device",
         "scheduled_device_run_smoke_test",
-        "androidharness_3_2_only_features_not_available_on_current_device"
+        "androidharness_3_2_only_features_not_available_on_current_device",
+        "npm",
+        "pip",
+        "gradle",
+        "android_sdk_platform",
+        "clang",
+        "cmake"
       ],
       "execution_defaults": {
         "root": false,
@@ -85,7 +94,7 @@
         "The bounded GitHub issue bridge returned a successful read-only doctor result on issue #122; the Python test operation on issue #123 failed before tests because git fetch origin/main failed, and retry issue #133 was claimed but had no result at the latest check. This verifies limited device-side execution, not a guaranteed continuously running poller.",
         "The issue bridge accepts only four fixed read-only operations and is not general remote shell.",
         "The Python test operation runs under the AndroidHarness Linux/app UID and is not an OS sandbox; use only trusted owner-controlled origin/main code.",
-        "The GitHub issue bridge uses existing Code workspace, Python, Git and authenticated gh CLI features and does not depend on 3.2-only project configuration, plugin bundles, WorkManager automation, or android_sdk_install. Device-side availability still requires a live doctor result."
+        "The GitHub issue bridge uses existing Code workspace, Python, Git and authenticated gh CLI features and does not depend on 3.2-only project configuration, plugin bundles, WorkManager automation, or android_sdk_install. The 2026-11-02 doctor result verifies the listed device tool snapshot; re-probe before relying on a later session."
       ],
       "device_installed_version": "3.1",
       "device_installed_version_source": "operator_confirmed_2026-11-02",
