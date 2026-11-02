@@ -159,6 +159,23 @@ print(book.bids[:5], book.asks[:5], book.fetched_at)
 
 Kraken's internal asset codes (such as `XXBT` and `ZUSD`) must be explicitly mapped to canonical IDs; the adapter never infers equivalence from symbols. Public REST pacing is limited to one request per second per IP by Kraken; the adapter uses a shared process-wide limiter. Taker/maker schedules are preserved but no current account tier is assumed. Missing fee, depth or settlement inputs keep net estimates incomplete. See [data sources and trust boundaries](DATA_SOURCES.md).
 
+## Read-only OKX Spot market data
+
+A dependency-free public adapter is available at `arb_engine.market_sources.okx.OKXPublicSpotMarketData`. It reads public Spot instrument metadata and aggregated L2 order-book snapshots only; no API key or private account method is used.
+
+```python
+from arb_engine.market_sources.okx import OKXPublicSpotMarketData
+
+# Select the regional API host that matches the OKX account registration region.
+market = OKXPublicSpotMarketData(base_url="https://www.okx.com")
+instrument = market.fetch_instrument(inst_id="BTC-USDT")
+book = market.fetch_orderbook(inst_id=instrument.instrument_id, depth=20)
+print(instrument.base_step_size, instrument.price_tick_size, instrument.min_base_quantity)
+print(book.bids[:5], book.asks[:5], book.sequence)
+```
+
+The resulting snapshot implements the shared CEX order-book shape and can be included in the bounded multi-venue comparator after an explicit canonical InstrumentRegistry mapping. OKX USD and USDT markets must not be treated as interchangeable. See [data source limits and regional terms](DATA_SOURCES.md).
+
 ## Read-only Coinbase Exchange Spot market data
 
 A fixture-tested public adapter is available at `arb_engine.market_sources.coinbase.CoinbaseExchangePublicMarketData`. It calls only the unauthenticated public product and aggregated order-book GET endpoints. It preserves product increments, minimum market funds, status restrictions, Decimal book levels, order counts, sequence number and exchange/local timestamps.
