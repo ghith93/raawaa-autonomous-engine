@@ -1,6 +1,7 @@
 """Bounded multi-venue CEX spot depth collection and comparison."""
 from __future__ import annotations
 
+from collections import Counter
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -226,7 +227,8 @@ def scan_cex_universe(
 
     venue_ids = tuple(sorted(fetched))
     if venue_ids:
-        required_quote_code = fetched[venue_ids[0]][1].quote_asset_code
+        quote_counts = Counter(fetched[venue][1].quote_asset_code for venue in venue_ids)
+        required_quote_code = min(quote_counts, key=lambda code: (-quote_counts[code], code))
         for venue in tuple(venue_ids):
             if fetched[venue][1].quote_asset_code != required_quote_code:
                 failures[venue] = "quote_asset_code_mismatch"
