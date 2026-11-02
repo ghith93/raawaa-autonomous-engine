@@ -35,6 +35,7 @@ from .venue_smoke import (
 from .v3_math import get_sqrt_ratio_at_tick
 from .v3_rpc import DEFAULT_V3_ETHEREUM_RPC, EvmV3PoolReader
 from .v3_simulator import simulate_v3_swap
+from .cex_universe import VenueRequest, scan_cex_universe, CexUniverseScanError, SUPPORTED_VENUES
 
 
 def _fetch_cex_snapshot(venue: str, instrument_id: str):
@@ -346,6 +347,23 @@ def main() -> None:
     solana_quote_parser.add_argument("--output-mint", required=True)
     solana_quote_parser.add_argument("--amount-raw", required=True)
     solana_quote_parser.add_argument("--timeout-seconds", type=float, default=8.0)
+
+    cex_universe_parser = sub.add_parser(
+        "cex-universe-scan",
+        help="bounded read-only pairwise depth comparison across 2-5 CEX Spot venues",
+    )
+    cex_universe_parser.add_argument("--venue", action="append", choices=SUPPORTED_VENUES, required=True)
+    cex_universe_parser.add_argument("--instrument", action="append", required=True)
+    cex_universe_parser.add_argument("--base-asset-id", action="append", required=True)
+    cex_universe_parser.add_argument("--quote-currency-id", action="append", required=True)
+    cex_universe_parser.add_argument(
+        "--fee-bps", action="append", default=[], metavar="VENUE=BPS",
+        help="optional operator-supplied taker fee per venue; repeat for each known fee",
+    )
+    cex_universe_parser.add_argument("--base-quantity", required=True)
+    cex_universe_parser.add_argument("--latency-cost-bps")
+    cex_universe_parser.add_argument("--max-quote-age-seconds", type=int, default=5)
+    cex_universe_parser.add_argument("--max-quote-skew-seconds", type=int, default=2)
 
     cex_parser = sub.add_parser(
         "cex-scan",
@@ -797,6 +815,48 @@ def main() -> None:
             }, indent=2))
         except (JupiterQuoteError, ValueError, ArithmeticError) as exc:
             parser.exit(2, f"solana-price failed: {exc}\n")
+    elif args.command == "cex-universe-scan":
+        try:
+            counts = (
+                len(args.venue), len(args.instrument),
+                len(args.base_asset_id), len(args.quote_currency_id),
+            )
+            if len(set(counts)) != 1:
+                raise CexUniverseScanError(
+                    "repeat --venue, --instrument, --base-asset-id and --quote-currency-id equally"
+                )
+            fee_map = {}
+            for entry in args.fee_bps:
+                if "=" not in entry:
+                    raise CexUniverseScanError("--fee-bps must use VENUE=BPS")
+                venue, fee = entry.split("=", 1)
+                if venue in fee_map:
+                    raise CexUniverseScanError("duplicate fee profile")
+                fee_map[venue] = fee
+            if set(fee_map) - set(args.venue):
+                raise CexUniverseScanError("fee profile supplied for an unselected venue")
+            requests = [
+                VenueRequest(
+                    venue_id=venue,
+                    instrument_id=instrument,
+                    base_asset_id=base_id,
+                    quote_currency_id=quote_id,
+                    fee_bps=fee_map.get(venue),
+                )
+                for venue, instrument, base_id, quote_id in zip(
+                    args.venue, args.instrument, args.base_asset_id, args.quote_currency_id
+                )
+            ]
+            result = scan_cex_universe(
+                venues=requests,
+                base_quantity=args.base_quantity,
+                latency_cost_bps=args.latency_cost_bps,
+                max_quote_age_seconds=args.max_quote_age_seconds,
+                max_quote_skew_seconds=args.max_quote_skew_seconds,
+            )
+            print(json.dumps(result, indent=2))
+        except (CexUniverseScanError, ValueError, RuntimeError, OSError, ArithmeticError) as exc:
+            parser.exit(2, f"cex-universe-scan failed: {exc}\\n")
     elif args.command == "cex-scan":
         try:
             print(json.dumps(run_cex_scan(args), indent=2))
