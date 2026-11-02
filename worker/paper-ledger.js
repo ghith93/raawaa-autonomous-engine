@@ -24,12 +24,37 @@ function validText(value, max = 128) {
 function isPlainObject(value) {
   return value !== null && typeof value === "object" && !Array.isArray(value);
 }
+function compareCodePoints(left, right) {
+  const a = Array.from(left, char => char.codePointAt(0));
+  const b = Array.from(right, char => char.codePointAt(0));
+  for (let i = 0; i < Math.min(a.length, b.length); i++) {
+    if (a[i] !== b[i]) return a[i] - b[i];
+  }
+  return a.length - b.length;
+}
 function stable(value) {
   if (Array.isArray(value)) return value.map(stable);
   if (isPlainObject(value)) {
-    return Object.fromEntries(Object.keys(value).sort().map(key => [key, stable(value[key])]));
+    return Object.fromEntries(Object.keys(value).sort(compareCodePoints).map(key => [key, stable(value[key])]));
   }
   return value;
+}
+function validatePayload(value, depth = 0) {
+  if (depth > 32) throw new Error("invalid_payload_depth");
+  if (value === null || typeof value === "string" || typeof value === "boolean") return;
+  if (typeof value === "number") {
+    if (!Number.isSafeInteger(value)) throw new Error("invalid_payload_number");
+    return;
+  }
+  if (Array.isArray(value)) {
+    for (const item of value) validatePayload(item, depth + 1);
+    return;
+  }
+  if (isPlainObject(value)) {
+    for (const item of Object.values(value)) validatePayload(item, depth + 1);
+    return;
+  }
+  throw new Error("invalid_payload_value");
 }
 function canonical(value) {
   // Match Python json.dumps(..., ensure_ascii=True) so both clients hash identical bytes.
@@ -60,12 +85,17 @@ function normalize(input) {
   if (!validText(candidate_id, 128) || !validText(event_id, 128) || !EVENT_TYPES.has(event_type)) {
     throw new Error("invalid_event_identity");
   }
-  if (typeof input.occurred_at !== "string" || !Number.isFinite(Date.parse(input.occurred_at))) {
+  if (
+    typeof input.occurred_at !== "string"
+    || !/(?:Z|[+-][0-9]{2}:[0-9]{2})$/i.test(input.occurred_at)
+    || !Number.isFinite(Date.parse(input.occurred_at))
+  ) {
     throw new Error("invalid_occurred_at");
   }
   const occurred_at = new Date(input.occurred_at).toISOString().replace("Z", "+00:00");
   const payload = input.payload ?? {};
   if (!isPlainObject(payload)) throw new Error("invalid_payload");
+  validatePayload(payload);
   const payload_json = canonical(payload);
   if (new TextEncoder().encode(payload_json).byteLength > 24576) throw new Error("payload_too_large");
 
