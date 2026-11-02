@@ -85,7 +85,7 @@ class JupiterQuote:
 
 def _mint(value: str, label: str) -> str:
     if not isinstance(value, str) or not _BASE58.fullmatch(value):
-        raise ValueError(f"{label} must be a valid 32-byte Solana base58 public key")
+        raise ValueError(f"{label} must be a valid 32-byte Solana base58 mint address")
     number = 0
     for character in value:
         number = number * 58 + _BASE58_ALPHABET.index(character)
@@ -94,7 +94,7 @@ def _mint(value: str, label: str) -> str:
         number.to_bytes((number.bit_length() + 7) // 8, "big") if number else b""
     )
     if len(decoded) != 32:
-        raise ValueError(f"{label} must decode to exactly 32 bytes")
+        raise ValueError(f"{label} must decode to exactly 32-byte public key data")
     return value
 
 
