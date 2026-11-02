@@ -173,7 +173,7 @@ def main() -> None:
             )
             print(json.dumps(result, indent=2))
         except (VenueVerificationError, ValueError, OSError, json.JSONDecodeError) as exc:
-            parser.exit(2, f"venue-check failed: {exc}\\n")
+            parser.exit(2, f"venue-check failed: {exc}\n")
     elif args.command == "v2-sim":
         try:
             args.buy_fee_bps, args.buy_factory, args.buy_router, buy_venue = resolve_venue_config(
