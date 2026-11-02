@@ -1,6 +1,7 @@
 import { handleQuota } from "./quota.js";
 import { handlePaperLedger } from "./paper-ledger.js";
 import { handleTelegramWebhook } from "./telegram-webhook.js";
+import { handleMobilePage, handleMobileStatus } from "./mobile-status.js";
 const JSON_HEADERS = { "content-type": "application/json; charset=utf-8", "cache-control": "no-store" };
 const MAX_BODY_BYTES = 32 * 1024;
 
@@ -163,6 +164,8 @@ export default {
 
   async fetch(request, env) {
     const url = new URL(request.url);
+    const mobilePage = handleMobilePage(request, url);
+    if (mobilePage) return mobilePage;
     if (request.method === "GET" && url.pathname === "/health") {
       try {
         const row = await env.DB.prepare("SELECT 1 AS ok").first();
@@ -182,11 +185,15 @@ export default {
         url.pathname !== "/v1/research/candidates" &&
         url.pathname !== "/v1/quota" &&
         url.pathname !== "/v1/paper-ledger" &&
+        url.pathname !== "/v1/mobile/status" &&
         url.pathname !== "/v1/research/candidates/review" &&
         !/^\/v1\/tasks\/[A-Za-z0-9-]+\/(heartbeat|finish|retry)$/.test(url.pathname)) {
       return json({ error: "not_found" }, 404);
     }
     if (!(await authorized(request, env))) return json({ error: "unauthorized" }, 401);
+
+    const mobileStatusResponse = await handleMobileStatus(request, env, url);
+    if (mobileStatusResponse) return mobileStatusResponse;
 
     const quotaResponse = await handleQuota(request, env, url);
     if (quotaResponse) return quotaResponse;
