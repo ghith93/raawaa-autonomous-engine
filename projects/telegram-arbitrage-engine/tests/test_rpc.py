@@ -1,4 +1,7 @@
-from arb_engine.rpc import EvmBlockContext, EthereumV2PoolReader, PoolFactoryMismatch, RpcExecutionReverted, RpcReadError
+from arb_engine.rpc import (
+    EvmBlockContext, EthereumV2PoolReader, PoolFactoryMismatch,
+    RpcExecutionReverted, RpcReadError, RpcTransportError,
+)
 
 
 TOKEN0 = "0x" + "1" * 40
@@ -546,3 +549,23 @@ def test_rpc_http_403_is_classified_as_retryable_transport_error(monkeypatch):
     with pytest.raises(RpcTransportError, match="HTTP error: 403"):
         reader._rpc("eth_chainId", [])
     assert reader.rpc_request_count == 1
+
+
+def test_json_rpc_rate_limit_error_is_retryable_transport_failure(monkeypatch):
+    class FakeResponse:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def read(self):
+            return (
+                b'{"jsonrpc":"2.0","id":1,"error":'
+                b'{"code":-32005,"message":"rate limit exceeded"}}'
+            )
+
+    monkeypatch.setattr("arb_engine.rpc.urlopen", lambda *args, **kwargs: FakeResponse())
+    reader = EthereumV2PoolReader(min_request_interval=0)
+    with pytest.raises(RpcTransportError, match="rate limit"):
+        reader._rpc("eth_blockNumber", [])
