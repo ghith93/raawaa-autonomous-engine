@@ -27,6 +27,7 @@ FALLBACK_ENDPOINTS = (
     "https://eth.drpc.org",
     "https://public.1rpc.io/eth",
 )
+MAX_RPC_ENDPOINTS = 3
 
 
 def configured_endpoints() -> tuple[str, ...]:
@@ -36,6 +37,8 @@ def configured_endpoints() -> tuple[str, ...]:
     unique = tuple(dict.fromkeys(candidates))
     if not unique:
         raise RuntimeError("No V3 smoke RPC endpoints configured")
+    if len(unique) > MAX_RPC_ENDPOINTS:
+        raise RuntimeError(f"At most {MAX_RPC_ENDPOINTS} V3 smoke RPC endpoints may be configured")
     return unique
 
 
