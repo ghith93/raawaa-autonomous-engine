@@ -353,3 +353,8 @@ arb-engine cex-universe-scan \
 ```
 
 A failed venue is retained as a sanitized source failure while healthy venues continue; fewer than two compatible books produce `insufficient_sources`. This remains a manual read-only research command, not a scheduler or order executor.
+
+
+### Live public-market connectivity check
+
+The separate GitHub Actions workflow `.github/workflows/cex-public-market-smoke.yml` can be run manually and is scheduled daily. It queries five public BTC/USDT Spot books, stores a seven-day JSON artifact, and validates minimum source coverage plus the no-order/no-profit-claim contract. It is a read-only connectivity/coverage check; it does not execute trades, use credentials, infer fees, or establish profitability. GitHub scheduled events are best-effort and must not be treated as a guaranteed scan cadence.
