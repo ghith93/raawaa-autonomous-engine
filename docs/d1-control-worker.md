@@ -68,6 +68,6 @@ The schedule is designed for the Cloudflare Workers Free limits published at imp
 
 ## Scheduled Python task consumer
 
-GitHub Actions invokes the Python runner every 15 minutes and can also be started manually from the Actions tab. It uses the repository Actions secret `ENGINE_API_TOKEN`, the deployed Worker URL, and a strict batch limit of five tasks / 60 seconds. If Cloudflare Access is enabled for the Worker, it can additionally use the optional service-token secrets described above.
+GitHub Actions invokes the Python runner every 5 minutes and can also be started manually from the Actions tab. It uses the repository Actions secret `ENGINE_API_TOKEN`, the deployed Worker URL, and a strict batch limit of five tasks / 60 seconds. If Cloudflare Access is enabled for the Worker, it can additionally use the optional service-token secrets described above.
 
 The runner currently supports only the safe dry-run handlers listed in `engine/worker.py`. Unsupported task types are marked blocked. It does not call Gemini, Groq, OpenRouter, or other model providers, and it cannot perform external writes. Scheduled GitHub Actions jobs may be delayed; this is periodic batch processing, not real-time or always-on execution.
