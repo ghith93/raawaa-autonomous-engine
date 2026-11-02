@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from .v2 import V2PoolState, _validate_pool, quote_exact_input
+from .v2 import V2PoolState, V2SwapQuote, _validate_pool, quote_exact_input
 
 
 @dataclass(frozen=True, slots=True)
@@ -24,7 +24,7 @@ class V2FlashSwapSimulation:
     """Reserve-math estimate for borrowing one asset and repaying the source pair in the other."""
 
     borrow: V2FlashBorrow
-    sale: object
+    sale: V2SwapQuote
     repayment_token: str
     repayment_amount_raw: int
     sale_proceeds_raw: int
