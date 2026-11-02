@@ -166,7 +166,7 @@ def test_scan_returns_no_routes_when_one_trusted_venue_is_missing():
 
 def test_scan_rejects_candidate_and_rpc_budget_overruns_before_onchain_work():
     dex = FakeDexScreener([
-        candidate("uniswap", "0x" + f"{i:040x}") for i in range(5)
+        candidate("uniswap", "0x" + f"{i + 1:040x}") for i in range(5)
     ])
     reader = FakeReader()
     with pytest.raises(ValueError, match="candidate count"):
