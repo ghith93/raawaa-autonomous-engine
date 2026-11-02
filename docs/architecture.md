@@ -26,7 +26,7 @@ The Python worker calls `engine.operating_policy.load_operating_policy()` at the
 
 ## Cloud execution and device independence
 
-The Cloudflare control Worker + D1 task ledger is the remote control plane and durable source of truth. The GitHub Actions Task Runner is a bounded, ephemeral consumer (five tasks / 60 seconds per run) scheduled every 5 minutes; it is useful for low-cost unattended batches, but GitHub documents that scheduled runs can be delayed or dropped under load and public-repository schedules can be disabled after 60 days without activity. It is not a persistent process or a 24/7 guarantee.
+The Cloudflare control Worker + D1 task ledger is the remote control plane and durable source of truth. The GitHub Actions Task Runner is a bounded, ephemeral consumer (five tasks / 60 seconds per run) scheduled every 5 minutes. Within one invocation, the Python batch runner may execute up to the policy's `max_parallel_agents` limit (currently 2); each worker claims a distinct fenced D1 task lease and shares the atomic provider quota ledger. This improves batch throughput without adding a scheduler, queue, or independent state store. GitHub documents that scheduled runs can be delayed or dropped under load and public-repository schedules can be disabled after 60 days without activity. It is not a persistent process or a 24/7 guarantee.
 
 AndroidHarness is an optional operator-side diagnostic and compatibility environment only. No task, CI, recovery, or core engine capability may require the tablet poller or WorkManager. Device unavailability must never block cloud queue progress.
 
