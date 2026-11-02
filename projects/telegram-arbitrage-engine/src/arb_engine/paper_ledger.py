@@ -216,7 +216,10 @@ class PaperTradingLedger:
             if not isinstance(block_hash, str) or not HASH_RE.fullmatch(block_hash):
                 raise ValueError("block_hash must be a 32-byte hexadecimal hash")
             block_hash = block_hash.lower()
-        if event_type in {"snapshot_captured", "route_simulated", "gas_scenario_evaluated"} and chain_id is None:
+        if event_type in {
+            "snapshot_captured", "route_simulated", "gas_scenario_evaluated",
+            "paper_order_simulated", "outcome_observed",
+        } and chain_id is None:
             raise ValueError(f"{event_type} requires canonical chain and block provenance")
         if strategy_id is not None:
             strategy_id = self._text(strategy_id, "strategy_id", 80)
@@ -230,6 +233,8 @@ class PaperTradingLedger:
                 raise ValueError("route_simulated requires strategy, both pools, and both token addresses")
             if source_pool == destination_pool:
                 raise ValueError("route_simulated requires distinct source and destination pools")
+            if raw_values["gross_profit_raw"] is None:
+                raise ValueError("route_simulated requires gross_profit_raw")
 
         raw_values = {
             "gross_profit_raw": self._integer(gross_profit_raw, "gross_profit_raw"),
