@@ -133,8 +133,8 @@ def main() -> None:
     flash_parser.add_argument("--native-quote-pair", help="same-block V2 pair for native/repayment-token valuation")
     flash_parser.add_argument("--native-quote-venue", help="source-documented V2 venue for the native quote pair")
     flash_parser.add_argument("--native-quote-fee-bps", type=int, help="required with --native-quote-pair unless a venue is supplied")
-    flash_parser.add_argument("--record-paper", action="store_true", help="opt in to local append-only research event recording")
-    flash_parser.add_argument("--ledger", default="data/paper-trading.sqlite3")
+    flash_parser.add_argument("--record-paper", action="store_true", help="opt in to append-only research event capture (SQLite by default; D1 only when explicitly configured)")
+    flash_parser.add_argument("--ledger", default="data/paper-trading.sqlite3", help="local SQLite ledger path; ignored when the D1 backend is selected")
 
     token_parser = sub.add_parser(
         "token-check", help="read-only contract-code and ERC-20 metadata preflight at one pinned block"
