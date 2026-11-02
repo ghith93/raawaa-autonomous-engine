@@ -8,8 +8,7 @@ SET cost_nanos=CAST(ROUND(cost_usd * 1000000000) AS INTEGER)
 WHERE cost_usd > 0;
 
 CREATE UNIQUE INDEX IF NOT EXISTS idx_model_usage_reservation
-  ON model_usage(reservation_id)
-  WHERE reservation_id IS NOT NULL;
+  ON model_usage(reservation_id);
 CREATE INDEX IF NOT EXISTS idx_model_usage_task
   ON model_usage(task_id, created_at);
 
