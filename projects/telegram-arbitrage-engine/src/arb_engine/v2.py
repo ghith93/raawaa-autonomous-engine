@@ -32,6 +32,7 @@ class V2SwapQuote:
     fee_bps: int
     block_number: int
     block_hash: str
+    price_impact_bps: Decimal
 
 
 @dataclass(frozen=True, slots=True)
@@ -59,6 +60,10 @@ def _validate_pool(pool: V2PoolState) -> None:
         pool.pair_address, pool.token0, pool.token1,
     )):
         raise ValueError("Pool and token addresses must be 20-byte EVM addresses")
+    if any(int(value[2:], 16) == 0 for value in (pool.pair_address, pool.token0, pool.token1)):
+        raise ValueError("Zero address is not valid for a pool or token")
+    if pool.token0.lower() >= pool.token1.lower():
+        raise ValueError("V2 token0 must be the lower-sorted token address")
     if not re.fullmatch(r"0x[0-9a-fA-F]{64}", pool.block_hash):
         raise ValueError("Block hash must be a 32-byte hexadecimal value")
     if pool.token0.casefold() == pool.token1.casefold():
@@ -83,8 +88,11 @@ def quote_exact_input(pool: V2PoolState, token_in: str, amount_in_raw: int) -> V
     _validate_pool(pool)
     if not isinstance(token_in, str) or not token_in.strip():
         raise ValueError("token_in is required")
-    if not isinstance(amount_in_raw, int) or isinstance(amount_in_raw, bool) or amount_in_raw <= 0:
-        raise ValueError("amount_in_raw must be a positive integer")
+    if (
+        not isinstance(amount_in_raw, int) or isinstance(amount_in_raw, bool)
+        or not 0 < amount_in_raw < 2**256
+    ):
+        raise ValueError("amount_in_raw must be a positive uint256")
 
     if token_in.casefold() == pool.token0.casefold():
         reserve_in, reserve_out, token_out = pool.reserve0_raw, pool.reserve1_raw, pool.token1
@@ -98,6 +106,18 @@ def quote_exact_input(pool: V2PoolState, token_in: str, amount_in_raw: int) -> V
     amount_out = (amount_with_fee * reserve_out) // denominator
     if amount_out <= 0 or amount_out >= reserve_out:
         raise ValueError("Pool quote rounds to zero or exceeds available reserves")
+    # Price impact is measured against the post-fee spot output, isolating
+    # constant-product curve impact from the separately reported pool fee.
+    with localcontext() as ctx:
+        ctx.prec = 50
+        ideal_after_fee = (
+            Decimal(amount_in_raw) * Decimal(10000 - pool.fee_bps)
+            * Decimal(reserve_out) / (Decimal(10000) * Decimal(reserve_in))
+        )
+        impact_bps = ((ideal_after_fee - Decimal(amount_out_raw := amount_out))
+                      / ideal_after_fee) * Decimal(10000)
+        if impact_bps < 0:
+            impact_bps = Decimal(0)
     return V2SwapQuote(
         pool_address=pool.pair_address,
         token_in=token_in,
@@ -107,6 +127,7 @@ def quote_exact_input(pool: V2PoolState, token_in: str, amount_in_raw: int) -> V
         fee_bps=pool.fee_bps,
         block_number=pool.block_number,
         block_hash=pool.block_hash,
+        price_impact_bps=impact_bps,
     )
 
 
