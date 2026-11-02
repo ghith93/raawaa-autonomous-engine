@@ -266,9 +266,10 @@ class CoinbaseExchangePublicMarketData:
                 raise CoinbaseMarketDataError(f"invalid Coinbase product flag: {flag}")
         restricted = any(item.get(flag) is True for flag in flags)
         status = (
-            "TRADING"
-            if raw_status == "online" and not restricted
-            else ("AUCTION" if item.get("auction_mode") is True else str(raw_status or "UNKNOWN").upper())
+            "AUCTION" if item.get("auction_mode") is True
+            else "RESTRICTED" if restricted
+            else "TRADING" if raw_status == "online"
+            else str(raw_status or "UNKNOWN").upper()
         )
         return InstrumentMetadata(
             venue_id="coinbase",
