@@ -71,6 +71,8 @@ The first Solana adapter should use **Price API V3 only**. It must:
 
 Solana mint identity is chain-specific. The mint account stores decimals and token-program ownership. Token-2022 extensions can include transfer fees and transfer hooks, so a price alone cannot establish an executable net output.
 
+**Future execution research, not enabled:** Jupiter Lend documents flashloans with no collateral and no protocol fee, provided the borrowed amount is returned within the same transaction. Its SDK flow still requires a signer and ordered borrow → custom logic → payback instructions, so this is outside the read-only adapter and requires a separate security review. Jupiter Lend AMM's documented quote helpers are currently SDK-based; the REST AMM API is marked as not yet available. This may be a promising Solana-native atomic-arbitrage path later, but no wallet, signer, transaction build, or submission is part of the current plan.
+
 ### CEX findings
 
 CCXT's current public documentation describes 100+ supported exchange markets and is MIT-licensed. Its unified public methods cover market metadata, tickers, order books, trades and OHLCV. Built-in rate limiting is enabled by default. The manual warns that most exchanges allow roughly 1–2 requests per second, endpoint costs vary, and one exchange instance has one limiter; reuse the same instance instead of creating parallel clients for the same venue/IP.
