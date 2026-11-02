@@ -20,6 +20,8 @@ def test_live_v3_smoke_script_parses_and_contains_no_transaction_submission() ->
     assert "250_002" in source
     assert "RpcTransportError" in source
     assert '"https://eth.nodely.dev"' in source
+    assert '"https://rpcfree.com/ethereum-rpc"' in source
+    assert '"https://eth-mainnet.g.alchemy.com/public"' in source
     assert "MAX_TOTAL_RPC_REQUESTS = 512" in source
     assert "remaining_budget = MAX_TOTAL_RPC_REQUESTS - requests_used" in source
     assert "rpc_endpoint" in source
