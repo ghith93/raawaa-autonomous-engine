@@ -527,3 +527,22 @@ def test_lookup_v2_pair_address_returns_none_for_factory_zero_address(monkeypatc
     assert reader.lookup_v2_pair_address(
         "0x" + "8" * 40, "0x" + "1" * 40, "0x" + "2" * 40, 123,
     ) is None
+
+
+def test_rpc_http_403_is_classified_as_retryable_transport_error(monkeypatch):
+    from io import BytesIO
+    from urllib.error import HTTPError
+
+    import pytest
+
+    from arb_engine.rpc import RpcTransportError
+
+    reader = EthereumV2PoolReader(min_request_interval=0)
+
+    def forbidden(*args, **kwargs):
+        raise HTTPError("https://example.invalid", 403, "Forbidden", hdrs=None, fp=BytesIO(b""))
+
+    monkeypatch.setattr("arb_engine.rpc.urlopen", forbidden)
+    with pytest.raises(RpcTransportError, match="HTTP error: 403"):
+        reader._rpc("eth_chainId", [])
+    assert reader.rpc_request_count == 1
