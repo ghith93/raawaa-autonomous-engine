@@ -98,3 +98,17 @@ When the operator asks to activate the bridge:
 5. The bridge accepts only issues authored by ghith93 with the exact [AndroidHarness Task] title prefix and versioned JSON marker.
 
 Allowed bridge operations are fixed: inspect_environment, git_status, run_python_tests (only against the exact fetched origin/main SHA), and run_androidharness_doctor (read-only; must assert no mutations, no network requests, and no secret output). The Python test runner uses a minimal environment and temporary HOME, but it is not an OS sandbox: test code runs as the AndroidHarness Linux/app UID and can access files/network resources available to that UID. Run it only against trusted owner-controlled main code; do not store unrelated secrets in files accessible to the app UID. Do not modify the bridge to accept arbitrary shell or user-provided command strings. Do not enqueue root, package installation, SSH, provider, Cloudflare, production, or customer-facing operations. Task output is bounded and results are posted to the issue. If a task is left marked Running after interruption, inspect the private audit log before manually requeueing it.
+
+
+## Preferred recurring operation: WorkManager
+
+For ongoing project cycles, prefer AndroidHarness' native scheduled-message automation through Android WorkManager over a manually launched infinite GitHub issue poller.
+
+- Follow the complete one-time setup and recurring prompt in docs/androidharness-workmanager-automation.md.
+- Use one dedicated Code conversation and one hourly scheduled automation initially. Each occurrence may perform at most one bounded project task.
+- Enable bounded Auto-continue (initial retry count 3), conservative per-task token/time/cost limits, and notifications. Do not treat auto-continue as permission to bypass approvals.
+- Configure Android battery/background settings to avoid aggressive app suspension where the OS offers that control. Never request root, Full access, Shizuku, or disable system protections for persistence.
+- Verify a real scheduled occurrence and its next scheduled occurrence in Automation history before marking the backend active.
+- WorkManager scheduling is opportunistic and can be delayed or stopped by device power, force-stop, connectivity, battery policy, or OEM behavior. It is not guaranteed 24/7 execution.
+- Keep Cloudflare D1 as the durable task ledger and GitHub Actions as CI. AndroidHarness is a recurring optional worker, not the sole source of task state.
+- Do not run the legacy issue poller alongside the recurring Code automation unless a separately reviewed use case requires it; duplicate workers can race for workspace state.
