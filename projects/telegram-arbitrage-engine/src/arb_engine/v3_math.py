@@ -15,7 +15,7 @@ MAX_TICK = 887272
 MIN_SQRT_RATIO = 4295128739
 MAX_SQRT_RATIO = 1461446703485210103287273052203988822378723970342
 
-# Fixed-point factors for sqrt(1.0001 ** (2 ** bit)) in Q128.128.
+# Fixed-point factors for sqrt(1.0001 ** (-(2 ** bit))) in Q128.128.
 # They are protocol constants; using integer multiplication preserves the
 # exact rounding behavior required by the on-chain Q64.96 representation.
 _TICK_FACTORS = (
