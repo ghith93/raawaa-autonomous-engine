@@ -41,6 +41,7 @@ python -m unittest discover -s tests -v
 python -m engine.cli enqueue --type research_brief --title "Example" --payload '{"topic":"agent frameworks"}'
 python -m engine.cli list
 python -m engine.cli run-once
+python -m engine.cli monetary-status
 ```
 
 ## Repository map
