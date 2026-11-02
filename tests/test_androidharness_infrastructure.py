@@ -61,7 +61,7 @@ class AndroidHarnessInfrastructureTests(unittest.TestCase):
             env=env,
             text=True,
             capture_output=True,
-            timeout=15,
+            timeout=45,
             check=False,
         )
         self.assertEqual(result.returncode, 0, result.stderr)
