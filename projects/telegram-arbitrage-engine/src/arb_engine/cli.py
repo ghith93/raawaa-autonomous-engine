@@ -386,7 +386,7 @@ def main() -> None:
             )
             print(json.dumps(result, indent=2))
         except (RpcReadError, ValueError, ArithmeticError, OSError, RuntimeError, sqlite3.Error) as exc:
-            parser.exit(2, f"flash-swap-sim failed: {exc}\\n")
+            parser.exit(2, f"flash-swap-sim failed: {exc}\n")
     elif args.command == "token-check":
         try:
             reader = EthereumV2PoolReader(args.rpc_url, expected_chain_id=args.chain_id)
