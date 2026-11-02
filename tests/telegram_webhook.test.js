@@ -117,3 +117,41 @@ test("unsupported HTTP methods are rejected", async () => {
   const response = await handleTelegramWebhook(request(null, { method: "GET" }), ENV, new URL("https://engine.example/v1/telegram/webhook"));
   assert.equal(response.status, 405);
 });
+
+test("D1 receipt failure returns retryable service error before Telegram send", async () => {
+  const DB = dbMock({ fail: true });
+  const originalFetch = globalThis.fetch;
+  let sends = 0;
+  globalThis.fetch = async () => { sends++; return new Response(JSON.stringify({ ok: true }), { status: 200 }); };
+  try {
+    const response = await handleTelegramWebhook(request({ update_id: 101, message: { chat: { id: 12345, type: "private" }, text: "/help" } }), { ...ENV, DB }, new URL("https://engine.example/v1/telegram/webhook"));
+    assert.equal(response.status, 503);
+    assert.equal(sends, 0);
+  } finally { globalThis.fetch = originalFetch; }
+});
+
+test("out-of-order unique update IDs are independently processed and command arguments are rejected", async () => {
+  const DB = dbMock();
+  const originalFetch = globalThis.fetch;
+  const replies = [];
+  globalThis.fetch = async (_url, init) => {
+    replies.push(JSON.parse(init.body).text);
+    return new Response(JSON.stringify({ ok: true }), { status: 200 });
+  };
+  try {
+    for (const [update_id, text] of [[105, "/report"], [104, "/status ignored"]]) {
+      const response = await handleTelegramWebhook(request({ update_id, message: { chat: { id: 12345, type: "private" }, text } }), { ...ENV, DB }, new URL("https://engine.example/v1/telegram/webhook"));
+      assert.equal(response.status, 200);
+      assert.equal((await response.json()).delivery_status, "sent");
+    }
+    assert.match(replies[0], /candidate_detected: 3/);
+    assert.match(replies[1], /Unknown command/);
+  } finally { globalThis.fetch = originalFetch; }
+});
+
+test("per-chat rate cap is enforced by the receipt insert statement", async () => {
+  const DB = dbMock({ inserted: false });
+  const response = await handleTelegramWebhook(request({ update_id: 106, message: { chat: { id: 12345, type: "private" }, text: "/help" } }), { ...ENV, DB }, new URL("https://engine.example/v1/telegram/webhook"));
+  assert.equal(response.status, 200);
+  assert.match(DB.calls[0].sql, /COUNT\(\*\).*created_at/s);
+});
