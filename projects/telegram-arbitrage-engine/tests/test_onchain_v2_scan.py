@@ -337,7 +337,7 @@ def test_scan_rejects_unsafe_rpc_request_interval():
         scan_onchain_v2_candidates(
             token_address=BASE, quote_token_address=QUOTE,
             capital_quote="1000", dex_client=FakeDexScreener([]),
-            reader=FakeReader(), min_request_interval=0,
+            min_request_interval=0,
         )
 
 
