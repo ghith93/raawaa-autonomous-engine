@@ -43,6 +43,18 @@ class EvmPoolSnapshot:
     seconds_since_last_reserve_update: int = 0
 
 
+@dataclass(frozen=True, slots=True)
+class EvmBlockContext:
+    chain_id: int
+    block_number: int
+    block_hash: str
+    timestamp: int
+
+
+class PoolFactoryMismatch(RpcReadError):
+    """Raised when a discovered pair is not registered by the expected V2 factory."""
+
+
 class EthereumV2PoolReader:
     """Read-only EVM V2 pool reader. It has no transaction or signing methods."""
 
@@ -53,6 +65,7 @@ class EthereumV2PoolReader:
         expected_chain_id: int = 1,
         timeout_seconds: float = 8.0,
         min_request_interval: float = 0.25,
+        max_rpc_requests: int | None = None,
     ):
         parsed = urlsplit(endpoint)
         if (
@@ -64,14 +77,28 @@ class EthereumV2PoolReader:
             raise ValueError("expected_chain_id must be a positive integer")
         if timeout_seconds <= 0 or min_request_interval < 0:
             raise ValueError("Invalid RPC timing configuration")
+        if max_rpc_requests is not None and (
+            not isinstance(max_rpc_requests, int) or isinstance(max_rpc_requests, bool)
+            or max_rpc_requests < 1
+        ):
+            raise ValueError("max_rpc_requests must be a positive integer when supplied")
         self.endpoint = endpoint
         self.expected_chain_id = expected_chain_id
         self.timeout_seconds = timeout_seconds
         self.min_request_interval = min_request_interval
+        self.max_rpc_requests = max_rpc_requests
+        self._rpc_request_count = 0
         self._last_request = 0.0
         self._next_id = 1
 
+    @property
+    def rpc_request_count(self) -> int:
+        return self._rpc_request_count
+
     def _rpc(self, method: str, params: list[Any]) -> Any:
+        if self.max_rpc_requests is not None and self._rpc_request_count >= self.max_rpc_requests:
+            raise RpcReadError(f"RPC request budget exceeded ({self.max_rpc_requests})")
+        self._rpc_request_count += 1
         wait = self.min_request_interval - (time.monotonic() - self._last_request)
         if wait > 0:
             time.sleep(wait)
