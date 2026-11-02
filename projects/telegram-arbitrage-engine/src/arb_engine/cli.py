@@ -145,9 +145,14 @@ def main() -> None:
         "--amount-specified", required=True, type=int,
         help="raw token units: positive for exact input, negative for exact output",
     )
-    v3_parser.add_argument(
-        "--limit-tick", required=True, type=int,
-        help="hard price boundary tick; must be on the requested side of the current price",
+    v3_limit_group = v3_parser.add_mutually_exclusive_group(required=True)
+    v3_limit_group.add_argument(
+        "--limit-tick", type=int,
+        help="absolute hard price boundary tick on the requested side of current price",
+    )
+    v3_limit_group.add_argument(
+        "--limit-ticks", type=int,
+        help="positive tick distance from current slot0.tick; direction selects lower or upper limit",
     )
     v3_parser.add_argument("--chain-id", type=int, default=1)
     v3_parser.add_argument("--rpc-url", help="HTTPS read-only RPC; defaults to PublicNode for Ethereum only")
@@ -473,7 +478,6 @@ def main() -> None:
                 raise ValueError("--max-steps must be between 1 and 2048")
             rpc_url = args.rpc_url or DEFAULT_ETHEREUM_RPC
             zero_for_one = args.direction == "token0_to_token1"
-            sqrt_price_limit_x96 = get_sqrt_ratio_at_tick(args.limit_tick)
             reader = EvmV3PoolReader(
                 rpc_url,
                 expected_chain_id=args.chain_id,
@@ -481,10 +485,20 @@ def main() -> None:
                 min_request_interval=args.min_request_interval,
                 max_rpc_requests=args.max_rpc_requests,
             )
+            block_context = None
+            if args.limit_ticks is not None:
+                if not 1 <= args.limit_ticks <= 887272:
+                    raise ValueError("--limit-ticks must be between 1 and 887272")
+                block_context, _, current_tick = reader.read_slot0(args.pool)
+                limit_tick = current_tick - args.limit_ticks if zero_for_one else current_tick + args.limit_ticks
+            else:
+                limit_tick = args.limit_tick
+            sqrt_price_limit_x96 = get_sqrt_ratio_at_tick(limit_tick)
             snapshot = reader.read_snapshot(
                 args.pool,
                 zero_for_one=zero_for_one,
                 sqrt_price_limit_x96=sqrt_price_limit_x96,
+                block_context=block_context,
                 expected_factory=args.factory,
                 max_bitmap_words=args.max_bitmap_words,
                 max_initialized_ticks=args.max_initialized_ticks,
@@ -509,6 +523,8 @@ def main() -> None:
                 "block_number": result.block_number,
                 "block_hash": result.block_hash,
                 "direction": args.direction,
+                "current_tick": snapshot.tick,
+                "limit_tick": limit_tick,
                 "exact_input": result.exact_input,
                 "amount_specified_raw": str(result.amount_specified),
                 "amount_in_excluding_fee_raw": str(result.amount_in),
