@@ -16,7 +16,7 @@ Simulation-first spot-arbitrage research module, isolated inside the autonomous-
 
 ## Same-block on-chain V2 cross-venue scan
 
-The `onchain-v2-scan` command uses DEX Screener only to discover candidate pair addresses and token metadata. It then verifies each candidate against the registered Ethereum V2 factory, reads both verified pools at one pinned block, verifies each Router02 factory, and obtains `getAmountsOut` quotes for both buy/sell directions at that same block.
+The `onchain-v2-scan` command uses DEX Screener only as a candidate discovery hint. It verifies discovered pairs against the registered Ethereum V2 factories and, if a ranked discovery response omits a registered venue, queries that venue's trusted factory `getPair()` directly at the same pinned block. Every selected pair still passes `pair.factory()` and `factory.getPair()` verification before both pools are read and both Router02 factories and buy/sell `getAmountsOut` quotes are checked at that same block.
 
 Example (replace the token addresses with verified contracts; the quote token is always explicit):
 
