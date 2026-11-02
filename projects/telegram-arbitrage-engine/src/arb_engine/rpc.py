@@ -20,6 +20,10 @@ class RpcReadError(RuntimeError):
     """Raised when a read-only JSON-RPC request cannot be trusted."""
 
 
+class RpcExecutionReverted(RpcReadError):
+    """Raised when a read-only EVM call explicitly reports execution reverted."""
+
+
 @dataclass(frozen=True, slots=True)
 class EvmTokenPreflight:
     chain_id: int
@@ -130,6 +134,9 @@ class EthereumV2PoolReader:
         if payload.get("error") is not None:
             error = payload["error"]
             code = error.get("code") if isinstance(error, dict) else None
+            message = error.get("message", "") if isinstance(error, dict) else ""
+            if isinstance(message, str) and "execution reverted" in message.casefold():
+                raise RpcExecutionReverted("EVM eth_call execution reverted")
             raise RpcReadError(f"EVM RPC returned an error (code={code})")
         if "result" not in payload:
             raise RpcReadError("JSON-RPC response has no result")
@@ -454,8 +461,10 @@ class EthereumV2PoolReader:
                 "eth_call", [{"to": pair, "data": "0xc45a0155"}, block_tag],
             )
             actual_factory = self._address(factory_word, "pair factory")
+        except RpcExecutionReverted as exc:
+            raise PoolFactoryMismatch("Candidate pair.factory() call reverted") from exc
         except RpcReadError as exc:
-            if "EVM RPC returned an error" in str(exc) or "ABI address word" in str(exc):
+            if "Invalid ABI address word" in str(exc):
                 raise PoolFactoryMismatch("Candidate does not expose a valid V2 pair factory()") from exc
             raise
         if actual_factory != factory:
@@ -467,8 +476,10 @@ class EthereumV2PoolReader:
                 "eth_call", [{"to": factory, "data": calldata}, block_tag],
             )
             registered_pair = self._address(pair_word, "factory getPair")
+        except RpcExecutionReverted as exc:
+            raise PoolFactoryMismatch("Configured factory getPair() call reverted") from exc
         except RpcReadError as exc:
-            if "EVM RPC returned an error" in str(exc) or "ABI address word" in str(exc):
+            if "Invalid ABI address word" in str(exc):
                 raise PoolFactoryMismatch("Configured factory does not expose a valid V2 getPair() result") from exc
             raise
         if registered_pair != pair:
