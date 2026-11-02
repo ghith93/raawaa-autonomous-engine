@@ -78,9 +78,15 @@ def _next_sqrt_from_amount0(
             else:
                 # Match v3-core's overflow-safe fallback, including its
                 # intermediate floor division before the final ceil.
-                result = _ceil_div(numerator1, numerator1 // sqrt_price_x96 + amount)
+                fallback_denominator = numerator1 // sqrt_price_x96 + amount
+                if fallback_denominator > MAX_UINT256:
+                    raise ValueError("token0 input overflows the protocol fallback denominator")
+                result = _ceil_div(numerator1, fallback_denominator)
         else:
-            result = _ceil_div(numerator1, numerator1 // sqrt_price_x96 + amount)
+            fallback_denominator = numerator1 // sqrt_price_x96 + amount
+            if fallback_denominator > MAX_UINT256:
+                raise ValueError("token0 input overflows the protocol fallback denominator")
+            result = _ceil_div(numerator1, fallback_denominator)
     else:
         if product > MAX_UINT256 or numerator1 <= product:
             raise ValueError("amount removes all available virtual token0 liquidity")
