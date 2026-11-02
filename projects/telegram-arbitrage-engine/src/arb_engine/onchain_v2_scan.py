@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation, localcontext
 import math
 from typing import Any
@@ -10,7 +11,7 @@ from .rpc import (
     EthereumV2PoolReader,
     PoolFactoryMismatch,
 )
-from .venues import Venue, get_venue_by_dexscreener_id
+from .venues import Venue, get_venue, get_venue_by_dexscreener_id
 
 
 def _address(value: str, label: str) -> str:
@@ -198,6 +199,44 @@ def scan_onchain_v2_candidates(
         candidate_verification.append(_candidate_record(candidate, venue, verified=True))
 
     required_venues = {"uniswap_v2_ethereum", "sushiswap_v2_ethereum"}
+    # Discovery APIs can omit a lower-volume venue from their ranked token-pair results.
+    # Resolve any missing registered venue directly from its trusted factory; DEX Screener
+    # remains a hint only, and the returned pair is still factory-verified below.
+    for venue_id in sorted(required_venues - set(verified_by_venue)):
+        venue = get_venue(venue_id, 1)
+        pair_address = reader.lookup_v2_pair_address(
+            venue.factory, token, quote_token, context.block_number,
+        )
+        if pair_address is None:
+            continue
+        pair_address = _address(pair_address, "factory-discovered pair address")
+        if any(item.get("pair_address", "").lower() == pair_address for item in candidate_verification):
+            continue
+        candidate = DexPairCandidate(
+            chain="ethereum",
+            dex=venue.dexscreener_id,
+            pair_address=pair_address,
+            base_address=token,
+            base_symbol=None,
+            quote_address=quote_token,
+            quote_symbol=None,
+            fetched_at=datetime.now(timezone.utc),
+            pair_created_at_ms=None,
+            source_url=None,
+            labels=("trusted_factory_lookup",),
+        )
+        try:
+            reader.verify_v2_pool_factory(
+                pair_address, venue.factory, token, quote_token, context.block_number,
+            )
+        except PoolFactoryMismatch:
+            candidate_verification.append(
+                _candidate_record(candidate, venue, verified=False, reason="factory_lookup_mismatch"),
+            )
+            continue
+        verified_by_venue[venue.id] = (candidate, venue)
+        candidate_verification.append(_candidate_record(candidate, venue, verified=True))
+
     if set(verified_by_venue) != required_venues:
         reader.verify_canonical_block(context.block_number, context.block_hash)
         return {
