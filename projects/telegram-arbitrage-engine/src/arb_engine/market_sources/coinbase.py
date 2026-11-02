@@ -294,8 +294,8 @@ class CoinbaseExchangePublicMarketData:
         self, *, product_id: str, level: int = 2
     ) -> CoinbaseOrderBookSnapshot:
         product_id = _product_id(product_id)
-        if type(level) is not int or level not in (1, 2, 3):
-            raise ValueError("level must be 1, 2 or 3")
+        if type(level) is not int or level not in (1, 2):
+            raise ValueError("level must be 1 or 2; level 3 has a different order-ID schema")
         item = self._get(
             f"/products/{urllib.parse.quote(product_id, safe='-')}/book",
             {"level": str(level)},
