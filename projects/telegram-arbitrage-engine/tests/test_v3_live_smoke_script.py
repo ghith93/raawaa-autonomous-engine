@@ -25,6 +25,8 @@ def test_live_v3_smoke_script_parses_and_contains_no_transaction_submission() ->
     assert "eth_sendRawTransaction" not in source
     assert "live_execution" in source
     assert "transaction_submitted" in source
+    assert "re.fullmatch" in source
+    assert "250_002" in source
 
 
 def test_v3_smoke_only_fails_over_for_transport_failures() -> None:
@@ -48,3 +50,12 @@ def test_v3_smoke_endpoint_override_is_unique_and_does_not_embed_credentials(mon
         "https://eth.drpc.org",
         "https://public.1rpc.io/eth",
     )
+
+
+def test_v3_smoke_token_runtime_bytecode_must_be_strict_hex() -> None:
+    _, module = smoke_module()
+    assert module._has_valid_runtime_bytecode("0x6001600055")
+    assert not module._has_valid_runtime_bytecode("0x")
+    assert not module._has_valid_runtime_bytecode("0xzz")
+    assert not module._has_valid_runtime_bytecode("0x123")
+    assert not module._has_valid_runtime_bytecode("0x" + "60" * 125001)
