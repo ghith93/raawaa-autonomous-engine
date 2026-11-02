@@ -5,7 +5,7 @@
       "id": "androidharness",
       "display_name": "AndroidHarness",
       "kind": "external_android_linux_runtime",
-      "status": "bridge_implemented_not_activated",
+      "status": "workmanager_automation_documented_not_activated",
       "operator_reported_snapshot_utc": "2026-11-01T22:40:00Z",
       "capabilities_reported": [
         "bash",
@@ -25,7 +25,8 @@
         "local_gguf_model_support",
         "foreground_service_resume",
         "one_approval_android_sdk_installer",
-        "github_issue_task_bridge_code"
+        "github_issue_task_bridge_code",
+        "upstream_workmanager_recurring_automation_support"
       ],
       "capabilities_not_ready_or_unverified": [
         "java_d8",
@@ -38,7 +39,9 @@
         "local_model_benchmark",
         "engine_authenticated_mcp_server",
         "github_issue_task_bridge_running_on_device",
-        "direct_remote_mcp_adapter"
+        "direct_remote_mcp_adapter",
+        "workmanager_automation_created_on_device",
+        "scheduled_device_run_smoke_test"
       ],
       "execution_defaults": {
         "root": false,
@@ -64,6 +67,7 @@
         ]
       },
       "documentation": "docs/android-harness.md",
+      "recurring_worker_runbook": "docs/androidharness-workmanager-automation.md",
       "upstream_version": "3.2-release",
       "upstream_release_published_at_utc": "2026-10-31T19:23:44Z",
       "upstream_apk_sha256": "e6607cd7a70bf555cfd3fb7ce8b66d77efd5461c083e9f4585e16f57c36f6261",
@@ -75,13 +79,14 @@
       "notes": [
         "Upstream v3.2-release metadata and APK SHA-256 verified from the official GitHub release on 2026-11-02; this does not verify the app version installed on the device.",
         "Operator-reported device snapshot is dated 2026-11-01T22:40:00Z and is not a live health check.",
-        "Android SDK/JDK/Gradle are optional for this Python-first engine; v3.2 android_sdk_install can install OpenJDK 21, D8, aapt2, apksigner, android.jar and optional Gradle behind one explicit approval.",
-        "OpenSSH is not required for HTTPS GitHub operations. Shizuku and direct root remain disabled unless a concrete Android system task requires them.",
-        "Harness is an MCP client. No authenticated engine MCP endpoint or remote device adapter exists yet.",
-        "Foreground service and resume support do not constitute guaranteed 24/7 execution.",
-        "A bounded GitHub issue task bridge is implemented but not active until a local AndroidHarness poller is started; it is not a direct MCP or general remote shell adapter.",
-        "Only owner-authored issues with the strict task schema can request the four allowlisted read-only operations; issue title/comment/close updates are task-lifecycle metadata only.",
-        "The Python test operation runs under the AndroidHarness Linux/app UID and is not OS-sandboxed; restrict it to trusted owner-controlled origin/main code."
+        "Android SDK/JDK/Gradle are optional for this Python-first engine.",
+        "OpenSSH is not required for HTTPS GitHub operations. Shizuku and direct root remain disabled unless a concrete task requires them.",
+        "Harness is an MCP client. No authenticated engine MCP endpoint or direct remote device adapter exists.",
+        "Upstream AndroidHarness supports recurring WorkManager prompt automations, a foreground service, persistent queues and bounded auto-continue. Device-side setup and a successful scheduled-run smoke test remain unverified.",
+        "WorkManager scheduling is opportunistic and subject to Android power, battery, connectivity and OEM restrictions; it is not guaranteed 24/7 execution.",
+        "A bounded GitHub issue task bridge is implemented but remains inactive unless its local poller is started; prefer native recurring automation for routine cycles.",
+        "The issue bridge accepts only four fixed read-only operations and is not general remote shell.",
+        "The Python test operation runs under the AndroidHarness Linux/app UID and is not an OS sandbox; use only trusted owner-controlled origin/main code."
       ]
     }
   ]

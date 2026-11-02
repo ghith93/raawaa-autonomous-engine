@@ -41,3 +41,10 @@ The integration now includes an AndroidHarness 3.2 project configuration (`harne
 ## Safety boundaries
 
 Human approval is mandatory for publishing, sending messages, spending money, price changes, production deployment, deleting data, changing access, and modifying a storefront. Read-only research and local tests can be automated within configured limits.
+
+
+## Recurring Android worker and durability boundary
+
+The preferred tablet-side recurring execution mode is AndroidHarness native scheduled-message automation through Android WorkManager, with a dedicated Code conversation and bounded hourly cycles. See docs/androidharness-workmanager-automation.md for setup, recurring prompt, limits, and recovery. This avoids requiring a manually maintained infinite terminal poller.
+
+WorkManager is an opportunistic device scheduler, not an always-on service or real-time SLA. Cloudflare D1 remains the durable task ledger; GitHub Actions remains CI and the bounded cloud scheduler. AndroidHarness may execute one bounded unit of work per occurrence when the device, app, network, and model quota permit. A missed device run must leave tasks queued, not lose them. Activation requires an actual successful scheduled run and a verified next occurrence in Automation history; repository-side configuration is not device-side proof.

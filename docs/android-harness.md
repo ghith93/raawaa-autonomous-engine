@@ -196,3 +196,14 @@ The expected commit must be the current GitHub main SHA or a descendant, not a h
 - [ ] Smoke test and failure cleanup documented
 - [ ] Results, versions, commit SHA, and resource measurements recorded
 - [ ] Agent invocation still passes policy and audit gates
+
+
+## Preferred recurring worker: native WorkManager automation
+
+For recurring project work, use the native AndroidHarness scheduled-message automation described in [the WorkManager runbook](androidharness-workmanager-automation.md). It is preferred over keeping scripts/androidharness_issue_bridge.py running as a manual infinite terminal process.
+
+AndroidHarness upstream documents recurring/interval prompt tasks through Android WorkManager, persistent message queues, a foreground service for active work, resume cards, and optional bounded auto-continue. Configure one dedicated Code conversation and one hourly recurrence initially. The runbook includes the complete recurring prompt, policy limits, recovery steps, and one-time device setup.
+
+This mode removes the need to keep a terminal session manually open. It is still opportunistic Android background work, not a 24/7 guarantee: device power, force-stop, network, battery restrictions, and OEM scheduling can delay or stop it. Keep the cloud queue and task ledger durable in Cloudflare D1, and keep GitHub Actions as the reproducible CI gate. Do not run the legacy issue poller concurrently with the scheduled Code automation unless a reviewed need exists.
+
+Backend activation requires a successful device-side scheduled run and a verified next occurrence in Automation history. Repository documentation alone is not proof that the tablet schedule has been created or is running.
