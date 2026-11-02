@@ -55,6 +55,21 @@ The earlier spike CI run [41362857123](https://github.com/ghith93/raawaa-autonom
 
 Cloudflare Workers SDK released Wrangler **4.156.1** at 2026-11-01 23:24 UTC. Its release updates the bundled `workerd` dependency to `1.20261101.1` and the default compatibility date to `2026-11-01`. The CI and local smoke test now pin that exact patch release rather than lowering the Worker compatibility date. This preserves deterministic tooling and avoids changing runtime compatibility merely to accommodate an older local emulator.
 
+## Exact PR-head validation
+
+PR [#125](https://github.com/ghith93/raawaa-autonomous-engine/pull/125) head `58ba78460db3ec9568c1f7ac93ebaf5377fc3c81` passed Engine CI on 2026-11-02: [run 41367225843](https://github.com/ghith93/raawaa-autonomous-engine/actions/runs/41367225843).
+
+| Check | Result |
+|---|---:|
+| Policy audit | Passed |
+| Python unit suite | 227 passed (5.826 s) |
+| Existing Cloudflare Worker tests | 25 passed, 0 failed |
+| Workflows deterministic unit tests | 10 passed, 0 failed |
+| Pinned Wrangler CLI | 4.156.1 |
+| Local Workflows runtime smoke | Passed in 5.5 s |
+
+The local runtime smoke exercised duplicate instance creation, step replay after restart, approval event delivery/resume, termination, expired lease handling, and approval timeout. The test runs with fake adapters and a filtered environment; it does not contact Cloudflare or a model provider. This is exact PR-head CI evidence, not production deployment or remote-runtime verification.
+
 ## Comparative assessment
 
 | Criterion | GitHub Actions + D1 | Cloudflare Workflows | MAF checkpoint adapter |
