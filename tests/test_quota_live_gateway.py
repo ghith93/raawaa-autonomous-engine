@@ -377,7 +377,7 @@ class QuotaAwareGatewayTests(unittest.TestCase):
 
     def test_existing_spend_blocks_live_gateway_before_provider_call(self):
         adapter = FakeAdapter("groq")
-        self.usage.record("groq", "model-x", "research", 1, 1, 0.01)
+        self.usage.record("groq", "model-x", "research", 1, 1, 0.01, task_id="other-task")
         manager = QuotaManager([self.profile()], self.quota)
         gateway = QuotaAwareLiveGateway(
             manager, {"groq": adapter}, self.usage, True,
