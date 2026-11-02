@@ -141,6 +141,11 @@ class EthereumV2PoolReader:
             message = error.get("message", "") if isinstance(error, dict) else ""
             if isinstance(message, str) and "execution reverted" in message.casefold():
                 raise RpcExecutionReverted("EVM eth_call execution reverted")
+            if code == -32005 or (
+                isinstance(message, str)
+                and any(term in message.casefold() for term in ("rate limit", "too many requests"))
+            ):
+                raise RpcTransportError(f"EVM RPC provider rate limit (code={code})")
             raise RpcReadError(f"EVM RPC returned an error (code={code})")
         if "result" not in payload:
             raise RpcReadError("JSON-RPC response has no result")
