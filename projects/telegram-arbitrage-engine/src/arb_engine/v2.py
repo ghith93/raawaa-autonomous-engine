@@ -114,7 +114,7 @@ def simulate_round_trip(
     _validate_pool(buy_pool)
     _validate_pool(sell_pool)
     if buy_pool.chain_id != sell_pool.chain_id:
-        raise ValueError("Cross-chain pools cannot form an atomic round trip")
+        raise ValueError("Cross-chain pools cannot form a same-chain round trip")
     if buy_pool.pair_address.casefold() == sell_pool.pair_address.casefold():
         raise ValueError("Round trip requires two different pools")
     if buy_pool.block_number != sell_pool.block_number or buy_pool.block_hash.casefold() != sell_pool.block_hash.casefold():
