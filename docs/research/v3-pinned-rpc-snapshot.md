@@ -51,6 +51,6 @@ Positive `--amount-specified` means exact input; negative means exact output. Th
 
 ## Public RPC provider fallback
 
-The scheduled Ethereum smoke tries the default public endpoint first and then the known public Nodely endpoint. Only transport failures (HTTP access errors, timeouts, URL failures or invalid transport payloads) trigger fallback; contract identity, ABI, chain, tick and snapshot-validation failures remain hard failures.
+The scheduled Ethereum smoke tries PublicNode, Nodely, dRPC and 1RPC in order. Only transport failures (HTTP access errors, timeouts, URL failures or invalid transport payloads) trigger fallback; contract identity, ABI, chain, tick and snapshot-validation failures remain hard failures.
 
 Each provider attempt gets only the remaining share of a single 512-request total budget. A failed attempt is discarded and the entire read starts again against the next endpoint; the reader never combines slot0, bitmap, tick or token metadata from different providers or block contexts. The selected endpoint and total requests across attempts are included in the smoke output. No API key or paid endpoint is configured.
