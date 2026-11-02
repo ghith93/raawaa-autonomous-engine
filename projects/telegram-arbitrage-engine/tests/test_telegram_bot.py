@@ -91,7 +91,7 @@ def test_telegram_api_errors_never_expose_bot_token_or_request_url(monkeypatch):
 
 
 
-def test_failed_reply_consumes_update_without_repeating_scan(monkeypatch):
+def test_failed_reply_consumes_update_without_repeating_scan(monkeypatch, tmp_path):
     from arb_engine import telegram_bot
 
     updates = [message_update(update_id=11, text="/scan WETH/USDC")]
@@ -106,16 +106,23 @@ def test_failed_reply_consumes_update_without_repeating_scan(monkeypatch):
     calls = []
     monkeypatch.setattr(
         telegram_bot,
-        "scan",
-        lambda *args: calls.append(args) or {"opportunities": []},
+        "scan_with_spreads",
+        lambda *args: calls.append(args) or ({"opportunities": []}, []),
     )
     controller = TelegramController(
-        FailingSendAPI(updates), frozenset({123}), min_request_interval_seconds=0,
+        FailingSendAPI(updates), frozenset({123}),
+        ledger_path=str(tmp_path / "telegram.sqlite3"),
+        min_request_interval_seconds=0,
     )
 
     next_offset = controller.poll_once(offset=0)
     assert next_offset == 12
     assert controller.poll_once(offset=next_offset) == 12
+    assert len(calls) == 1
+    # Simulate a restart replaying this update before the offset checkpoint.
+    replay = controller.response_for_update(updates[0])
+    assert replay is not None
+    assert "No cross-DEX indicative spread" in replay[1]
     assert len(calls) == 1
 
 
@@ -157,3 +164,15 @@ def test_poll_offset_callback_failure_stops_batch_without_claiming_later_updates
 
     assert checkpoints == [32]
     assert len(api.sent) == 1
+
+
+def test_scan_update_requires_a_valid_update_id(tmp_path):
+    controller = TelegramController(
+        FakeAPI([]), frozenset({123}), ledger_path=str(tmp_path / "telegram.sqlite3"),
+        min_request_interval_seconds=0,
+    )
+    update = message_update(text="/scan WETH/USDC")
+    update.pop("update_id")
+    response = controller.response_for_update(update)
+    assert response is not None
+    assert "update ID is missing or invalid" in response[1]
