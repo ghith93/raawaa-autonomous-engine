@@ -14,6 +14,26 @@ Simulation-first spot-arbitrage research module, isolated inside the autonomous-
 - An optional local Anvil fork-call adapter accepts exact caller-supplied calldata and performs read-only eth_call/eth_estimateGas with optional callTracer output; it refuses non-loopback endpoints and never submits transactions. It simulates one call only, not an atomic two-venue arbitrage route.
 - A read-only EVM JSON-RPC adapter retrieves two V2 pool states and token decimals at one pinned block. The V2 constant-product calculator uses integer raw units and requires two distinct pools at the same block; it is reserve math only and excludes gas, transfer taxes, dynamic fees, reverts, MEV, and execution. Pool fee basis points can be supplied manually or selected from the source-documented Ethereum V2 registry. Registry entries remain unverified until the CLI confirms pair.factory(), factory.getPair(), and router.factory() at the pinned block; the fee model is still a documented assumption.
 
+## Read-only Solana quote data
+
+A fixture-tested Jupiter Swap API V2 quote-only client is available at `arb_engine.market_sources.jupiter.JupiterQuoteOnlyClient`. It calls only `GET /swap/v2/order` without `taker` or an API key. Jupiter documents that this returns a quote with `transaction: null`; the adapter rejects any response that contains a transaction. It enforces the keyless 0.5 requests/second limit (2-second minimum interval), validates raw uint64 amounts and mint identity, and preserves fee/route/price-impact metadata.
+
+Example:
+
+```python
+from arb_engine.market_sources.jupiter import JupiterQuoteOnlyClient
+
+client = JupiterQuoteOnlyClient()  # keyless, quote only; no wallet or transaction
+quote = client.quote(
+    input_mint="So11111111111111111111111111111111111111112",
+    output_mint="EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+    amount_raw="100000000",
+)
+print(quote.output_amount_raw, quote.fee_bps, quote.router, quote.price_impact_pct)
+```
+
+This is an indicative aggregator quote, not a guaranteed fill or a net-profit calculation. Jupiter's Meta-Aggregator may combine on-chain routes and off-chain RFQ sources; fees, quote freshness, last-look behavior and execution risk must be accounted for separately. No transaction is built, signed, or submitted. See [data sources and trust boundaries](DATA_SOURCES.md).
+
 ## Read-only flash-swap simulation
 
 The `flash-swap-sim` command reads two V2 pools at one canonical block, models the opposite-token repayment invariant, and optionally applies a caller-supplied gas-used/gas-price scenario. It can optionally record local research events with `--record-paper`.
