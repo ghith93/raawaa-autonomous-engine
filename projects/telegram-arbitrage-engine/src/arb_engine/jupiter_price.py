@@ -167,7 +167,7 @@ class JupiterRateLimiter:
         ):
             seconds = self.interval_seconds
         with self._lock:
-            self._next_request_at = max(self._next_request_at, self._clock()) + float(seconds)
+            self._next_request_at = max(self._next_request_at, self._clock() + float(seconds))
 
 
 _DEFAULT_RATE_LIMITER = JupiterRateLimiter(interval_seconds=2.0)
