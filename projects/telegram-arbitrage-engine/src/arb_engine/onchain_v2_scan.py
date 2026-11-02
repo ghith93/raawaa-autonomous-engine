@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from decimal import Decimal, InvalidOperation, localcontext
+import math
 from typing import Any
 
 from .dexscreener import DexPairCandidate, DexScreenerClient
@@ -97,6 +98,7 @@ def scan_onchain_v2_candidates(
     rpc_url: str = "https://ethereum-rpc.publicnode.com",
     max_candidate_pairs: int = 4,
     max_rpc_requests: int = 32,
+    min_request_interval: float = 0.55,
     dex_client: DexScreenerClient | None = None,
     reader: EthereumV2PoolReader | None = None,
 ) -> dict[str, Any]:
@@ -120,11 +122,17 @@ def scan_onchain_v2_candidates(
         or not 1 <= max_rpc_requests <= 64
     ):
         raise ValueError("max_rpc_requests must be an integer from 1 to 64")
+    if (
+        isinstance(min_request_interval, bool) or not isinstance(min_request_interval, (int, float))
+        or not math.isfinite(min_request_interval) or not 0.1 <= min_request_interval <= 5.0
+    ):
+        raise ValueError("min_request_interval must be between 0.1 and 5 seconds")
     capital_amount = _capital_decimal(capital_quote)
 
     dex_client = dex_client or DexScreenerClient()
     reader = reader or EthereumV2PoolReader(
         rpc_url, expected_chain_id=1, max_rpc_requests=max_rpc_requests,
+        min_request_interval=float(min_request_interval),
     )
     discovered = dex_client.token_pair_candidates("ethereum", token)
     filtered: list[tuple[DexPairCandidate, Venue]] = []
