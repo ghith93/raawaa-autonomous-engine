@@ -51,6 +51,8 @@ def test_v2_sim_cli_converts_human_amount_to_raw_units(monkeypatch, capsys):
     assert result["mode"] == "read_only_same_block_v2_reserve_simulation"
     assert result["capital_quote"] == "50"
     assert result["block_number"] == 123
+    assert result["buy_pool_fee_bps_assumed"] == 30
+    assert result["sell_pool_fee_bps_assumed"] == 25
     assert result["live_execution"] is False
     assert "Excludes gas" in result["warning"]
 
