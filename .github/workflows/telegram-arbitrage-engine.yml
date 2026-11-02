@@ -1,11 +1,6 @@
 name: Telegram Arbitrage Engine CI
 
 on:
-  push:
-    branches: ["feature/telegram-arbitrage-engine"]
-    paths:
-      - "projects/telegram-arbitrage-engine/**"
-      - ".github/workflows/telegram-arbitrage-engine.yml"
   pull_request:
     branches: [main]
     paths:
