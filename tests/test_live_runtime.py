@@ -3,6 +3,7 @@ import tempfile
 import unittest
 from datetime import datetime, timezone
 from pathlib import Path
+from unittest.mock import patch
 
 from engine.live_runtime import build_live_gateway
 
@@ -78,6 +79,49 @@ class LiveRuntimeFactoryTests(unittest.TestCase):
                     "GROQ_API_KEY": "test-key",
                 },
             )
+
+    def test_cloud_mode_uses_durable_d1_monetary_ledger_without_local_fallback(self):
+        fake_usage = type("FakeUsageLedger", (), {
+            "budget_status": lambda self, *args, **kwargs: {
+                "daily_over_budget": False,
+                "monthly_over_budget": False,
+                "per_task_over_budget": False,
+            },
+            "totals": lambda self, *args, **kwargs: {
+                "daily_usd": 0.0, "monthly_usd": 0.0,
+                "daily_reserved_usd": 0.0, "monthly_reserved_usd": 0.0,
+                "daily_total_nanos": 0, "monthly_total_nanos": 0,
+                "pending_reservations": 0,
+            },
+        })()
+        class FakeManager:
+            def __init__(self, profiles, ledger):
+                self.profiles = profiles
+                self.ledger = ledger
+            def eligible(self, profile, estimated_tokens):
+                return True
+            def snapshot(self):
+                return []
+
+        environ = {
+            "RAAWAA_ENGINE_LIVE_INFERENCE": "enabled",
+            "RAAWAA_ENGINE_API_URL": "https://engine.example",
+            "RAAWAA_ENGINE_API_TOKEN": "test-worker-token",
+            "GROQ_API_KEY": "test-key",
+        }
+        with patch("engine.live_runtime.D1QuotaLedger", return_value=object()):
+            with patch("engine.live_runtime.D1UsageLedger", return_value=fake_usage) as d1_usage:
+                with patch("engine.live_runtime.QuotaManager", side_effect=FakeManager):
+                    with patch("engine.live_runtime.OpenAICompatibleAdapter", return_value=object()):
+                        with patch("engine.live_runtime.UsageLedger") as local_usage:
+                            gateway = build_live_gateway(
+                                self.db_path, self.policy_path, self.registry_path,
+                                environ=environ,
+                            )
+        self.assertIsNotNone(gateway)
+        self.assertIs(gateway.usage_ledger, fake_usage)
+        d1_usage.assert_called_once_with()
+        local_usage.assert_not_called()
 
     def test_preview_profile_is_not_eligible_even_if_marked_enabled(self):
         qwen = next(route for route in self.registry["routes"]
