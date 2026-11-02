@@ -131,7 +131,7 @@ Agents may research and propose changes. Policy gates must control execution. Ke
 
 - No persistent scheduler or always-on service; GitHub Actions and the Cloudflare cron are bounded scheduled jobs.
 - No unattended live-agent loop: the scheduled worker defaults to dry-run. The Groq API key is configured and its read-only model-catalog check succeeded. GPT-OSS 20B/120B production candidates and Qwen 3.8-27B preview profile are staged in the registry, but every route remains disabled and no inference request has been made.
-- No notification channel.
+- No proactive alerting channel. A read-only Telegram command webhook (`/help`, `/status`, `/report`) is implemented behind operator-managed secrets and a private-chat allowlist; it is not automatically activated, and it does not provide scheduled alerts.
 - The Cloudflare control Worker and D1 binding are deployed. The latest Task Runner passed health GET and authenticated POST preflights (HTTP 200) and completed a one-time D1 smoke task successfully in dry-run mode. Live inference remains disabled.
 - Lease-token fencing and periodic heartbeat renewal are implemented and covered by tests. External side effects still require handler-specific idempotency before activation.
 - Local SQLite memory and model-usage state need an explicit backup/retention strategy for production.
