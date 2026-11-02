@@ -28,20 +28,24 @@
 
 ## Source-documented V2 venue registry
 
-The packaged registry currently contains Ethereum mainnet only:
+The packaged registry contains source-documented Ethereum mainnet and BNB Smart Chain V2 venues:
 
 | Venue | Factory | Router02 | Swap fee assumption |
 |---|---|---|---:|
 | Uniswap V2 | `0x5C69bEe701ef814a2B6a3EDD4B1652CB9cc5aA6f` | `0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D` | 30 bps |
 | SushiSwap V2 | `0xC0AEe478e3658e2610c5F7A4A2E1777cE9e4f2Ac` | `0xd9e1cE17f2641f24aE83637ab66a2cca9C378B9F` | 30 bps |
+| PancakeSwap V2 (BSC) | `0xcA143Ce32Fe78f1f7019d7d551a6402fC5350c73` | `0x10ED43C718714eb63d5aA57B78B54704E256024E` | 25 bps |
+| ApeSwap V2 (BSC) | `0x0841BD0B734E4F5853f0dD8d7Ea041c241fb0Da6` | `0xcF0feBd3f17CEf5b47b0cD257aCf6025c5BFf3b7` | 20 bps |
 
 - Uniswap deployment source: https://developers.uniswap.org/docs/protocols/v2/deployments
 - Uniswap fee source: https://developers.uniswap.org/docs/get-started/concepts/fees (0.30% total V2 swap fee; protocol fee affects distribution, not the total trader fee).
 - SushiSwap deployment source: https://github.com/sushiswap/v2-core/tree/master/deployments/ethereum
 - SushiSwap fee source: https://github.com/sushiswap/v2-core/blob/master/contracts/UniswapV2Pair.sol (pair invariant deducts 3/1000 from input).
 - Registry status is `source_documented_not_live_verified`. Selecting a venue auto-fills its fee, factory, and Router02, then the CLI verifies `pair.factory()`, `factory.getPair(token0,token1)`, and `router.factory()` via `eth_call` at the pinned block.
+- PancakeSwap V2 BSC router source verification: https://bscscan.com/address/0x10ed43c718714eb63d5aa57b78b54704e256024e; factory: https://bscscan.com/address/0xca143ce32fe78f1f7019d7d551a6402fc5350c73. Fee source: https://blog.pancakeswap.finance/articles/introducing-pancake-swap-v3-a-more-efficient-and-user-friendly-dex-on-bnb-chain-and-ethereum (V2 0.25%).
+- ApeSwap BSC factory/router deployments: https://github.com/ApeSwapFinance/apeswap-banana-farm. Fee assumption source: https://www.fairyproof.com/doc/104.ApeSwapFinance-Audit-Report-102521.pdf (0.20%); this audit is historical, so current fee configuration remains an assumption until live-verified.
 - These checks establish contract relationships at the selected block; they do not prove proxy implementation safety, actual token transfer behavior, gas cost, atomic route success, or profitability. Fee assumptions remain explicitly sourced assumptions until separately validated against the actual pair implementation.
-- Only Ethereum mainnet (chain ID 1) is currently registered. Other networks must continue to use explicit manual addresses and fee assumptions until separately researched and verified.
+- Ethereum mainnet (chain ID 1) and BNB Smart Chain (chain ID 56) are registered. The scanner now accepts a chain ID, DEX Screener slug, exactly two registered venues and an explicit RPC URL for non-Ethereum chains. CI's live deployment and scanner smoke still covers Ethereum only; BSC entries remain `source_documented_not_live_verified` until a successful BSC RPC run is captured. Other networks remain unregistered pending deployment and fee research.
 
 ## V2 reserve-math simulator
 
