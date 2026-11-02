@@ -158,8 +158,16 @@ function validText(value, max) {
 }
 
 export default {
-  async scheduled(_controller, env) {
-    await recoverStaleTasks(env);
+  async scheduled(controller, env) {
+    const recovery = await recoverStaleTasks(env);
+    const occurredAt = new Date().toISOString();
+    await env.DB.prepare(
+      "INSERT INTO audit_log(task_id,event,details_json,created_at) VALUES(NULL,?,?,?)"
+    ).bind("worker_cron_tick", JSON.stringify({
+      cron: typeof controller?.cron === "string" ? controller.cron : null,
+      requeued: recovery.requeued,
+      failed: recovery.failed,
+    }), occurredAt).run();
   },
 
   async fetch(request, env) {
