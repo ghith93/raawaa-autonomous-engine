@@ -443,3 +443,42 @@ test("paper ledger rejects arbitrary event types and malformed raw integer strin
     assert.equal(DB.calls.length, 0);
   }
 });
+
+
+test("paper ledger rejects non-canonical payload numbers and naive timestamps before writes", async () => {
+  const invalidEvents = [
+    { candidate_id: "candidate-1", event_id: "float-1", event_type: "candidate_detected",
+      occurred_at: "2026-11-02T11:00:00Z", payload: { fraction: 1.5 } },
+    { candidate_id: "candidate-1", event_id: "unsafe-1", event_type: "candidate_detected",
+      occurred_at: "2026-11-02T11:00:00Z", payload: { unsafe: 9007199254740992 } },
+    { candidate_id: "candidate-1", event_id: "naive-1", event_type: "candidate_detected",
+      occurred_at: "2026-11-02T11:00:00", payload: {} },
+  ];
+  for (const event of invalidEvents) {
+    const DB = paperLedgerDbMock();
+    const response = await worker.fetch(request("/v1/paper-ledger", {
+      method: "POST", body: { action: "append", event },
+    }), { DB, ENGINE_API_TOKEN: TOKEN });
+    assert.equal(response.status, 400);
+    assert.equal(DB.calls.length, 0);
+  }
+});
+
+test("paper ledger rejects raw-unit integers outside uint256 bounds", async () => {
+  const DB = paperLedgerDbMock();
+  const response = await worker.fetch(request("/v1/paper-ledger", {
+    method: "POST",
+    body: { action: "append", event: {
+      candidate_id: "candidate-1", event_id: "too-large", event_type: "route_simulated",
+      occurred_at: "2026-11-02T11:00:00Z", chain_id: 1, block_number: 1,
+      block_hash: "0x" + "a".repeat(64), strategy_id: "v2",
+      source_pool: "0x" + "1".repeat(40), destination_pool: "0x" + "2".repeat(40),
+      token_in: "0x" + "3".repeat(40), token_out: "0x" + "4".repeat(40),
+      gross_profit_raw: "115792089237316195423570985008687907853269984665640564039457584007913129639936",
+      payload: {},
+    } },
+  }), { DB, ENGINE_API_TOKEN: TOKEN });
+  assert.equal(response.status, 400);
+  assert.deepEqual(await response.json(), { error: "invalid_gross_profit_raw" });
+  assert.equal(DB.calls.length, 0);
+});
