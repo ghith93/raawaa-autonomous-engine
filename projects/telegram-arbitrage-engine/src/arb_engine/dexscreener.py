@@ -124,12 +124,16 @@ class DexScreenerClient:
         )
         if not all(isinstance(value, str) and value.strip() for value in fields):
             return None
-        parsed_url = urlsplit(fields[7])
+        try:
+            parsed_url = urlsplit(fields[7])
+            port = parsed_url.port
+        except ValueError:
+            return None
         if (
             parsed_url.scheme != "https"
             or parsed_url.hostname not in {"dexscreener.com", "www.dexscreener.com"}
             or parsed_url.username or parsed_url.password
-            or parsed_url.port not in (None, 443)
+            or port not in (None, 443)
             or parsed_url.query or parsed_url.fragment
             or len(fields[7]) > 2048
         ):
