@@ -5,7 +5,7 @@ import pytest
 
 from arb_engine.dexscreener import DexPair
 from arb_engine.onchain_discovery import discover_pool_candidates, scan_onchain_v2
-from arb_engine.rpc import EvmPoolSnapshot, RpcVerificationError
+from arb_engine.rpc import EvmBlockSnapshot, EvmPoolSnapshot, RpcVerificationError
 from arb_engine.v2 import V2PoolState
 
 
@@ -63,8 +63,15 @@ class FakeReader:
         self.canonical = []
         self.quotes = []
 
-    def read_pools(self, pools):
+    def read_latest_block_snapshot(self):
+        return EvmBlockSnapshot(
+            chain_id=1, block_number=100, block_hash=HASH,
+            block_timestamp=1_798_000_000,
+        )
+
+    def read_pools(self, pools, *, pinned_block=None):
         assert len(pools) == 2
+        assert pinned_block.block_number == 100
         return [self.states[address] for address, _fee in pools]
 
     def verify_v2_pool_factory(self, pair_address, factory, token0, token1, block):
