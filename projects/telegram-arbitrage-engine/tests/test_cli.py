@@ -10,6 +10,8 @@ from arb_engine.v2 import V2PoolState
 QUOTE = "0x" + "1" * 40
 BASE = "0x" + "2" * 40
 HASH = "0x" + "a" * 64
+POOL_A = "0x" + "3" * 40
+POOL_B = "0x" + "4" * 40
 
 
 def snapshot(address, reserve0, reserve1, fee):
