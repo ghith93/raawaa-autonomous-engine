@@ -76,6 +76,14 @@ def main() -> None:
     v2_parser.add_argument("--capital-quote", required=True, help="human quote-token amount, e.g. 50")
     v2_parser.add_argument("--rpc-url", default=DEFAULT_ETHEREUM_RPC)
     v2_parser.add_argument("--chain-id", type=int, default=1, help="expected EVM chain ID (default: Ethereum mainnet)")
+    v2_parser.add_argument(
+        "--gas-units-assumption", type=int,
+        help="optional explicit gas-units assumption; reports native-asset cost only, not net profit",
+    )
+    v2_parser.add_argument(
+        "--gas-safety-bps", type=int, default=2000,
+        help="extra gas-unit buffer in basis points (default: 2000 = 20%%)",
+    )
     v2_parser.add_argument("--buy-router", help="optional V2 router contract for same-block getAmountsOut validation")
     v2_parser.add_argument("--sell-router", help="optional V2 router contract for same-block getAmountsOut validation")
     v2_parser.add_argument("--buy-factory", help="expected V2 factory for the buy pair; verifies factory() and getPair()")
@@ -139,6 +147,10 @@ def main() -> None:
             base_decimals = decimals_for(buy_snapshot, base_address)
             if decimals_for(sell_snapshot, quote_address) != quote_decimals or decimals_for(sell_snapshot, base_address) != base_decimals:
                 raise ValueError("Token decimals disagree between pools")
+            if args.gas_units_assumption is not None and not 21000 <= args.gas_units_assumption <= 30_000_000:
+                raise ValueError("gas-units-assumption must be between 21000 and 30000000")
+            if not 0 <= args.gas_safety_bps <= 10000:
+                raise ValueError("gas-safety-bps must be between 0 and 10000")
             capital = Decimal(args.capital_quote)
             if not capital.is_finite() or capital <= 0:
                 raise ValueError("capital-quote must be finite and positive")
@@ -167,11 +179,27 @@ def main() -> None:
                 "final_quote": human(result.final_quote_raw, quote_decimals),
                 "gross_profit_quote": human(result.gross_profit_quote_raw, quote_decimals),
                 "gross_return_bps": str(result.gross_return_bps),
+                "buy_price_impact_bps_excluding_fee": str(result.buy.price_impact_bps),
+                "sell_price_impact_bps_excluding_fee": str(result.sell.price_impact_bps),
                 "classification": result.classification,
                 "live_execution": False,
                 "factory_verification": "passed" if args.buy_factory and args.sell_factory else "not_requested",
                 "warning": "Excludes gas, transfer taxes, dynamic fees, reverts, MEV, and execution. Not paper PnL or a trade recommendation.",
             }
+            if args.gas_units_assumption is not None:
+                gas_price_wei = reader.read_gas_price_wei()
+                buffered_gas_units = (
+                    args.gas_units_assumption * (10000 + args.gas_safety_bps) + 9999
+                ) // 10000
+                output["gas_cost_estimate"] = {
+                    "gas_units_assumption": args.gas_units_assumption,
+                    "safety_buffer_bps": args.gas_safety_bps,
+                    "buffered_gas_units": buffered_gas_units,
+                    "gas_price_wei": str(gas_price_wei),
+                    "estimated_native_asset_cost_wei": str(buffered_gas_units * gas_price_wei),
+                    "valuation_in_quote_token": None,
+                    "warning": "Indicative node gas-price estimate multiplied by a user-supplied gas-units assumption. Not eth_estimateGas, not transaction simulation, and not deducted from gross profit.",
+                }
             if args.buy_router and args.sell_router:
                 reader.verify_v2_router_factory(
                     args.buy_router, args.buy_factory, result.buy.block_number,
