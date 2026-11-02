@@ -16,7 +16,7 @@ class QuotaAwareLiveGateway:
     def __init__(self, quota_manager: QuotaManager, adapters: dict, usage_ledger: UsageLedger,
                  network_calls_enabled: bool = False, cooldown_seconds: int = 900,
                  environ=None, daily_budget_usd: float = 0.0,
-                 monthly_budget_usd: float = 0.0):
+                 monthly_budget_usd: float = 0.0, per_task_budget_usd: float = 0.0):
         if cooldown_seconds < 1:
             raise ValueError("cooldown_seconds must be positive")
         self.quota_manager = quota_manager
@@ -27,6 +27,10 @@ class QuotaAwareLiveGateway:
         self.environ = os.environ if environ is None else environ
         self.daily_budget_usd = daily_budget_usd
         self.monthly_budget_usd = monthly_budget_usd
+        if (type(per_task_budget_usd) not in (int, float)
+                or not math.isfinite(per_task_budget_usd) or per_task_budget_usd < 0):
+            raise ValueError("per_task_budget_usd must be finite and non-negative")
+        self.per_task_budget_usd = per_task_budget_usd
         # Validate configured caps before the gateway can make any provider request.
         self.usage_ledger.budget_status(daily_budget_usd, monthly_budget_usd)
 
@@ -93,6 +97,8 @@ class QuotaAwareLiveGateway:
                 monetary_reservation_id = self.usage_ledger.reserve(
                     profile.provider, profile.model, request.task_kind,
                     estimated_cost_usd, self.daily_budget_usd, self.monthly_budget_usd,
+                    task_id=request.task_id,
+                    per_task_budget_usd=self.per_task_budget_usd,
                 )
             except BudgetExceeded as exc:
                 last_error = exc
@@ -276,6 +282,7 @@ class QuotaAwareLiveGateway:
             "monetary_budgets": {
                 "daily_usd": self.daily_budget_usd,
                 "monthly_usd": self.monthly_budget_usd,
+                "per_task_usd": self.per_task_budget_usd,
             },
             "monetary_usage": self.usage_ledger.totals(),
             "cost_accounting_note": (
