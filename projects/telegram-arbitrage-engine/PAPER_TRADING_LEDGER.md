@@ -20,7 +20,7 @@ Allowed event types:
 
 The caller supplies a stable `candidate_id`, unique `event_id`, timezone-aware event time, and JSON payload. Snapshot-derived events require `chain_id`, `block_number`, and `block_hash` together. Route simulation events additionally require a strategy ID, two distinct pool addresses, and input/output token addresses. Gas scenario events require explicit gas units, gas price, gas cost, and net raw-unit fields.
 
-All raw token and gas values are stored as decimal strings, not SQLite INTEGERs, so uint256-sized values are not truncated to signed 64-bit integers.
+All raw token and gas values are stored as decimal strings, not SQLite INTEGERs, so uint256-sized values are not truncated to signed 64-bit integers. Payloads use a cross-runtime canonical JSON subset: null, strings, booleans, safe integers, arrays, and string-keyed objects. Floating-point values and integers outside JavaScript's safe range are rejected; store prices and large raw-unit values as decimal strings.
 
 ## Integrity and replay
 
@@ -67,7 +67,7 @@ This example records only a discovery event. It does not create or submit a pape
 The repository also contains an authenticated Worker endpoint at `POST /v1/paper-ledger` and a Python HTTP client, backed by additive migration `0004_paper_event_ledger.sql`. This is a staged API/client implementation; it is **not** yet enabled in the Telegram arbitrage scanner, deployed, or migrated against production D1.
 
 - D1 is intended to be the cross-run source of truth for scheduled ephemeral workers; local SQLite remains the deterministic offline/test adapter.
-- The Worker accepts only the fixed event vocabulary, validates block provenance and raw integer strings, caps request/payload sizes, and requires the existing bearer authentication.
+- The Worker accepts only the fixed event vocabulary, validates timezone-aware timestamps, block provenance, uint256 raw integer strings, and cross-runtime canonical JSON payloads; it caps request/payload sizes and requires the existing bearer authentication.
 - Appends use a candidate-head compare-and-swap followed by conditional event/checkpoint inserts in one D1 batch. A stale concurrent writer cannot advance the head or create a fork; the caller receives a conflict and may retry with bounded backoff.
 - Replaying an identical event ID and content returns the original sequence/hash; conflicting event-ID reuse is rejected.
 - Event and checkpoint UPDATE/DELETE operations are rejected by D1 triggers. The candidate head is mutable only through the CAS path.
