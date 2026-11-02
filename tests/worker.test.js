@@ -37,9 +37,6 @@ function dbMock() {
         },
         async run() {
           calls.push({ kind: "run", sql, values: this.values });
-          if (sql.includes("INSERT OR IGNORE INTO paper_candidate_heads") && !head) {
-            head = { candidate_id: this.values[0], sequence: 0, event_hash: this.values[1] };
-          }
           return { meta: { changes: 1 } };
         },
         async all() {
