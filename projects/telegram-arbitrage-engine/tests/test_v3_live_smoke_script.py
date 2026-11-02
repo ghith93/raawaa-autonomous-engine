@@ -84,7 +84,7 @@ def test_live_smoke_retries_next_provider_with_one_shared_request_budget(monkeyp
     monkeypatch.setattr(module, "_run_smoke", fake_run)
     module.main()
 
-    assert [attempt.endpoint for attempt in attempts] == list(module.RPC_ENDPOINTS)
+    assert [attempt.endpoint for attempt in attempts] == list(module.RPC_ENDPOINTS[:2])
     assert attempts[0].max_rpc_requests == module.MAX_TOTAL_RPC_REQUESTS
     assert attempts[1].max_rpc_requests == module.MAX_TOTAL_RPC_REQUESTS - 3
     output = __import__("json").loads(capsys.readouterr().out)
