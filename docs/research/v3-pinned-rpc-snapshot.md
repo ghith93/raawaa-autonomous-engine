@@ -48,3 +48,9 @@ Positive `--amount-specified` means exact input; negative means exact output. Th
 - [Uniswap V3 factory interface](https://github.com/Uniswap/v3-core/blob/main/contracts/interfaces/IUniswapV3Factory.sol) — getPool and feeAmountTickSpacing.
 - [Uniswap V3 pool immutables](https://github.com/Uniswap/v3-core/blob/main/contracts/interfaces/pool/IUniswapV3PoolImmutables.sol).
 - [Uniswap V3 pool state interface](https://github.com/Uniswap/v3-core/blob/main/contracts/interfaces/pool/IUniswapV3PoolState.sol).
+
+## Public RPC provider fallback
+
+The scheduled Ethereum smoke tries the default public endpoint first and then the known public Nodely endpoint. Only transport failures (HTTP access errors, timeouts, URL failures or invalid transport payloads) trigger fallback; contract identity, ABI, chain, tick and snapshot-validation failures remain hard failures.
+
+Each provider attempt gets only the remaining share of a single 512-request total budget. A failed attempt is discarded and the entire read starts again against the next endpoint; the reader never combines slot0, bitmap, tick or token metadata from different providers or block contexts. The selected endpoint and total requests across attempts are included in the smoke output. No API key or paid endpoint is configured.
