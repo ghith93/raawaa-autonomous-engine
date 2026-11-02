@@ -602,5 +602,5 @@ test("paper ledger canonicalizes supplementary Unicode keys in Python code-point
   }), { DB, ENGINE_API_TOKEN: TOKEN });
   assert.equal(response.status, 201);
   const batch = DB.calls.find(call => call.kind === "batch");
-  assert.equal(batch.statements[1].values[17], String.raw`{"a":3,"\\ue000":1,"\\ud800\\udc00":2}`);
+  assert.equal(batch.statements[1].values[17], String.raw`{"a":3,"\ue000":1,"\ud800\udc00":2}`);
 });
