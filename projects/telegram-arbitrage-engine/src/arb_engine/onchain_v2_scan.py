@@ -86,6 +86,7 @@ def _candidate_record(candidate: DexPairCandidate, venue: Venue, *, verified: bo
         "base_symbol_metadata_only": candidate.base_symbol,
         "quote_symbol_metadata_only": candidate.quote_symbol,
         "source_url": candidate.source_url,
+        "discovery_source": candidate.discovery_source,
         "labels_metadata_only": list(candidate.labels),
         "pair_created_at_ms_metadata_only": candidate.pair_created_at_ms,
         "factory_verified": verified,
@@ -224,6 +225,7 @@ def scan_onchain_v2_candidates(
             pair_created_at_ms=None,
             source_url=None,
             labels=("trusted_factory_lookup",),
+            discovery_source="trusted_factory_getPair",
         )
         try:
             reader.verify_v2_pool_factory(
