@@ -258,6 +258,27 @@ arb-engine cex-scan \
 
 See CEX_CROSS_VENUE.md. This is a read-only manual comparison command, not a scheduler, order executor or automated strategy loop.
 
+### Multi-venue universe scan
+
+The separate `cex-universe-scan` command fetches two to five public Spot books concurrently and compares every compatible venue pair in both directions. Repeat the venue/instrument/canonical-ID flags in the same order. The base asset ID can explicitly map venue-specific aliases (for example Kraken XBT to BTC); quote-currency codes must match across the selected venues because no FX or stablecoin conversion is performed. Fee profiles are optional per venue; missing fees or latency remain unknown.
+
+```bash
+arb-engine cex-universe-scan \
+  --venue binance --instrument BTCUSDT \
+  --base-asset-id asset:canonical:BTC --quote-currency-id currency:canonical:USDT \
+  --fee-bps binance=10 \
+  --venue bybit --instrument BTCUSDT \
+  --base-asset-id asset:canonical:BTC --quote-currency-id currency:canonical:USDT \
+  --fee-bps bybit=10 \
+  --venue okx --instrument BTC-USDT \
+  --base-asset-id asset:canonical:BTC --quote-currency-id currency:canonical:USDT \
+  --fee-bps okx=10 \
+  --base-quantity 0.001 --latency-cost-bps 2
+```
+
+A failed venue is retained as a sanitized source failure while healthy venues continue; fewer than two compatible books produce `insufficient_sources`. This remains a manual read-only research command, not a scheduler or order executor.
+
+
 ## Read-only flash-swap simulation
 
 The `flash-swap-sim` command reads two V2 pools at one canonical block, models the opposite-token repayment invariant, and optionally applies a caller-supplied gas-used/gas-price scenario. It can optionally record local research events with `--record-paper`.
