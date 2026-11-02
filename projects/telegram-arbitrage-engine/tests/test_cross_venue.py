@@ -5,11 +5,14 @@ import pytest
 
 from arb_engine.market_sources.binance import BinanceOrderBookSnapshot
 from arb_engine.market_sources.bybit import OrderBookSnapshot as BybitOrderBookSnapshot
+from arb_engine.market_sources.coinbase import CoinbaseOrderBookSnapshot
+from arb_engine.market_sources.kraken import KrakenOrderBookSnapshot
 from arb_engine.market_sources.cross_venue import (
     InstrumentMappingError,
     InstrumentRegistry,
     InstrumentSpec,
     compare_cex_spot_orderbooks,
+    compare_cex_spot_orderbook_universe,
 )
 from arb_engine.opportunity_costs import OpportunityCosts
 
@@ -258,4 +261,133 @@ def test_instrument_spec_rejects_invalid_minimum_order_constraints():
         InstrumentSpec(
             "bybit", "BTCUSDT", BTC, USDT, "0.001",
             min_quote_notional="-1",
+        )
+
+
+
+def coinbase_book(*, asks=None, bids=None, fetched_at=NOW):
+    return CoinbaseOrderBookSnapshot(
+        source="coinbase",
+        category="spot",
+        symbol="BTC-USD",
+        bids=tuple(bids or ((Decimal("100.2"), Decimal("1")),)),
+        asks=tuple(asks or ((Decimal("100.3"), Decimal("1")),)),
+        sequence=1001,
+        fetched_at=fetched_at,
+        exchange_timestamp_ms=1793628000000,
+        bid_order_counts=(3,),
+        ask_order_counts=(2,),
+    )
+
+
+def kraken_book(*, asks=None, bids=None, fetched_at=NOW):
+    return KrakenOrderBookSnapshot(
+        source="kraken",
+        category="spot",
+        symbol="XBT/USDT",
+        bids=tuple(bids or ((Decimal("100.3"), Decimal("1")),)),
+        asks=tuple(asks or ((Decimal("100.4"), Decimal("1")),)),
+        fetched_at=fetched_at,
+        exchange_timestamp_ms=1793628000000,
+        bid_level_timestamps_ms=(1793628000000,),
+        ask_level_timestamps_ms=(1793628000000,),
+    )
+
+
+def four_venue_registry(*, coinbase_quote=USDT):
+    return InstrumentRegistry([
+        InstrumentSpec("bybit", "BTCUSDT", BTC, USDT, "0.001"),
+        InstrumentSpec("binance", "BTCUSDT", BTC, USDT, "0.001"),
+        InstrumentSpec("coinbase", "BTC-USD", BTC, coinbase_quote, "0.00000001"),
+        InstrumentSpec("kraken", "XBT/USDT", BTC, USDT, "0.00000001"),
+    ])
+
+
+def all_pair_costs(venue_ids):
+    return {
+        (buy, sell): known_costs()
+        for buy in venue_ids
+        for sell in venue_ids
+        if buy != sell
+    }
+
+
+def test_multi_venue_comparison_compares_all_four_cex_sources_pairwise():
+    books = [bybit_book(), binance_book(), coinbase_book(), kraken_book()]
+    venue_ids = ["bybit", "binance", "coinbase", "kraken"]
+    result = compare_cex_spot_orderbook_universe(
+        books=books,
+        registry=four_venue_registry(),
+        base_quantity="0.5",
+        costs_by_direction=all_pair_costs(venue_ids),
+        now=NOW,
+    )
+    assert result.status == "complete"
+    assert result.venue_ids == tuple(venue_ids)
+    assert result.compared_pair_count == 6
+    assert len(result.opportunities) == 12
+    assert result.skipped_pairs == ()
+    assert result.source_failures == ()
+    assert {
+        (item.buy_venue_id, item.sell_venue_id)
+        for item in result.opportunities
+    } == {
+        (buy, sell)
+        for buy in venue_ids
+        for sell in venue_ids
+        if buy != sell
+    }
+    assert all(item.evaluation is not None for item in result.opportunities)
+
+
+def test_multi_venue_comparison_preserves_partial_sources_and_skips_identity_collisions():
+    books = [bybit_book(), binance_book(), coinbase_book()]
+    result = compare_cex_spot_orderbook_universe(
+        books=books,
+        registry=four_venue_registry(coinbase_quote="currency:canonical:USD"),
+        base_quantity="0.5",
+        source_failures={"kraken": "public_api_timeout"},
+        now=NOW,
+    )
+    assert result.status == "partial"
+    assert result.venue_ids == ("bybit", "binance", "coinbase")
+    assert result.compared_pair_count == 1
+    assert len(result.opportunities) == 2
+    assert result.skipped_pairs == (
+        ("bybit", "coinbase", "canonical_base_or_quote_identity_mismatch"),
+        ("binance", "coinbase", "canonical_base_or_quote_identity_mismatch"),
+    )
+    assert result.source_failures == (("kraken", "public_api_timeout"),)
+
+
+def test_multi_venue_comparison_reports_insufficient_sources_and_enforces_bounds():
+    result = compare_cex_spot_orderbook_universe(
+        books=[bybit_book()],
+        registry=four_venue_registry(),
+        base_quantity="0.5",
+        source_failures={"kraken": "rate_limited"},
+        now=NOW,
+    )
+    assert result.status == "insufficient_sources"
+    assert result.opportunities == ()
+
+    with pytest.raises(InstrumentMappingError, match="duplicate order-book source"):
+        compare_cex_spot_orderbook_universe(
+            books=[bybit_book(), bybit_book()],
+            registry=four_venue_registry(),
+            base_quantity="0.5",
+        )
+    with pytest.raises(InstrumentMappingError, match="exceeds the 2-venue"):
+        compare_cex_spot_orderbook_universe(
+            books=[bybit_book(), binance_book(), coinbase_book()],
+            registry=four_venue_registry(),
+            base_quantity="0.5",
+            max_venues=2,
+        )
+    with pytest.raises(InstrumentMappingError, match="both available and failed"):
+        compare_cex_spot_orderbook_universe(
+            books=[bybit_book(), binance_book()],
+            registry=four_venue_registry(),
+            base_quantity="0.5",
+            source_failures={"bybit": "timeout"},
         )
