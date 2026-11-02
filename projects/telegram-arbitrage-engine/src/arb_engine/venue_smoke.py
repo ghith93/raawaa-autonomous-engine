@@ -46,7 +46,7 @@ class JsonRpcClient:
         self.endpoint = endpoint
         self.timeout_seconds = timeout_seconds
         self.request_id = 0
-        self.min_request_interval_seconds = 1.1
+        self.min_request_interval_seconds = 3.1
         self._last_request_at = 0.0
 
     def call(self, method: str, params: list[Any]) -> Any:
