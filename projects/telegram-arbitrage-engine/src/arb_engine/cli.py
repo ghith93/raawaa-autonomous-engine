@@ -77,6 +77,10 @@ def main() -> None:
     v2_parser.add_argument("--rpc-url", default=DEFAULT_ETHEREUM_RPC)
     v2_parser.add_argument("--chain-id", type=int, default=1, help="expected EVM chain ID (default: Ethereum mainnet)")
     v2_parser.add_argument(
+        "--slippage-bps", type=int, default=50,
+        help="per-leg minimum-output tolerance for router quote reporting (default: 50 bps)",
+    )
+    v2_parser.add_argument(
         "--gas-units-assumption", type=int,
         help="optional explicit gas-units assumption; reports native-asset cost only, not net profit",
     )
@@ -147,6 +151,8 @@ def main() -> None:
             base_decimals = decimals_for(buy_snapshot, base_address)
             if decimals_for(sell_snapshot, quote_address) != quote_decimals or decimals_for(sell_snapshot, base_address) != base_decimals:
                 raise ValueError("Token decimals disagree between pools")
+            if not 0 <= args.slippage_bps <= 5000:
+                raise ValueError("slippage-bps must be between 0 and 5000")
             if args.gas_units_assumption is not None and not 21000 <= args.gas_units_assumption <= 30_000_000:
                 raise ValueError("gas-units-assumption must be between 21000 and 30000000")
             if not 0 <= args.gas_safety_bps <= 10000:
@@ -211,10 +217,20 @@ def main() -> None:
                     args.buy_router, result.capital_quote_raw,
                     [quote_address, base_address], result.buy.block_number,
                 )
+                buy_min_base_out_raw = (
+                    buy_amounts[-1] * (10000 - args.slippage_bps) // 10000
+                )
+                if buy_min_base_out_raw <= 0:
+                    raise ValueError("Buy minimum output rounds to zero at the selected slippage tolerance")
                 sell_amounts = reader.quote_v2_router_exact_input(
-                    args.sell_router, buy_amounts[-1],
+                    args.sell_router, buy_min_base_out_raw,
                     [base_address, quote_address], result.sell.block_number,
                 )
+                sell_min_quote_out_raw = (
+                    sell_amounts[-1] * (10000 - args.slippage_bps) // 10000
+                )
+                if sell_min_quote_out_raw <= 0:
+                    raise ValueError("Sell minimum output rounds to zero at the selected slippage tolerance")
                 reader.verify_canonical_block(
                     result.buy.block_number, result.buy.block_hash,
                 )
@@ -222,8 +238,11 @@ def main() -> None:
                     "mode": "read_only_router_eth_call",
                     "buy_router": args.buy_router.lower(),
                     "sell_router": args.sell_router.lower(),
-                    "buy_base_out": human(buy_amounts[-1], base_decimals),
-                    "sell_quote_out": human(sell_amounts[-1], quote_decimals),
+                    "buy_base_out_expected": human(buy_amounts[-1], base_decimals),
+                    "buy_min_base_out": human(buy_min_base_out_raw, base_decimals),
+                    "sell_quote_out_at_buy_min": human(sell_amounts[-1], quote_decimals),
+                    "sell_min_quote_out": human(sell_min_quote_out_raw, quote_decimals),
+                    "slippage_tolerance_bps_per_leg": args.slippage_bps,
                     "gross_profit_quote": human(sell_amounts[-1] - result.capital_quote_raw, quote_decimals),
                     "buy_router_vs_reserve_math_raw": buy_amounts[-1] - result.buy.amount_out_raw,
                     "sell_router_vs_reserve_math_raw": sell_amounts[-1] - result.sell.amount_out_raw,
