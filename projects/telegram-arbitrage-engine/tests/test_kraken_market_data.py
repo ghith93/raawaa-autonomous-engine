@@ -199,8 +199,8 @@ def test_registry_and_cross_venue_comparator_accept_kraken_books_with_explicit_a
     binance_book = BinanceOrderBookSnapshot(
         source="binance",
         symbol="BTCUSDT",
-        bids=((Decimal("101.4"), Decimal("2")),),
-        asks=((Decimal("101.5"), Decimal("2")),),
+        bids=((Decimal("101.8"), Decimal("2")),),
+        asks=((Decimal("101.9"), Decimal("2")),),
         last_update_id=123,
         fetched_at=book.fetched_at,
     )
