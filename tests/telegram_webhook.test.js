@@ -39,7 +39,10 @@ function request(update, { secret = SECRET, raw, method = "POST" } = {}) {
   const headers = {};
   if (secret !== null) headers["x-telegram-bot-api-secret-token"] = secret;
   if (raw !== undefined) headers["content-type"] = "application/json";
-  const body = raw !== undefined ? raw : JSON.stringify(update);
+  const normalized = update && typeof update === "object" && update.message && !Object.hasOwn(update.message, "from")
+    ? { ...update, message: { ...update.message, from: { id: update.message.chat?.id, is_bot: false } } }
+    : update;
+  const body = raw !== undefined ? raw : JSON.stringify(normalized);
   return new Request("https://engine.example/v1/telegram/webhook", {
     method, headers, body: method === "GET" ? undefined : body,
   });
@@ -70,6 +73,20 @@ test("webhook ignores group and non-allowlisted chats", async () => {
   const DB = dbMock();
   for (const chat of [{ id: 12345, type: "group" }, { id: 99999, type: "private" }]) {
     const response = await handleTelegramWebhook(request({ update_id: chat.id, message: { chat, text: "/help" } }), { ...ENV, DB }, new URL("https://engine.example/v1/telegram/webhook"));
+    assert.equal(response.status, 200);
+    assert.deepEqual(await response.json(), { ok: true, ignored: true });
+  }
+  assert.equal(DB.calls.length, 0);
+});
+
+test("webhook ignores private-chat updates whose sender is not the allowlisted human chat owner", async () => {
+  const DB = dbMock();
+  for (const from of [{ id: 99999, is_bot: false }, { id: 12345, is_bot: true }, null]) {
+    const response = await handleTelegramWebhook(
+      request({ update_id: 70, message: { chat: { id: 12345, type: "private" }, from, text: "/help" } }),
+      { ...ENV, DB },
+      new URL("https://engine.example/v1/telegram/webhook"),
+    );
     assert.equal(response.status, 200);
     assert.deepEqual(await response.json(), { ok: true, ignored: true });
   }
