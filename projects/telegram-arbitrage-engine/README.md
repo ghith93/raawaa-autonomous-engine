@@ -73,6 +73,12 @@ print(perpetual.mark_price, perpetual.index_price, perpetual.funding_rate)
 
 This is a source adapter, not yet a cross-venue strategy or profitability engine. Depth is only a timestamped snapshot; fees, fill probability, latency and account eligibility must be modelled before ranking any opportunity. See [data sources and trust boundaries](DATA_SOURCES.md).
 
+## Conservative opportunity cost evaluator
+
+The pure `arb_engine.opportunity_costs.evaluate_two_leg_spread` component separates gross spread from estimated net profit. It refuses to compare different canonical asset IDs or quote currencies, rejects stale/partial-depth observations, and requires venue fees, slippage, latency, gas/priority fees, Solana network fees, funding, bridge/settlement and borrow costs when applicable. Missing required costs produce `net_profit_quote=None`; they are never treated as zero.
+
+See [OPPORTUNITY_COST_MODEL.md](OPPORTUNITY_COST_MODEL.md). This evaluator is a deterministic guardrail component and is not yet connected to automated opportunity ranking or order execution. Even a positive result remains an estimate with `execution_verified=False`.
+
 ## Read-only flash-swap simulation
 
 The `flash-swap-sim` command reads two V2 pools at one canonical block, models the opposite-token repayment invariant, and optionally applies a caller-supplied gas-used/gas-price scenario. It can optionally record local research events with `--record-paper`.
