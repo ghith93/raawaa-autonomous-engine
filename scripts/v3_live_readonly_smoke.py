@@ -12,14 +12,19 @@ import re
 
 from arb_engine.rpc import DEFAULT_ETHEREUM_RPC, RpcTransportError
 from arb_engine.v3_math import MIN_TICK, get_sqrt_ratio_at_tick
-from arb_engine.v3_rpc import EvmV3PoolReader
+from arb_engine.v3_rpc import DEFAULT_V3_ETHEREUM_RPC, EvmV3PoolReader
 from arb_engine.v3_simulator import simulate_v3_swap
 
 
 POOL = "0x8ad599c3a0ff1de082011efddc58f1908eb6e6d8"
 USDC = "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48"
 WETH = "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2"
-RPC_ENDPOINTS = (DEFAULT_ETHEREUM_RPC, "https://eth.nodely.dev")
+RPC_ENDPOINTS = (
+    DEFAULT_V3_ETHEREUM_RPC,
+    "https://eth.drpc.org",
+    "https://public.1rpc.io/eth",
+    DEFAULT_ETHEREUM_RPC,
+)
 MAX_TOTAL_RPC_REQUESTS = 512
 
 
@@ -118,7 +123,7 @@ def main() -> None:
             endpoint,
             expected_chain_id=1,
             timeout_seconds=10,
-            min_request_interval=0.05,
+            min_request_interval=0.55,
             max_rpc_requests=remaining_budget,
         )
         try:
