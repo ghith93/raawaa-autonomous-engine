@@ -113,7 +113,7 @@ When a real AndroidHarness tool/session becomes available to the engine, expose 
 
 Every call must carry a task ID, workspace boundary, timeout, output limit, and policy decision. Deny arbitrary shell strings from untrusted task payloads; use argument arrays or reviewed command templates. Root, network exposure, package installation, credential access, and external writes require separate policy gates. The adapter must integrate the repository operating-policy loader and audit log before any execution.
 
-The direct authenticated tool/session adapter described above does not exist. A narrower GitHub issue bridge is implemented below for four fixed operations; it is not a direct MCP tool interface or general device control.
+The direct authenticated tool/session adapter described above does not exist. A narrower GitHub issue bridge is implemented below for four fixed allowlisted operations (environment inspection, Git status, Python unit tests, and the read-only doctor); it is not a direct MCP tool interface or general device control. Python tests execute trusted repository test code under the AndroidHarness Linux/app UID and are not an OS sandbox; arbitrary shell commands are not exposed.
 
 ## GitHub-mediated AndroidHarness task bridge
 
