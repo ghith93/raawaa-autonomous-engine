@@ -14,7 +14,7 @@ Keep the current GitHub Actions D1 Task Runner as the **only active queue consum
 
 | Path | Verified capability | Current limitation |
 |---|---|---|
-| GitHub Actions + D1 Task Runner | Scheduled every 15 minutes; bounded batch of up to 5 tasks / 60 seconds; authenticated Worker preflight; D1 claim/heartbeat/finish; deterministic dry-run specialist assignment | Each Actions invocation is ephemeral; polling cadence is not a durable long-running workflow and does not provide 24/7 agent execution |
+| GitHub Actions + D1 Task Runner | Scheduled every 5 minutes; bounded batch of up to 5 tasks / 60 seconds; authenticated Worker preflight; D1 claim/heartbeat/finish; deterministic dry-run specialist assignment | Each Actions invocation is ephemeral; polling cadence is not a durable long-running workflow and does not provide 24/7 agent execution |
 | Microsoft Agent Framework checkpoint adapter | HMAC-authenticated checkpoint envelopes; isolated file-backed restart/recovery tests; completed-step replay checks | Test adapter only; pinned framework/private APIs and pickle-bearing payloads; no distributed D1 storage or production worker integration |
 | Cloudflare Workflows prototype | Durable step API, bounded retry policy, deterministic instance IDs, approval wait/resume, restart/replay, cancellation, lease-expiry and timeout paths in a local Wrangler runtime | Fake adapters only; no D1/Queue integration, no production policy-loader wiring, no authenticated production endpoint, no model/provider calls |
 
@@ -46,6 +46,13 @@ Verified against Cloudflare's current Workflows limits documentation on 2026-11-
 - 100,000 queued instances.
 - Three-day retention for completed Workflow state on Free.
 - Maximum 100 Workflow instance creations per second on Free.
+- Free-plan retention for completed Workflow state is three days.
+
+### Billing update verified 2026-11-02
+
+Cloudflare's pricing page was updated 2026-09-21 and states that Workflows step and storage billing began 2026-08-10. The Free plan currently includes **3,000 steps/day**, **1 GB-month of Workflow storage**, and **100,000 requests/day shared with Workers**. It also lists 10 ms active CPU per invocation on Free. Therefore, "available on Free" does not mean unlimited or unmetered. Step count and persisted state are explicit billing dimensions; completed, errored, sleeping, and running instance state contributes to storage until retention/deletion. See the [official Workflows pricing page](https://developers.cloudflare.com/workflows/reference/pricing/) and [limits page](https://developers.cloudflare.com/workflows/reference/limits/).
+
+Decision remains unchanged: keep Workflows isolated and undeployed. Do not connect it to production D1 or activate it as a second queue consumer. Before reconsideration, measure expected steps per task, state size/retention, request volume, and account-specific limits; require an explicit no-surprise-spend control and a reviewed rollback plan. Do not enable a paid plan or accept overage charges automatically.
 
 These are platform ceilings, not a guarantee of account eligibility or a cost forecast. Recheck the account plan, current limits, and billing semantics before any production adoption. Keep payloads to IDs and bounded references; store durable business/task truth in D1, not in Workflow event bodies or large step outputs.
 
