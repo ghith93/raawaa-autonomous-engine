@@ -26,7 +26,7 @@ from .venue_smoke import (
     verify_registry_venue_deployments, verify_registry_venues,
 )
 from .v3_math import get_sqrt_ratio_at_tick
-from .v3_rpc import EvmV3PoolReader
+from .v3_rpc import DEFAULT_V3_ETHEREUM_RPC, EvmV3PoolReader
 from .v3_simulator import simulate_v3_swap
 
 
@@ -155,13 +155,13 @@ def main() -> None:
         help="positive tick distance from current slot0.tick; direction selects lower or upper limit",
     )
     v3_parser.add_argument("--chain-id", type=int, default=1)
-    v3_parser.add_argument("--rpc-url", help="HTTPS read-only RPC; defaults to PublicNode for Ethereum only")
+    v3_parser.add_argument("--rpc-url", help="HTTPS read-only RPC; defaults to keyless Nodely for Ethereum only")
     v3_parser.add_argument("--factory", help="expected trusted V3 factory; required outside Ethereum")
     v3_parser.add_argument("--max-rpc-requests", type=int, default=256)
     v3_parser.add_argument("--max-bitmap-words", type=int, default=16)
     v3_parser.add_argument("--max-initialized-ticks", type=int, default=128)
     v3_parser.add_argument("--max-steps", type=int, default=512)
-    v3_parser.add_argument("--min-request-interval", type=float, default=0.1)
+    v3_parser.add_argument("--min-request-interval", type=float, default=0.55)
     v3_parser.add_argument("--timeout-seconds", type=float, default=8.0)
     solana_price_parser = sub.add_parser(
         "solana-price",
@@ -476,7 +476,7 @@ def main() -> None:
                 raise ValueError("--amount-specified must fit int256 raw units")
             if not 1 <= args.max_steps <= 2048:
                 raise ValueError("--max-steps must be between 1 and 2048")
-            rpc_url = args.rpc_url or DEFAULT_ETHEREUM_RPC
+            rpc_url = args.rpc_url or DEFAULT_V3_ETHEREUM_RPC
             zero_for_one = args.direction == "token0_to_token1"
             reader = EvmV3PoolReader(
                 rpc_url,
