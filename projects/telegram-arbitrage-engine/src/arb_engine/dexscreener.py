@@ -7,11 +7,12 @@ from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
 from typing import Any
 from urllib.error import HTTPError, URLError
-from urllib.parse import urlencode
+from urllib.parse import urlencode, urlsplit
 from urllib.request import Request, urlopen
 
 BASE_URL = "https://api.dexscreener.com"
-USER_AGENT = "telegram-arbitrage-engine/0.2 (+read-only research)"
+USER_AGENT = "telegram-arbitrage-engine/0.3 (+read-only research)"
+MAX_RESPONSE_BYTES = 2_000_000
 
 
 class MarketDataError(RuntimeError):
@@ -23,7 +24,7 @@ def _decimal(value: Any) -> Decimal | None:
         return None
     try:
         result = Decimal(str(value))
-    except (InvalidOperation, ValueError):
+    except (InvalidOperation, ValueError, TypeError):
         return None
     return result if result.is_finite() else None
 
@@ -48,7 +49,7 @@ class DexPair:
 class DexScreenerClient:
     """Read-only public client; deliberately exposes no wallet or order methods."""
 
-    def __init__(self, timeout_seconds: float = 10.0, min_request_interval: float = 0.25):
+    def __init__(self, timeout_seconds: float = 10.0, min_request_interval: float = 1.0):
         if timeout_seconds <= 0 or min_request_interval < 0:
             raise ValueError("Invalid HTTP client timing configuration")
         self.timeout_seconds = timeout_seconds
@@ -56,17 +57,26 @@ class DexScreenerClient:
         self._last_request = 0.0
 
     def search_pairs(self, query: str) -> list[DexPair]:
+        if not isinstance(query, str):
+            raise ValueError("Search query must be text")
         query = query.strip()
         if not query or len(query) > 120:
             raise ValueError("Search query must contain 1..120 characters")
         payload = self._get("/latest/dex/search", {"q": query})
+        return self.parse_pairs(payload, datetime.now(timezone.utc))
+
+    @classmethod
+    def parse_pairs(cls, payload: Any, fetched_at: datetime | None = None) -> list[DexPair]:
+        """Parse API/fixture payload. fetched_at is retrieval time, not on-chain quote time."""
         rows = payload.get("pairs") if isinstance(payload, dict) else None
         if not isinstance(rows, list):
             raise MarketDataError("Unexpected DEX Screener response: 'pairs' array missing")
-        fetched_at = datetime.now(timezone.utc)
+        retrieved = fetched_at or datetime.now(timezone.utc)
+        if not isinstance(retrieved, datetime) or retrieved.tzinfo is None or retrieved.utcoffset() is None:
+            raise ValueError("fetched_at must be timezone-aware")
         result = []
         for row in rows:
-            parsed = self._parse_pair(row, fetched_at)
+            parsed = cls._parse_pair(row, retrieved)
             if parsed is not None:
                 result.append(parsed)
         return result
@@ -79,8 +89,8 @@ class DexScreenerClient:
         request = Request(url, headers={"Accept": "application/json", "User-Agent": USER_AGENT})
         try:
             with urlopen(request, timeout=self.timeout_seconds) as response:
-                body = response.read(2_000_001)
-                if len(body) > 2_000_000:
+                body = response.read(MAX_RESPONSE_BYTES + 1)
+                if len(body) > MAX_RESPONSE_BYTES:
                     raise MarketDataError("Market-data response exceeded 2 MB safety limit")
                 payload = json.loads(body)
         except HTTPError as exc:
@@ -97,21 +107,31 @@ class DexScreenerClient:
     def _parse_pair(row: Any, fetched_at: datetime) -> DexPair | None:
         if not isinstance(row, dict):
             return None
-        base = row.get("baseToken") or {}
-        quote = row.get("quoteToken") or {}
-        liquidity = row.get("liquidity") or {}
-        volume = row.get("volume") or {}
+        base = row.get("baseToken")
+        quote = row.get("quoteToken")
+        liquidity = row.get("liquidity")
+        volume = row.get("volume")
+        if not all(isinstance(value, dict) for value in (base, quote, liquidity, volume)):
+            return None
+
         price = _decimal(row.get("priceUsd"))
         liquidity_usd = _decimal(liquidity.get("usd"))
-        volume_usd = _decimal(volume.get("h24")) or Decimal("0")
+        volume_usd = _decimal(volume.get("h24"))
         fields = (
             row.get("chainId"), row.get("dexId"), row.get("pairAddress"),
             base.get("address"), base.get("symbol"), quote.get("address"),
             quote.get("symbol"), row.get("url"),
         )
-        if not all(isinstance(v, str) and v.strip() for v in fields):
+        if not all(isinstance(value, str) and value.strip() for value in fields):
             return None
-        if price is None or price <= 0 or liquidity_usd is None or liquidity_usd < 0 or volume_usd < 0:
+        parsed_url = urlsplit(fields[7])
+        if parsed_url.scheme != "https" or not parsed_url.netloc or len(fields[7]) > 2048:
+            return None
+        if (
+            price is None or price <= 0
+            or liquidity_usd is None or liquidity_usd <= 0
+            or volume_usd is None or volume_usd < 0
+        ):
             return None
         created = row.get("pairCreatedAt")
         created_ms = created if isinstance(created, int) and not isinstance(created, bool) and created > 0 else None
