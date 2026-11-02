@@ -63,6 +63,8 @@ class V3PoolSnapshot:
             raise V3SnapshotError("pool_address must be a 20-byte EVM address")
         if not all(isinstance(token, str) and address.fullmatch(token) for token in (self.token0, self.token1)):
             raise V3SnapshotError("token addresses must be 20-byte EVM addresses")
+        if any(int(value[2:], 16) == 0 for value in (self.pool_address, self.token0, self.token1)):
+            raise V3SnapshotError("pool and token addresses cannot be the zero address")
         if self.token0.lower() >= self.token1.lower():
             raise V3SnapshotError("token0 and token1 must be distinct and address-sorted")
         if type(self.fee_pips) is not int or not 0 <= self.fee_pips < 1_000_000:
@@ -218,6 +220,8 @@ def simulate_v3_swap(
         total_in += amount_in
         total_out += amount_out
         total_fee += fee
+        if any(value > MAX_UINT256 for value in (total_in, total_out, total_fee)):
+            raise ArithmeticError("aggregate swap amount exceeds uint256")
         steps += 1
 
         if next_price == sqrt_at_tick:
