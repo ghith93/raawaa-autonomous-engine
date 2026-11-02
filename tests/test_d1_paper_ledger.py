@@ -1,3 +1,4 @@
+import hashlib
 import json
 import sqlite3
 import tempfile
@@ -53,6 +54,29 @@ class D1PaperLedgerTests(unittest.TestCase):
                 candidate_id="c", event_id="e", event_type="candidate_detected",
                 occurred_at="2026-11-02T00:00:00Z", payload={},
             )
+
+    @patch("urllib.request.urlopen")
+    def test_verify_chain_checks_event_digest_and_checkpoint(self, open_url):
+        record = {
+            "candidate_id": "candidate-1", "event_id": "event-1",
+            "event_type": "candidate_detected", "occurred_at": "2026-11-02T00:00:00+00:00",
+            "chain_id": None, "block_number": None, "block_hash": None,
+            "strategy_id": None, "source_pool": None, "destination_pool": None,
+            "token_in": None, "token_out": None, "gross_profit_raw": None,
+            "gas_used": None, "gas_price_wei": None, "gas_cost_profit_raw": None,
+            "net_profit_raw": None, "payload_json": "{}",
+        }
+        envelope = {"previous_hash": "0" * 64, "record": {"sequence": 1, **record}}
+        digest = hashlib.sha256(json.dumps(
+            envelope, sort_keys=True, separators=(",", ":"), ensure_ascii=True, allow_nan=False,
+        ).encode()).hexdigest()
+        event = {**record, "sequence": 1, "previous_hash": "0" * 64, "event_hash": digest}
+        checkpoint = {"sequence": 1, "event_id": "event-1", "event_hash": digest}
+        open_url.return_value = Response({"events": [event], "checkpoints": [checkpoint]})
+        self.assertTrue(self.ledger.verify_chain("candidate-1"))
+        event["event_hash"] = "f" * 64
+        open_url.return_value = Response({"events": [event], "checkpoints": [checkpoint]})
+        self.assertFalse(self.ledger.verify_chain("candidate-1"))
 
     def test_configuration_requires_https_and_token(self):
         for url, token in (("http://engine.example", "token"), ("https://engine.example", "")):
