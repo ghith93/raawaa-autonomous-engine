@@ -329,3 +329,9 @@ def test_read_slot0_rejects_inconsistent_tick_and_price(monkeypatch):
     monkeypatch.setattr(rpc, "_rpc", fake)
     with pytest.raises(RpcReadError, match="inconsistent"):
         rpc.read_slot0(POOL)
+
+
+def test_v3_reader_defaults_to_keyless_nodely_with_documented_heavy_call_spacing():
+    rpc = EvmV3PoolReader()
+    assert rpc.endpoint == "https://eth.nodely.dev"
+    assert rpc.min_request_interval >= 0.5
