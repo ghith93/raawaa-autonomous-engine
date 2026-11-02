@@ -75,7 +75,7 @@ class D1QuotaLedger:
             raise ValueError("task_id is required")
         # Aggregate task usage across all routes through the dedicated task view.
         from urllib.parse import quote
-        result = self._request("GET", f"/v1/quota?task_id={quote(task_id)}")
+        result = self._request("GET", f"/v1/quota?route_id=__no_route__&task_id={quote(task_id)}")
         return result["usage"]["task"]
 
     def reserve(self, route_id: str, estimated_tokens: int, request_limit: int,
@@ -139,5 +139,5 @@ class D1QuotaLedger:
         return int(result["id"])
 
     def audit_events(self, limit: int = 100) -> list[dict]:
-        result = self._request("GET", f"/v1/quota?limit={max(1, min(int(limit), 500))}")
+        result = self._request("GET", f"/v1/quota?route_id=__no_route__&limit={max(1, min(int(limit), 500))}")
         return result.get("audit", [])
