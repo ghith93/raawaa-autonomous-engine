@@ -14,6 +14,25 @@ Simulation-first spot-arbitrage research module, isolated inside the autonomous-
 - An optional local Anvil fork-call adapter accepts exact caller-supplied calldata and performs read-only eth_call/eth_estimateGas with optional callTracer output; it refuses non-loopback endpoints and never submits transactions. It simulates one call only, not an atomic two-venue arbitrage route.
 - A read-only EVM JSON-RPC adapter retrieves two V2 pool states and token decimals at one pinned block. The V2 constant-product calculator uses integer raw units and requires two distinct pools at the same block; it is reserve math only and excludes gas, transfer taxes, dynamic fees, reverts, MEV, and execution. Pool fee basis points can be supplied manually or selected from the source-documented Ethereum V2 registry. Registry entries remain unverified until the CLI confirms pair.factory(), factory.getPair(), and router.factory() at the pinned block; the fee model is still a documented assumption.
 
+## Read-only centralized-exchange market data
+
+A fixture-tested Bybit public market-data adapter is available at `arb_engine.market_sources.bybit.BybitPublicMarketData`. It retrieves spot/perpetual/option tickers and order-book snapshots using public GET endpoints only, preserves numeric precision with `Decimal`, records venue timestamps/update IDs, rejects malformed or crossed books, blocks redirects, and applies a conservative one-request-per-second per-instance budget. It does not require API credentials and does not expose account/order/withdrawal methods.
+
+Example:
+
+```python
+from arb_engine.market_sources.bybit import BybitPublicMarketData
+
+market = BybitPublicMarketData()  # public Bybit REST API; no API key
+book = market.fetch_orderbook(category="spot", symbol="BTCUSDT", limit=50)
+for price, size in book.bids[:5]:
+    print(price, size)
+perpetual = market.fetch_tickers(category="linear", symbol="BTCUSDT")[0]
+print(perpetual.mark_price, perpetual.index_price, perpetual.funding_rate)
+```
+
+This is a source adapter, not yet a cross-venue strategy or profitability engine. Depth is only a timestamped snapshot; fees, fill probability, latency and account eligibility must be modelled before ranking any opportunity. See [data sources and trust boundaries](DATA_SOURCES.md).
+
 ## Read-only flash-swap simulation
 
 The `flash-swap-sim` command reads two V2 pools at one canonical block, models the opposite-token repayment invariant, and optionally applies a caller-supplied gas-used/gas-price scenario. It can optionally record local research events with `--record-paper`.
