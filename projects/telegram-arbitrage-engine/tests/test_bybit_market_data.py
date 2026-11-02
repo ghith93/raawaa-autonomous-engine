@@ -34,9 +34,8 @@ def client_with(payload, **kwargs):
         calls.append((url, timeout))
         return encoded(payload)
 
-    return BybitPublicMarketData(
-        transport=transport, min_interval_seconds=0, **kwargs,
-    ), calls
+    kwargs.setdefault("min_interval_seconds", 0)
+    return BybitPublicMarketData(transport=transport, **kwargs), calls
 
 
 def test_orderbook_normalizes_exact_decimal_levels_and_preserves_provenance():
