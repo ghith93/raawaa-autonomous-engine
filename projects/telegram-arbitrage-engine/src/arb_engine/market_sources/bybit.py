@@ -12,6 +12,8 @@ from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
 from typing import Callable
 
+from .instruments import InstrumentMetadata
+
 
 DEFAULT_BASE_URL = "https://api.bybit.com"
 _ALLOWED_HOSTS = {"api.bybit.com", "api-testnet.bybit.com"}
@@ -193,6 +195,48 @@ class BybitPublicMarketData:
         if category not in _CATEGORIES:
             raise ValueError("category must be spot, linear, inverse or option")
         return category
+
+    def fetch_instrument(self, *, symbol: str, category: str = "spot") -> InstrumentMetadata:
+        """Fetch one public spot instrument specification; never infers asset identity."""
+        category = self._validate_category(category)
+        if category != "spot":
+            raise ValueError("fetch_instrument currently supports spot instruments only")
+        symbol = _symbol(symbol)
+        payload = self._get("/v5/market/instruments-info", {
+            "category": category,
+            "symbol": symbol,
+        })
+        result = payload["result"]
+        if result.get("category") != category:
+            raise BybitMarketDataError("Bybit instrument category did not match request")
+        items = result.get("list")
+        if not isinstance(items, list) or len(items) != 1 or not isinstance(items[0], dict):
+            raise BybitMarketDataError("Bybit did not return exactly one instrument")
+        item = items[0]
+        if item.get("symbol") != symbol:
+            raise BybitMarketDataError("Bybit instrument symbol did not match request")
+        base_code = item.get("baseCoin")
+        quote_code = item.get("quoteCoin")
+        status = item.get("status")
+        lot_filter = item.get("lotSizeFilter")
+        price_filter = item.get("priceFilter")
+        if not all(isinstance(value, str) and value for value in (base_code, quote_code, status)):
+            raise BybitMarketDataError("Bybit instrument omitted asset codes or status")
+        if not isinstance(lot_filter, dict) or not isinstance(price_filter, dict):
+            raise BybitMarketDataError("Bybit instrument omitted precision filters")
+        min_quote = lot_filter.get("minOrderAmt")
+        return InstrumentMetadata(
+            venue_id="bybit",
+            instrument_id=symbol,
+            market_family="cex_spot",
+            base_asset_code=base_code,
+            quote_asset_code=quote_code,
+            base_step_size=lot_filter.get("basePrecision"),
+            price_tick_size=price_filter.get("tickSize"),
+            status=status,
+            fetched_at=datetime.now(timezone.utc),
+            min_quote_notional=min_quote if min_quote not in (None, "") else None,
+        )
 
     def fetch_orderbook(
         self,
