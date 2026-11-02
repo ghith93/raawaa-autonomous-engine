@@ -100,12 +100,15 @@ export async function handleMobileStatus(request, env, url) {
       env.DB.prepare("SELECT version FROM schema_migrations WHERE version IN ('0003_durable_quota_ledger','0004_paper_event_ledger')").all(),
     ]);
     const applied = new Set((migrations.results || []).map(row => row.version));
-    const [paper, latest, usage] = await Promise.all([
+    const [paper, latest, snapshot, usage] = await Promise.all([
       applied.has("0004_paper_event_ledger")
         ? env.DB.prepare("SELECT event_type,COUNT(*) AS count FROM paper_events GROUP BY event_type ORDER BY event_type").all()
         : Promise.resolve({ results: [] }),
       applied.has("0004_paper_event_ledger")
         ? env.DB.prepare("SELECT event_type,candidate_id,occurred_at FROM paper_events ORDER BY occurred_at DESC,event_id DESC LIMIT 1").first()
+        : Promise.resolve(null),
+      applied.has("0004_paper_event_ledger")
+        ? env.DB.prepare("SELECT candidate_id,occurred_at,chain_id,block_number FROM paper_events WHERE event_type='snapshot_captured' ORDER BY occurred_at DESC,event_id DESC LIMIT 1").first()
         : Promise.resolve(null),
       applied.has("0003_durable_quota_ledger")
         ? env.DB.prepare("SELECT route_id,COUNT(*) AS requests,COALESCE(SUM(tokens),0) AS tokens FROM quota_usage GROUP BY route_id ORDER BY route_id").all()
@@ -118,11 +121,15 @@ export async function handleMobileStatus(request, env, url) {
       latest_paper_event: latest ? {
         event_type: latest.event_type, candidate_id: latest.candidate_id, occurred_at: latest.occurred_at,
       } : null,
+      latest_market_snapshot: snapshot ? {
+        candidate_id: snapshot.candidate_id, occurred_at: snapshot.occurred_at,
+        chain_id: snapshot.chain_id, block_number: snapshot.block_number,
+      } : null,
       provider_usage: (usage.results || []).map(row => ({
         route_id: row.route_id, requests: Number(row.requests) || 0, tokens: Number(row.tokens) || 0,
       })),
       unavailable_metrics: {
-        last_scan: "Not recorded in the shared D1 control plane",
+        last_scan: "Scan-run heartbeat is not recorded; the latest captured market snapshot is shown separately",
         source_freshness: "Not yet aggregated from market-data adapters",
         ci_health: "Not yet ingested from GitHub Actions",
         monetary_costs: "Monetary ledger remains local SQLite; not exposed here",
