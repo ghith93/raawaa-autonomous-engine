@@ -335,3 +335,10 @@ def test_default_v3_ethereum_rpc_is_keyless_nodely():
     from arb_engine.v3_rpc import DEFAULT_V3_ETHEREUM_RPC
 
     assert DEFAULT_V3_ETHEREUM_RPC == "https://eth.nodely.dev"
+
+
+def test_default_v3_reader_rate_limit_matches_nodely_heavy_call_ceiling():
+    from arb_engine.v3_rpc import DEFAULT_V3_MIN_REQUEST_INTERVAL, EvmV3PoolReader
+
+    instance = EvmV3PoolReader(min_request_interval=DEFAULT_V3_MIN_REQUEST_INTERVAL)
+    assert instance.min_request_interval >= 0.5
