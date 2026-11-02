@@ -1,4 +1,6 @@
-# AndroidHarness runtime profile (optional)
+# AndroidHarness runtime profile (optional diagnostics only)
+
+> **Current decision (2026-11-02):** AndroidHarness is outside the Raawaa Autonomous Engine's critical path. Do not start or maintain a recurring poller, WorkManager schedule, auto-continue session, or device-side worker. The installed 3.1 app may be used for occasional diagnostics only when explicitly initiated by the operator. The GitHub issue bridge is not required for task execution, CI, or recovery. Historical setup and diagnostic evidence below is retained for traceability; it is not an instruction to reactivate the device runtime.
 
 ## Purpose and status
 
@@ -18,7 +20,7 @@ The project config defines read-only researcher/reviewer/security-reviewer profi
 
 AndroidHarness is an optional external Android/Linux diagnostic and compatibility environment. It is not required for project execution and is deliberately outside the critical path. GitHub Actions, the Cloudflare Worker, and D1 provide the normal CI and cloud task path; the device never owns the only copy of a task or recovery state.
 
-**Integration status:** the repository has no direct AndroidHarness MCP/client adapter. The bounded GitHub issue bridge has now returned a successful read-only doctor result from the AndroidHarness 3.1 Code workspace (issue #122), so its device-side execution path is verified for that allowlisted operation. A separate Python test task (issue #123) failed before tests began because the device could not fetch `origin/main`. PR #139 merged bounded retry/backoff for that fetch. Stale retry #133 was superseded and closed after main advanced; exact-head task #140 now awaits a device-side result. The existing 3.1 checkout and foreground poller must pull the latest main and restart before using the retry fix. This is limited task-bridge evidence, not proof of a continuously running poller, general remote shell, or always-on device worker. GitHub Actions and this ChatGPT conversation cannot start a private tablet process. Never claim a device command ran unless the bridge posts its result to the corresponding GitHub issue.
+**Historical integration status:** the repository has no direct AndroidHarness MCP/client adapter. The bounded GitHub issue bridge has now returned a successful read-only doctor result from the AndroidHarness 3.1 Code workspace (issue #122), so its device-side execution path is verified for that allowlisted operation. A separate Python test task (issue #123) failed before tests began because the device could not fetch `origin/main`. PR #139 merged bounded retry/backoff for that fetch. Stale retry #133 was superseded and closed after main advanced; task #140 was superseded and closed as not planned when AndroidHarness was removed as a release gate. No checkout refresh or poller restart is required for normal engine operation. This is limited task-bridge evidence, not proof of a continuously running poller, general remote shell, or always-on device worker. GitHub Actions and this ChatGPT conversation cannot start a private tablet process. Never claim a device command ran unless the bridge posts its result to the corresponding GitHub issue.
 
 The operator supplied a readiness snapshot dated 2026-11-01 22:40 UTC. It reported:
 - AndroidHarness device access: Auto with fallback enabled; temporary root mode enabled per project/use; direct root not checked.
@@ -48,7 +50,7 @@ AndroidHarness is an MCP client, not an MCP server. No engine MCP endpoint is cu
 
 The upstream app has a foreground service, persistent message queue, resume cards and optional auto-continue. These improve session resilience but do not make the tablet a guaranteed 24/7 worker. Optional Telegram remote control can be paired to steer a tablet session from another device, but it is not configured and does not give ChatGPT this conversation direct device access.
 
-## Intended role in the execution architecture
+## Historical intended role (not an active runtime dependency)
 
 Use AndroidHarness for bounded, inspectable device-side or Linux-side work that benefits from the Android tablet environment:
 
@@ -115,7 +117,7 @@ Every call must carry a task ID, workspace boundary, timeout, output limit, and 
 
 The direct authenticated tool/session adapter described above does not exist. A narrower GitHub issue bridge is implemented below for four fixed allowlisted operations (environment inspection, Git status, Python unit tests, and the read-only doctor); it is not a direct MCP tool interface or general device control. Python tests execute trusted repository test code under the AndroidHarness Linux/app UID and are not an OS sandbox; arbitrary shell commands are not exposed.
 
-## GitHub-mediated AndroidHarness task bridge
+## Historical GitHub-mediated AndroidHarness task bridge (optional, inactive)
 
 A narrow issue-polling bridge is implemented in `scripts/androidharness_issue_bridge.py`. It is not an MCP server and does not expose general remote shell or direct UI control. ChatGPT can enqueue a bounded task by opening a GitHub issue with title prefix `[AndroidHarness Task]` and the required task marker/JSON body. The AndroidHarness process polls the repository through the existing authenticated GitHub CLI session, claims only issues authored by `ghith93`, and posts structured results back to the issue.
 
@@ -127,9 +129,9 @@ Allowed operations are fixed in code:
 
 The bridge never accepts shell commands, arbitrary paths, package installation, root, SSH, provider calls, Cloudflare access, production writes, or deployments. Test execution uses a minimal environment that does not inherit provider, Cloudflare, or GitHub credential environment variables and uses a temporary HOME. It verifies all five mandatory policy documents before claiming each task. Task output and runtime are bounded. A private local audit log is written under `~/.cache/raawaa-autonomous-engine/`; a file lock prevents multiple pollers. **This is not an OS sandbox:** Python tests run as the AndroidHarness Linux/app UID and can still access files and network resources available to that UID. Use the bridge only with trusted, owner-controlled `origin/main` code; do not mistake environment filtering or a temporary HOME for filesystem/network isolation. Successful tasks are closed after their result is posted; failed tasks remain open with a failed title. A task interrupted after claim remains marked Running and must be inspected/requeued manually to avoid accidental duplicate execution.
 
-### One-time activation on the tablet (AndroidHarness 3.1)
+### Retired activation instructions — do not execute as part of normal operations
 
-The supplied AndroidHarness clone is at `/workspace/raawaa-autonomous-engine`. After the bridge is merged, the operator only needs to start one long-running foreground terminal session in AndroidHarness:
+The following commands are retained only as historical reference. Do not start this poller for normal project operation; AndroidHarness is optional diagnostics only:
 
 ```bash
 cd /workspace/raawaa-autonomous-engine
@@ -158,7 +160,7 @@ The issue must be authored by `ghith93`, use the exact title prefix above, and i
 
 For `run_python_tests`, include `"commit_sha":"<full 40-character current main SHA>"`. Never put secrets or arbitrary commands in task bodies.
 
-## Initial enablement sequence
+## Archived device enablement sequence (not required; do not follow unless explicitly requested)
 
 1. Keep the installed AndroidHarness 3.1 version. Select the writable `raawaa-autonomous-engine` Code workspace; do not rely on 3.2-only project auto-loading, plugin bundles, WorkManager features, or SDK installer.
 2. Run `/doctor`, `env_status`, and `python scripts/androidharness/doctor.py --json`; compare the local SHA with GitHub `main`.
@@ -198,9 +200,9 @@ The expected commit must be the current GitHub main SHA or a descendant, not a h
 - [ ] Agent invocation still passes policy and audit gates
 
 
-## Future recurring worker: WorkManager automation (3.2 capability)
+## Retired recurring worker proposal: WorkManager automation (3.2 capability)
 
-The WorkManager runbook documents the newer AndroidHarness recurring-message path. The device is intentionally remaining on 3.1, so do not assume this 3.2-era workflow is available or configure it now. For the current 3.1 setup, use the bounded GitHub issue bridge only when its foreground poller is explicitly started. Keep the cloud queue and task ledger durable in Cloudflare D1, and GitHub Actions as the reproducible CI gate. Do not run two device workers concurrently. If the device later moves to a version with verified WorkManager support, assess it as a separate migration.
+The WorkManager runbook is retired. Do not configure it. The installed device remains on 3.1, and AndroidHarness is no longer a task execution backend. Use the cloud Worker + D1 and bounded GitHub Actions runner for normal operation. Keep the cloud queue and task ledger durable in Cloudflare D1, and GitHub Actions as the reproducible CI gate. Do not run two device workers concurrently. If the device later moves to a version with verified WorkManager support, assess it as a separate migration.
 
 Any Android background schedule remains opportunistic, not a 24/7 guarantee. Backend activation requires device-side evidence; repository documentation alone is not proof that a schedule or poller is running.
 
@@ -208,4 +210,4 @@ Any Android background schedule remains opportunistic, not a 24/7 guarantee. Bac
 
 The bounded read-only doctor task completed successfully on the installed AndroidHarness 3.1 workspace at 2026-11-02 01:20:33 UTC. It reported Lenovo TB370FU, Android 15, arm64-v8a, 8 CPU cores, 8,198,997,816 bytes total RAM, 2,804,215,808 bytes available RAM, and 210,349,273,088 bytes free disk. Python 3.14.8, Node.js 26.12.1, Java 21.0.13, Git 2.56.0, GitHub CLI 2.103.3, D8, aapt2, and apksigner passed their version checks. Gradle, npm, pip, clang, cmake, and SSH were unavailable; no Android SDK platform was installed. The doctor reported zero mutations, zero network requests, and no secret values emitted.
 
-This confirms the Python/Git/GitHub CLI path is present in that session; it does not prove that the issue-bridge poller remains running or that the bridge can fetch the latest repository commit. A subsequent Python test task failed at the single `git fetch origin/main` attempt before tests began. PR #139 merged bounded retries with 2s/4s backoff and a 45-second per-attempt timeout. Task #133 was closed as stale; task #140 targets the latest merged main SHA but has no device-side result yet. The AndroidHarness 3.1 checkout must fast-forward to main and the foreground poller must restart before it loads the retry fix. Do not treat the earlier Python test snapshot or the doctor success as a passing test run for the current merged commit. Node/npm-dependent experiments must first account for npm being absent in the verified session. No SDK installation or app upgrade is required for the Python-first engine.
+This confirms the Python/Git/GitHub CLI path is present in that session; it does not prove that the issue-bridge poller remains running or that the bridge can fetch the latest repository commit. A subsequent Python test task failed before tests began due to a Git fetch failure; retry/backoff support was merged in PR #139. The device-side test tasks were superseded when AndroidHarness was removed as a release gate. No device-side test result is required; current tests and release validation run in cloud CI. Do not treat the earlier Python test snapshot or the doctor success as a passing test run for the current merged commit. Node/npm-dependent experiments must first account for npm being absent in the verified session. No SDK installation or app upgrade is required for the Python-first engine.
