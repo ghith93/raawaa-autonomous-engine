@@ -28,6 +28,7 @@ from .venue_smoke import (
 from .v3_math import get_sqrt_ratio_at_tick
 from .v3_rpc import DEFAULT_V3_ETHEREUM_RPC, EvmV3PoolReader
 from .v3_simulator import simulate_v3_swap
+from .cex_scan import scan_cex_spot_depth, CexScanError
 
 
 def demo() -> dict:
@@ -177,6 +178,23 @@ def main() -> None:
     solana_quote_parser.add_argument("--output-mint", required=True)
     solana_quote_parser.add_argument("--amount-raw", required=True)
     solana_quote_parser.add_argument("--timeout-seconds", type=float, default=8.0)
+
+    cex_parser = sub.add_parser(
+        "cex-scan",
+        help="bounded read-only CEX spot order-book depth comparison; no orders or profit claim",
+    )
+    cex_parser.add_argument(
+        "--venue", action="append", required=True, metavar="VENUE=INSTRUMENT",
+        help="repeat 2-4 times; supported: binance, bybit, coinbase, okx",
+    )
+    cex_parser.add_argument("--base-code", required=True, help="exact uppercase exchange base-asset code")
+    cex_parser.add_argument("--quote-code", required=True, help="exact uppercase exchange quote-currency code")
+    cex_parser.add_argument("--base-asset-id", required=True, help="operator-approved canonical base asset ID")
+    cex_parser.add_argument("--quote-currency-id", required=True, help="operator-approved canonical quote currency ID")
+    cex_parser.add_argument("--base-quantity", required=True, help="requested base quantity, in human units")
+    cex_parser.add_argument("--timeout-seconds", type=float, default=8.0)
+    cex_parser.add_argument("--max-quote-age-seconds", type=int, default=5)
+    cex_parser.add_argument("--max-quote-skew-seconds", type=int, default=2)
 
     flash_parser = sub.add_parser(
         "flash-swap-sim",
@@ -646,6 +664,30 @@ def main() -> None:
             }, indent=2))
         except (JupiterQuoteError, ValueError, ArithmeticError) as exc:
             parser.exit(2, f"solana-quote failed: {exc}\n")
+    elif args.command == "cex-scan":
+        try:
+            venue_instruments = {}
+            for entry in args.venue:
+                if not isinstance(entry, str) or "=" not in entry:
+                    raise CexScanError("each --venue must use VENUE=INSTRUMENT")
+                venue, instrument = entry.split("=", 1)
+                if venue in venue_instruments:
+                    raise CexScanError("duplicate venue")
+                venue_instruments[venue] = instrument
+            result = scan_cex_spot_depth(
+                venue_instruments=venue_instruments,
+                base_code=args.base_code,
+                quote_code=args.quote_code,
+                base_asset_id=args.base_asset_id,
+                quote_currency_id=args.quote_currency_id,
+                base_quantity=args.base_quantity,
+                timeout_seconds=args.timeout_seconds,
+                max_quote_age_seconds=args.max_quote_age_seconds,
+                max_quote_skew_seconds=args.max_quote_skew_seconds,
+            )
+            print(json.dumps(result, indent=2))
+        except (CexScanError, ValueError, ArithmeticError, RuntimeError) as exc:
+            parser.exit(2, f"cex-scan failed: {exc}\\n")
     elif args.command == "paper-observe":
         try:
             result = observe_flash_swap_outcome(
