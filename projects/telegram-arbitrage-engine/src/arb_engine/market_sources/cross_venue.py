@@ -26,6 +26,8 @@ class InstrumentSpec:
     quote_currency_id: str
     base_step_size: Decimal | str
     market_family: str = "cex_spot"
+    min_base_quantity: Decimal | str | None = None
+    min_quote_notional: Decimal | str | None = None
 
     def __post_init__(self) -> None:
         for value, label in (
@@ -40,6 +42,16 @@ class InstrumentSpec:
             raise InstrumentMappingError("only cex_spot instruments are supported by this scanner")
         step = _positive_decimal(self.base_step_size, "base_step_size")
         object.__setattr__(self, "base_step_size", step)
+        if self.min_base_quantity is not None:
+            object.__setattr__(
+                self, "min_base_quantity",
+                _positive_decimal(self.min_base_quantity, "min_base_quantity"),
+            )
+        if self.min_quote_notional is not None:
+            object.__setattr__(
+                self, "min_quote_notional",
+                _positive_decimal(self.min_quote_notional, "min_quote_notional"),
+            )
 
 
 class InstrumentRegistry:
@@ -84,6 +96,8 @@ class InstrumentRegistry:
                 quote_currency_id=quote_id,
                 base_step_size=item.base_step_size,
                 market_family=item.market_family,
+                min_base_quantity=item.min_base_quantity,
+                min_quote_notional=item.min_quote_notional,
             ))
         return registry
 
@@ -216,6 +230,36 @@ def _direction(
             evaluation=None,
         )
     assert buy_vwap is not None and sell_vwap is not None
+    minimum_status = None
+    if (
+        (buy_spec.min_base_quantity is not None and quantity < buy_spec.min_base_quantity)
+        or (sell_spec.min_base_quantity is not None and quantity < sell_spec.min_base_quantity)
+    ):
+        minimum_status = "below_minimum_order_quantity"
+    elif (
+        (buy_spec.min_quote_notional is not None and buy_spent < buy_spec.min_quote_notional)
+        or (sell_spec.min_quote_notional is not None and sell_received < sell_spec.min_quote_notional)
+    ):
+        minimum_status = "below_minimum_order_notional"
+    if minimum_status is not None:
+        return CrossVenueOpportunity(
+            status=minimum_status,
+            buy_venue_id=buy_spec.venue_id,
+            sell_venue_id=sell_spec.venue_id,
+            base_asset_id=buy_spec.base_asset_id,
+            quote_currency_id=buy_spec.quote_currency_id,
+            requested_base_quantity=quantity,
+            buy_filled_base_quantity=buy_filled,
+            sell_filled_base_quantity=sell_filled,
+            buy_fill_fraction=buy_fraction,
+            sell_fill_fraction=sell_fraction,
+            buy_vwap=buy_vwap,
+            sell_vwap=sell_vwap,
+            buy_quote_spent=buy_spent,
+            sell_quote_received=sell_received,
+            gross_profit_quote=sell_received - buy_spent,
+            evaluation=None,
+        )
     evaluation = evaluate_two_leg_spread(
         buy_price_quote_per_base=buy_vwap,
         sell_price_quote_per_base=sell_vwap,

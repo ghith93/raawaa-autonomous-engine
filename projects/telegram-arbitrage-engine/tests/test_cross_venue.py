@@ -197,3 +197,65 @@ def test_duplicate_or_non_spot_instrument_mappings_are_rejected():
         ])
     with pytest.raises(InstrumentMappingError, match="only cex_spot"):
         InstrumentSpec("bybit", "BTCUSDT", BTC, USDT, "0.001", market_family="cex_perp")
+
+
+def test_cross_venue_blocks_quantities_below_either_venues_minimum_order_quantity():
+    minimum_registry = InstrumentRegistry([
+        InstrumentSpec(
+            "bybit", "BTCUSDT", BTC, USDT, "0.001",
+            min_base_quantity="0.6",
+        ),
+        InstrumentSpec("binance", "BTCUSDT", BTC, USDT, "0.001"),
+    ])
+    result, reverse = compare_cex_spot_orderbooks(
+        book_a=bybit_book(),
+        book_b=binance_book(),
+        registry=minimum_registry,
+        base_quantity="0.5",
+        costs_by_direction={
+            ("bybit", "binance"): known_costs(),
+            ("binance", "bybit"): known_costs(),
+        },
+        now=NOW,
+    )
+    assert result.status == "below_minimum_order_quantity"
+    assert reverse.status == "below_minimum_order_quantity"
+    assert result.gross_profit_quote == Decimal("0.19")
+    assert result.evaluation is None
+
+
+def test_cross_venue_blocks_quote_notional_below_either_venues_minimum():
+    minimum_registry = InstrumentRegistry([
+        InstrumentSpec(
+            "bybit", "BTCUSDT", BTC, USDT, "0.001",
+            min_quote_notional="60",
+        ),
+        InstrumentSpec("binance", "BTCUSDT", BTC, USDT, "0.001"),
+    ])
+    result, _ = compare_cex_spot_orderbooks(
+        book_a=bybit_book(),
+        book_b=binance_book(),
+        registry=minimum_registry,
+        base_quantity="0.5",
+        costs_by_direction={
+            ("bybit", "binance"): known_costs(),
+            ("binance", "bybit"): known_costs(),
+        },
+        now=NOW,
+    )
+    assert result.status == "below_minimum_order_notional"
+    assert result.gross_profit_quote == Decimal("0.19")
+    assert result.evaluation is None
+
+
+def test_instrument_spec_rejects_invalid_minimum_order_constraints():
+    with pytest.raises(InstrumentMappingError, match="min_base_quantity"):
+        InstrumentSpec(
+            "bybit", "BTCUSDT", BTC, USDT, "0.001",
+            min_base_quantity="0",
+        )
+    with pytest.raises(InstrumentMappingError, match="min_quote_notional"):
+        InstrumentSpec(
+            "bybit", "BTCUSDT", BTC, USDT, "0.001",
+            min_quote_notional="-1",
+        )
