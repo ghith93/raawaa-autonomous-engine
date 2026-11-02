@@ -137,9 +137,10 @@ def build_parser() -> argparse.ArgumentParser:
     listing.add_argument("--limit", type=int, default=50)
     sub.add_parser("run-once")
 
-    batch = sub.add_parser("run-batch", help="Run a bounded batch of dry-run tasks")
+    batch = sub.add_parser("run-batch", help="Run a bounded task batch with policy-limited concurrency")
     batch.add_argument("--max-tasks", type=int, default=5)
     batch.add_argument("--max-seconds", type=int, default=60)
+    batch.add_argument("--max-parallel", type=int, default=None)
 
     log = sub.add_parser("audit-log")
     log.add_argument("--limit", type=int, default=100)
@@ -222,8 +223,14 @@ def main() -> int:
         runner = lambda current_store: run_once(
             current_store, live_gateway=gateway, environ=os.environ
         )
-        print(json.dumps(run_batch(store(), args.max_tasks, args.max_seconds, runner=runner),
-                         indent=2, ensure_ascii=False))
+        max_parallel = args.max_parallel
+        if max_parallel is None:
+            execution_policy = load_json(ROOT / "config" / "policy.json")
+            max_parallel = execution_policy.get("max_parallel_agents", 1)
+        print(json.dumps(run_batch(
+            store(), args.max_tasks, args.max_seconds,
+            runner=runner, max_parallel=max_parallel,
+        ), indent=2, ensure_ascii=False))
     elif args.command == "audit-log":
         print(json.dumps(store().audit_events(args.limit), indent=2, ensure_ascii=False))
     elif args.command == "memory-add":
