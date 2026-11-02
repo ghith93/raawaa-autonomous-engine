@@ -91,7 +91,7 @@ def _mint(value: str, label: str) -> str:
     for character in value:
         number = number * 58 + _BASE58_ALPHABET.index(character)
     leading_zeroes = len(value) - len(value.lstrip("1"))
-    decoded = (b"\\x00" * leading_zeroes) + (
+    decoded = (b"\x00" * leading_zeroes) + (
         number.to_bytes((number.bit_length() + 7) // 8, "big") if number else b""
     )
     if len(decoded) != 32:
