@@ -552,6 +552,8 @@ def test_rpc_http_403_is_classified_as_retryable_transport_error(monkeypatch):
 
 
 def test_json_rpc_rate_limit_error_is_retryable_transport_failure(monkeypatch):
+    import pytest
+
     class FakeResponse:
         def __enter__(self):
             return self
