@@ -41,6 +41,8 @@ disabled until the D1 worker/runner lifecycle is separately implemented and test
 Run `npm run test:worker` with Node.js 20+. Tests use an in-memory mock binding and
 do not connect to or mutate the real Cloudflare database.
 
+The Python suite also applies all ordered D1 migrations to a temporary SQLite database and executes the exact quota reservation SQL from `worker/quota.js` under concurrent writers, after a database reopen, and with an active cooldown. These local parity tests validate SQL shape and regression behavior only; they do not prove Cloudflare D1 production concurrency, deployed schema state, or remote restart recovery. A non-production D1 test database remains required before enabling live inference.
+
 
 ## Python runner connection
 
