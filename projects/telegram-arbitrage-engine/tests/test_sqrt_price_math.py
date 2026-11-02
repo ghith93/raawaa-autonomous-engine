@@ -37,7 +37,7 @@ def test_amount_deltas_are_order_independent() -> None:
 def test_input_token0_decreases_price_and_token1_increases_price() -> None:
     token0_input = get_next_sqrt_price_from_input(Q96, 10**18, 10**15, True)
     token1_input = get_next_sqrt_price_from_input(Q96, 10**18, 10**15, False)
-    assert Q96 < token0_input < Q96 + 1  # tiny but positive movement rounds in Q64.96
+    assert token0_input < Q96
     assert token1_input > Q96
 
 
