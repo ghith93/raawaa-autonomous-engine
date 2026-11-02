@@ -108,7 +108,7 @@ Use `flash-swap-sim` separately for the V2 pair-invariant flash-swap repayment s
 
 The `v3-sim` command reads a bounded Uniswap V3 pool snapshot at one pinned Ethereum block, verifies the pool against the configured factory and fee tier, fetches the tick bitmap words and initialized liquidityNet records along a requested price-limit path, and simulates exact-input or exact-output swaps across multiple ticks.
 
-Example (Ethereum defaults to the official Uniswap V3 factory and the configured public read-only RPC):
+Example (Ethereum defaults to the official Uniswap V3 factory and Nodely's keyless public read-only RPC):
 
 ```bash
 python -m arb_engine.cli v3-sim \
@@ -122,7 +122,7 @@ Positive `--amount-specified` is exact input; negative is exact output. Values a
 
 This is a read-only pool simulation, not an arbitrage or net-profit result. It does not model gas, token transfer taxes, router behavior, MEV, inclusion, or transaction execution. No wallet, signing, transaction or trade method exists.
 
-The `V3 read-only live pool smoke` workflow checks the Ethereum USDC/WETH 0.3% pool using bounded public RPC reads, verifies token decimals and block provenance, and simulates a one-USDC input without sending a transaction. It tries the default public RPC and then a public Nodely fallback; provider failover restarts the entire snapshot and shares one 512-request budget, so state from different endpoints is never mixed. It runs on V3 code changes to main and once daily. Its output validates reader connectivity and arithmetic on one pool only; it is not a market opportunity signal.
+The `V3 read-only live pool smoke` workflow checks the Ethereum USDC/WETH 0.3% pool using bounded public RPC reads, starts with Nodely and falls back only on transport/provider errors, verifies token decimals and block provenance, and simulates a one-USDC input without sending a transaction. It tries the default public RPC and then a public Nodely fallback; provider failover restarts the entire snapshot and shares one 512-request budget, so state from different endpoints is never mixed. It runs on V3 code changes to main and once daily. Its output validates reader connectivity and arithmetic on one pool only; it is not a market opportunity signal.
 
 See [V3 math foundation](../../docs/research/v3-math-foundation.md), [multi-tick simulator](../../docs/research/v3-multi-tick-simulator.md), and [pinned RPC snapshot reader](../../docs/research/v3-pinned-rpc-snapshot.md).
 
