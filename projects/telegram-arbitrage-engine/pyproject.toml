@@ -19,6 +19,9 @@ arb-telegram = "arb_engine.telegram_bot:main"
 [tool.setuptools.packages.find]
 where = ["src"]
 
+[tool.setuptools.package-data]
+arb_engine = ["venue_registry.json"]
+
 [tool.pytest.ini_options]
 addopts = "-q"
 testpaths = ["tests"]
