@@ -26,7 +26,7 @@ def pool(address, token0, token1, reserve0, reserve1, *, fee=30, chain=1, block=
 
 
 def test_exact_input_quote_uses_integer_constant_product_math():
-    p = pool("0xpool", QUOTE, BASE, 1_000_000_000_000, 10**24)
+    p = pool("0x" + "3" * 40, QUOTE, BASE, 1_000_000_000_000, 10**24)
     result = quote_exact_input(p, QUOTE, 1_000_000_000)
     assert result.amount_in_raw == 1_000_000_000
     assert result.amount_out_raw > 0
@@ -41,8 +41,8 @@ def test_exact_input_quote_supports_reverse_token_order():
 
 
 def test_same_block_two_pool_round_trip_is_calculated_in_raw_units():
-    buy = pool("0xbuy", QUOTE, BASE, 1_000_000_000_000, 10**24)
-    sell = pool("0xsell", BASE, QUOTE, 10**24, 1_010_000_000_000)
+    buy = pool("0x" + "3" * 40, QUOTE, BASE, 1_000_000_000_000, 10**24)
+    sell = pool("0x" + "4" * 40, BASE, QUOTE, 10**24, 1_010_000_000_000)
     result = simulate_round_trip(
         buy, sell, quote_token=QUOTE, base_token=BASE, capital_quote_raw=1_000_000_000
     )
@@ -65,7 +65,7 @@ def test_cross_chain_or_different_block_pools_are_rejected():
 
 
 def test_same_pool_cannot_be_used_as_two_venues():
-    p = pool("0xsame", QUOTE, BASE, 1_000_000_000_000, 10**24)
+    p = pool("0x" + "3" * 40, QUOTE, BASE, 1_000_000_000_000, 10**24)
     with pytest.raises(ValueError, match="different pools"):
         simulate_round_trip(p, p, quote_token=QUOTE, base_token=BASE, capital_quote_raw=1000)
 
