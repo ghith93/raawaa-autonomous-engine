@@ -8,7 +8,7 @@ category: project
 
 ## Current operating decision
 
-AndroidHarness 3.1 is outside the engine's critical path. Use this skill only when the operator explicitly requests a device-specific diagnostic or compatibility check. Do not start or maintain a foreground poller, WorkManager schedule, recurring prompt, auto-continue session, or device-side task worker. Do not upgrade the installed app or request additional permissions.
+AndroidHarness 3.1 is outside the engine's critical path. This skill supports diagnostics only. Use it only when the operator explicitly requests a device-specific diagnostic or compatibility check. Do not start or maintain a foreground poller, WorkManager schedule, recurring prompt, auto-continue session, or device-side task worker. Do not upgrade the installed app or request additional permissions.
 
 Normal project work, code changes, tests, cloud task execution, recovery, and CI use GitHub integrations, GitHub Actions, Cloudflare Worker, and D1. Device unavailability or exhausted AndroidHarness model quota must never block the project.
 
