@@ -14,6 +14,25 @@ Simulation-first spot-arbitrage research module, isolated inside the autonomous-
 - An optional local Anvil fork-call adapter accepts exact caller-supplied calldata and performs read-only eth_call/eth_estimateGas with optional callTracer output; it refuses non-loopback endpoints and never submits transactions. It simulates one call only, not an atomic two-venue arbitrage route.
 - A read-only EVM JSON-RPC adapter retrieves two V2 pool states and token decimals at one pinned block. The V2 constant-product calculator uses integer raw units and requires two distinct pools at the same block; it is reserve math only and excludes gas, transfer taxes, dynamic fees, reverts, MEV, and execution. Pool fee basis points can be supplied manually or selected from the source-documented Ethereum V2 registry. Registry entries remain unverified until the CLI confirms pair.factory(), factory.getPair(), and router.factory() at the pinned block; the fee model is still a documented assumption.
 
+## Same-block on-chain V2 cross-venue scan
+
+The \`onchain-v2-scan\` command uses DEX Screener only to discover candidate pair addresses and token metadata. It then verifies each candidate against the registered Ethereum V2 factory, reads both verified pools at one pinned block, verifies each Router02 factory, and obtains \`getAmountsOut\` quotes for both buy/sell directions at that same block.
+
+Example (replace the token addresses with verified contracts; the quote token is always explicit):
+
+\`\`\`bash
+python -m arb_engine.cli onchain-v2-scan \\
+  --token-address 0x<BASE_TOKEN_ADDRESS> \\
+  --quote-token-address 0x<QUOTE_TOKEN_ADDRESS> \\
+  --capital-quote 1000 \\
+  --max-candidate-pairs 4 \\
+  --max-rpc-requests 32
+\`\`\`
+
+The result reports raw and human-readable router outputs and gross quote-token surplus for each direction. It is **not net profit** and does not model flash-swap repayment, gas, MEV, inclusion/revert risk, transfer taxes, or execution overhead. Candidate discovery is bounded to four pairs and the Ethereum reader enforces the RPC request budget. No transaction, calldata, wallet, signer, approval, or order is created or submitted.
+
+Use \`flash-swap-sim\` separately for the V2 pair-invariant flash-swap repayment simulation; neither command enables live execution.
+
 ## Read-only flash-swap simulation
 
 The `flash-swap-sim` command reads two V2 pools at one canonical block, models the opposite-token repayment invariant, and optionally applies a caller-supplied gas-used/gas-price scenario. It can optionally record local research events with `--record-paper`.
