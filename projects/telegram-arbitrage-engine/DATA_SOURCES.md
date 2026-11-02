@@ -11,10 +11,10 @@
 - The client's `fetched_at` is the local response retrieval time only. It must never be interpreted as proof that the on-chain pool state was fresh at that time.
 - API marks are useful for discovery and ranking only. They are not executable swap quotes, guaranteed depth, or evidence of profit.
 
-## Public Ethereum JSON-RPC candidate
+## Public EVM JSON-RPC candidate
 
 - Default PublicNode endpoint: https://ethereum-rpc.publicnode.com (Ethereum mainnet, chain ID 1). The CLI accepts `--chain-id` and a custom HTTPS `--rpc-url` for other EVM networks.
-- The current `v2-sim` CLI uses this endpoint for read-only `eth_chainId`, `eth_blockNumber`, `eth_getBlockByNumber`, and `eth_call` requests. It reads V2 `token0`, `token1`, `getReserves`, and token `decimals`, pins both pools to one block, checks the block timestamp, and re-reads the block hash to detect a reorg during collection. When explicit router addresses are supplied, it also calls V2 `getAmountsOut(uint256,address[])` for each leg at that same block validates the ABI response, and re-checks the canonical block hash after the router calls.
+- The current `v2-sim` CLI uses this endpoint for read-only `eth_chainId`, `eth_blockNumber`, `eth_getBlockByNumber`, and `eth_call` requests. It reads V2 `token0`, `token1`, `getReserves`, and token `decimals`, pins both pools to one block, checks the block timestamp, and re-reads the block hash to detect a reorg during collection. When explicit router addresses are supplied, it also calls V2 `getAmountsOut(uint256,address[])` for each leg at that same block, validates the ABI response, and re-checks the canonical block hash after the router calls.
 - Public/free availability is not an SLA, and rate limits or service terms may change.
 - No key, wallet, signer, transaction submission, or paid access is required by the current code.
 
@@ -31,7 +31,7 @@
 1. Use the optional factory verification for each pair, then independently verify the protocol's fee model; factory membership alone does not prove the configured fee basis points.
 2. Reject fee-on-transfer/rebasing/blacklisted assets where their behavior cannot be safely simulated.
 3. Estimate gas and convert it to the quote asset using a fresh, independent price source.
-4. Independently verify pool factory/protocol and fee configuration; compare reserve math against router `eth_call` exact-input quotes at the same block.
+4. Compare reserve math against router `eth_call` exact-input quotes at the same block, after verifying pair and router factory bindings.
 5. Include route-level slippage, minimum-output constraints, and revert simulation.
 6. Record block hash, retrieval time, data source, and every assumption in each simulation.
 7. Replay captured snapshots and test quote stability across blocks before enabling paper-trade accounting.
