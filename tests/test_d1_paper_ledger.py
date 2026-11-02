@@ -87,8 +87,25 @@ class D1PaperLedgerTests(unittest.TestCase):
                 ("b" * 64, "candidate-1", "0" * 64),
             ).rowcount
             self.assertEqual(lost_race, 0)
-            with self.assertRaises(sqlite3.IntegrityError):
-                db.execute("UPDATE paper_candidate_heads SET sequence=2 WHERE candidate_id='candidate-1'")
+            db.execute("""
+                INSERT INTO paper_events(
+                    event_id,candidate_id,sequence,event_type,occurred_at,payload_json,
+                    previous_hash,event_hash
+                ) VALUES(?,?,?,?,?,?,?,?)
+            """, ("event-1", "candidate-1", 1, "candidate_detected",
+                  "2026-11-02T00:00:00+00:00", "{}", "0" * 64, "a" * 64))
+            db.execute("""
+                INSERT INTO paper_event_checkpoints(candidate_id,sequence,event_id,event_hash,created_at)
+                VALUES(?,?,?,?,?)
+            """, ("candidate-1", 1, "event-1", "a" * 64, "2026-11-02T00:00:00+00:00"))
+            for statement in (
+                "UPDATE paper_events SET event_type='expired' WHERE event_id='event-1'",
+                "DELETE FROM paper_events WHERE event_id='event-1'",
+                "UPDATE paper_event_checkpoints SET event_hash='b' WHERE event_id='event-1'",
+                "DELETE FROM paper_event_checkpoints WHERE event_id='event-1'",
+            ):
+                with self.subTest(statement=statement), self.assertRaises(sqlite3.IntegrityError):
+                    db.execute(statement)
             db.close()
 
 
