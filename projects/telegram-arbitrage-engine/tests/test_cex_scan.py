@@ -110,8 +110,10 @@ def test_two_venue_scan_sweeps_depth_but_never_claims_net_profit():
 
     buy_binance = next(x for x in result["opportunities"] if x["buy_venue"] == "binance")
     assert buy_binance["status"] == "incomplete_costs"
-    assert buy_binance["gross_profit_quote"] == "0.01"
+    assert buy_binance["gross_profit_quote"] == "-0.04"
     assert buy_binance["evaluation"]["net_profit_quote"] is None
+    buy_bybit = next(x for x in result["opportunities"] if x["buy_venue"] == "bybit")
+    assert buy_bybit["gross_profit_quote"] == "0.02"
     assert set(buy_binance["evaluation"]["missing_required_costs"]) == {
         "buy_fee_bps",
         "sell_fee_bps",
