@@ -137,8 +137,11 @@ def evaluate_two_leg_spread(
     buy_time = _aware(buy_fetched_at, "buy_fetched_at")
     sell_time = _aware(sell_fetched_at, "sell_fetched_at")
     current_time = _aware(now or datetime.now(timezone.utc), "now")
-    buy_age = Decimal(str((current_time - buy_time).total_seconds()))
-    sell_age = Decimal(str((current_time - sell_time).total_seconds()))
+    buy_age_raw = Decimal(str((current_time - buy_time).total_seconds()))
+    sell_age_raw = Decimal(str((current_time - sell_time).total_seconds()))
+    future_dated = min(buy_age_raw, sell_age_raw) < Decimal("-1")
+    buy_age = max(Decimal("0"), buy_age_raw)
+    sell_age = max(Decimal("0"), sell_age_raw)
     max_age = max(buy_age, sell_age)
 
     identity_matches = (
@@ -175,6 +178,7 @@ def evaluate_two_leg_spread(
         required.extend(("bridge_cost_quote", "settlement_cost_quote"))
     if uses_borrow:
         required.append("borrow_cost_quote")
+    required = list(dict.fromkeys(required))
 
     known_bps = Decimal("0")
     known_flat = Decimal("0")
@@ -195,7 +199,7 @@ def evaluate_two_leg_spread(
             known_flat += _decimal(value, field)
     known_cost = notional * known_bps / Decimal("10000") + known_flat
 
-    stale = min(buy_age, sell_age) < Decimal("-1") or max_age > Decimal(max_quote_age_seconds)
+    stale = future_dated or max_age > Decimal(max_quote_age_seconds)
     insufficient_depth = buy_fill < 1 or sell_fill < 1
     if stale:
         status = "stale_data"
