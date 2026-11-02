@@ -26,7 +26,8 @@ python -m arb_engine.cli onchain-v2-scan \
   --quote-token-address 0x<QUOTE_TOKEN_ADDRESS> \
   --capital-quote 1000 \
   --max-candidate-pairs 4 \
-  --max-rpc-requests 32
+  --max-rpc-requests 32 \
+  --min-request-interval 0.55
 ```
 
 The result reports raw and human-readable router outputs and gross quote-token surplus for each direction. It is **not net profit** and does not model flash-swap repayment, gas, MEV, inclusion/revert risk, transfer taxes, or execution overhead. Candidate discovery is bounded to four pairs and the Ethereum reader enforces the RPC request budget. No transaction, calldata, wallet, signer, approval, or order is created or submitted.
