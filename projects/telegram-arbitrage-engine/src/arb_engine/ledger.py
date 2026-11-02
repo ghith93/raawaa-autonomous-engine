@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import json
 import sqlite3
+from statistics import median
+from decimal import Decimal
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -73,3 +75,37 @@ class OpportunityLedger:
             db.row_factory = sqlite3.Row
             rows = db.execute("SELECT * FROM observations ORDER BY id DESC LIMIT ?", (limit,)).fetchall()
         return [dict(row) for row in rows]
+
+    def summarize(self, limit: int = 500) -> list[dict[str, str | int]]:
+        """Summarize repeated indicative observations; this is not a backtest or PnL report."""
+        rows = self.recent(limit)
+        grouped: dict[tuple[str, str, str, str, str], list[dict[str, str]]] = {}
+        for row in rows:
+            key = (
+                row["chain"], row["base_symbol"], row["quote_symbol"],
+                row["buy_venue"], row["sell_venue"],
+            )
+            grouped.setdefault(key, []).append(row)
+
+        summaries: list[dict[str, str | int]] = []
+        for key, observations in grouped.items():
+            spreads = [Decimal(item["gross_spread_bps"]) for item in observations]
+            timestamps = sorted(item["observed_at"] for item in observations)
+            summaries.append({
+                "chain": key[0],
+                "pair": f"{key[1]}/{key[2]}",
+                "buy_venue": key[3],
+                "sell_venue": key[4],
+                "observation_count": len(observations),
+                "mean_gross_spread_bps": str(sum(spreads) / len(spreads)),
+                "median_gross_spread_bps": str(median(spreads)),
+                "max_gross_spread_bps": str(max(spreads)),
+                "first_observed_at": timestamps[0],
+                "last_observed_at": timestamps[-1],
+                "interpretation": "repeated_indicative_observations_not_backtested_profit",
+            })
+        return sorted(
+            summaries,
+            key=lambda item: (int(item["observation_count"]), Decimal(str(item["mean_gross_spread_bps"]))),
+            reverse=True,
+        )
