@@ -5,7 +5,7 @@
 
 ## Executive decision
 
-Raawaa already has a policy loader, task model, quota controls, D1-backed state, a Microsoft Agent Framework checkpoint adapter, GitHub Actions and an optional AndroidHarness 3.2 device worker. Adding another full orchestration framework now would duplicate scheduling, persistence, memory and approval logic. The strongest next infrastructure experiment is Cloudflare Workflows because it runs on the Cloudflare platform already selected by the project and provides durable multi-step execution without a separate VM.
+Raawaa has a policy loader, task model, quota controls, D1-backed state, a Microsoft Agent Framework checkpoint adapter, GitHub Actions, and no required device worker. Adding another full orchestration framework now would duplicate scheduling, persistence, memory and approval logic. Cloudflare Workflows has a local runtime prototype, but production adoption still requires separate D1 durability and recovery validation.
 
 ## Candidate comparison
 
@@ -16,7 +16,7 @@ Raawaa already has a policy loader, task model, quota controls, D1-backed state,
 | LangGraph | Stateful graph orchestration, checkpoints, pending writes, thread/checkpoint IDs | Medium: strong checkpoint reference, but duplicates the current MAF adapter and task graph | Borrow tests and semantics; do not add to production |
 | Microsoft Agent Framework | Current isolated workflow/checkpoint prototype | High short-term: already integrated and verified through adapter tests and real workflow resume | Continue restart/authentication tests |
 | Agno | Agent teams, task modes, shared state, memory, guardrails, metrics and human-in-the-loop | Medium: broad alternative, but a second runtime | Revisit only if current scheduler lacks a measured capability |
-| Goose | CLI/API agent, MCP extensions, recipes, subagents and permission controls | Low on tablet: AndroidHarness already provides the equivalent local coding surface | Study recipes/MCP patterns; do not install |
+| Goose | CLI/API agent, MCP extensions, recipes, subagents and permission controls | Not required: device execution is outside the critical path | Study recipes/MCP patterns; do not install |
 | OpenHands | Agent Server, Automation service, remote sandboxes and browser/files/terminal | Medium for a secured cloud VM; poor fit for Android tablet | Optional future cloud coding worker only |
 | Mem0 | Extracted memory facts, SDK or self-hosted server, vector/history stores | Low now: adds model/embedder and vector-store dependencies | Do not add until memory retrieval quality is measured |
 | Letta | Stateful agents with git-backed memory blocks and background consolidation | Medium conceptually, but duplicates current project memory and requires a server/model route | Borrow core/on-demand memory patterns; no deployment |
@@ -98,9 +98,9 @@ Qdrant supports dense and hybrid retrieval; Qdrant Edge offers embedded/offline 
 
 Decision: defer vector search. Start with indexed Markdown/SQLite/D1 retrieval and add Qdrant Edge only if a benchmark demonstrates semantic-recall gains at acceptable memory cost.
 
-## 5. AndroidHarness is the best local coding surface
+## 5. AndroidHarness is optional diagnostics only (superseded)
 
-AndroidHarness 3.2 already provides the local capabilities that would otherwise motivate installing Goose or OpenHands on the tablet: project config, Code profiles, skills, subagents, shell, Git, browser, local models, MCP client and task resumption. Use AndroidHarness Code for tablet-side tasks, GitHub Actions for reproducible CI, Cloudflare for the future durable worker/workflow layer, and ChatGPT/GitHub integration for remote code review and PR operations.
+The previous recommendation to use AndroidHarness Code as a tablet-side execution surface is superseded. The installed version is 3.1 and the operator chose to remove the device from the critical path. Use GitHub Actions for reproducible CI, Cloudflare Worker + D1 for the remote control plane and durable task ledger, and authenticated GitHub/ChatGPT integrations for code review and repository operations. AndroidHarness may be used only for occasional operator-initiated diagnostics.
 
 Do not assume a direct ChatGPT-to-AndroidHarness control channel. A future MCP bridge must be authenticated, workspace-bound, allowlisted, audited, rate-limited, cancellable and protected from arbitrary command execution.
 
@@ -108,7 +108,7 @@ Do not assume a direct ChatGPT-to-AndroidHarness control channel. A future MCP b
 
 | Priority | Work | Why | Gate |
 |---|---|---|---|
-| P0 | Finish AndroidHarness 3.2 device setup and verify toolchain | Unlock local tests and native build checks | One app approval card; fresh device report |
+| Deferred | AndroidHarness 3.2 setup / device worker | Not required for engine operation | Revisit only if the operator explicitly requests device-specific compatibility work |
 | P1 | Cloudflare Workflows deterministic spike | Best fit for durable task execution on current platform | Local/CI only; no providers or deploy |
 | P2 | Restart/resume and interrupted-write tests for file-backed checkpoint adapter | Prove persistence before D1 | Fresh adapter instance, HMAC verification, failure injection |
 | P3 | Compare Pydantic AI StepPersistence with MAF adapter | Check whether a smaller agent runtime improves reliability | No-provider isolated benchmark |
