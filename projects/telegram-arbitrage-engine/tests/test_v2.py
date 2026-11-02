@@ -35,9 +35,9 @@ def test_exact_input_quote_uses_integer_constant_product_math():
 
 
 def test_exact_input_quote_supports_reverse_token_order():
-    p = pool("0x" + "5" * 40, BASE, QUOTE, 10**24, 1_000_000_000_000)
-    result = quote_exact_input(p, QUOTE, 1_000_000_000)
-    assert result.token_out == BASE
+    p = pool("0x" + "5" * 40, QUOTE, BASE, 1_000_000_000_000, 10**24)
+    result = quote_exact_input(p, BASE, 1_000_000_000)
+    assert result.token_out == QUOTE
 
 
 def test_same_block_two_pool_round_trip_is_calculated_in_raw_units():
@@ -99,3 +99,29 @@ def test_reserves_must_fit_v2_uint112():
     p = pool("0x" + "3" * 40, QUOTE, BASE, 2**112, 10000)
     with pytest.raises(ValueError, match="uint112"):
         quote_exact_input(p, QUOTE, 100)
+
+
+def test_price_impact_is_separate_from_pool_fee_and_increases_with_size():
+    p = pool("0x" + "3" * 40, QUOTE, BASE, 10**12, 10**24, fee=30)
+    small = quote_exact_input(p, QUOTE, 10**8)
+    large = quote_exact_input(p, QUOTE, 10**11)
+    assert small.price_impact_bps >= 0
+    assert large.price_impact_bps > small.price_impact_bps
+    assert small.fee_bps == 30
+
+
+def test_zero_addresses_and_unsorted_v2_tokens_are_rejected():
+    with pytest.raises(ValueError, match="Zero address"):
+        quote_exact_input(
+            pool("0x" + "0" * 40, QUOTE, BASE, 10000, 10000), QUOTE, 100,
+        )
+    with pytest.raises(ValueError, match="lower-sorted"):
+        quote_exact_input(
+            pool("0x" + "3" * 40, BASE, QUOTE, 10000, 10000), QUOTE, 100,
+        )
+
+
+def test_exact_input_amount_must_fit_uint256():
+    p = pool("0x" + "3" * 40, QUOTE, BASE, 10000, 10000)
+    with pytest.raises(ValueError, match="uint256"):
+        quote_exact_input(p, QUOTE, 2**256)
