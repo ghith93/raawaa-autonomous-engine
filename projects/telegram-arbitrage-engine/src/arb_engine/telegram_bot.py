@@ -11,7 +11,7 @@ from decimal import Decimal
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
-from .cli import scan
+from .cli import scan_with_spreads
 from .dexscreener import MarketDataError
 from .ledger import OpportunityLedger
 
@@ -111,14 +111,25 @@ class TelegramController:
         if not isinstance(text, str):
             return None
 
+        command, _, argument = text.strip().partition(" ")
+        command = command.split("@", 1)[0].lower()
+        if command == "/scan":
+            update_id = update.get("update_id")
+            if not isinstance(update_id, int) or isinstance(update_id, bool) or update_id < 0:
+                return chat_id, "Cannot process scan: Telegram update ID is missing or invalid."
+            try:
+                cached = OpportunityLedger(self.ledger_path).get_telegram_scan_receipt(update_id)
+            except (OSError, ValueError, sqlite3.Error):
+                return chat_id, "Local scan receipt ledger is unavailable; scan was not started."
+            if cached is not None:
+                return (chat_id, cached[1]) if cached[0] == chat_id else None
+
         now = time.monotonic()
         previous = self._last_request_by_chat.get(chat_id)
         if previous is not None and now - previous < self.min_request_interval_seconds:
             return chat_id, "Rate limit: wait a few seconds before the next command."
         self._last_request_by_chat[chat_id] = now
 
-        command, _, argument = text.strip().partition(" ")
-        command = command.split("@", 1)[0].lower()
         if command in {"/start", "/help"}:
             return chat_id, (
                 "Telegram Arbitrage Engine — read-only research mode.\n"
@@ -155,22 +166,35 @@ class TelegramController:
             if len(query) > 120:
                 return chat_id, "Search query is too long (maximum 120 characters)."
             try:
-                result = scan(query, Decimal("10000"), Decimal("1000"), self.ledger_path)
+                result, spreads = scan_with_spreads(query, Decimal("10000"), Decimal("1000"))
             except (MarketDataError, ValueError, OSError, sqlite3.Error):
                 return chat_id, "Market scan failed safely. Retry later; no trade was placed."
             opportunities = result["opportunities"][:5]
             if not opportunities:
-                return chat_id, (
+                response_text = (
                     f"No cross-DEX indicative spread passed the liquidity/volume filters for {query}.\n"
                     "This is not proof that no arbitrage exists."
                 )
-            lines = [f"Indicative scan: {query}", "Not executable quotes; no profit guarantee."]
-            for item in opportunities:
-                lines.append(
-                    f"{item['chain']} {item['pair']}: {item['buy_venue']} → {item['sell_venue']} "
-                    f"{item['gross_spread_bps']} bps gross"
+            else:
+                lines = [f"Indicative scan: {query}", "Not executable quotes; no profit guarantee."]
+                for item in opportunities:
+                    lines.append(
+                        f"{item['chain']} {item['pair']}: {item['buy_venue']} → {item['sell_venue']} "
+                        f"{item['gross_spread_bps']} bps gross"
+                    )
+                response_text = "\n".join(lines)
+            try:
+                committed = OpportunityLedger(self.ledger_path).record_telegram_scan(
+                    update_id, chat_id, response_text, spreads,
                 )
-            return chat_id, "\n".join(lines)
+                if not committed:
+                    cached = OpportunityLedger(self.ledger_path).get_telegram_scan_receipt(update_id)
+                    if cached is None or cached[0] != chat_id:
+                        return chat_id, "Scan receipt conflict; no result was returned."
+                    response_text = cached[1]
+            except (OSError, ValueError, sqlite3.Error):
+                return chat_id, "Scan completed but its idempotency receipt could not be saved; retry later."
+            return chat_id, response_text
         return chat_id, "Unknown command. Send /help."
 
     def poll_once(self, offset: int = 0, *, on_offset=None) -> int:
