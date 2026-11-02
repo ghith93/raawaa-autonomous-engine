@@ -38,8 +38,8 @@ def test_v2_sim_cli_converts_human_amount_to_raw_units(monkeypatch, capsys):
     monkeypatch.setattr(cli, "EthereumV2PoolReader", FakeReader)
     monkeypatch.setattr(sys, "argv", [
         "arb-engine", "v2-sim",
-        "--buy-pair", "0xbuy", "--buy-fee-bps", "30",
-        "--sell-pair", "0xsell", "--sell-fee-bps", "25",
+        "--buy-pair", POOL_A, "--buy-fee-bps", "30",
+        "--sell-pair", POOL_B, "--sell-fee-bps", "25",
         "--quote-token", QUOTE, "--base-token", BASE,
         "--capital-quote", "50", "--rpc-url", "https://rpc.example",
     ])
