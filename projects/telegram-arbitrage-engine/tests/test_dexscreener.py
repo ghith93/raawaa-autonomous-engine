@@ -71,3 +71,33 @@ def test_scanner_rejects_future_collected_snapshots():
     a = DexScreenerClient._parse_pair(pair("dex-a", "1.00", "p1"), future)
     b = DexScreenerClient._parse_pair(pair("dex-b", "1.01", "p2"), future)
     assert find_spreads([a, b]) == []
+
+
+def test_parser_skips_malformed_nested_api_shapes():
+    now = datetime.now(timezone.utc)
+    malformed = [
+        {"baseToken": "not-an-object", "quoteToken": {}, "liquidity": {}, "volume": {}},
+        {"baseToken": {}, "quoteToken": {}, "liquidity": "bad", "volume": {}},
+        {"baseToken": {}, "quoteToken": {}, "liquidity": {}, "volume": None},
+    ]
+    assert all(DexScreenerClient._parse_pair(row, now) is None for row in malformed)
+
+
+def test_parser_rejects_non_https_source_urls_and_zero_liquidity():
+    now = datetime.now(timezone.utc)
+    insecure = pair("dex-a", "1.0", "p1")
+    insecure["url"] = "http://dex.example/p1"
+    empty_liquidity = pair("dex-b", "1.0", "p2")
+    empty_liquidity["liquidity"]["usd"] = 0
+    assert DexScreenerClient._parse_pair(insecure, now) is None
+    assert DexScreenerClient._parse_pair(empty_liquidity, now) is None
+
+
+def test_parse_pairs_requires_well_formed_payload_and_aware_fetch_time():
+    import pytest
+    from arb_engine.dexscreener import MarketDataError
+
+    with pytest.raises(MarketDataError):
+        DexScreenerClient.parse_pairs([])
+    with pytest.raises(ValueError):
+        DexScreenerClient.parse_pairs({"pairs": []}, datetime.now())
