@@ -37,6 +37,9 @@ function dbMock() {
         },
         async run() {
           calls.push({ kind: "run", sql, values: this.values });
+          if (sql.includes("INSERT OR IGNORE INTO paper_candidate_heads") && !head) {
+            head = { candidate_id: this.values[0], sequence: 0, event_hash: this.values[1] };
+          }
           return { meta: { changes: 1 } };
         },
         async all() {
@@ -342,7 +345,7 @@ test("quota settlement retries identical usage and rejects conflicting usage", a
 
 function paperLedgerDbMock() {
   const calls = [];
-  let head = { sequence: 0, event_hash: "0".repeat(64) };
+  let head = null;
   let event = null;
   return {
     calls,
@@ -369,8 +372,8 @@ function paperLedgerDbMock() {
     async batch(statements) {
       calls.push({ kind: "batch", statements: statements.map(x => ({ sql: x.sql, values: x.values })) });
       const [update, insert] = statements;
-      if (update.values[3] === "candidate-1" && head.sequence === update.values[4] && head.event_hash === update.values[5]) {
-        head = { sequence: update.values[0], event_hash: update.values[1] };
+      if (head && update.values[3] === head.candidate_id && head.sequence === update.values[4] && head.event_hash === update.values[5]) {
+        head = { candidate_id: update.values[3], sequence: update.values[0], event_hash: update.values[1] };
         event = Object.fromEntries([
           "candidate_id","event_id","event_type","occurred_at","chain_id","block_number","block_hash",
           "strategy_id","source_pool","destination_pool","token_in","token_out","gross_profit_raw",
