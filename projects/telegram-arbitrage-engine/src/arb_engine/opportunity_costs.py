@@ -78,6 +78,20 @@ def _decimal(value: Decimal | str, field: str, *, positive: bool = False) -> Dec
     return parsed
 
 
+def _signed_decimal(value: Decimal | str, field: str) -> Decimal:
+    if isinstance(value, bool) or isinstance(value, float):
+        raise OpportunityEvaluationError(f"{field} must be Decimal or a decimal string, not float")
+    if not isinstance(value, (Decimal, str)) or (isinstance(value, str) and (not value or len(value) > 80)):
+        raise OpportunityEvaluationError(f"invalid {field}")
+    try:
+        parsed = value if isinstance(value, Decimal) else Decimal(value)
+    except InvalidOperation as exc:
+        raise OpportunityEvaluationError(f"invalid {field}") from exc
+    if not parsed.is_finite():
+        raise OpportunityEvaluationError(f"invalid {field}")
+    return parsed
+
+
 def _aware(value: datetime, field: str) -> datetime:
     if not isinstance(value, datetime) or value.tzinfo is None or value.utcoffset() is None:
         raise OpportunityEvaluationError(f"{field} must be timezone-aware")
@@ -98,6 +112,7 @@ def evaluate_two_leg_spread(
     buy_fetched_at: datetime,
     sell_fetched_at: datetime,
     costs: OpportunityCosts,
+    gross_profit_quote_override: Decimal | str | None = None,
     now: datetime | None = None,
     max_quote_age_seconds: int = 5,
     buy_fill_fraction: Decimal | str = "1",
@@ -164,7 +179,13 @@ def evaluate_two_leg_spread(
         )
 
     gross_spread_bps = (sell_price / buy_price - Decimal("1")) * Decimal("10000")
-    gross_profit = notional * (sell_price / buy_price - Decimal("1"))
+    # Depth-swept callers can provide the exact quote proceeds minus exact quote spend.
+    # This avoids rounding repeating VWAP ratios into monetary PnL.
+    gross_profit = (
+        _signed_decimal(gross_profit_quote_override, "gross_profit_quote_override")
+        if gross_profit_quote_override is not None
+        else notional * (sell_price / buy_price - Decimal("1"))
+    )
 
     required = list(_BPS_FIELDS)
     families = {buy_market_family, sell_market_family}

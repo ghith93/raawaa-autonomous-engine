@@ -8,6 +8,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
 from typing import Callable
 
@@ -36,6 +37,7 @@ class OrderBookSnapshot:
     asks: tuple[tuple[Decimal, Decimal], ...]
     exchange_timestamp_ms: int
     matching_engine_timestamp_ms: int | None
+    fetched_at: datetime
     update_id: int
     cross_sequence: int
 
@@ -58,6 +60,7 @@ class TickerSnapshot:
     funding_rate: Decimal | None
     basis: Decimal | None
     exchange_timestamp_ms: int
+    fetched_at: datetime
 
 
 def _decimal(value: object, field: str, *, positive: bool = True) -> Decimal:
@@ -242,6 +245,7 @@ class BybitPublicMarketData:
             asks=asks,
             exchange_timestamp_ms=_positive_int(result.get("ts"), "exchange timestamp"),
             matching_engine_timestamp_ms=cts,
+            fetched_at=datetime.now(timezone.utc),
             update_id=_positive_int(result.get("u"), "order book update ID"),
             cross_sequence=_positive_int(result.get("seq"), "order book sequence"),
         )
@@ -288,5 +292,6 @@ class BybitPublicMarketData:
                 funding_rate=_optional_decimal(row.get("fundingRate"), "funding rate"),
                 basis=_optional_decimal(row.get("basis"), "basis"),
                 exchange_timestamp_ms=_positive_int(payload.get("time"), "exchange response timestamp"),
+                fetched_at=datetime.now(timezone.utc),
             ))
         return tuple(snapshots)

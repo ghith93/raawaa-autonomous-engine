@@ -174,3 +174,16 @@ def test_float_costs_naive_timestamps_and_invalid_flags_are_rejected():
         evaluate(max_quote_age_seconds=0)
     with pytest.raises(OpportunityEvaluationError, match="fill fractions"):
         evaluate(sell_fill_fraction="1.1")
+
+
+def test_exact_depth_swept_gross_profit_override_preserves_quote_precision():
+    result = evaluate(gross_profit_quote_override="0.19")
+    assert result.gross_profit_quote == Decimal("0.19")
+    assert result.net_profit_quote == Decimal("0.19") - result.known_cost_quote
+
+    negative = evaluate(
+        sell_price_quote_per_base="99",
+        gross_profit_quote_override="-0.5",
+    )
+    assert negative.gross_profit_quote == Decimal("-0.5")
+    assert negative.net_profit_quote < 0

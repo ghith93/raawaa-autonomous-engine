@@ -27,7 +27,7 @@ Call `arb_engine.opportunity_costs.evaluate_two_leg_spread` with:
 | Cross-chain route | Bridge cost and settlement/finality cost |
 | Borrowed or leveraged capital | Borrow cost |
 
-Known optional costs are included in the total as well. Explicit zero is accepted only when the caller has evidence that the cost is zero. Missing required fields produce `incomplete_costs` and `net_profit_quote=None`.
+Known optional costs are included in the total as well. Explicit zero is accepted only when the caller has evidence that the cost is zero. Depth-swept callers may pass an exact signed gross quote delta (proceeds minus spend) to avoid deriving monetary PnL from a repeating VWAP ratio. Missing required fields produce `incomplete_costs` and `net_profit_quote=None`.
 
 ## Result statuses
 
