@@ -302,7 +302,12 @@ class EvmV3PoolReader(EthereumV2PoolReader):
                 bit_pos = (remaining_bits & -remaining_bits).bit_length() - 1
                 compressed_tick = (word_pos << 8) + bit_pos
                 initialized_tick = compressed_tick * tick_spacing
-                if -(887272) <= initialized_tick <= 887272:
+                in_requested_tick_range = (
+                    limit_tick <= initialized_tick <= tick
+                    if zero_for_one
+                    else tick <= initialized_tick <= limit_tick
+                )
+                if -(887272) <= initialized_tick <= 887272 and in_requested_tick_range:
                     initialized_tick_indices.append(initialized_tick)
                 remaining_bits &= remaining_bits - 1
                 if len(initialized_tick_indices) > max_initialized_ticks:
