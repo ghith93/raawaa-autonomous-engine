@@ -55,6 +55,20 @@ print(quote.output_amount_raw, quote.fee_bps, quote.router, quote.price_impact_p
 
 This is an indicative aggregator quote, not a guaranteed fill or a net-profit calculation. Jupiter's Meta-Aggregator may combine on-chain routes and off-chain RFQ sources; fees, quote freshness, last-look behavior and execution risk must be accounted for separately. No transaction is built, signed, or submitted. See [data sources and trust boundaries](DATA_SOURCES.md).
 
+### Live deployment verification across EVM networks
+
+The `venue-deployment-check` command verifies factory/router bytecode and `router.factory()` at one pinned block on any registered EVM chain. The `Multi-chain V2 venue deployment smoke` GitHub Actions workflow runs this check on BNB Chain, Arbitrum, Optimism, Base, Polygon and Avalanche using public read-only RPC endpoints.
+
+Example:
+
+```bash
+python -m arb_engine.cli venue-deployment-check \
+  --chain-id 42161 \
+  --rpc-url https://arb1.arbitrum.io/rpc
+```
+
+This check does not assert a token pair exists or has liquidity. The stronger WETH/USDC pair and live scanner smoke remains Ethereum-only. Other chains must pass the pinned-block factory/router deployment check before any later pair-level verification is considered.
+
 ## Same-block on-chain V2 cross-venue scan
 
 ### BNB Smart Chain example
