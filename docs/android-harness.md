@@ -18,7 +18,7 @@ The project config defines read-only researcher/reviewer/security-reviewer profi
 
 AndroidHarness is registered as an optional external Android/Linux execution environment for this project. It complements GitHub Actions and Cloudflare; it does not replace the repository's control plane, task ledger, policy enforcement, or CI.
 
-**Integration status:** documented and registered as a candidate execution backend. The repository does not yet contain a live AndroidHarness MCP/client adapter, and GitHub Actions cannot reach a private tablet session merely because this profile exists. An agent may execute through AndroidHarness only when a real, authenticated tool/session is exposed to that agent. Never claim a device command ran unless the harness returns its result.
+**Integration status:** the repository has no direct AndroidHarness MCP/client adapter. A narrow GitHub issue bridge is merged and can run only four fixed operations after its local poller is started in the AndroidHarness 3.1 Code workspace. Until the bridge posts its first device-side result, the backend remains implemented-but-not-activated. GitHub Actions and this ChatGPT conversation cannot start a private tablet process. Never claim a device command ran unless the bridge posts its result to the corresponding GitHub issue.
 
 The operator supplied a readiness snapshot dated 2026-11-01 22:40 UTC. It reported:
 - AndroidHarness device access: Auto with fallback enabled; temporary root mode enabled per project/use; direct root not checked.
