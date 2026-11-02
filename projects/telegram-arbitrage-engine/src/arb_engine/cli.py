@@ -147,6 +147,10 @@ def main() -> None:
     onchain_parser.add_argument("--rpc-url", default=DEFAULT_ETHEREUM_RPC)
     onchain_parser.add_argument("--max-candidate-pairs", type=int, default=4)
     onchain_parser.add_argument("--max-rpc-requests", type=int, default=32)
+    onchain_parser.add_argument(
+        "--min-request-interval", type=float, default=0.55,
+        help="minimum seconds between Ethereum RPC requests (default 0.55 for public eth_call limits)",
+    )
 
     token_parser = sub.add_parser(
         "token-check", help="read-only contract-code and ERC-20 metadata preflight at one pinned block"
@@ -408,6 +412,7 @@ def main() -> None:
                 rpc_url=args.rpc_url,
                 max_candidate_pairs=args.max_candidate_pairs,
                 max_rpc_requests=args.max_rpc_requests,
+                min_request_interval=args.min_request_interval,
             )
             print(json.dumps(result, indent=2))
         except (MarketDataError, RpcReadError, ValueError, ArithmeticError, RuntimeError) as exc:
