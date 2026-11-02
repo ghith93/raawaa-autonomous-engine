@@ -43,8 +43,8 @@ def compute_swap_step(
         raise ValueError("current sqrt price must be a positive uint160")
     if type(target) is not int or not 0 < target <= MAX_UINT160:
         raise ValueError("target sqrt price must be a positive uint160")
-    if type(liquidity) is not int or not 0 < liquidity <= MAX_UINT128:
-        raise ValueError("liquidity must be a positive uint128")
+    if type(liquidity) is not int or not 0 <= liquidity <= MAX_UINT128:
+        raise ValueError("liquidity must be a uint128")
     if type(amount_remaining) is not int or not MIN_INT256 <= amount_remaining <= MAX_INT256:
         raise ValueError("amount_remaining must fit int256")
     if type(fee_pips) is not int or not 0 <= fee_pips < FEE_DENOMINATOR or fee_pips > MAX_UINT24:

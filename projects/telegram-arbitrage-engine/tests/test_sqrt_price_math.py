@@ -14,8 +14,11 @@ from arb_engine.sqrt_price_math import (
 
 
 def test_amount_deltas_at_unit_price_are_exact() -> None:
-    assert get_amount0_delta(Q96, 2 * Q96, 1, False) == Q96 // 2
-    assert get_amount1_delta(Q96, 2 * Q96, 1, False) == Q96
+    # One unit of liquidity over this range is half a raw token0 unit,
+    # so round-down is zero and protocol round-up is one.
+    assert get_amount0_delta(Q96, 2 * Q96, 1, False) == 0
+    assert get_amount0_delta(Q96, 2 * Q96, 1, True) == 1
+    assert get_amount1_delta(Q96, 2 * Q96, 1, False) == 1
 
 
 def test_amount_delta_round_up_is_never_below_round_down() -> None:
