@@ -264,6 +264,7 @@ def run_flash_swap_simulation(
             str(gas_price_wei) if gas_price_wei is not None else "",
             native_token.casefold() if native_token else "",
             native_quote_snapshot.state.pair_address.casefold() if native_quote_snapshot else "",
+            str(native_quote_fee) if native_quote_snapshot else "",
         ))
         candidate_id = "flashswap-" + hashlib.sha256(candidate_key.encode()).hexdigest()[:32]
         # Block time makes retries of the same pinned simulation content-identical for D1 idempotency.
@@ -281,7 +282,6 @@ def run_flash_swap_simulation(
             **common, event_id=f"{candidate_id}:snapshot",
             event_type="snapshot_captured",
             payload={
-                "rpc_endpoint": rpc_url,
                 "pool_addresses": [item.state.pair_address for item in snapshots],
                 "token_decimals": {
                     item.state.token0: item.token0_decimals for item in snapshots
