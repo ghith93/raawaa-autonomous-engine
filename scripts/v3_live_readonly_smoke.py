@@ -146,7 +146,7 @@ def main() -> None:
             continue
 
         requests_used += reader.rpc_request_count
-        result["rpc_endpoint"] = endpoint.split("/", 3)[0] + "//" + endpoint.split("/", 3)[2]
+        result["rpc_endpoint"] = endpoint
         result["rpc_requests_used"] = requests_used
         result["rpc_requests_budget"] = MAX_TOTAL_RPC_REQUESTS
         print(json.dumps(result, indent=2))
