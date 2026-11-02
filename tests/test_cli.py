@@ -9,6 +9,7 @@ from unittest.mock import patch
 
 from engine import cli
 from engine.task_store import TaskStore
+from engine.model_gateway import UsageLedger
 
 
 class CliTests(unittest.TestCase):
@@ -26,6 +27,7 @@ class CliTests(unittest.TestCase):
             ["memory-list"],
             ["memory-archive", "--id", "memory-id"],
             ["model-status"],
+            ["monetary-status"],
             ["provider-profile-status"],
             ["research-discover"],
             ["quota-status"],
@@ -169,6 +171,30 @@ class CliTests(unittest.TestCase):
             self.assertFalse(status["network_calls_enabled"])
             self.assertFalse(status["paid_calls_enabled"])
             self.assertEqual(status["budgets"]["per_task_usd"], 0)
+
+    def test_monetary_status_is_read_only_and_lists_ambiguous_reservations(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = os.path.join(tmp, "engine.db")
+            ledger = UsageLedger(db_path)
+            ledger.reserve(
+                "groq", "openai/gpt-oss-20b", "research", 0.05, 1.0, 1.0,
+                task_id="task-test", per_task_budget_usd=0.10,
+            )
+            output = io.StringIO()
+            with patch.dict(os.environ, {"RAAWAA_ENGINE_DB": db_path}, clear=True):
+                with patch("sys.argv", ["engine", "monetary-status"]):
+                    with contextlib.redirect_stdout(output):
+                        self.assertEqual(cli.main(), 0)
+            result = json.loads(output.getvalue())
+            self.assertEqual(result["network_calls_performed"], 0)
+            self.assertFalse(result["paid_calls_enabled"])
+            self.assertEqual(result["usage"]["pending_reservations"], 1)
+            self.assertEqual(result["pending_reservations"][0]["task_id"], "task-test")
+            self.assertEqual(result["pending_reservations"][0]["provider"], "groq")
+            self.assertEqual(result["pending_reservations"][0]["estimated_cost_usd"], 0.05)
+            self.assertTrue(result["budget_status"]["daily_over_budget"])
+            self.assertIn("Do not release", result["reconciliation_note"])
+            self.assertNotIn("gsk_", output.getvalue())
 
     def test_provider_discovery_command_is_explicit_and_mocked(self):
         output = io.StringIO()
