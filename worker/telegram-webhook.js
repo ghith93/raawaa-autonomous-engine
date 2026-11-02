@@ -44,7 +44,9 @@ function allowedChatIds(env) {
 
 function commandOf(text) {
   if (typeof text !== "string" || text.length > 256) return "unknown";
-  const token = text.trim().split(/\s+/, 1)[0] || "";
+  const trimmed = text.trim();
+  if (!trimmed || /\s/.test(trimmed)) return "unknown";
+  const token = trimmed;
   const match = token.match(/^\/([a-z]{1,20})(?:@[a-z0-9_]{5,32})?$/i);
   return match ? match[1].toLowerCase() : "unknown";
 }
