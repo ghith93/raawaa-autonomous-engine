@@ -35,6 +35,11 @@ class OpportunityLedger:
                 UNIQUE(observed_at, chain, base_symbol, quote_symbol, buy_venue, sell_venue)
             )""")
             db.execute("CREATE INDEX IF NOT EXISTS idx_observations_pair_time ON observations(chain, base_symbol, observed_at)")
+            db.execute("""CREATE TABLE IF NOT EXISTS engine_state (
+                key TEXT PRIMARY KEY,
+                value TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            )""")
 
     def _connect(self) -> sqlite3.Connection:
         db = sqlite3.connect(self.path, timeout=10)
@@ -109,3 +114,22 @@ class OpportunityLedger:
             key=lambda item: (int(item["observation_count"]), Decimal(str(item["mean_gross_spread_bps"]))),
             reverse=True,
         )
+
+    def get_state(self, key: str) -> str | None:
+        if not isinstance(key, str) or not key.strip() or len(key) > 100:
+            raise ValueError("Invalid state key")
+        with self._connect() as db:
+            row = db.execute("SELECT value FROM engine_state WHERE key = ?", (key,)).fetchone()
+        return row[0] if row else None
+
+    def set_state(self, key: str, value: str) -> None:
+        if not isinstance(key, str) or not key.strip() or len(key) > 100:
+            raise ValueError("Invalid state key")
+        if not isinstance(value, str) or len(value) > 200:
+            raise ValueError("Invalid state value")
+        with self._connect() as db:
+            db.execute(
+                """INSERT INTO engine_state(key, value, updated_at) VALUES (?, ?, ?)
+                ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at""",
+                (key, value, datetime.now(timezone.utc).isoformat()),
+            )
