@@ -264,3 +264,30 @@ def test_okx_orderbook_snapshot_plugs_into_shared_cex_comparator():
         for item in result
     } == {("okx", "binance"), ("binance", "okx")}
     assert all(item.status != "asset_or_quote_identity_mismatch" for item in result)
+
+
+
+def test_okx_instrument_and_orderbook_clients_share_process_pacing():
+    current = [0.0]
+    sleeps = []
+
+    def sleep(seconds):
+        sleeps.append(seconds)
+        current[0] += seconds
+
+    limiter = _RateLimiter(clock=lambda: current[0], sleeper=sleep)
+    first, _ = make_client([instrument_payload()], rate_limiter=limiter)
+    second, _ = make_client([orderbook_payload()], rate_limiter=limiter)
+    first.fetch_instrument(inst_id="BTC-USDT")
+    second.fetch_orderbook(inst_id="BTC-USDT")
+    assert sleeps == [1.0]
+
+
+def test_okx_us_and_eea_regional_hosts_are_explicitly_supported():
+    for host in ("us.okx.com", "eea.okx.com"):
+        client, calls = make_client(
+            [instrument_payload()],
+            base_url=f"https://{host}",
+        )
+        client.fetch_instrument(inst_id="BTC-USDT")
+        assert urlsplit(calls[0][0]).netloc == host
