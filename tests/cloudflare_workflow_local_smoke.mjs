@@ -49,6 +49,9 @@ const child = spawn("npx", [
   cwd: process.cwd(),
   env: safeWranglerEnvironment(),
   stdio: ["ignore", "pipe", "pipe"],
+  // Keep Wrangler and its workerd child in a dedicated process group so cleanup
+  // cannot leave an orphaned local server holding the CI step open.
+  detached: process.platform !== "win32",
 });
 
 let logs = "";
@@ -168,9 +171,25 @@ try {
 } catch (error) {
   throw new Error(String(error?.stack || error) + "\nWrangler logs:\n" + logs);
 } finally {
-  child.kill("SIGTERM");
-  await Promise.race([
-    new Promise(resolve => child.once("exit", resolve)),
-    delay(5000),
-  ]);
+  const signalProcessTree = signal => {
+    if (child.exitCode !== null || child.signalCode !== null) return;
+    if (process.platform !== "win32" && child.pid) {
+      try { process.kill(-child.pid, signal); } catch { /* already exited */ }
+    } else {
+      child.kill(signal);
+    }
+  };
+  const waitForChildExit = async timeoutMs => {
+    if (child.exitCode !== null || child.signalCode !== null) return true;
+    return Promise.race([
+      new Promise(resolve => child.once("exit", () => resolve(true))),
+      delay(timeoutMs).then(() => false),
+    ]);
+  };
+
+  signalProcessTree("SIGTERM");
+  if (!(await waitForChildExit(5000))) {
+    signalProcessTree("SIGKILL");
+    await waitForChildExit(2000);
+  }
 }
