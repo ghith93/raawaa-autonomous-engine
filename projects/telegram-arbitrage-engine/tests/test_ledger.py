@@ -102,3 +102,20 @@ def test_ledger_migrates_legacy_unique_key_and_preserves_rows(tmp_path):
                 unique_columns.append(tuple(row[2] for row in db.execute(f"PRAGMA index_info('{index[1]}')")))
     assert ("observed_at", "chain", "base_symbol", "quote_symbol",
             "base_address", "quote_address", "buy_venue", "sell_venue") in unique_columns
+
+
+def test_telegram_scan_receipt_atomically_deduplicates_observations(tmp_path):
+    ledger = OpportunityLedger(tmp_path / "telegram-idempotency.sqlite3")
+    item = PriceSpread(
+        chain="ethereum", base_symbol="AAA", quote_symbol="USDC",
+        base_address="0x" + "1" * 40, quote_address="0x" + "2" * 40,
+        buy_venue="dex-a", sell_venue="dex-b", buy_price_usd=Decimal("1"),
+        sell_price_usd=Decimal("1.01"), gross_spread_bps=Decimal("100"),
+        min_pool_liquidity_usd=Decimal("20000"), total_24h_volume_usd=Decimal("50000"),
+        retrieval_age_seconds=Decimal("0.5"), buy_pair_url="https://a", sell_pair_url="https://b",
+    )
+    assert ledger.record_telegram_scan(77, 123, "cached scan response", [item]) is True
+    assert ledger.get_telegram_scan_receipt(77) == (123, "cached scan response")
+    assert ledger.record_telegram_scan(77, 123, "different replay response", [item]) is False
+    assert ledger.get_telegram_scan_receipt(77) == (123, "cached scan response")
+    assert len(ledger.recent()) == 1
