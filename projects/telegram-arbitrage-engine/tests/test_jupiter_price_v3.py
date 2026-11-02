@@ -24,11 +24,11 @@ def encoded(payload):
 
 def price_payload(**overrides):
     item = {
-        "usdPrice": 147.481234567890123456,
+        "usdPrice": "147.481234567890123456",
         "decimals": 9,
         "blockId": 348004023,
-        "priceChange24h": -2.31,
-        "liquidity": 621679197.67,
+        "priceChange24h": "-2.31",
+        "liquidity": "621679197.67",
         "createdAt": "2026-11-02T12:00:00.000Z",
     }
     item.update(overrides)
