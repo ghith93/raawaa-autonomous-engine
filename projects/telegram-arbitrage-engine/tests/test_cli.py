@@ -337,3 +337,40 @@ def test_v2_sim_cli_registry_auto_fills_and_verifies_both_venues(monkeypatch, ca
     assert result["factory_verification"] == "passed"
     assert result["router_validation"]["mode"] == "read_only_router_eth_call"
     assert result["live_execution"] is False
+
+
+
+def test_v2_discover_cli_uses_explicit_quote_token_and_labels_gross_only(monkeypatch, capsys):
+    captured = {}
+
+    def fake_discovery(query, **kwargs):
+        captured["query"] = query
+        captured.update(kwargs)
+        return {
+            "mode": "read_only_onchain_v2_discovery",
+            "candidate_pairs_verified": 1,
+            "live_execution": False,
+            "transaction_submitted": False,
+            "warning": "Gross same-block router quote surplus only.",
+        }
+
+    monkeypatch.setattr(cli, "scan_onchain_v2", fake_discovery)
+    monkeypatch.setattr(sys, "argv", [
+        "arb-engine", "v2-discover", "WETH USDC",
+        "--quote-token", QUOTE, "--capital-quote", "50",
+        "--min-liquidity", "15000", "--max-candidates", "3",
+        "--rpc-url", "https://rpc.example",
+    ])
+    cli.main()
+    result = json.loads(capsys.readouterr().out)
+    assert captured == {
+        "query": "WETH USDC",
+        "quote_token": QUOTE,
+        "capital_quote": Decimal("50"),
+        "min_liquidity_usd": Decimal("15000"),
+        "max_candidates": 3,
+        "rpc_url": "https://rpc.example",
+    }
+    assert result["mode"] == "read_only_onchain_v2_discovery"
+    assert result["transaction_submitted"] is False
+    assert "Gross same-block" in result["warning"]
