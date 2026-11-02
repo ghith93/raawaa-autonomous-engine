@@ -65,3 +65,54 @@ def test_venues_cli_is_read_only_and_labels_registry_unverified(monkeypatch, cap
     assert output["live_verified"] is False
     assert len(output["venues"]) == 2
     assert "not live-verified" in output["warning"]
+
+
+
+def test_venue_check_cli_uses_read_only_verifier(monkeypatch, capsys):
+    from arb_engine import cli
+
+    monkeypatch.setattr(cli, "JsonRpcClient", lambda endpoint, timeout_seconds: object())
+    monkeypatch.setattr(
+        cli,
+        "verify_registry_venues",
+        lambda rpc, venues, expected_chain_id: {
+            "mode": "read_only_live_venue_deployment_verification",
+            "chain_id": expected_chain_id,
+            "verification_status": "live_read_only_onchain_checks_passed",
+            "venues": [{"venue_id": venue.id} for venue in venues],
+        },
+    )
+    monkeypatch.setattr(sys, "argv", ["arb-engine", "venue-check", "--chain-id", "1"])
+    cli.main()
+    output = json.loads(capsys.readouterr().out)
+    assert output["verification_status"] == "live_read_only_onchain_checks_passed"
+    assert len(output["venues"]) == 2
+
+
+
+def test_venue_check_cli_error_message_ends_with_real_newline(monkeypatch, capsys):
+    from arb_engine.venue_smoke import VenueVerificationError
+
+    monkeypatch.setattr(cli, "JsonRpcClient", lambda endpoint, timeout_seconds: object())
+    monkeypatch.setattr(
+        cli, "verify_registry_venues",
+        lambda rpc, venues, expected_chain_id: (_ for _ in ()).throw(
+            VenueVerificationError("simulated failure")
+        ),
+    )
+    monkeypatch.setattr(sys, "argv", ["arb-engine", "venue-check", "--chain-id", "1"])
+    with pytest.raises(SystemExit) as exc:
+        cli.main()
+    assert exc.value.code == 2
+    assert capsys.readouterr().err == "venue-check failed: simulated failure\n"
+
+
+def test_live_rpc_client_rejects_credentials_and_query_parameters():
+    from arb_engine.venue_smoke import JsonRpcClient
+
+    with pytest.raises(ValueError, match="without credentials"):
+        JsonRpcClient("https://user:secret@example.com/rpc")
+    with pytest.raises(ValueError, match="without credentials"):
+        JsonRpcClient("https://example.com/rpc?api-key=secret")
+    with pytest.raises(ValueError, match="HTTPS RPC"):
+        JsonRpcClient("http://127.0.0.1:8545")

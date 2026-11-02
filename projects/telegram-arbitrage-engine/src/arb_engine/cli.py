@@ -14,6 +14,7 @@ from .rpc import DEFAULT_ETHEREUM_RPC, EthereumV2PoolReader, RpcReadError
 from .scanner import find_spreads
 from .v2 import simulate_round_trip
 from .venues import list_venues, resolve_venue_config
+from .venue_smoke import JsonRpcClient, VenueVerificationError, verify_registry_venues
 
 
 def demo() -> dict:
@@ -78,6 +79,10 @@ def main() -> None:
     report_parser.add_argument("--limit", type=int, default=500)
     venues_parser = sub.add_parser("venues", help="list source-documented V2 venue deployments")
     venues_parser.add_argument("--chain-id", type=int, help="filter by EVM chain ID")
+    venue_check_parser = sub.add_parser("venue-check", help="verify registered Ethereum V2 deployments using read-only public RPC calls")
+    venue_check_parser.add_argument("--chain-id", type=int, default=1)
+    venue_check_parser.add_argument("--rpc-url", default=DEFAULT_ETHEREUM_RPC)
+    venue_check_parser.add_argument("--timeout-seconds", type=float, default=8.0)
     v2_parser = sub.add_parser("v2-sim", help="read-only same-block Ethereum V2 reserve simulation")
     v2_parser.add_argument("--buy-pair", required=True)
     v2_parser.add_argument("--buy-venue", help="known source-documented venue ID; auto-fills fee/factory/router")
@@ -158,6 +163,17 @@ def main() -> None:
             }, indent=2))
         except (ValueError, OSError, json.JSONDecodeError) as exc:
             parser.exit(2, f"venue registry failed: {exc}\n")
+    elif args.command == "venue-check":
+        try:
+            venues = list_venues(args.chain_id)
+            result = verify_registry_venues(
+                JsonRpcClient(args.rpc_url, timeout_seconds=args.timeout_seconds),
+                venues,
+                expected_chain_id=args.chain_id,
+            )
+            print(json.dumps(result, indent=2))
+        except (VenueVerificationError, ValueError, OSError, json.JSONDecodeError) as exc:
+            parser.exit(2, f"venue-check failed: {exc}\n")
     elif args.command == "v2-sim":
         try:
             args.buy_fee_bps, args.buy_factory, args.buy_router, buy_venue = resolve_venue_config(
