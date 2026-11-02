@@ -31,7 +31,12 @@ function stable(value) {
   }
   return value;
 }
-function canonical(value) { return JSON.stringify(stable(value)); }
+function canonical(value) {
+  // Match Python json.dumps(..., ensure_ascii=True) so both clients hash identical bytes.
+  return JSON.stringify(stable(value)).replace(/[\\u007f-\\uffff]/g, char =>
+    "\\u" + char.charCodeAt(0).toString(16).padStart(4, "0")
+  );
+}
 function address(value, name) {
   if (value === null || value === undefined) return null;
   if (typeof value !== "string" || !/^0x[0-9a-fA-F]{40}$/.test(value) || /^0x0{40}$/i.test(value)) {
