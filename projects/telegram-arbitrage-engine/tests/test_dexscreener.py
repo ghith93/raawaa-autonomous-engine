@@ -61,7 +61,7 @@ def test_scanner_rejects_old_collected_snapshots():
     old = now - timedelta(seconds=45)
     a = DexScreenerClient._parse_pair(pair("dex-a", "1.00", "p1"), old)
     b = DexScreenerClient._parse_pair(pair("dex-b", "1.01", "p2"), old)
-    assert find_spreads([a, b], max_data_age_seconds=Decimal("20")) == []
+    assert find_spreads([a, b], max_retrieval_age_seconds=Decimal("20")) == []
 
 
 def test_scanner_rejects_future_collected_snapshots():
@@ -101,3 +101,10 @@ def test_parse_pairs_requires_well_formed_payload_and_aware_fetch_time():
         DexScreenerClient.parse_pairs([])
     with pytest.raises(ValueError):
         DexScreenerClient.parse_pairs({"pairs": []}, datetime.now())
+
+
+def test_scanner_ignores_duplicate_pair_address_across_venues():
+    now = datetime.now(timezone.utc)
+    a = DexScreenerClient._parse_pair(pair("dex-a", "1.00", "same-pair"), now)
+    b = DexScreenerClient._parse_pair(pair("dex-b", "1.01", "same-pair"), now)
+    assert find_spreads([a, b]) == []
