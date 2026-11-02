@@ -337,7 +337,7 @@ def test_scan_rejects_unsafe_rpc_request_interval():
         scan_onchain_v2_candidates(
             token_address=BASE, quote_token_address=QUOTE,
             capital_quote="1000", dex_client=FakeDexScreener([]),
-            reader=FakeReader(), min_request_interval=0,
+            min_request_interval=0,
         )
 
 
@@ -400,3 +400,29 @@ def test_non_ethereum_registry_contains_two_documented_bsc_v2_venues():
     assert PANCAKE.swap_fee_bps == 25
     assert APESWAP.swap_fee_bps == 20
     assert all(venue.network == "bsc" for venue in bsc_venues)
+
+
+
+def test_bsc_v2_scan_uses_chain_specific_default_venues_when_not_overridden():
+    dex = FakeDexScreener([
+        candidate("pancakeswap", PANCAKE_PAIR, chain="bsc"),
+        candidate("apeswap", APESWAP_PAIR, chain="bsc"),
+    ])
+    reader = FakeBscReader()
+    result = scan_onchain_v2_candidates(
+        token_address=BASE,
+        quote_token_address=QUOTE,
+        capital_quote="1000",
+        chain_id=56,
+        dex_client=dex,
+        reader=reader,
+        min_request_interval=0.0,
+    )
+    assert dex.calls == [("bsc", BASE)]
+    assert result["status"] == "quoted"
+    assert [item["venue_id"] for item in result["venues"]] == [
+        PANCAKE.id, APESWAP.id,
+    ]
+    assert result["chain_id"] == 56
+    assert result["live_execution"] is False
+    assert result["transaction_submitted"] is False

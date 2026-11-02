@@ -28,24 +28,36 @@
 
 ## Source-documented V2 venue registry
 
-The packaged registry contains source-documented Ethereum mainnet and BNB Smart Chain V2 venues:
+The packaged registry contains read-only quote venues on Ethereum, BNB Smart Chain, Arbitrum One, Avalanche C-Chain, Base, Optimism and Polygon PoS. Every new chain entry is marked `source_documented_not_live_verified`; a registry entry is not a live deployment attestation.
 
-| Venue | Factory | Router02 | Swap fee assumption |
-|---|---|---|---:|
-| Uniswap V2 | `0x5C69bEe701ef814a2B6a3EDD4B1652CB9cc5aA6f` | `0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D` | 30 bps |
-| SushiSwap V2 | `0xC0AEe478e3658e2610c5F7A4A2E1777cE9e4f2Ac` | `0xd9e1cE17f2641f24aE83637ab66a2cca9C378B9F` | 30 bps |
-| PancakeSwap V2 (BSC) | `0xcA143Ce32Fe78f1f7019d7d551a6402fC5350c73` | `0x10ED43C718714eb63d5aA57B78B54704E256024E` | 25 bps |
-| ApeSwap V2 (BSC) | `0x0841BD0B734E4F5853f0dD8d7Ea041c241fb0Da6` | `0xcF0feBd3f17CEf5b47b0cD257aCf6025c5BFf3b7` | 20 bps |
+| Network | Chain ID | Venue | Factory | Router02 | Fee assumption |
+|---|---:|---|---|---|---:|
+| Ethereum | 1 | Uniswap V2 | `0x5C69bEe701ef814a2B6a3EDD4B1652CB9cc5aA6f` | `0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D` | 30 bps |
+| Ethereum | 1 | SushiSwap V2 | `0xC0AEe478e3658e2610c5F7A4A2E1777cE9e4f2Ac` | `0xd9e1cE17f2641f24aE83637ab66a2cca9C378B9F` | 30 bps |
+| BNB Chain | 56 | PancakeSwap V2 | `0xcA143Ce32Fe78f1f7019d7d551a6402fC5350c73` | `0x10ED43C718714eb63d5aA57B78B54704E256024E` | 25 bps |
+| BNB Chain | 56 | ApeSwap V2 | `0x0841BD0B734E4F5853f0dD8d7Ea041c241fb0Da6` | `0xcF0feBd3f17CEf5b47b0cD257aCf6025c5BFf3b7` | 20 bps |
+| Arbitrum One | 42161 | Uniswap V2 | `0xf1D7CC64Fb4452F05c498126312eBE29f30Fbcf9` | `0x4752ba5dbc23f44d87826276bf6fd6b1c372ad24` | 30 bps |
+| Arbitrum One | 42161 | SushiSwap V2 | `0xc35DADB65012eC5796536bD9864eD8773aBc74C4` | `0x1b02dA8Cb0d097eB8D57A175b88c7D8b47997506` | 30 bps |
+| Avalanche C-Chain | 43114 | Uniswap V2 | `0x9e5A52f57b3038F1B8EeE45F28b3C1967e22799C` | `0x4752ba5dbc23f44d87826276bf6fd6b1c372ad24` | 30 bps |
+| Avalanche C-Chain | 43114 | SushiSwap V2 | `0xc35DADB65012eC5796536bD9864eD8773aBc74C4` | `0x1b02dA8Cb0d097eB8D57A175b88c7D8b47997506` | 30 bps |
+| Base | 8453 | Uniswap V2 | `0x8909Dc15e40173Ff4699343b6eB8132c65e18eC6` | `0x4752ba5dbc23f44d87826276bf6fd6b1c372ad24` | 30 bps |
+| Base | 8453 | SushiSwap V2 | `0x71524B4f93c58fcbF659783284E38825f0622859` | `0x6BDED42c6DA8FBf0d2bA55B2fa120C5e0c8D7891` | 30 bps |
+| Optimism | 10 | Uniswap V2 | `0x0c3c1c532F1e39EdF36BE9Fe0bE1410313E074Bf` | `0x4A7b5Da61326A6379179b40d00F57E5bbDC962c2` | 30 bps |
+| Optimism | 10 | SushiSwap V2 | `0xFbc12984689e5f15626Bad03Ad60160Fe98B303C` | `0x2ABf469074dc0b54d793850807E6eb5Faf2625b1` | 30 bps |
+| Polygon PoS | 137 | Uniswap V2 | `0x9e5A52f57b3038F1B8EeE45F28b3C1967e22799C` | `0xedf6066a2b290C185783862C7F4776A2C8077AD1` | 30 bps |
+| Polygon PoS | 137 | QuickSwap V2 | `0x5757371414417b8C6CAad45bAeF941aBc7d3Ab32` | `0xa5E0829CaCEd8fFDD4De3c43696c57F7D7A678ff` | 30 bps |
 
-- Uniswap deployment source: https://developers.uniswap.org/docs/protocols/v2/deployments
-- Uniswap fee source: https://developers.uniswap.org/docs/get-started/concepts/fees (0.30% total V2 swap fee; protocol fee affects distribution, not the total trader fee).
-- SushiSwap deployment source: https://github.com/sushiswap/v2-core/tree/master/deployments/ethereum
-- SushiSwap fee source: https://github.com/sushiswap/v2-core/blob/master/contracts/UniswapV2Pair.sol (pair invariant deducts 3/1000 from input).
-- Registry status is `source_documented_not_live_verified`. Selecting a venue auto-fills its fee, factory, and Router02, then the CLI verifies `pair.factory()`, `factory.getPair(token0,token1)`, and `router.factory()` via `eth_call` at the pinned block.
-- PancakeSwap V2 BSC router source verification: https://bscscan.com/address/0x10ed43c718714eb63d5aa57b78b54704e256024e; factory: https://bscscan.com/address/0xca143ce32fe78f1f7019d7d551a6402fc5350c73. Fee source: https://blog.pancakeswap.finance/articles/introducing-pancake-swap-v3-a-more-efficient-and-user-friendly-dex-on-bnb-chain-and-ethereum (V2 0.25%).
-- ApeSwap BSC factory/router deployments: https://github.com/ApeSwapFinance/apeswap-banana-farm. Fee assumption source: https://www.fairyproof.com/doc/104.ApeSwapFinance-Audit-Report-102521.pdf (0.20%); this audit is historical, so current fee configuration remains an assumption until live-verified.
-- These checks establish contract relationships at the selected block; they do not prove proxy implementation safety, actual token transfer behavior, gas cost, atomic route success, or profitability. Fee assumptions remain explicitly sourced assumptions until separately validated against the actual pair implementation.
-- Ethereum mainnet (chain ID 1) and BNB Smart Chain (chain ID 56) are registered. The scanner now accepts a chain ID, DEX Screener slug, exactly two registered venues and an explicit RPC URL for non-Ethereum chains. CI's live deployment and scanner smoke still covers Ethereum only; BSC entries remain `source_documented_not_live_verified` until a successful BSC RPC run is captured. Other networks remain unregistered pending deployment and fee research.
+Deployment and fee sources:
+
+- Uniswap V2 factory/router addresses for Ethereum, Arbitrum, Avalanche, BNB Chain, Base, Optimism and Polygon are listed in the [official Uniswap V2 deployment table](https://developers.uniswap.org/docs/protocols/v2/deployments). Uniswap documents the V2 swap fee as 0.30% in its [fee concepts](https://developers.uniswap.org/docs/get-started/concepts/fees).
+- SushiSwap factory/router addresses are published in the official [v2-core deployment artifacts](https://github.com/sushiswap/v2-core/tree/master/deployments): [Arbitrum](https://github.com/sushiswap/v2-core/tree/master/deployments/arbitrum), [Avalanche](https://github.com/sushiswap/v2-core/tree/master/deployments/avalanche), [Base](https://github.com/sushiswap/v2-core/tree/master/deployments/base), [Optimism](https://github.com/sushiswap/v2-core/tree/master/deployments/optimism), and [Ethereum](https://github.com/sushiswap/v2-core/tree/master/deployments/ethereum). The pair invariant deducts 3/1000 from input; this is a 30 bps pool-fee assumption.
+- PancakeSwap V2 BNB Chain router/factory are listed on [BscScan](https://bscscan.com/address/0x10ed43c718714eb63d5aa57b78b54704e256024e) and [BscScan factory](https://bscscan.com/address/0xca143ce32fe78f1f7019d7d551a6402fc5350c73). The published V2 fee assumption is 0.25%.
+- ApeSwap BNB Chain deployments are listed in the [official ApeSwap repository](https://github.com/ApeSwapFinance/apeswap-banana-farm); its 20 bps fee is sourced from a historical [Fairyproof audit](https://www.fairyproof.com/doc/104.ApeSwapFinance-Audit-Report-102521.pdf), so current pool configuration remains an assumption until live-verified.
+- QuickSwap Polygon factory/router are listed in the [official QuickSwap core README](https://github.com/QuickSwap/quickswap-core/blob/master/README.md). QuickSwap states its core is a Uniswap V2 fork without core-contract changes; the 30 bps assumption follows the inherited pair invariant.
+
+The scanner selects exactly two registered venues for a chain by default, or accepts an explicit pair of venue IDs. It requires a chain-matched RPC URL for non-Ethereum networks and verifies `eth_chainId`, factory/pair identity, router factory binding and router quotes at one pinned block before returning a route. DEX Screener is discovery-only; it is not treated as an execution quote.
+
+The live `venue-check` and CI smoke currently verify Ethereum mainnet only. BNB Chain, Arbitrum, Avalanche, Base, Optimism and Polygon registry entries remain `source_documented_not_live_verified` until their contract relationships are checked against a live RPC at a pinned block. The checks do not prove token transfer behavior, gas, dynamic fees, atomic execution, account eligibility or profitability.
 
 ## V2 reserve-math simulator
 
@@ -206,6 +218,15 @@ No item in this list authorizes live trading.
 - Example: `arb-engine token-check --token-address 0x... --chain-id 1`
 - No approvals, transfer calls, signing, or transactions are performed.
 
+
+
+## Chain-aware V2 venue selection
+
+- The read-only V2 scanner resolves its default venue pair from the selected chain ID rather than silently retaining Ethereum venue IDs.
+- The current registry has two source-documented candidates on Ethereum (Uniswap V2 and SushiSwap V2), BNB Smart Chain (PancakeSwap V2 and ApeSwap V2), Arbitrum, Optimism, Base, and Avalanche (Uniswap V2 and SushiSwap V2), and Polygon (Uniswap V2 and QuickSwap V2). For these seven chains, `--venue-ids` is optional and the matching pair is selected automatically.
+- Chains with zero, one, or more than two registered V2 venues fail closed and require an explicit pair of venue IDs. No arbitrary first-two selection is made when registry choice is ambiguous.
+- Chain ID, DEX Screener network slug, venue factory/router, and the RPC-reported chain ID must still agree. BSC requires an operator-supplied HTTPS RPC endpoint; no paid RPC is enabled or assumed.
+- This is multi-chain configuration reuse of the existing V2 reader and verifier, not support for V3 concentrated-liquidity math, Solana AMMs, or other protocol families. Uniswap deployments are taken from the official V2 deployment table; SushiSwap factory/router addresses are taken from its per-chain v2-core deployment artifacts. SushiSwap's pair invariant applies the 3/1000 fee deduction. Polygon QuickSwap factory/router addresses are taken from QuickSwap's published core README; the project states its core contracts are an unchanged Uniswap V2 fork. Registry entries remain source-documented only until their exact chain contracts are checked live at a pinned block.
 
 ## DEX Screener pair-address discovery and on-chain V2 verification
 

@@ -11,7 +11,7 @@ from .rpc import (
     EthereumV2PoolReader,
     PoolFactoryMismatch,
 )
-from .venues import Venue, get_venue, get_venue_by_dexscreener_id
+from .venues import Venue, default_scan_venue_ids, get_venue, get_venue_by_dexscreener_id
 
 
 def _address(value: str, label: str) -> str:
@@ -101,7 +101,7 @@ def scan_onchain_v2_candidates(
     rpc_url: str | None = None,
     chain_id: int = 1,
     chain_slug: str | None = None,
-    venue_ids: tuple[str, str] | list[str] = ("uniswap_v2_ethereum", "sushiswap_v2_ethereum"),
+    venue_ids: tuple[str, str] | list[str] | None = None,
     max_candidate_pairs: int = 4,
     max_rpc_requests: int = 32,
     min_request_interval: float = 0.55,
@@ -116,6 +116,8 @@ def scan_onchain_v2_candidates(
     """
     if not isinstance(chain_id, int) or isinstance(chain_id, bool) or chain_id <= 0:
         raise ValueError("chain_id must be a positive integer")
+    if venue_ids is None:
+        venue_ids = default_scan_venue_ids(chain_id)
     if not isinstance(venue_ids, (tuple, list)) or len(venue_ids) != 2:
         raise ValueError("venue_ids must contain exactly two registered V2 venue IDs")
     if any(not isinstance(item, str) or not item.strip() for item in venue_ids):
@@ -144,11 +146,15 @@ def scan_onchain_v2_candidates(
         or not 1 <= max_rpc_requests <= 64
     ):
         raise ValueError("max_rpc_requests must be an integer from 1 to 64")
+    minimum_interval = 0.0 if reader is not None else 0.1
     if (
         isinstance(min_request_interval, bool) or not isinstance(min_request_interval, (int, float))
-        or not math.isfinite(min_request_interval) or not 0.1 <= min_request_interval <= 5.0
+        or not math.isfinite(min_request_interval)
+        or not minimum_interval <= min_request_interval <= 5.0
     ):
-        raise ValueError("min_request_interval must be between 0.1 and 5 seconds")
+        raise ValueError(
+            f"min_request_interval must be between {minimum_interval:g} and 5 seconds"
+        )
     capital_amount = _capital_decimal(capital_quote)
 
     dex_client = dex_client or DexScreenerClient()

@@ -112,3 +112,17 @@ def resolve_venue_config(
     if fee_bps is None:
         raise ValueError("Supply a known --*-venue or an explicit --*-fee-bps")
     return fee_bps, factory, router, None
+
+
+
+def default_scan_venue_ids(chain_id: int) -> tuple[str, str]:
+    """Return unambiguous default V2 venue pair for a chain; require explicit choice otherwise."""
+    if not isinstance(chain_id, int) or isinstance(chain_id, bool) or chain_id <= 0:
+        raise ValueError("chain_id must be a positive integer")
+    matches = list_venues(chain_id)
+    if len(matches) != 2:
+        raise ValueError(
+            f"Chain ID {chain_id} has {len(matches)} registered V2 venues; "
+            "supply exactly two explicit --venue-ids"
+        )
+    return matches[0].id, matches[1].id

@@ -148,8 +148,8 @@ def main() -> None:
     onchain_parser.add_argument("--chain-slug", help="DEX Screener chain slug; must match the registered venues")
     onchain_parser.add_argument(
         "--venue-ids", nargs=2,
-        default=("uniswap_v2_ethereum", "sushiswap_v2_ethereum"),
-        help="exactly two registered V2 venue IDs for the selected chain",
+        default=None,
+        help="optional explicit pair of registered V2 venue IDs; defaults to the two registered venues for --chain-id",
     )
     onchain_parser.add_argument("--rpc-url", help="read-only RPC URL; required for non-Ethereum EVM chains")
     onchain_parser.add_argument("--max-candidate-pairs", type=int, default=4)
@@ -419,7 +419,7 @@ def main() -> None:
                 rpc_url=args.rpc_url,
                 chain_id=args.chain_id,
                 chain_slug=args.chain_slug,
-                venue_ids=tuple(args.venue_ids),
+                venue_ids=tuple(args.venue_ids) if args.venue_ids else None,
                 max_candidate_pairs=args.max_candidate_pairs,
                 max_rpc_requests=args.max_rpc_requests,
                 min_request_interval=args.min_request_interval,
