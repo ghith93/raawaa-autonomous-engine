@@ -75,6 +75,11 @@ function rawInteger(value, name, signed = false) {
   if (typeof value !== "string" || value.length > 78 || !pattern.test(value)) {
     throw new Error("invalid_" + name);
   }
+  const parsed = BigInt(value);
+  const maximum = (1n << 256n) - 1n;
+  if (signed ? (parsed > maximum || parsed < -maximum) : parsed > maximum) {
+    throw new Error("invalid_" + name);
+  }
   return value;
 }
 function normalize(input) {
