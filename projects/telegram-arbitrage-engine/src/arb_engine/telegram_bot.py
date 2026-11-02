@@ -205,13 +205,14 @@ class TelegramController:
         if stored_offset is not None and not stored_offset.isdigit():
             raise ValueError("Stored Telegram polling offset is corrupt; refusing to reset it")
         offset = int(stored_offset) if stored_offset is not None else 0
+        def checkpoint(value: int) -> None:
+            nonlocal offset
+            ledger.set_state("telegram_update_offset", str(value))
+            offset = value
+
         while True:
             try:
-                next_offset = self.poll_once(
-                    offset,
-                    on_offset=lambda value: ledger.set_state("telegram_update_offset", str(value)),
-                )
-                offset = next_offset
+                self.poll_once(offset, on_offset=checkpoint)
             except (TelegramApiError, OSError, ValueError, sqlite3.Error):
                 time.sleep(3)
 
