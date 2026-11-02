@@ -90,6 +90,17 @@ class D1PaperLedgerTests(unittest.TestCase):
                 occurred_at=__import__("datetime").datetime(2026, 11, 2), payload={},
             )
 
+    def test_production_deploy_and_migration_are_manual_only(self):
+        deploy = (ROOT / ".github" / "workflows" / "deploy-worker.yml").read_text(encoding="utf-8")
+        manual_migrate = (ROOT / ".github" / "workflows" / "d1-migrate.yml").read_text(encoding="utf-8")
+        self.assertIn("workflow_dispatch:", deploy)
+        self.assertIn("DEPLOY_CONTROL_WORKER", deploy)
+        self.assertNotIn("  push:", deploy)
+        self.assertIn("workflow_dispatch:", manual_migrate)
+        self.assertIn("raawaa-autonomous-e", manual_migrate)
+        self.assertNotIn("  push:", manual_migrate)
+        self.assertFalse((ROOT / ".github" / "workflows" / "d1-auto-migrate.yml").exists())
+
     def test_migration_creates_append_only_tables_and_cas_head(self):
         migration = ROOT / "migrations" / "0004_paper_event_ledger.sql"
         with tempfile.TemporaryDirectory() as tmp:
