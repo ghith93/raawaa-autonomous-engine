@@ -51,10 +51,11 @@ def make_reader(*, block, block_hash, timestamp, destination_quote_reserve=2_100
 
 
 class FakeReader:
-    def __init__(self, states):
+    def __init__(self, states, canonical_hashes=None):
         self.states = states
         self.requested = None
         self.canonical_checks = []
+        self.canonical_hashes = canonical_hashes or {}
 
     def read_pools(self, pools):
         self.requested = pools
@@ -62,6 +63,9 @@ class FakeReader:
 
     def verify_canonical_block(self, block_number, block_hash):
         self.canonical_checks.append((block_number, block_hash))
+        expected = self.canonical_hashes.get(block_number)
+        if expected is not None and expected.casefold() != block_hash.casefold():
+            raise ValueError("canonical block hash mismatch")
 
 
 def capture_candidate(ledger_path, *, with_gas=False):
@@ -97,7 +101,9 @@ def test_forward_observer_records_only_a_later_canonical_block(tmp_path):
     assert result["transaction_submitted"] is False
     assert result["wallet_or_signer_used"] is False
     assert result["live_execution"] is False
-    assert reader.canonical_checks == [(101, OBSERVED_HASH)]
+    assert reader.canonical_checks == [
+        (100, CANDIDATE_HASH), (100, CANDIDATE_HASH), (101, OBSERVED_HASH),
+    ]
     outcomes = [event for event in ledger.events(candidate_id) if event["event_type"] == "outcome_observed"]
     assert len(outcomes) == 1
     assert outcomes[0]["block_number"] == 101
@@ -131,6 +137,16 @@ def test_gas_scenario_is_replayed_at_the_forward_block_and_is_idempotent(tmp_pat
     assert second["replayed"] is True
     assert ledger.verify_chain(candidate_id)
     assert len([event for event in ledger.events(candidate_id) if event["event_type"] == "outcome_observed"]) == 1
+
+
+def test_observer_rejects_reorged_candidate_block_before_recording(tmp_path):
+    ledger, candidate_id = capture_candidate(tmp_path / "paper.sqlite3")
+    reader = make_reader(block=101, block_hash=OBSERVED_HASH, timestamp=CANDIDATE_TIME + 12)
+    reader.canonical_hashes[100] = "0x" + "c" * 64
+    with pytest.raises(ValueError, match="canonical block hash mismatch"):
+        observe_flash_swap_outcome(candidate_id, ledger=ledger, reader=reader)
+    assert reader.requested is None
+    assert not [event for event in ledger.events(candidate_id) if event["event_type"] == "outcome_observed"]
 
 
 def test_observer_rejects_unrecorded_token_decimal_provenance(tmp_path):
