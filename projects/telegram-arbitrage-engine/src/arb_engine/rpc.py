@@ -143,7 +143,7 @@ class EthereumV2PoolReader:
         data = bytes.fromhex(raw[2:])
         try:
             if len(data) == 32:
-                value = data.rstrip(b"\\x00").decode("utf-8")
+                value = data.rstrip(bytes([0])).decode("utf-8")
             elif len(data) >= 64:
                 offset = int.from_bytes(data[:32], "big")
                 if offset != 32 or len(data) < 64:
@@ -156,7 +156,7 @@ class EthereumV2PoolReader:
                 return None
         except (UnicodeDecodeError, ValueError):
             return None
-        value = value.strip().strip("\\x00")
+        value = value.strip().strip(chr(0))
         return value[:64] if value else None
 
     def read_token_preflight(self, token_address: str) -> EvmTokenPreflight:
