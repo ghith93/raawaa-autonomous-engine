@@ -189,6 +189,8 @@ def test_v2_sim_cli_reports_native_gas_budget_separately(monkeypatch, capsys):
     result = json.loads(capsys.readouterr().out)
     gas = result["gas_cost_estimate"]
     assert gas["buffered_gas_units"] == 360000
+    assert gas["gas_price_source"] == "EVM JSON-RPC eth_gasPrice"
+    assert gas["gas_price_retrieved_at"].endswith("+00:00")
     assert gas["estimated_native_asset_cost_wei"] == "720000000000000"
     assert gas["valuation_in_quote_token"] is None
     assert "gas" in result["warning"].lower()
