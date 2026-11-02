@@ -58,6 +58,15 @@ jobs:
         run: python -m pip install --disable-pip-version-check --no-deps -e .
       - name: Verify source-documented Ethereum V2 deployments (read-only)
         run: arb-engine venue-check --chain-id 1 --rpc-url https://ethereum-rpc.publicnode.com --timeout-seconds 8
+      - name: Verify live WETH-USDC cross-venue scanner (read-only)
+        env:
+          WETH_MAINNET: "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2"
+          USDC_MAINNET: "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"
+        run: |
+          set -euo pipefail
+          result="$(arb-engine onchain-v2-scan --token-address "$WETH_MAINNET" --quote-token-address "$USDC_MAINNET" --capital-quote 1000 --rpc-url https://eth.nodely.dev --max-candidate-pairs 4 --max-rpc-requests 32 --min-request-interval 0.55)"
+          printf '%s\n' "$result"
+          python -c 'import json,sys; d=json.loads(sys.stdin.read()); assert d["status"] == "quoted", d; assert d["chain_id"] == 1; assert len(d["routes"]) == 2; assert d["gas_included"] is False and d["net_profit_claim"] is False; assert d["transaction_submitted"] is False; assert len(d["block_hash"]) == 66' <<< "$result"
 
   anvil-fork-smoke:
     needs: live-venue-smoke
