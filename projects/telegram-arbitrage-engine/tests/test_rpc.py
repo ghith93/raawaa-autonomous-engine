@@ -501,3 +501,29 @@ def test_factory_verification_classifies_only_explicit_evm_reverts_as_candidate_
     monkeypatch.setattr(reader, "_rpc", reverted)
     with pytest.raises(PoolFactoryMismatch, match="call reverted"):
         reader.verify_v2_pool_factory(POOL_A, "0x" + "8" * 40, TOKEN0, TOKEN1, 100)
+
+
+def test_lookup_v2_pair_address_uses_factory_and_pinned_block(monkeypatch):
+    reader = EthereumV2PoolReader(min_request_interval=0)
+    factory = "0x" + "8" * 40
+    token_a = "0x" + "1" * 40
+    token_b = "0x" + "2" * 40
+    pair = "0x" + "9" * 40
+    calls = []
+
+    def fake(method, params):
+        calls.append((method, params))
+        return address_word(pair)
+
+    monkeypatch.setattr(reader, "_rpc", fake)
+    assert reader.lookup_v2_pair_address(factory, token_a, token_b, 123) == pair
+    expected_data = "0xe6a43905" + ("0" * 24 + token_a[2:]) + ("0" * 24 + token_b[2:])
+    assert calls == [("eth_call", [{"to": factory, "data": expected_data}, "0x7b"])]
+
+
+def test_lookup_v2_pair_address_returns_none_for_factory_zero_address(monkeypatch):
+    reader = EthereumV2PoolReader(min_request_interval=0)
+    monkeypatch.setattr(reader, "_rpc", lambda method, params: address_word("0x" + "0" * 40))
+    assert reader.lookup_v2_pair_address(
+        "0x" + "8" * 40, "0x" + "1" * 40, "0x" + "2" * 40, 123,
+    ) is None
