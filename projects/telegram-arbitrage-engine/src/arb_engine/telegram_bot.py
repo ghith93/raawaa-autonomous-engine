@@ -183,6 +183,7 @@ class TelegramController:
         return next_offset
 
     def run_forever(self) -> None:
+        self.api.call("getMe", {})  # Validate the token once; do not spin on invalid credentials.
         ledger = OpportunityLedger(self.ledger_path)
         stored_offset = ledger.get_state("telegram_update_offset")
         if stored_offset is not None and not stored_offset.isdigit():
