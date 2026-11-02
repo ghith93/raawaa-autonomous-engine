@@ -186,3 +186,35 @@ def test_canonical_block_revalidation_accepts_matching_hash(monkeypatch):
         lambda method, params: {"hash": BLOCK_HASH} if method == "eth_getBlockByNumber" else None,
     )
     reader.verify_canonical_block(100, BLOCK_HASH)
+
+
+def test_v2_factory_verification_checks_pair_factory_and_registration(monkeypatch):
+    reader = EthereumV2PoolReader(min_request_interval=0)
+    factory = "0x" + "8" * 40
+    calls = []
+
+    def fake(method, params):
+        calls.append((method, params))
+        call, block_tag = params
+        assert method == "eth_call"
+        assert block_tag == "0x64"
+        if call["to"] == POOL_A and call["data"] == "0xc45a0155":
+            return address_word(factory)
+        if call["to"] == factory and call["data"].startswith("0xe6a43905"):
+            return address_word(POOL_A)
+        raise AssertionError(f"Unexpected factory call: {call}")
+
+    monkeypatch.setattr(reader, "_rpc", fake)
+    reader.verify_v2_pool_factory(POOL_A, factory, TOKEN0, TOKEN1, 100)
+    assert len(calls) == 2
+
+
+def test_v2_factory_verification_rejects_untrusted_factory(monkeypatch):
+    import pytest
+
+    reader = EthereumV2PoolReader(min_request_interval=0)
+    monkeypatch.setattr(reader, "_rpc", lambda method, params: address_word("0x" + "7" * 40))
+    with pytest.raises(RpcReadError, match="does not match"):
+        reader.verify_v2_pool_factory(
+            POOL_A, "0x" + "8" * 40, TOKEN0, TOKEN1, 100,
+        )
