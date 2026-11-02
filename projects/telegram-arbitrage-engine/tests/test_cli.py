@@ -65,6 +65,10 @@ def test_v2_sim_cli_router_validation_is_read_only(monkeypatch, capsys):
                 snapshot(POOL_B, 1_000_000_000_000, 10**24, 25),
             ]
 
+        def verify_canonical_block(self, block, expected_hash):
+            assert block == 123
+            assert expected_hash == HASH
+
         def quote_v2_router_exact_input(self, router, amount, path, block):
             assert block == 123
             if path == [QUOTE, BASE]:
