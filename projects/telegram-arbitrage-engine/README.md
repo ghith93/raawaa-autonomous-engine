@@ -111,6 +111,25 @@ print(book.last_update_id, book.bids[0], ticker.ask_price, book.fetched_at)
 
 The adapter enforces one request per second and does not synchronize REST snapshots with WebSocket depth updates. It is a timestamped indicative source, not a guaranteed executable book or net-profit engine. See [data sources and trust boundaries](DATA_SOURCES.md).
 
+## Read-only Kraken Spot market data
+
+A fixture-tested Kraken public REST adapter is available at `arb_engine.market_sources.kraken.KrakenPublicMarketData`. It uses only the public `AssetPairs` and `Depth` GET endpoints, requires no API key, resolves pair aliases to Kraken's internal REST pair ID, and preserves exact Decimal order-book levels and per-level timestamps.
+
+Example:
+
+```python
+from arb_engine.market_sources.kraken import KrakenPublicMarketData
+
+market = KrakenPublicMarketData()  # public endpoints only; no API key
+instrument = market.fetch_instrument(pair="XBTUSDT")
+book = market.fetch_orderbook(pair=instrument.instrument_id, count=100)
+print(instrument.base_asset_code, instrument.quote_asset_code)
+print(instrument.fee_tiers)  # taker/maker bps by 30-day volume threshold
+print(book.bids[:5], book.asks[:5], book.fetched_at)
+```
+
+Kraken's internal asset codes (such as `XXBT` and `ZUSD`) must be explicitly mapped to canonical IDs; the adapter never infers equivalence from symbols. Public REST pacing is limited to one request per second per IP by Kraken; the adapter uses a shared process-wide limiter. Taker/maker schedules are preserved but no current account tier is assumed. Missing fee, depth or settlement inputs keep net estimates incomplete. See [data sources and trust boundaries](DATA_SOURCES.md).
+
 ## Multi-chain EVM V2 scanning
 
 The V2 candidate scanner now accepts an explicit EVM chain ID, DEX Screener slug and two registered venue IDs. BNB Chain (chain ID 56) has source-documented PancakeSwap V2 and ApeSwap V2 registry entries. Non-Ethereum runs require an explicit RPC URL and verify the chain ID, factory/pair identity and router binding at one pinned block.
