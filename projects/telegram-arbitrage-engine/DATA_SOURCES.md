@@ -80,3 +80,9 @@ No item in this list authorizes live trading.
 - Optional router validation derives a minimum buy output from the buy quote using `--slippage-bps` (default 50 bps).
 - The second router quote is then requested using that conservative minimum buy output, not the expected buy output. A second minimum quote output is derived using the same per-leg tolerance.
 - These values are read-only scenario bounds. No calldata is signed or submitted, and they do not guarantee execution price or transaction success.
+
+
+## Pair reserve-update timestamp
+
+- Each V2 `getReserves()` response includes `blockTimestampLast` (a uint32 timestamp for the last pair reserve update). The reader now records this value and its modulo-2^32 elapsed age relative to the pinned block timestamp.
+- This is descriptive pool activity metadata, not a freshness failure by itself: an inactive pool can have unchanged but still-current reserves. The separately checked pinned block timestamp/hash remains the actual snapshot freshness and reorg control.
