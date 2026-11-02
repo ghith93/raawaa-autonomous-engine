@@ -23,7 +23,7 @@ def fake_rpc(method, params):
         return "0x64"
     if method == "eth_getBlockByNumber":
         assert params == ["0x64", False]
-        return {"hash": BLOCK_HASH, "timestamp": "0x6553f100"}
+        return {"hash": BLOCK_HASH, "timestamp": hex(int(__import__("time").time()))}
     if method == "eth_call":
         call, block_tag = params
         assert block_tag == "0x64"
@@ -89,3 +89,21 @@ def test_reader_rejects_duplicate_pool_addresses():
     reader = EthereumV2PoolReader(min_request_interval=0)
     with pytest.raises(ValueError, match="Duplicate"):
         reader.read_pools([(POOL_A, 30), (POOL_A, 25)])
+
+
+def test_reader_rejects_reorg_during_snapshot(monkeypatch):
+    reader = EthereumV2PoolReader(min_request_interval=0)
+    block_reads = 0
+
+    def changing_rpc(method, params):
+        nonlocal block_reads
+        if method == "eth_getBlockByNumber":
+            block_reads += 1
+            current_hash = BLOCK_HASH if block_reads == 1 else "0x" + "b" * 64
+            return {"hash": current_hash, "timestamp": hex(int(__import__("time").time()))}
+        return fake_rpc(method, params)
+
+    monkeypatch.setattr(reader, "_rpc", changing_rpc)
+    import pytest
+    with pytest.raises(RpcReadError, match="possible reorg"):
+        reader.read_pool(POOL_A, 30)
