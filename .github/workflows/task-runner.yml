@@ -239,6 +239,7 @@ jobs:
           MOBILE_STATUS_HTTP: ${{ steps.mobile.outputs.http }}
           MOBILE_PAPER_LEDGER: ${{ steps.mobile.outputs.paper_ledger }}
           MOBILE_PROVIDER_USAGE: ${{ steps.mobile.outputs.provider_usage }}
+          MOBILE_TELEGRAM_RECEIPTS: ${{ steps.mobile.outputs.telegram_receipts }}
           MOBILE_LAST_SCAN: ${{ steps.mobile.outputs.last_scan }}
           MOBILE_SOURCE_FRESHNESS: ${{ steps.mobile.outputs.source_freshness }}
           MOBILE_CI_HEALTH: ${{ steps.mobile.outputs.ci_health }}
@@ -263,6 +264,7 @@ jobs:
               "Stop reason: " + (process.env.STOP_REASON || "unknown"),
               "D1 mobile status GET: " + (process.env.MOBILE_STATUS_HTTP || "not run"),
               "D1 paper ledger / quota ledger: " + (process.env.MOBILE_PAPER_LEDGER || "unknown") + " / " + (process.env.MOBILE_PROVIDER_USAGE || "unknown"),
+              "Telegram receipt schema: " + (process.env.MOBILE_TELEGRAM_RECEIPTS || "unknown") + " (schema only; webhook activation separately gated)",
               "D1 pending / running tasks: " + (process.env.MOBILE_TASKS_PENDING || "unknown") + " / " + (process.env.MOBILE_TASKS_RUNNING || "unknown"),
               "D1 paper events: " + (process.env.MOBILE_PAPER_EVENTS || "unknown"),
               "Telemetry gaps — scan: " + (process.env.MOBILE_LAST_SCAN || "unknown") +
