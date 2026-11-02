@@ -191,7 +191,8 @@ class DexScreenerClient:
         wait = self.min_request_interval - (time.monotonic() - self._last_request)
         if wait > 0:
             time.sleep(wait)
-        url = f"{BASE_URL}{path}?{urlencode(params)}"
+        query = urlencode(params)
+        url = f"{BASE_URL}{path}" + (f"?{query}" if query else "")
         request = Request(url, headers={"Accept": "application/json", "User-Agent": USER_AGENT})
         try:
             with urlopen(request, timeout=self.timeout_seconds) as response:
