@@ -448,7 +448,7 @@ def main() -> None:
             )
             print(json.dumps(result, indent=2))
         except (RpcReadError, ValueError, ArithmeticError, OSError, RuntimeError, sqlite3.Error) as exc:
-            parser.exit(2, f"paper-observe failed: {exc}\\n")
+            parser.exit(2, f"paper-observe failed: {exc}\n")
     elif args.command == "onchain-v2-scan":
         try:
             result = scan_onchain_v2_candidates(
