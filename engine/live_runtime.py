@@ -82,4 +82,5 @@ def build_live_gateway(
         environ=source,
         daily_budget_usd=policy.get("daily_budget_usd", 0),
         monthly_budget_usd=policy.get("monthly_budget_usd", 0),
+        per_task_budget_usd=policy.get("per_task_budget_usd", 0),
     )
