@@ -84,6 +84,30 @@ class PaperTradingLedger:
                 ON paper_events(candidate_id, sequence)
             """)
             db.execute("""
+                CREATE TABLE IF NOT EXISTS paper_event_checkpoints (
+                    candidate_id TEXT NOT NULL,
+                    sequence INTEGER NOT NULL CHECK(sequence > 0),
+                    event_id TEXT NOT NULL UNIQUE,
+                    event_hash TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    PRIMARY KEY(candidate_id, sequence)
+                )
+            """)
+            db.execute("""
+                CREATE TRIGGER IF NOT EXISTS paper_event_checkpoints_no_update
+                BEFORE UPDATE ON paper_event_checkpoints
+                BEGIN
+                    SELECT RAISE(ABORT, 'paper checkpoints are append-only');
+                END
+            """)
+            db.execute("""
+                CREATE TRIGGER IF NOT EXISTS paper_event_checkpoints_no_delete
+                BEFORE DELETE ON paper_event_checkpoints
+                BEGIN
+                    SELECT RAISE(ABORT, 'paper checkpoints are append-only');
+                END
+            """)
+            db.execute("""
                 CREATE TRIGGER IF NOT EXISTS paper_events_no_update
                 BEFORE UPDATE ON paper_events
                 BEGIN
@@ -164,7 +188,7 @@ class PaperTradingLedger:
         """Append one event. Replaying the same event_id and content is an idempotent no-op."""
         candidate_id = self._text(candidate_id, "candidate_id")
         event_id = self._text(event_id, "event_id")
-        if event_type not in EVENT_TYPES:
+        if not isinstance(event_type, str) or event_type not in EVENT_TYPES:
             raise ValueError("Unsupported paper-trading event type")
         if not isinstance(occurred_at, datetime) or occurred_at.tzinfo is None or occurred_at.utcoffset() is None:
             raise ValueError("occurred_at must be timezone-aware")
@@ -280,6 +304,12 @@ class PaperTradingLedger:
                 "previous_hash": previous_hash,
                 "event_hash": event_hash,
             })
+            db.execute(
+                """INSERT INTO paper_event_checkpoints
+                   (candidate_id, sequence, event_id, event_hash, created_at)
+                   VALUES (?, ?, ?, ?, ?)""",
+                (candidate_id, sequence, event_id, event_hash, timestamp),
+            )
         return True
 
     def events(self, candidate_id: str, *, limit: int = 500) -> list[dict[str, Any]]:
@@ -297,9 +327,23 @@ class PaperTradingLedger:
     def verify_chain(self, candidate_id: str) -> bool:
         """Verify sequence continuity, previous hashes, and each event digest."""
         events = self.events(candidate_id, limit=5000)
+        with self._connect() as db:
+            checkpoints = db.execute(
+                "SELECT sequence, event_id, event_hash FROM paper_event_checkpoints "
+                "WHERE candidate_id = ? ORDER BY sequence",
+                (candidate_id,),
+            ).fetchall()
+        if len(events) != len(checkpoints):
+            return False
         previous_hash = "0" * 64
-        for expected_sequence, event in enumerate(events, start=1):
-            if event["sequence"] != expected_sequence or event["previous_hash"] != previous_hash:
+        for expected_sequence, (event, checkpoint) in enumerate(
+            zip(events, checkpoints, strict=True), start=1,
+        ):
+            if (
+                event["sequence"] != expected_sequence
+                or event["previous_hash"] != previous_hash
+                or checkpoint != (expected_sequence, event["event_id"], event["event_hash"])
+            ):
                 return False
             record = {
                 key: event[key] for key in (*METADATA_FIELDS, "payload_json")
