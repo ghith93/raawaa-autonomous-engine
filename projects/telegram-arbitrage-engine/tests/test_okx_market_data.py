@@ -4,7 +4,6 @@ from urllib.parse import parse_qs, urlsplit
 
 import pytest
 
-from arb_engine.market_sources.instruments import InstrumentMetadataError
 from arb_engine.market_sources.okx import (
     OKXMarketDataError,
     OKXPublicSpotMarketData,
