@@ -57,7 +57,22 @@ This is an indicative aggregator quote, not a guaranteed fill or a net-profit ca
 
 ## Same-block on-chain V2 cross-venue scan
 
-The `onchain-v2-scan` command uses DEX Screener only as a candidate discovery hint. It verifies discovered pairs against the registered Ethereum V2 factories and, if a ranked discovery response omits a registered venue, queries that venue's trusted factory `getPair()` directly at the same pinned block. Every selected pair still passes `pair.factory()` and `factory.getPair()` verification before both pools are read and both Router02 factories and buy/sell `getAmountsOut` quotes are checked at that same block.
+### BNB Smart Chain example
+
+```bash
+python -m arb_engine.cli onchain-v2-scan \
+  --chain-id 56 \
+  --rpc-url https://YOUR-TRUSTED-BSC-RPC \
+  --token-address 0x<BASE_TOKEN_ADDRESS> \
+  --quote-token-address 0x<QUOTE_TOKEN_ADDRESS> \
+  --capital-quote 1000
+```
+
+For Ethereum and BNB Smart Chain, `--venue-ids` is optional because each currently has exactly two registered venues. Other chains with incomplete or ambiguous venue pairs require explicit `--venue-ids`; the scanner does not guess. The RPC endpoint must report the requested chain ID and support the read-only calls used by the scanner.
+
+
+
+The `onchain-v2-scan` command uses DEX Screener only as a candidate discovery hint. It resolves the default venue pair from `--chain-id`: Ethereum selects Uniswap V2 / SushiSwap V2; BNB Smart Chain selects PancakeSwap V2 / ApeSwap V2. It verifies discovered pairs against the selected chain's registered V2 factories and, if a ranked discovery response omits a registered venue, queries that venue's trusted factory `getPair()` directly at the same pinned block. Every selected pair still passes `pair.factory()` and `factory.getPair()` verification before both pools are read and both Router02 factories and buy/sell `getAmountsOut` quotes are checked at that same block.
 
 Example (replace the token addresses with verified contracts; the quote token is always explicit):
 
