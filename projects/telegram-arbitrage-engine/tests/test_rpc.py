@@ -119,3 +119,49 @@ def test_rpc_rejects_noncanonical_hex_and_nonzero_abi_address_padding():
     with pytest.raises(ValueError, match="hexadecimal EVM address"):
         reader._pool_address("0x+" + "1" * 39)
     assert reader._address("0x" + "0" * 24 + "2" * 40, "token0") == "0x" + "2" * 40
+
+
+def test_router_quote_encodes_exact_input_and_decodes_dynamic_amounts(monkeypatch):
+    reader = EthereumV2PoolReader(min_request_interval=0)
+    seen = {}
+
+    def fake(method, params):
+        seen["method"] = method
+        seen["params"] = params
+        amounts = [123456, 654321]
+        encoded = "0x" + word(32) + word(len(amounts)) + "".join(word(value) for value in amounts)
+        return encoded
+
+    monkeypatch.setattr(reader, "_rpc", fake)
+    result = reader.quote_v2_router_exact_input(
+        "0x" + "9" * 40, 123456, [TOKEN0, TOKEN1], 100,
+    )
+    assert result == [123456, 654321]
+    call, block_tag = seen["params"]
+    assert seen["method"] == "eth_call"
+    assert block_tag == "0x64"
+    assert call["to"] == "0x" + "9" * 40
+    assert call["data"].startswith("0xd06ca61f")
+    assert int(call["data"][10:74], 16) == 123456
+    assert int(call["data"][74:138], 16) == 64
+
+
+def test_router_quote_rejects_bad_abi_array(monkeypatch):
+    import pytest
+
+    reader = EthereumV2PoolReader(min_request_interval=0)
+    monkeypatch.setattr(reader, "_rpc", lambda method, params: "0x" + word(32) + word(1) + word(100))
+    with pytest.raises(RpcReadError, match="unexpected amounts array"):
+        reader.quote_v2_router_exact_input(
+            "0x" + "9" * 40, 123456, [TOKEN0, TOKEN1], 100,
+        )
+
+
+def test_router_quote_rejects_bad_path_and_amount():
+    import pytest
+
+    reader = EthereumV2PoolReader(min_request_interval=0)
+    with pytest.raises(ValueError, match="uint256"):
+        reader.quote_v2_router_exact_input("0x" + "9" * 40, True, [TOKEN0, TOKEN1], 100)
+    with pytest.raises(ValueError, match="repeat"):
+        reader.quote_v2_router_exact_input("0x" + "9" * 40, 10, [TOKEN0, TOKEN0], 100)
