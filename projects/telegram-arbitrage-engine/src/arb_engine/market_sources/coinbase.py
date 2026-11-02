@@ -81,6 +81,8 @@ class CoinbaseOrderBookSnapshot:
     sequence: int
     fetched_at: datetime
     exchange_timestamp_ms: int | None
+    bid_order_counts: tuple[int, ...]
+    ask_order_counts: tuple[int, ...]
 
 
 def _product_id(value: str) -> str:
@@ -131,7 +133,9 @@ def _iso_timestamp_ms(value: object) -> int | None:
         raise CoinbaseMarketDataError("invalid Coinbase order-book time") from exc
     if parsed.tzinfo is None or parsed.utcoffset() is None:
         raise CoinbaseMarketDataError("Coinbase order-book time must include a timezone")
-    return int(parsed.timestamp() * 1000)
+    utc = parsed.astimezone(timezone.utc)
+    delta = utc - datetime(1970, 1, 1, tzinfo=timezone.utc)
+    return delta.days * 86_400_000 + delta.seconds * 1000 + delta.microseconds // 1000
 
 
 class CoinbaseExchangePublicMarketData:
@@ -257,6 +261,9 @@ class CoinbaseExchangePublicMarketData:
             "limit_only",
             "auction_mode",
         )
+        for flag in flags:
+            if flag in item and type(item[flag]) is not bool:
+                raise CoinbaseMarketDataError(f"invalid Coinbase product flag: {flag}")
         restricted = any(item.get(flag) is True for flag in flags)
         status = (
             "TRADING"
@@ -296,8 +303,8 @@ class CoinbaseExchangePublicMarketData:
         sequence = item.get("sequence")
         if type(sequence) is not int or sequence <= 0:
             raise CoinbaseMarketDataError("invalid Coinbase order-book sequence")
-        bids, _ = self._levels(item.get("bids"), "bids")
-        asks, _ = self._levels(item.get("asks"), "asks")
+        bids, bid_counts = self._levels(item.get("bids"), "bids")
+        asks, ask_counts = self._levels(item.get("asks"), "asks")
         if any(bids[index][0] < bids[index + 1][0] for index in range(len(bids) - 1)):
             raise CoinbaseMarketDataError("Coinbase bids were not sorted highest-first")
         if any(asks[index][0] > asks[index + 1][0] for index in range(len(asks) - 1)):
@@ -311,6 +318,8 @@ class CoinbaseExchangePublicMarketData:
             sequence=sequence,
             fetched_at=datetime.now(timezone.utc),
             exchange_timestamp_ms=_iso_timestamp_ms(item.get("time")),
+            bid_order_counts=bid_counts,
+            ask_order_counts=ask_counts,
         )
 
     @staticmethod
@@ -327,7 +336,7 @@ class CoinbaseExchangePublicMarketData:
             price = _decimal(item[0], f"{field} price")
             quantity = _decimal(item[1], f"{field} quantity")
             count = item[2]
-            if type(count) is not int or count < 0:
+            if type(count) is not int or count <= 0:
                 raise CoinbaseMarketDataError(f"invalid Coinbase {field} order count")
             levels.append((price, quantity))
             order_counts.append(count)
