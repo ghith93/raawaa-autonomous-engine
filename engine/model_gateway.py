@@ -48,8 +48,8 @@ class UsageLedger:
     """Persistent spend ledger with atomic pre-call reservations and idempotent settlement.
 
     An unsettled reservation is deliberately retained after an ambiguous provider error.
-    This conservatively counts the estimated spend against future requests until an
-    operator reconciles it; it must never be silently released and reused.
+    It is counted against every subsequent daily/monthly budget until reconciled; it must
+    never be silently released and reused.
     """
 
     def __init__(self, db_path: str | Path = "data/engine.db"):
@@ -101,29 +101,29 @@ class UsageLedger:
             "SELECT COALESCE(SUM(cost_nanos),0) n FROM model_usage WHERE substr(created_at,1,7)=?",
             (month,),
         ).fetchone()["n"]
-        daily_reserved = db.execute(
+        # Ambiguous in-flight calls remain reserved across date boundaries. Counting
+        # them in every future window is intentionally conservative until reconciled.
+        pending = db.execute(
             "SELECT COALESCE(SUM(estimated_cost_nanos),0) n FROM model_usage_reservations "
-            "WHERE settled_at IS NULL AND substr(created_at,1,10)=?",
-            (day,),
+            "WHERE settled_at IS NULL"
         ).fetchone()["n"]
-        monthly_reserved = db.execute(
-            "SELECT COALESCE(SUM(estimated_cost_nanos),0) n FROM model_usage_reservations "
-            "WHERE settled_at IS NULL AND substr(created_at,1,7)=?",
-            (month,),
-        ).fetchone()["n"]
-        return tuple(int(value) for value in (
-            daily_spent, monthly_spent, daily_reserved, monthly_reserved
-        ))
+        return int(daily_spent), int(monthly_spent), int(pending), int(pending)
 
-    def totals(self, now: datetime | None = None) -> dict[str, float]:
+    def totals(self, now: datetime | None = None) -> dict[str, float | int]:
         stamp = _utc(now)
         with self._connect() as db:
             daily, monthly, daily_reserved, monthly_reserved = self._spend_nanos(db, stamp)
+            pending_count = int(db.execute(
+                "SELECT COUNT(*) n FROM model_usage_reservations WHERE settled_at IS NULL"
+            ).fetchone()["n"])
         return {
             "daily_usd": daily / 1_000_000_000,
             "monthly_usd": monthly / 1_000_000_000,
             "daily_reserved_usd": daily_reserved / 1_000_000_000,
             "monthly_reserved_usd": monthly_reserved / 1_000_000_000,
+            "daily_total_nanos": daily + daily_reserved,
+            "monthly_total_nanos": monthly + monthly_reserved,
+            "pending_reservations": pending_count,
         }
 
     def reserve(self, provider: str, model: str, task_kind: str,
@@ -136,8 +136,8 @@ class UsageLedger:
         estimate = _money_nanos(estimated_cost_usd, round_up=True)
         daily_cap = _money_nanos(daily_budget_usd, round_up=False)
         monthly_cap = _money_nanos(monthly_budget_usd, round_up=False)
-        stamp = _utc(now).isoformat()
         current = _utc(now)
+        stamp = current.isoformat()
         with self._connect() as db:
             db.execute("BEGIN IMMEDIATE")
             daily, monthly, daily_reserved, monthly_reserved = self._spend_nanos(db, current)
@@ -154,14 +154,14 @@ class UsageLedger:
 
     def settle(self, reservation_id: int, input_tokens: int, output_tokens: int,
                actual_cost_usd: float, now: datetime | None = None) -> dict[str, Any]:
-        """Record actual cost exactly once; report any post-response budget overrun."""
+        """Record actual cost exactly once; return integer spend totals for hard-cap checks."""
         if type(input_tokens) is not int or type(output_tokens) is not int:
             raise ValueError("token counts must be integers")
         if input_tokens < 0 or output_tokens < 0:
             raise ValueError("token counts cannot be negative")
         actual = _money_nanos(actual_cost_usd, round_up=True)
-        stamp = _utc(now).isoformat()
         current = _utc(now)
+        stamp = current.isoformat()
         with self._connect() as db:
             db.execute("BEGIN IMMEDIATE")
             reservation = db.execute(
@@ -199,6 +199,8 @@ class UsageLedger:
             "monthly_usd": monthly / 1_000_000_000,
             "daily_reserved_usd": daily_reserved / 1_000_000_000,
             "monthly_reserved_usd": monthly_reserved / 1_000_000_000,
+            "daily_total_nanos": daily + daily_reserved,
+            "monthly_total_nanos": monthly + monthly_reserved,
         }
 
     def record(self, provider: str, model: str, task_kind: str, input_tokens: int,
@@ -228,7 +230,6 @@ class ModelGateway:
         self.ledger = ledger
         self.daily_budget_usd = daily_budget_usd
         self.monthly_budget_usd = monthly_budget_usd
-        # Validate configuration at construction so malformed caps fail closed.
         _money_nanos(daily_budget_usd, round_up=False)
         _money_nanos(monthly_budget_usd, round_up=False)
         self.allow_paid_calls = allow_paid_calls
@@ -257,9 +258,7 @@ class ModelGateway:
             raise ProviderUnavailable(f"No adapter registered for provider: {model.provider}")
 
         estimated_tokens = max(1, len(request.prompt.split())) + request.max_output_tokens
-        estimated_cost = (
-            estimated_tokens / 1000.0
-        ) * model.estimated_cost_per_1k_tokens_usd
+        estimated_cost = (estimated_tokens / 1000.0) * model.estimated_cost_per_1k_tokens_usd
         if estimated_cost > 0 and not self.allow_paid_calls:
             raise BudgetExceeded("Paid model calls are disabled.")
 
@@ -270,7 +269,9 @@ class ModelGateway:
         # If the adapter raises or times out, the reservation intentionally remains
         # outstanding because provider-side processing/billing may be ambiguous.
         response = adapter.generate(model.model, request)
-        if not isinstance(getattr(response, "cost_usd", None), (int, float)):
+        if isinstance(getattr(response, "cost_usd", None), bool) or not isinstance(
+            getattr(response, "cost_usd", None), (int, float)
+        ):
             raise ValueError("provider response cost must be numeric")
         if not isinstance(getattr(response, "input_tokens", None), int) or not isinstance(
             getattr(response, "output_tokens", None), int
@@ -280,17 +281,16 @@ class ModelGateway:
             raise ValueError("provider response cost must be finite and non-negative")
 
         settlement = self.ledger.settle(
-            reservation_id,
-            response.input_tokens,
-            response.output_tokens,
-            response.cost_usd,
+            reservation_id, response.input_tokens, response.output_tokens, response.cost_usd,
         )
         if response.cost_usd > 0 and not self.allow_paid_calls:
             raise BudgetExceeded(
                 "Provider reported unexpected non-zero cost; actual usage was recorded."
             )
-        if (settlement["daily_usd"] + settlement["daily_reserved_usd"] > self.daily_budget_usd
-                or settlement["monthly_usd"] + settlement["monthly_reserved_usd"] > self.monthly_budget_usd):
+        daily_cap = _money_nanos(self.daily_budget_usd, round_up=False)
+        monthly_cap = _money_nanos(self.monthly_budget_usd, round_up=False)
+        if (settlement["daily_total_nanos"] > daily_cap
+                or settlement["monthly_total_nanos"] > monthly_cap):
             raise BudgetExceeded(
                 "Actual provider cost exceeded the remaining budget; actual usage was recorded."
             )
