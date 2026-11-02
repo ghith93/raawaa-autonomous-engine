@@ -411,7 +411,7 @@ def main() -> None:
             )
             print(json.dumps(result, indent=2))
         except (MarketDataError, RpcReadError, ValueError, ArithmeticError, RuntimeError) as exc:
-            parser.exit(2, f"onchain-v2-scan failed: {exc}\\n")
+            parser.exit(2, f"onchain-v2-scan failed: {exc}\n")
     elif args.command == "token-check":
         try:
             reader = EthereumV2PoolReader(args.rpc_url, expected_chain_id=args.chain_id)
