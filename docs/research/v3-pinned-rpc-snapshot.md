@@ -13,7 +13,7 @@ For a requested direction and sqrt-price limit, it:
 5. Verifies factory.getPool(token0, token1, fee) returns the exact pool.
 6. Verifies factory.feeAmountTickSpacing(fee) matches the pool's tickSpacing.
 7. Fetches only the bitmap words on the requested price-limit path, within a caller-configured word bound.
-8. Reads liquidityGross/liquidityNet/initialized for every set bit, within a caller-configured initialized-tick bound.
+8. Reads liquidityGross/liquidityNet/initialized only for initialized ticks inside the requested current-price-to-limit interval, within a caller-configured initialized-tick bound. Other set bits in the fetched bitmap word are ignored because the simulator cannot reach them before the explicit price limit.
 9. Rechecks the canonical block hash before returning the snapshot.
 
 The V3 reader defaults to Nodely's keyless Ethereum endpoint (`https://eth.nodely.dev`) and spaces requests by 0.55 seconds, below Nodely's documented two-heavy-call-per-second limit. The live smoke uses Nodely, dRPC and 1RPC before the legacy PublicNode endpoint. The default factory is the official Uniswap V3 Ethereum mainnet factory. Other chains require an explicit factory address; do not reuse Ethereum addresses on other networks.
