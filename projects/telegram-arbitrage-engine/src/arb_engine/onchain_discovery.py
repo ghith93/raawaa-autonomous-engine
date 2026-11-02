@@ -6,7 +6,7 @@ import re
 from typing import Any
 
 from .dexscreener import DexPair
-from .rpc import EthereumV2PoolReader, EvmPoolSnapshot
+from .rpc import EthereumV2PoolReader, EvmPoolSnapshot, RpcVerificationError
 from .venues import Venue, get_venue
 
 _ADDRESS = re.compile(r"0x[0-9a-fA-F]{40}")
@@ -72,7 +72,7 @@ def discover_pool_candidates(
     if type(max_candidates) is not int or not 1 <= max_candidates <= 10:
         raise ValueError("max_candidates must be between 1 and 10")
 
-    groups: dict[tuple[str, str], dict[str, DiscoveredPool]] = {}
+    groups: dict[tuple[str, str], dict[str, list[DiscoveredPool]]] = {}
     for pair in pairs:
         if (
             not isinstance(pair, DexPair)
@@ -101,18 +101,23 @@ def discover_pool_candidates(
         base_token = quote_address if base == quote else base
         pool = DiscoveredPool(pair=pair, venue=venue)
         key = (base_token, quote)
-        current = groups.setdefault(key, {}).get(venue.id)
-        if current is None or pair.liquidity_usd > current.pair.liquidity_usd:
-            groups[key][venue.id] = pool
+        venue_pools = groups.setdefault(key, {}).setdefault(venue.id, [])
+        if not any(
+            item.pair.pair_address.casefold() == pair.pair_address.casefold()
+            for item in venue_pools
+        ):
+            venue_pools.append(pool)
+            venue_pools.sort(key=lambda item: item.pair.liquidity_usd, reverse=True)
+            del venue_pools[max_candidates:]
 
     candidates = []
     for pools in groups.values():
-        if len(pools) != 2:
-            continue
-        first = pools.get("uniswap_v2_ethereum")
-        second = pools.get("sushiswap_v2_ethereum")
-        if first and second and first.pair.pair_address.casefold() != second.pair.pair_address.casefold():
-            candidates.append((first, second))
+        uniswap_pools = pools.get("uniswap_v2_ethereum", [])
+        sushiswap_pools = pools.get("sushiswap_v2_ethereum", [])
+        for first in uniswap_pools:
+            for second in sushiswap_pools:
+                if first.pair.pair_address.casefold() != second.pair.pair_address.casefold():
+                    candidates.append((first, second))
     candidates.sort(
         key=lambda item: min(item[0].pair.liquidity_usd, item[1].pair.liquidity_usd),
         reverse=True,
@@ -195,6 +200,7 @@ def scan_onchain_v2(
     )
     rpc = reader or EthereumV2PoolReader(rpc_url, expected_chain_id=1)
     results = []
+    rejected_candidates = []
     for first, second in candidates:
         snapshots = rpc.read_pools([
             (first.pair.pair_address, first.venue.swap_fee_bps),
@@ -235,14 +241,25 @@ def scan_onchain_v2(
         quote_decimals = decimals[quote]
         capital_raw = _raw_amount(capital_quote, quote_decimals)
 
-        for pool, venue in ((a, first.venue), (b, second.venue)):
-            rpc.verify_v2_pool_factory(
-                pool.state.pair_address, venue.factory,
-                pool.state.token0, pool.state.token1, pool.state.block_number,
-            )
-            rpc.verify_v2_router_factory(
-                venue.router02, venue.factory, pool.state.block_number,
-            )
+        try:
+            for pool, venue in ((a, first.venue), (b, second.venue)):
+                rpc.verify_v2_pool_factory(
+                    pool.state.pair_address, venue.factory,
+                    pool.state.token0, pool.state.token1, pool.state.block_number,
+                )
+                rpc.verify_v2_router_factory(
+                    venue.router02, venue.factory, pool.state.block_number,
+                )
+        except RpcVerificationError as exc:
+            # A DEX label may point at another AMM version; skip only identity mismatches.
+            # Transport/provider failures remain fatal and are never hidden as candidate rejection.
+            rejected_candidates.append({
+                "source_pair": first.pair.pair_address,
+                "destination_pair": second.pair.pair_address,
+                "reason": str(exc),
+                "classification": "candidate_rejected_protocol_identity_mismatch",
+            })
+            continue
         directions = [
             _quote_route(rpc, a, b, first.venue, second.venue,
                          quote_token=quote, base_token=base, capital_raw=capital_raw),
@@ -281,6 +298,8 @@ def scan_onchain_v2(
         "capital_quote": str(capital_quote),
         "candidate_pairs_verified": len(results),
         "candidate_pairs_discovered": len(candidates),
+        "candidate_pairs_rejected": len(rejected_candidates),
+        "rejected_candidates": rejected_candidates,
         "opportunities": results,
         "live_execution": False,
         "wallet_or_signer_used": False,
