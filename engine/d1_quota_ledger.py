@@ -30,6 +30,13 @@ class D1QuotaLedger:
     def _request(self, method: str, path: str, payload: dict[str, Any] | None = None) -> dict:
         data = None if payload is None else json.dumps(payload, separators=(",", ":")).encode()
         headers = {"Accept": "application/json", "Authorization": f"Bearer {self.token}"}
+        access_id = os.getenv("RAAWAA_ENGINE_CF_ACCESS_CLIENT_ID", "")
+        access_secret = os.getenv("RAAWAA_ENGINE_CF_ACCESS_CLIENT_SECRET", "")
+        if bool(access_id) != bool(access_secret):
+            raise D1QuotaLedgerError("Cloudflare Access service-token secrets must be configured as a pair")
+        if access_id and access_secret:
+            headers["CF-Access-Client-Id"] = access_id
+            headers["CF-Access-Client-Secret"] = access_secret
         if data is not None:
             headers["Content-Type"] = "application/json"
         request = urllib.request.Request(self.base_url + path, data=data, headers=headers, method=method)
