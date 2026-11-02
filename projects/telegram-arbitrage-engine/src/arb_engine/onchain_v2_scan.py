@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from decimal import Decimal, InvalidOperation
+from decimal import Decimal, InvalidOperation, localcontext
 from typing import Any
 
 from .dexscreener import DexPairCandidate, DexScreenerClient
@@ -34,7 +34,9 @@ def _token_decimals(snapshot: Any, token: str) -> int:
 
 
 def _human(raw: int, decimals: int) -> str:
-    return str(Decimal(raw) / (Decimal(10) ** decimals))
+    with localcontext() as context:
+        context.prec = 100
+        return format(Decimal(raw) / (Decimal(10) ** decimals), "f")
 
 
 def _capital_decimal(value: str | Decimal) -> Decimal:
@@ -50,10 +52,14 @@ def _capital_decimal(value: str | Decimal) -> Decimal:
 
 
 def _capital_to_raw(amount: Decimal, decimals: int) -> int:
-    scaled = amount * (Decimal(10) ** decimals)
-    if scaled != scaled.to_integral_value():
-        raise ValueError("Capital amount has more fractional digits than the quote token supports")
-    raw = int(scaled)
+    with localcontext() as context:
+        context.prec = max(
+            100, len(amount.as_tuple().digits) + abs(amount.as_tuple().exponent) + decimals + 5,
+        )
+        scaled = amount * (Decimal(10) ** decimals)
+        if scaled != scaled.to_integral_value():
+            raise ValueError("Capital amount has more fractional digits than the quote token supports")
+        raw = int(scaled)
     if not 0 < raw < 2**256:
         raise ValueError("Capital amount must fit a positive uint256 raw-unit value")
     return raw
@@ -240,6 +246,9 @@ def scan_onchain_v2_candidates(
         )
         quote_received_raw = sell_amounts[-1]
         gross_surplus_raw = quote_received_raw - capital_raw
+        with localcontext() as context:
+            context.prec = 100
+            gross_return_bps = Decimal(gross_surplus_raw) * Decimal(10_000) / Decimal(capital_raw)
         routes.append({
             "buy_venue_id": buy_venue.id,
             "sell_venue_id": sell_venue.id,
@@ -254,12 +263,14 @@ def scan_onchain_v2_candidates(
             "gross_quote_surplus_raw": str(gross_surplus_raw),
             "gross_quote_surplus_human": _human(gross_surplus_raw, quote_decimals),
             "positive_gross_surplus": gross_surplus_raw > 0,
+            "gross_return_bps": str(gross_return_bps),
             "buy_router_amounts_raw": [str(value) for value in buy_amounts],
             "sell_router_amounts_raw": [str(value) for value in sell_amounts],
             "classification": "same_block_router_round_trip_quote_gross_only",
         })
 
     reader.verify_canonical_block(context.block_number, context.block_hash)
+    best_route = max(routes, key=lambda route: int(route["gross_quote_surplus_raw"]))
     return {
         "mode": "read_only_onchain_v2_candidate_scan",
         "status": "quoted",
@@ -287,6 +298,8 @@ def scan_onchain_v2_candidates(
             for candidate, venue in ordered
         ],
         "routes": routes,
+        "best_route": best_route,
+        "best_route_positive_gross_surplus": best_route["positive_gross_surplus"],
         "rpc_requests_used": getattr(reader, "rpc_request_count", None),
         "rpc_requests_budget": max_rpc_requests,
         "gas_included": False,
