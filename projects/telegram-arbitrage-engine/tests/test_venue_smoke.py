@@ -110,3 +110,12 @@ def test_live_venue_check_rejects_wrong_chain_and_empty_registry():
 def test_rpc_client_requires_https_endpoint():
     with pytest.raises(ValueError, match="HTTPS"):
         JsonRpcClient("http://127.0.0.1:8545")
+
+
+def test_live_venue_check_redacts_rpc_url_credentials_and_paths():
+    rpc = FakeRpc()
+    rpc.endpoint = "https://user:password@rpc.example/v2/SECRET_API_KEY?token=SECRET_API_KEY"
+    result = verify_registry_venues(rpc, list_venues(1))
+    assert result["rpc_endpoint"] == "https://rpc.example"
+    assert "password" not in result["rpc_endpoint"]
+    assert "SECRET_API_KEY" not in result["rpc_endpoint"]
