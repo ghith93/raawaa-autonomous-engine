@@ -248,6 +248,17 @@ class ModelGatewayTests(unittest.TestCase):
                 "VALUES(?,?,?,?,?,?,?)",
                 ("mock", "model", "research", 10, 5, 0.25, "2026-11-02T12:00:00+00:00"),
             )
+            db.execute("""CREATE TABLE model_usage_reservations (
+                id INTEGER PRIMARY KEY AUTOINCREMENT, provider TEXT NOT NULL, model TEXT NOT NULL,
+                task_kind TEXT NOT NULL, created_at TEXT NOT NULL,
+                estimated_cost_nanos INTEGER NOT NULL CHECK(estimated_cost_nanos >= 0),
+                settled_at TEXT, actual_cost_nanos INTEGER, input_tokens INTEGER, output_tokens INTEGER
+            )""")
+            db.execute(
+                "INSERT INTO model_usage_reservations(provider,model,task_kind,created_at,estimated_cost_nanos) "
+                "VALUES(?,?,?,?,?)",
+                ("mock", "model", "research", "2026-11-02T12:00:00+00:00", 100),
+            )
         migrated = UsageLedger(path)
         self.assertAlmostEqual(
             migrated.totals(datetime(2026, 11, 2, 13, tzinfo=timezone.utc))["daily_usd"], 0.25
@@ -255,6 +266,10 @@ class ModelGatewayTests(unittest.TestCase):
         with sqlite3.connect(path) as db:
             columns = {row[1] for row in db.execute("PRAGMA table_info(model_usage)")}
         self.assertIn("cost_nanos", columns)
+        self.assertIn("task_id", columns)
+        with sqlite3.connect(path) as db:
+            reservation_columns = {row[1] for row in db.execute("PRAGMA table_info(model_usage_reservations)")}
+        self.assertIn("task_id", reservation_columns)
 
 
 if __name__ == "__main__":
