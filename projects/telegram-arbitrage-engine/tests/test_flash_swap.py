@@ -23,7 +23,7 @@ def pool(address, token0, token1, reserve0, reserve1, *, fee=30, chain=1, block=
 def route(*, source_fee=30, destination_fee=30):
     source = pool("0x" + "3" * 40, QUOTE, BASE, 1_000_000, 1_000_000, fee=source_fee)
     destination = pool(
-        "0x" + "4" * 40, QUOTE, BASE, 1_020_000, 1_000_000,
+        "0x" + "4" * 40, QUOTE, BASE, 1_050_000, 1_000_000,
         fee=destination_fee,
     )
     return source, destination
@@ -37,7 +37,7 @@ def test_flash_swap_repayment_matches_v2_get_amount_in_rounding():
     expected = (1_000_000 * 10_000 * 10_000) // ((1_000_000 - 10_000) * 9_970) + 1
     assert result.repayment_token == QUOTE
     assert result.repayment_amount_raw == expected
-    assert result.borrow.amount_out_raw == 10_000
+    assert result.borrow.amount_borrowed_raw == 10_000
     assert result.borrow.amount_in_raw == expected
 
 
