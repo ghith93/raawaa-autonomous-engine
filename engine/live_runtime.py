@@ -14,6 +14,7 @@ from engine.model_gateway import UsageLedger
 from engine.quota_config import load_provider_profile_registry
 from engine.quota_live_gateway import QuotaAwareLiveGateway
 from engine.quota_manager import QuotaLedger, QuotaManager
+from engine.d1_quota_ledger import D1QuotaLedger
 
 
 LIVE_SWITCH = "RAAWAA_ENGINE_LIVE_INFERENCE"
@@ -50,7 +51,14 @@ def build_live_gateway(
     if not candidates:
         return None
 
-    quota_ledger = QuotaLedger(db_path)
+    # Scheduled/cloud execution sets the control-plane URL and therefore must use
+    # the durable Worker-backed ledger. Missing token or transport errors fail closed;
+    # there is deliberately no silent SQLite fallback in that mode.
+    quota_ledger = (
+        D1QuotaLedger()
+        if source.get("RAAWAA_ENGINE_API_URL")
+        else QuotaLedger(db_path)
+    )
     manager = QuotaManager([entry.profile for entry in candidates], quota_ledger)
     adapters = {}
     eligible_profiles = []
