@@ -25,7 +25,7 @@ Raawaa has a policy loader, task model, quota controls, D1-backed state, a Micro
 
 ## 1. Cloudflare Workflows — recommended next spike
 
-Cloudflare Workflows is available on Free and Paid plans and supports multi-step execution, automatic retries, persisted state, waits for external events and human approvals. Cloudflare's product page currently advertises 100,000 workflow requests/day and 1 GB workflow storage on the Free tier; verify current account limits before production use.
+Cloudflare Workflows is available on Free and Paid plans and supports multi-step execution, automatic retries, persisted state, waits for external events and human approvals. The current Free plan includes 100,000 requests/day shared with Workers, 3,000 steps/day, 1 GB-month of persisted state, 10 ms active CPU per invocation, and a 1,024-step ceiling per Workflow. Step and storage billing began 2026-08-10, so Free availability is bounded rather than unmetered. See the [official pricing](https://developers.cloudflare.com/workflows/reference/pricing/) and [limits](https://developers.cloudflare.com/workflows/reference/limits/) pages. Keep the prototype isolated; no production activation or paid-plan assumption.
 
 Cloudflare Queues are useful for dispatch and backpressure, but not as the durable source of truth: the Free plan has 24-hour message retention, messages are limited to 128 KB, and each consumer invocation has a 15-minute wall-time limit. Store durable task state in the approved store or Workflow state; queue messages should contain small task IDs or pointers.
 
