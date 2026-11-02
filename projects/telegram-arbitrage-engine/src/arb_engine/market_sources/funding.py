@@ -281,7 +281,8 @@ class PublicPerpetualFundingClient:
                 interval = intervals.get(symbol)
             else:
                 rate_raw, time_raw = item.get("fundingRate"), item.get("fundingRateTimestamp")
-                mark_raw, rate_type, interval = None, None, None
+                mark_raw, rate_type = None, None
+                interval = intervals.get(symbol)
             rate = _decimal(rate_raw, "fundingRate")
             funding_time = _timestamp(time_raw, "fundingTime")
             if funding_time in seen:
