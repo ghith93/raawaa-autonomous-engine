@@ -144,3 +144,24 @@ No item in this list authorizes live trading.
 - EIP-20 reference: https://eips.ethereum.org/EIPS/eip-20
 - Example: `arb-engine token-check --token-address 0x... --chain-id 1`
 - No approvals, transfer calls, signing, or transactions are performed.
+
+
+## On-chain V2 candidate discovery
+
+- DEX Screener search is used only to discover candidate Ethereum pair addresses, venue labels, and liquidity metadata. Its USD marks are not used to calculate trade output.
+- Initial registry coverage is intentionally limited to Ethereum Uniswap V2 and SushiSwap V2. DEX labels are hints only; a candidate is rejected unless the pair's `factory()`, the factory's `getPair(token0,token1)`, and the registered router's `factory()` all match at the pinned block.
+- Candidate identity is the exact pair of token contract addresses plus chain ID. The operator must provide the exact quote-token contract address and a human quote amount. Token symbols and USD prices are never used to infer token identity or executable output.
+- Both venue directions are quoted using router `getAmountsOut(uint256,address[])` at the same canonical block. The reader rechecks the block hash after quotes to detect a reorg during the scan.
+- The scan is bounded to at most 10 candidate pairs per invocation (default 5) and uses the existing bounded RPC timeout/rate interval.
+- Reported gross quote-token surplus is before gas, MEV/builder payments, inclusion risk, token transfer taxes, post-snapshot state changes, and actual execution. It is not net profit, a paper order, or an execution guarantee.
+- This feature does not construct calldata, use a wallet/signer, submit transactions, or write to the paper ledger.
+- Uniswap V2 flash swaps are atomic: the callback must repay enough for the pair invariant by the end of the same transaction or the whole transaction reverts. Cross-token repayment uses the ordinary exact-output swap fee mechanics; see the official [Flash Swaps implementation guide](https://developers.uniswap.org/docs/protocols/v2/guides/flash-swaps).
+- The official guide notes a 0.30% V2 swap fee and the callback's repayment invariant. These protocol rules do not imply a positive arbitrage margin after two pool fees and execution costs.
+
+## Open-source implementation research
+
+- [BowTiedDevil/degenbot](https://github.com/BowTiedDevil/degenbot) is MIT-licensed and contains reusable protocol-specific math/building blocks across Uniswap V2/V3/V4, Curve, Balancer, Solidly, and Aave V3. It is a stronger future reference for expanding pool math than copying a complete trading bot. Integration should be selective, version-pinned, and tested against the existing integer quote engine.
+- [gardennn/arb-rewind](https://github.com/gardennn/arb-rewind) is MIT-licensed and demonstrates historical fork-based replay and triangular route research across several AMM families. Its small public history means treat it as a design reference, not production evidence. The most valuable idea is historical block replay with no wallet or live transactions.
+- [flashbots/mev-share](https://github.com/flashbots/mev-share) documents an open order-flow auction protocol. It is a later-stage research path only: private orderflow and builder infrastructure are not prerequisites for a reliable read-only scanner, and integration may introduce competitive, operational, and access constraints.
+- Do not copy private keys, deployment scripts, execution code, or unsafe defaults from sample bots. Many public arbitrage repositories explicitly identify themselves as educational, untested, or non-competitive. Prefer extracting deterministic math, route enumeration, and fork-replay tests.
+
