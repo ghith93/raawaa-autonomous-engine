@@ -176,6 +176,13 @@ def test_invalid_venue_count_and_unknown_venues_are_rejected():
         scan_cex_spot_depth(**args)
 
 
+def test_canonical_base_and_quote_ids_must_be_distinct():
+    args = base_args()
+    args["quote_currency_id"] = args["base_asset_id"]
+    with pytest.raises(CexScanError, match="canonical_asset_ids_must_be_distinct"):
+        scan_cex_spot_depth(**args)
+
+
 def test_invalid_quantity_and_time_bounds_are_rejected():
     args = base_args()
     args["base_quantity"] = "NaN"
