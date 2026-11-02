@@ -53,7 +53,7 @@ python -m engine.cli run-once
 
 ## Next engineering priorities
 
-1. Implement and test monetary spend/credit accounting before enabling any non-zero-cost route; paid model calls remain disabled.
+1. Integrate the tested atomic monetary ledger into the active live gateway, configure hard spend/credit caps, and prove end-to-end enforcement before enabling any non-zero-cost route; paid model calls remain disabled.
 2. Complete provider-specific data-classification and retention review for each intended workload; keep confidential formulae, credentials, and customer/order data out of unsuitable provider tiers.
 3. Add operation-specific idempotency contracts and explicit approval gates before enabling side-effecting handlers or external writes.
 4. Extend durable D1 storage beyond the task lifecycle only where a measured need justifies migration; memory and model-usage ledgers are still local SQLite.
