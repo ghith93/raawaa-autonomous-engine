@@ -23,7 +23,7 @@ arb-engine demo
 arb-engine report --limit 500
 arb-engine scan WETH/USDC --min-liquidity 10000 --min-volume 1000
 arb-telegram  # optional read-only polling bot; requires TELEGRAM_BOT_TOKEN + TELEGRAM_ALLOWED_CHAT_IDS
-arb-engine v2-sim --buy-pair 0x... --buy-fee-bps 30 --sell-pair 0x... --sell-fee-bps 30 --quote-token 0x... --base-token 0x... --capital-quote 50
+arb-engine v2-sim --buy-pair 0x... --buy-fee-bps 30 --sell-pair 0x... --sell-fee-bps 30 --quote-token 0x... --base-token 0x... --capital-quote 50 --buy-router 0x... --sell-router 0x...
 ```
 
 Scan snapshots are saved to `data/opportunities.sqlite3`. Avoid tight polling and respect upstream rate limits.
@@ -31,7 +31,7 @@ Scan snapshots are saved to `data/opportunities.sqlite3`. Avoid tight polling an
 See [data sources and trust boundaries](DATA_SOURCES.md) for source rate limits, freshness limitations, and the release gates for future pool-state simulation.
 
 ## Before any paper-profit claim
-The next mandatory layer is exact-size router quotes, pool-state/block freshness, route price impact, fee and gas estimation, token transfer-tax/blacklist checks, revert/failure simulation, and chain atomicity analysis. Cross-chain spreads remain informational only and require bridge cost, settlement delay, and custody/bridge risk modelling.
+The next mandatory layer is verified factory/protocol/fee provenance, pool-state/block freshness, route price impact, gas valuation, token transfer-tax/blacklist checks, full transaction revert simulation, and chain atomicity analysis. Cross-chain spreads remain informational only and require bridge cost, settlement delay, and custody/bridge risk modelling.
 
 ## Current milestone
-0.5: hardened fail-closed input parsing, explicit retrieval-vs-quote freshness provenance, public read-only DEX scanner, local SQLite observation ledger, repeated-observation summary, read-only Ethereum V2 pool reader pinned to a canonical block with stale-head and reorg checks, and exact-input reserve-math simulation. Router-level quote comparison, gas valuation, and token-behavior checks remain unimplemented. Live market connectivity must be verified in the deployment environment; local CI uses fixtures and does not prove live API availability.
+0.5: hardened fail-closed input parsing, explicit retrieval-vs-quote freshness provenance, public read-only DEX scanner, local SQLite observation ledger, repeated-observation summary, read-only Ethereum V2 pool reader pinned to a canonical block with stale-head and reorg checks, and exact-input reserve-math simulation. Optional same-block V2 router getAmountsOut comparison is available when router addresses are supplied; gas valuation, token-behavior checks, and full transaction simulation remain unimplemented. Live market connectivity must be verified in the deployment environment; local CI uses fixtures and does not prove live API availability.
