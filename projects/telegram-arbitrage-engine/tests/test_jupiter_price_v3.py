@@ -9,6 +9,7 @@ from arb_engine.market_sources.jupiter import (
     JupiterPriceError,
     JupiterPriceRateLimited,
     JupiterPriceV3Client,
+    JupiterQuoteOnlyClient,
     _KeylessRateLimiter,
 )
 
@@ -218,3 +219,79 @@ def test_price_v3_rejects_malformed_and_oversized_responses():
     )
     with pytest.raises(JupiterPriceError, match="oversized"):
         client.fetch_prices([SOL])
+
+
+def test_price_v3_parses_json_number_precision_without_binary_float_rounding():
+    raw = (
+        f'{{"{SOL}":{{"usdPrice":147.481234567890123456,'
+        '"decimals":9,"blockId":348004023}}}'
+    ).encode("utf-8")
+    client = JupiterPriceV3Client(
+        transport=lambda _url, _timeout: raw,
+        rate_limiter=_KeylessRateLimiter(),
+    )
+    result = client.fetch_prices([SOL])
+    assert result.observations[0].usd_price == Decimal("147.481234567890123456")
+
+
+def test_price_and_quote_clients_share_the_same_injected_keyless_limiter():
+    current = [0.0]
+    sleeps = []
+
+    def sleep(seconds):
+        sleeps.append(seconds)
+        current[0] += seconds
+
+    limiter = _KeylessRateLimiter(clock=lambda: current[0], sleeper=sleep)
+    price, _ = make_client(price_payload(), rate_limiter=limiter)
+    quote_payload = {
+        "router": "metis",
+        "inAmount": "100000000",
+        "outAmount": "11680143",
+        "transaction": None,
+    }
+    quote = JupiterQuoteOnlyClient(
+        transport=lambda _url, _timeout: encoded(quote_payload),
+        rate_limiter=limiter,
+    )
+    price.fetch_prices([SOL])
+    quote.quote(
+        input_mint=SOL,
+        output_mint=USDC,
+        amount_raw="100000000",
+    )
+    assert sleeps == [2.0]
+
+
+def test_price_v3_default_transport_defers_shared_limiter_from_http_429(monkeypatch):
+    from io import BytesIO
+    from urllib.error import HTTPError
+
+    current = [0.0]
+    sleeps = []
+
+    def sleep(seconds):
+        sleeps.append(seconds)
+        current[0] += seconds
+
+    limiter = _KeylessRateLimiter(clock=lambda: current[0], sleeper=sleep)
+
+    class Opener:
+        def open(self, request, timeout):
+            raise HTTPError(
+                request.full_url, 429, "Too Many Requests",
+                {"Retry-After": "9"}, BytesIO(b""),
+            )
+
+    monkeypatch.setattr(
+        "arb_engine.market_sources.jupiter.urllib.request.build_opener",
+        lambda *_handlers: Opener(),
+    )
+    client = JupiterPriceV3Client(rate_limiter=limiter)
+    with pytest.raises(JupiterPriceRateLimited) as error:
+        client.fetch_prices([SOL])
+    assert error.value.retry_after_seconds == 9
+    # A subsequent request cannot be sent before the shared 429 cooldown expires.
+    with pytest.raises(JupiterPriceRateLimited):
+        client.fetch_prices([SOL])
+    assert sleeps == [9.0]
