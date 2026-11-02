@@ -47,6 +47,7 @@ class DexPairCandidate:
     pair_created_at_ms: int | None
     source_url: str | None
     labels: tuple[str, ...] = ()
+    discovery_source: str = "dexscreener_token_pairs"
 
 
 @dataclass(frozen=True, slots=True)
