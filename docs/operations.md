@@ -20,13 +20,6 @@ The default posture remains conservative:
 - Live inference adapters are opt-in code paths; do not enable them until provider eligibility, quota limits, and credentials are explicitly configured and verified.
 - Safe task types are now assigned to a named specialist role and required capability through a deterministic contract. This remains a dry-run assignment: it does not mean a persistent multi-agent team or model inference is running.
 
-## AndroidHarness runtime (optional)
-
-AndroidHarness 3.1 remains an optional, manually invoked diagnostic/compatibility environment. It is not part of the production control plane, task queue, scheduler, CI, quota enforcement, or recovery path. The engine must continue operating when the tablet is offline, the app is closed, or its free model quota is exhausted.
-
-Do not configure WorkManager, a foreground poller, recurring prompts, or device-side auto-continue as a prerequisite. Do not upgrade the installed app or grant additional device permissions for normal engine operation. The bounded issue bridge may be retained for occasional device-specific diagnostics, but its pending test task is no longer a release gate. All normal tests run in GitHub Actions; all cloud task state remains in D1.
-
-Cloud execution is still bounded and periodic, not guaranteed always-on: the deployed Worker owns authenticated D1 task operations and stale-lease recovery; GitHub Actions runs a small scheduled dry-run consumer. Durable Objects Alarms were evaluated and deferred: they cannot execute the current Python handlers, and Worker Cron already performs stale-lease recovery. Reconsider only after a Worker-native executor exists; D1 remains the source of truth.
 ## Requirements and checks
 
 Python 3.11 or later is required. Runtime dependencies are kept minimal.
