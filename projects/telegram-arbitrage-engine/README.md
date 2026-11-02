@@ -96,6 +96,12 @@ The pure `arb_engine.opportunity_costs.evaluate_two_leg_spread` component separa
 
 See [OPPORTUNITY_COST_MODEL.md](OPPORTUNITY_COST_MODEL.md). This evaluator is a deterministic guardrail component and is not yet connected to automated opportunity ranking or order execution. Even a positive result remains an estimate with `execution_verified=False`.
 
+## Public instrument metadata and explicit asset mapping
+
+The Bybit and Binance public adapters now expose single-instrument metadata reads. Bybit uses spot `instruments-info` precision fields; Binance uses `exchangeInfo` LOT_SIZE and PRICE_FILTER rules. `InstrumentRegistry.from_metadata` builds venue instrument specs only when the caller supplies explicit canonical IDs for each venue asset code. It never assumes that matching symbols prove matching assets.
+
+See [INSTRUMENT_METADATA.md](INSTRUMENT_METADATA.md). This provides verified lot steps and price ticks for the depth scanner, but it does not fetch account-specific fees or automatically equate wrapped/native/stablecoin assets.
+
 ## CEX cross-venue spot depth scanner
 
 The read-only compare_cex_spot_orderbooks component compares both directions between Bybit/Binance spot books using full depth sweeps at one base quantity. An explicit InstrumentRegistry must map each venue instrument to the same canonical base and quote IDs; symbol equality alone is never sufficient. The result is passed through the Decimal cost evaluator, so unknown fees/latency leave net profit unset and partial depth blocks profit labels.
