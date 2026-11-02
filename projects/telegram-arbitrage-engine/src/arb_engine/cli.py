@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import sqlite3
 from datetime import datetime, timezone
 from decimal import Decimal
 
@@ -384,7 +385,7 @@ def main() -> None:
                 ledger_path=args.ledger,
             )
             print(json.dumps(result, indent=2))
-        except (RpcReadError, ValueError, ArithmeticError, OSError, RuntimeError) as exc:
+        except (RpcReadError, ValueError, ArithmeticError, OSError, RuntimeError, sqlite3.Error) as exc:
             parser.exit(2, f"flash-swap-sim failed: {exc}\\n")
     elif args.command == "token-check":
         try:
