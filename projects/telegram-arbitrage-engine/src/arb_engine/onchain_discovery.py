@@ -89,7 +89,7 @@ def discover_pool_candidates(
         if venue_id is None:
             continue
         try:
-            pair_address = _address(pair.pair_address, "pair_address")
+            _address(pair.pair_address, "pair_address")
             base = _address(pair.base_address, "base_address")
             quote_address = _address(pair.quote_address, "pair_quote_address")
             if quote not in {base, quote_address} or base == quote_address:
