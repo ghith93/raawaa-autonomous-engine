@@ -43,7 +43,7 @@ class FakeDexScreener:
 
 
 class FakeReader:
-    def __init__(self, *, mismatch_quote_decimals=False):
+    def __init__(self, *, mismatch_quote_decimals=False, missing_venues=()):
         self.context = EvmBlockContext(
             1, 100, HASH, int(datetime.now(timezone.utc).timestamp()),
         )
@@ -54,9 +54,19 @@ class FakeReader:
         self.canonical_checks = []
         self.rpc_request_count = 29
         self.mismatch_quote_decimals = mismatch_quote_decimals
+        self.missing_venues = set(missing_venues)
+        self.lookup_calls = []
 
     def latest_block_context(self):
         return self.context
+
+    def lookup_v2_pair_address(self, factory, token0, token1, block_number):
+        self.lookup_calls.append((factory, token0, token1, block_number))
+        if factory == SUSHI.factory and "sushiswap_v2_ethereum" not in self.missing_venues:
+            return SUSHI_PAIR
+        if factory == UNISWAP.factory and "uniswap_v2_ethereum" not in self.missing_venues:
+            return UNISWAP_PAIR
+        return None
 
     def verify_v2_pool_factory(self, pair, factory, token0, token1, block_number):
         self.verified.append((pair, factory, token0, token1, block_number))
@@ -157,9 +167,29 @@ def test_scan_skips_non_v2_candidates_but_does_not_hide_rpc_failures():
     assert rejected[0]["rejection_reason"] == "v2_factory_mismatch"
 
 
-def test_scan_returns_no_routes_when_one_trusted_venue_is_missing():
+def test_scan_recovers_venue_omitted_by_dexscreener_using_factory_lookup():
     dex = FakeDexScreener([candidate("uniswap", UNISWAP_PAIR)])
     reader = FakeReader()
+    result = scan_onchain_v2_candidates(
+        token_address=BASE, quote_token_address=QUOTE,
+        capital_quote="1000", dex_client=dex, reader=reader,
+    )
+
+    assert result["status"] == "quoted"
+    assert len(result["routes"]) == 2
+    assert result["candidate_pairs_factory_verified"] == 2
+    assert any(
+        item["venue_id"] == SUSHI.id
+        and item["labels_metadata_only"] == ["trusted_factory_lookup"]
+        and item["factory_verified"]
+        for item in result["candidate_verification"]
+    )
+    assert reader.lookup_calls == [(SUSHI.factory, BASE, QUOTE, 100)]
+
+
+def test_scan_returns_no_routes_when_one_trusted_venue_is_missing():
+    dex = FakeDexScreener([candidate("uniswap", UNISWAP_PAIR)])
+    reader = FakeReader(missing_venues={"sushiswap_v2_ethereum"})
     result = scan_onchain_v2_candidates(
         token_address=BASE, quote_token_address=QUOTE,
         capital_quote="1000", dex_client=dex, reader=reader,
