@@ -26,6 +26,8 @@ class EvmPoolSnapshot:
     token0_decimals: int
     token1_decimals: int
     block_timestamp: int
+    reserve_timestamp_last: int = 0
+    seconds_since_last_reserve_update: int = 0
 
 
 class EthereumV2PoolReader:
@@ -218,11 +220,14 @@ class EthereumV2PoolReader:
                 block_hash=block_hash,
                 observed_at=observed_at,
             )
+            reserve_age = (block_timestamp - timestamp_last) % 2**32
             snapshots.append(EvmPoolSnapshot(
                 state=state,
                 token0_decimals=decimals_by_token[token0],
                 token1_decimals=decimals_by_token[token1],
                 block_timestamp=block_timestamp,
+                reserve_timestamp_last=timestamp_last,
+                seconds_since_last_reserve_update=reserve_age,
             ))
         return snapshots
 
