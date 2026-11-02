@@ -173,7 +173,12 @@ class TelegramController:
             return chat_id, "\n".join(lines)
         return chat_id, "Unknown command. Send /help."
 
-    def poll_once(self, offset: int = 0) -> int:
+    def poll_once(self, offset: int = 0, *, on_offset=None) -> int:
+        """Process one Telegram batch and checkpoint each completed update.
+
+        The callback must durably persist the next offset before the next update
+        is processed. Delivery of sendMessage itself remains at-least-once.
+        """
         next_offset = offset
         for update in self.api.get_updates(offset=offset, timeout=25):
             update_id = update.get("update_id")
@@ -189,6 +194,8 @@ class TelegramController:
                     LOGGER.warning("Telegram reply failed for consumed update %s: %s", update_id, exc)
             if isinstance(update_id, int) and not isinstance(update_id, bool):
                 next_offset = max(next_offset, update_id + 1)
+                if on_offset is not None:
+                    on_offset(next_offset)
         return next_offset
 
     def run_forever(self) -> None:
@@ -200,9 +207,10 @@ class TelegramController:
         offset = int(stored_offset) if stored_offset is not None else 0
         while True:
             try:
-                next_offset = self.poll_once(offset)
-                if next_offset != offset:
-                    ledger.set_state("telegram_update_offset", str(next_offset))
+                next_offset = self.poll_once(
+                    offset,
+                    on_offset=lambda value: ledger.set_state("telegram_update_offset", str(value)),
+                )
                 offset = next_offset
             except (TelegramApiError, OSError, ValueError, sqlite3.Error):
                 time.sleep(3)
