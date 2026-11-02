@@ -218,3 +218,11 @@ def test_v2_factory_verification_rejects_untrusted_factory(monkeypatch):
         reader.verify_v2_pool_factory(
             POOL_A, "0x" + "8" * 40, TOKEN0, TOKEN1, 100,
         )
+
+
+def test_zero_address_is_rejected_for_all_contract_roles():
+    import pytest
+
+    reader = EthereumV2PoolReader(min_request_interval=0)
+    with pytest.raises(ValueError, match="Zero address"):
+        reader._pool_address("0x" + "0" * 40)
