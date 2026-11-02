@@ -15,6 +15,10 @@ TOKEN = "synthetic-engine-token"
 
 def status_payload():
     return {
+        "telegram_webhook_schema": {
+            "available": True,
+            "status": "Migration 0005 applied; webhook activation remains separately gated",
+        },
         "unavailable_metrics": {
             "paper_ledger": "Available",
             "provider_usage": "Available",
@@ -60,6 +64,7 @@ class MobileStatusProbeTests(unittest.TestCase):
             "http": "200",
             "paper_ledger": "available",
             "provider_usage": "available",
+            "telegram_receipts": "available",
             "last_scan": "not_recorded",
             "source_freshness": "not_aggregated",
             "ci_health": "not_ingested",
@@ -75,10 +80,20 @@ class MobileStatusProbeTests(unittest.TestCase):
         result = probe.summarize_mobile_status({})
         self.assertEqual(result["paper_ledger"], "unknown")
         self.assertEqual(result["provider_usage"], "unknown")
+        self.assertEqual(result["telegram_receipts"], "unknown")
         self.assertEqual(result["last_scan"], "unknown")
         self.assertEqual(result["source_freshness"], "unknown")
         self.assertEqual(result["ci_health"], "unknown")
         self.assertEqual(result["kill_switch"], "unknown")
+
+    def test_telegram_receipt_schema_absence_is_reported_without_enabling_webhook(self):
+        payload = status_payload()
+        payload["telegram_webhook_schema"] = {
+            "available": False,
+            "status": "Migration 0005 is not applied to this database",
+        }
+        result = probe.summarize_mobile_status(payload)
+        self.assertEqual(result["telegram_receipts"], "not_available")
 
     def test_authenticated_probe_uses_only_approved_https_worker_and_get(self):
         seen = {}
@@ -164,6 +179,7 @@ class MobileStatusProbeTests(unittest.TestCase):
             parsed = dict(line.rstrip("\n").split("=", 1) for line in output if "=" in line)
             self.assertEqual(parsed["http"], "200")
             self.assertEqual(parsed["paper_ledger"], "available")
+            self.assertEqual(parsed["telegram_receipts"], "available")
             self.assertEqual(parsed["tasks_pending"], "2")
             self.assertEqual(parsed["paper_events"], "7")
             self.assertNotIn(TOKEN, stdout.getvalue())
