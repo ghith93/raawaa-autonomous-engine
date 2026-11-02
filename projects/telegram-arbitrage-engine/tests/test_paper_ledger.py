@@ -120,6 +120,11 @@ def test_rejects_invalid_event_types_provenance_and_required_route_fields(tmp_pa
             candidate_id="c", event_id="e5", event_type="route_simulated",
             occurred_at=AT, payload={},
         )
+    with pytest.raises(ValueError, match="requires canonical"):
+        ledger.append_event(
+            candidate_id="c", event_id="e5b", event_type="outcome_observed",
+            occurred_at=AT, payload={},
+        )
     with pytest.raises(ValueError, match="requires strategy"):
         ledger.append_event(
             candidate_id="c", event_id="e6", event_type="route_simulated",
