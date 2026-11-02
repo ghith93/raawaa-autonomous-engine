@@ -257,13 +257,16 @@ class PublicPerpetualFundingClient:
             if result.get("category") != contract_type or not isinstance(result.get("list"), list):
                 raise FundingMarketDataError("Bybit funding category/list did not match request")
             rows = result["list"]
-            try:
-                bybit_interval = self._bybit_funding_interval_hours(
-                    symbol=symbol, contract_type=contract_type,
-                )
-            except FundingMarketDataError:
-                bybit_interval = None
-            intervals = {symbol: bybit_interval} if bybit_interval is not None else {}
+            intervals = {}
+            if rows:
+                try:
+                    bybit_interval = self._bybit_funding_interval_hours(
+                        symbol=symbol, contract_type=contract_type,
+                    )
+                except FundingMarketDataError:
+                    bybit_interval = None
+                if bybit_interval is not None:
+                    intervals[symbol] = bybit_interval
         if not isinstance(rows, list) or len(rows) > limit:
             raise FundingMarketDataError("funding response exceeded requested row count")
         fetched_at = datetime.now(timezone.utc)
