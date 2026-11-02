@@ -208,7 +208,7 @@ def test_registry_and_cross_venue_comparator_accept_kraken_books_with_explicit_a
             ("kraken", "binance"): known_costs,
             ("binance", "kraken"): known_costs,
         },
-        now=NOW,
+        now=book.fetched_at,
     )
     assert result.buy_venue_id == "kraken"
     assert result.sell_venue_id == "binance"
