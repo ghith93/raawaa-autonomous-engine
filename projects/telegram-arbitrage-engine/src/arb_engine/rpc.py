@@ -179,6 +179,10 @@ class EthereumV2PoolReader:
         block_hash = block["hash"].lower()
         if not re.fullmatch(r"0x[0-9a-f]{64}", block_hash):
             raise RpcReadError("Pinned block hash is invalid")
+        block_timestamp = self._uint(block.get("timestamp"), "block timestamp")
+        now_timestamp = int(datetime.now(timezone.utc).timestamp())
+        if block_timestamp > now_timestamp + 30 or now_timestamp - block_timestamp > 60:
+            raise RpcReadError("Token preflight block timestamp is future-dated or stale")
         code = self._rpc("eth_getCode", [token, block_tag])
         if not isinstance(code, str) or not re.fullmatch(r"0x(?:[0-9a-fA-F]{2})*", code):
             raise RpcReadError("Token runtime bytecode response is malformed")
