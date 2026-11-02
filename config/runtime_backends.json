@@ -5,7 +5,7 @@
       "id": "androidharness",
       "display_name": "AndroidHarness",
       "kind": "external_android_linux_runtime",
-      "status": "github_issue_bridge_implemented_not_activated",
+      "status": "github_issue_bridge_verified_limited",
       "operator_reported_snapshot_utc": "2026-11-01T22:40:00Z",
       "capabilities_reported": [
         "bash",
@@ -23,7 +23,8 @@
         "optional_codegraph",
         "local_gguf_model_support",
         "foreground_service_resume",
-        "github_issue_task_bridge_code"
+        "github_issue_task_bridge_code",
+        "github_issue_task_bridge_verified_for_doctor_operation"
       ],
       "capabilities_not_ready_or_unverified": [
         "java_d8",
@@ -34,7 +35,6 @@
         "cloudflare_deployment_secrets",
         "local_model_benchmark",
         "engine_authenticated_mcp_server",
-        "github_issue_task_bridge_running_on_device",
         "direct_remote_mcp_adapter",
         "workmanager_automation_created_on_device",
         "scheduled_device_run_smoke_test",
@@ -82,7 +82,7 @@
         "Harness is an MCP client. No authenticated engine MCP endpoint or direct remote device adapter exists.",
         "Upstream AndroidHarness supports recurring WorkManager prompt automations, a foreground service, persistent queues and bounded auto-continue. Device-side setup and a successful scheduled-run smoke test remain unverified.",
         "WorkManager is documented as a future-version option only; it is not configured or assumed available on the installed 3.1 device.",
-        "The bounded GitHub issue bridge is the current 3.1 device execution path; it remains inactive until the foreground poller is started and posts a first successful device result.",
+        "The bounded GitHub issue bridge returned a successful read-only doctor result on issue #122; the Python test operation on issue #123 failed before tests because git fetch origin/main failed, and retry issue #133 was claimed but had no result at the latest check. This verifies limited device-side execution, not a guaranteed continuously running poller.",
         "The issue bridge accepts only four fixed read-only operations and is not general remote shell.",
         "The Python test operation runs under the AndroidHarness Linux/app UID and is not an OS sandbox; use only trusted owner-controlled origin/main code.",
         "The GitHub issue bridge uses existing Code workspace, Python, Git and authenticated gh CLI features and does not depend on 3.2-only project configuration, plugin bundles, WorkManager automation, or android_sdk_install. Device-side availability still requires a live doctor result."
