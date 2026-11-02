@@ -244,9 +244,11 @@ class QuotaAwareLiveGateway:
                     "Provider reported non-zero cost for a verified-free route; route quarantined."
                 )
             budget_status = self.usage_ledger.budget_status(
-                self.daily_budget_usd, self.monthly_budget_usd
+                self.daily_budget_usd, self.monthly_budget_usd,
+                task_id=request.task_id, per_task_budget_usd=self.per_task_budget_usd,
             )
-            if budget_status["daily_over_budget"] or budget_status["monthly_over_budget"]:
+            if (budget_status["daily_over_budget"] or budget_status["monthly_over_budget"]
+                    or budget_status["per_task_over_budget"]):
                 self.quota_manager.ledger.cool_down(
                     profile.route_id, self.cooldown_seconds, "monetary_budget_exceeded"
                 )
