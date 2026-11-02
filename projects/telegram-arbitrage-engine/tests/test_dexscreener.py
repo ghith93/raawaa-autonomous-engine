@@ -116,6 +116,8 @@ def test_parser_rejects_untrusted_or_credentialed_pair_urls():
         "https://dexscreener.com@evil.example/pair",
         "https://user:pass@dexscreener.com/pair",
         "https://dexscreener.com/pair?token=secret",
+        "https://dexscreener.com:99999/pair",
+        "https://[broken/pair",
     ):
         raw = pair("dex-a", "1.0", "p1")
         raw["url"] = url
