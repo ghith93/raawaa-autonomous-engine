@@ -149,12 +149,14 @@ def test_registry_requires_explicit_per_venue_asset_code_mappings():
         base_asset_code="BTC", quote_asset_code="USDT",
         base_step_size="0.000001", price_tick_size="0.1",
         status="Trading", fetched_at=NOW,
+        min_base_quantity="0.000011", min_quote_notional="5",
     )
     binance = InstrumentMetadata(
         venue_id="binance", instrument_id="BTCUSDT", market_family="cex_spot",
         base_asset_code="BTC", quote_asset_code="USDT",
         base_step_size="0.00001", price_tick_size="0.01",
         status="TRADING", fetched_at=NOW,
+        min_base_quantity="0.00001", min_quote_notional="5",
     )
     aliases = {
         ("bybit", "BTC"): "asset:canonical:BTC",
@@ -164,8 +166,11 @@ def test_registry_requires_explicit_per_venue_asset_code_mappings():
     }
     registry = InstrumentRegistry.from_metadata([bybit, binance], aliases)
     assert registry.resolve("bybit", "BTCUSDT").base_step_size == Decimal("0.000001")
-    assert registry.resolve("bybit", "BTCUSDT").min_base_quantity is None
+    assert registry.resolve("bybit", "BTCUSDT").min_base_quantity == Decimal("0.000011")
+    assert registry.resolve("bybit", "BTCUSDT").min_quote_notional == Decimal("5")
     assert registry.resolve("binance", "BTCUSDT").base_step_size == Decimal("0.00001")
+    assert registry.resolve("binance", "BTCUSDT").min_base_quantity == Decimal("0.00001")
+    assert registry.resolve("binance", "BTCUSDT").min_quote_notional == Decimal("5")
     assert registry.resolve("binance", "BTCUSDT").base_asset_id == "asset:canonical:BTC"
 
     with pytest.raises(InstrumentMappingError, match="missing explicit canonical mapping"):
