@@ -37,7 +37,7 @@ def _human(raw: int, decimals: int) -> str:
     return str(Decimal(raw) / (Decimal(10) ** decimals))
 
 
-def _capital_to_raw(value: str | Decimal, decimals: int) -> tuple[Decimal, int]:
+def _capital_decimal(value: str | Decimal) -> Decimal:
     if isinstance(value, bool) or isinstance(value, float):
         raise ValueError("Capital amount must be a decimal string or Decimal, not a float")
     try:
@@ -46,13 +46,17 @@ def _capital_to_raw(value: str | Decimal, decimals: int) -> tuple[Decimal, int]:
         raise ValueError("Capital amount must be a valid decimal value") from exc
     if not amount.is_finite() or amount <= 0:
         raise ValueError("Capital amount must be finite and positive")
+    return amount
+
+
+def _capital_to_raw(amount: Decimal, decimals: int) -> int:
     scaled = amount * (Decimal(10) ** decimals)
     if scaled != scaled.to_integral_value():
         raise ValueError("Capital amount has more fractional digits than the quote token supports")
     raw = int(scaled)
     if not 0 < raw < 2**256:
         raise ValueError("Capital amount must fit a positive uint256 raw-unit value")
-    return amount, raw
+    return raw
 
 
 def _candidate_record(candidate: DexPairCandidate, venue: Venue, *, verified: bool, reason: str | None = None) -> dict:
@@ -101,6 +105,7 @@ def scan_onchain_v2_candidates(
         or not 1 <= max_rpc_requests <= 64
     ):
         raise ValueError("max_rpc_requests must be an integer from 1 to 64")
+    capital_amount = _capital_decimal(capital_quote)
 
     dex_client = dex_client or DexScreenerClient()
     reader = reader or EthereumV2PoolReader(
@@ -136,6 +141,7 @@ def scan_onchain_v2_candidates(
             "chain_id": 1,
             "token_address": token,
             "quote_token_address": quote_token,
+            "capital_quote_human": str(capital_amount),
             "routes": [],
             "candidate_verification": [],
             "live_execution": False,
@@ -212,7 +218,7 @@ def scan_onchain_v2_candidates(
             raise ValueError("Base-token decimals disagree between verified venues")
         if _token_decimals(snapshot, quote_token) != quote_decimals:
             raise ValueError("Quote-token decimals disagree between verified venues")
-    capital_amount, capital_raw = _capital_to_raw(capital_quote, quote_decimals)
+    capital_raw = _capital_to_raw(capital_amount, quote_decimals)
 
     for (_candidate, venue) in ordered:
         reader.verify_v2_router_factory(venue.router02, venue.factory, context.block_number)
