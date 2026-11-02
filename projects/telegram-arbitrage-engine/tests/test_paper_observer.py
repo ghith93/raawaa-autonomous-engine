@@ -135,13 +135,31 @@ def test_gas_scenario_is_replayed_at_the_forward_block_and_is_idempotent(tmp_pat
 
 def test_observer_rejects_legacy_candidate_without_forward_parameters(tmp_path):
     ledger = PaperTradingLedger(tmp_path / "legacy.sqlite3")
+    occurred_at = datetime.fromtimestamp(CANDIDATE_TIME, timezone.utc)
     ledger.append_event(
         candidate_id="legacy-candidate", event_id="legacy-detected",
-        event_type="candidate_detected",
-        occurred_at=datetime.fromtimestamp(CANDIDATE_TIME, timezone.utc),
+        event_type="candidate_detected", occurred_at=occurred_at,
         payload={"source": "legacy", "classification": "research_only"},
     )
-    with pytest.raises(ValueError, match="missing detection, snapshot, or route"):
+    ledger.append_event(
+        candidate_id="legacy-candidate", event_id="legacy-snapshot",
+        event_type="snapshot_captured", occurred_at=occurred_at,
+        payload={
+            "pool_addresses": [SOURCE, DESTINATION],
+            "token_decimals": {QUOTE: 6, BASE: 18},
+        },
+        chain_id=1, block_number=100, block_hash=CANDIDATE_HASH,
+    )
+    ledger.append_event(
+        candidate_id="legacy-candidate", event_id="legacy-route",
+        event_type="route_simulated", occurred_at=occurred_at,
+        payload={"amount_borrowed_raw": str(10**18)},
+        chain_id=1, block_number=100, block_hash=CANDIDATE_HASH,
+        strategy_id="v2-cross-venue-flash-swap",
+        source_pool=SOURCE, destination_pool=DESTINATION,
+        token_in=BASE, token_out=QUOTE, gross_profit_raw=1,
+    )
+    with pytest.raises(ValueError, match="predates observer metadata"):
         observe_flash_swap_outcome(
             "legacy-candidate", ledger=ledger,
             reader=make_reader(block=101, block_hash=OBSERVED_HASH, timestamp=CANDIDATE_TIME + 12),
