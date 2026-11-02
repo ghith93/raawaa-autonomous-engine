@@ -174,8 +174,10 @@ async function list(db, url) {
   if (!validText(candidate, 128) || !Number.isInteger(limit) || limit < 1 || limit > 500) return json({ error: "invalid_query" }, 400);
   try {
     // One read statement gives events, checkpoints, and head sequence from one D1 snapshot.
-    const result = await db.prepare(`SELECT h.sequence AS head_sequence,e.*,
-      c.sequence AS checkpoint_sequence,c.event_id AS checkpoint_event_id,
+    const result = await db.prepare(`SELECT h.sequence AS head_sequence,h.event_hash AS head_hash,
+      (SELECT COUNT(*) FROM paper_events x WHERE x.candidate_id=h.candidate_id) AS event_count,
+      (SELECT COUNT(*) FROM paper_event_checkpoints y WHERE y.candidate_id=h.candidate_id) AS checkpoint_count,
+      e.*,c.sequence AS checkpoint_sequence,c.event_id AS checkpoint_event_id,
       c.event_hash AS checkpoint_event_hash
       FROM paper_candidate_heads h
       LEFT JOIN paper_events e ON e.candidate_id=h.candidate_id
@@ -188,7 +190,12 @@ async function list(db, url) {
     const checkpoints = rows.filter(row => row.event_id !== null && row.event_id !== undefined)
       .map(row => ({ sequence: row.checkpoint_sequence, event_id: row.checkpoint_event_id, event_hash: row.checkpoint_event_hash }));
     const headSequence = rows.length ? rows[0].head_sequence : 0;
-    return json({ events, checkpoints, head_sequence: headSequence });
+    return json({
+      events, checkpoints, head_sequence: headSequence,
+      head_hash: rows.length ? rows[0].head_hash : ZERO_HASH,
+      event_count: rows.length ? rows[0].event_count : 0,
+      checkpoint_count: rows.length ? rows[0].checkpoint_count : 0,
+    });
   } catch { return json({ error: "storage_unavailable" }, 503); }
 }
 export async function handlePaperLedger(request, env, url) {
