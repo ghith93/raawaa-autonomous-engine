@@ -3,12 +3,14 @@ from __future__ import annotations
 import json
 import os
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
+from decimal import Decimal
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 from .cli import scan
+from .dexscreener import MarketDataError
 from .ledger import OpportunityLedger
 
 TELEGRAM_API = "https://api.telegram.org"
@@ -73,6 +75,7 @@ class TelegramController:
     allowed_chat_ids: frozenset[int]
     ledger_path: str = "data/opportunities.sqlite3"
     min_request_interval_seconds: float = 3.0
+    _last_request_by_chat: dict[int, float] = field(default_factory=dict, init=False, repr=False)
 
     def __post_init__(self) -> None:
         if not self.allowed_chat_ids:
@@ -81,7 +84,6 @@ class TelegramController:
             raise ValueError("Allowed chat IDs must be integers")
         if self.min_request_interval_seconds < 0:
             raise ValueError("Rate-limit interval must be non-negative")
-        self._last_request_by_chat: dict[int, float] = {}
 
     def response_for_update(self, update: dict[str, Any]) -> tuple[int, str] | None:
         message = update.get("message")
@@ -144,8 +146,10 @@ class TelegramController:
                 return chat_id, "Usage: /scan TOKEN_OR_PAIR"
             if len(query) > 120:
                 return chat_id, "Search query is too long (maximum 120 characters)."
-            result = scan(query, __import__("decimal").Decimal("10000"),
-                          __import__("decimal").Decimal("1000"), self.ledger_path)
+            try:
+                result = scan(query, Decimal("10000"), Decimal("1000"), self.ledger_path)
+            except (MarketDataError, ValueError):
+                return chat_id, "Market scan failed safely. Retry later; no trade was placed."
             opportunities = result["opportunities"][:5]
             if not opportunities:
                 return chat_id, (
@@ -190,3 +194,11 @@ def controller_from_environment() -> TelegramController:
     except ValueError as exc:
         raise ValueError("TELEGRAM_ALLOWED_CHAT_IDS must be comma-separated integer IDs") from exc
     return TelegramController(TelegramBotAPI(token), allowed)
+
+
+def main() -> None:
+    controller_from_environment().run_forever()
+
+
+if __name__ == "__main__":
+    main()
