@@ -208,6 +208,16 @@ def test_paper_observe_cli_help_is_registered(monkeypatch, capsys):
     assert "later canonical block" in output
 
 
+def test_paper_observe_cli_help_is_registered(monkeypatch, capsys):
+    monkeypatch.setattr(sys, "argv", ["arb-engine", "paper-observe", "--help"])
+    with pytest.raises(SystemExit) as exit_info:
+        main()
+    assert exit_info.value.code == 0
+    output = capsys.readouterr().out
+    assert "--candidate-id" in output
+    assert "later canonical block" in output
+
+
 def test_explicit_d1_backend_records_deterministic_idempotent_events(monkeypatch, tmp_path):
     class FakeD1Ledger:
         records = {}
