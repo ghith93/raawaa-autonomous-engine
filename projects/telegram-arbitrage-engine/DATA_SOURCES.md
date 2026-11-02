@@ -46,5 +46,5 @@ No item in this list authorizes live trading.
 - Incoming commands are accepted only from explicitly allowlisted private chat IDs where sender ID matches chat ID.
 - The bot does not set webhooks, manage chats, publish to channels, place trades, or accept arbitrary command execution.
 - The polling offset is stored in the local SQLite state table to avoid replaying already handled updates after a restart.
-- One bot polling process should run at a time for a given token and ledger.
+- One bot polling process should run at a time for a given token and ledger. Telegram long polling and webhooks are mutually exclusive; the controller deliberately does not delete or replace an existing webhook.
 - A bot token is a secret. Supply it only as `TELEGRAM_BOT_TOKEN` in the runtime secret environment; set `TELEGRAM_ALLOWED_CHAT_IDS` to the operator's numeric private chat ID(s).
