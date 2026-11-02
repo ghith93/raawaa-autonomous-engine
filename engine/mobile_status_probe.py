@@ -9,7 +9,12 @@ import json
 import os
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlsplit
-from urllib.request import Request, urlopen
+from urllib.request import HTTPRedirectHandler, Request, build_opener, urlopen
+
+
+class _RejectRedirects(HTTPRedirectHandler):
+    def redirect_request(self, request, file_pointer, code, message, headers, new_url):
+        return None
 
 _ALLOWED_HOST = "raawaa-autonomous-engine-control.ghith-shikhkhaled.workers.dev"
 _OUTPUT_KEYS = (
@@ -66,15 +71,11 @@ def build_headers(
 
 
 def _count(value: object) -> int:
-    if isinstance(value, bool):
-        raise ValueError("status count must be a non-negative integer")
-    try:
-        result = int(value)
-    except (TypeError, ValueError) as exc:
-        raise ValueError("status count must be a non-negative integer") from exc
-    if result < 0:
-        raise ValueError("status count must be a non-negative integer")
-    return result
+    if type(value) is int and value >= 0:
+        return value
+    if isinstance(value, str) and value.isdigit():
+        return int(value)
+    raise ValueError("status count must be a non-negative integer")
 
 
 def summarize_mobile_status(payload: object, http_status: int = 200) -> dict[str, str]:
@@ -106,14 +107,26 @@ def summarize_mobile_status(payload: object, http_status: int = 200) -> dict[str
         value = unavailable.get(key, "")
         return value.lower() if isinstance(value, str) else ""
 
+    def migration_flag(key: str) -> str:
+        value = unavailable.get(key)
+        if value == "Available":
+            return "available"
+        return "not_available" if isinstance(value, str) and value else "unknown"
+
+    def gap_flag(key: str, marker: str, missing_label: str) -> str:
+        value = text_value(key)
+        if not value:
+            return "unknown"
+        return missing_label if marker in value else "available"
+
     return {
         "http": str(http_status),
-        "paper_ledger": "available" if unavailable.get("paper_ledger") == "Available" else "not_available",
-        "provider_usage": "available" if unavailable.get("provider_usage") == "Available" else "not_available",
-        "last_scan": "not_recorded" if "not recorded" in text_value("last_scan") else "available",
-        "source_freshness": "not_aggregated" if "not yet aggregated" in text_value("source_freshness") else "available",
-        "ci_health": "not_ingested" if "not yet ingested" in text_value("ci_health") else "available",
-        "kill_switch": "not_mirrored" if "not yet mirrored" in text_value("kill_switch") else "available",
+        "paper_ledger": migration_flag("paper_ledger"),
+        "provider_usage": migration_flag("provider_usage"),
+        "last_scan": gap_flag("last_scan", "not recorded", "not_recorded"),
+        "source_freshness": gap_flag("source_freshness", "not yet aggregated", "not_aggregated"),
+        "ci_health": gap_flag("ci_health", "not yet ingested", "not_ingested"),
+        "kill_switch": gap_flag("kill_switch", "not yet mirrored", "not_mirrored"),
         "tasks_pending": str(task_counts.get("pending", 0)),
         "tasks_running": str(task_counts.get("running", 0)),
         "paper_events": str(paper_event_count),
@@ -131,7 +144,7 @@ def probe_mobile_status(
     origin = _validate_api_url(api_url)
     headers = build_headers(engine_api_token, cf_access_client_id, cf_access_client_secret)
     request = Request(origin + "/v1/mobile/status", headers=headers, method="GET")
-    open_url = opener or urlopen
+    open_url = opener or build_opener(_RejectRedirects()).open
     with open_url(request, timeout=15) as response:
         status = int(response.status)
         if status != 200:
