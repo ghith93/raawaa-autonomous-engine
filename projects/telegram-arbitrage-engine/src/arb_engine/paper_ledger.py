@@ -233,8 +233,6 @@ class PaperTradingLedger:
                 raise ValueError("route_simulated requires strategy, both pools, and both token addresses")
             if source_pool == destination_pool:
                 raise ValueError("route_simulated requires distinct source and destination pools")
-            if raw_values["gross_profit_raw"] is None:
-                raise ValueError("route_simulated requires gross_profit_raw")
 
         raw_values = {
             "gross_profit_raw": self._integer(gross_profit_raw, "gross_profit_raw"),
@@ -243,6 +241,8 @@ class PaperTradingLedger:
             "gas_cost_profit_raw": self._integer(gas_cost_profit_raw, "gas_cost_profit_raw", minimum=0),
             "net_profit_raw": self._integer(net_profit_raw, "net_profit_raw"),
         }
+        if event_type == "route_simulated" and raw_values["gross_profit_raw"] is None:
+            raise ValueError("route_simulated requires gross_profit_raw")
         if event_type == "gas_scenario_evaluated" and any(
             raw_values[name] is None for name in ("gas_used", "gas_price_wei", "gas_cost_profit_raw", "net_profit_raw")
         ):
@@ -355,7 +355,7 @@ class PaperTradingLedger:
             if (
                 event["sequence"] != expected_sequence
                 or event["previous_hash"] != previous_hash
-                or checkpoint != (expected_sequence, event["event_id"], event["event_hash"])
+                or tuple(checkpoint) != (expected_sequence, event["event_id"], event["event_hash"])
             ):
                 return False
             record = {
