@@ -35,7 +35,7 @@ def load_venues() -> tuple[Venue, ...]:
     raw = json.loads(
         files(__package__).joinpath("venue_registry.json").read_text(encoding="utf-8")
     )
-    if raw.get("schema_version") != 1 or not isinstance(raw.get("venues"), list):
+    if raw.get("schema_version") != 2 or not isinstance(raw.get("venues"), list):
         raise ValueError("Unsupported V2 venue registry schema")
 
     venues: list[Venue] = []
