@@ -98,11 +98,15 @@ def scan_cex_spot_depth(
         (base_asset_id, "base_asset_id"),
         (quote_currency_id, "quote_currency_id"),
     ):
-        if not isinstance(value, str) or not value.strip() or len(value) > 120:
+        if not isinstance(value, str) or not value.strip() or value != value.strip() or len(value) > 120:
             raise CexScanError(f"invalid_{label}")
     if base_code != base_code.upper() or quote_code != quote_code.upper() or base_code == quote_code:
         raise CexScanError("asset_codes_must_be_distinct_uppercase")
-    if isinstance(base_quantity, str) and (not base_quantity or len(base_quantity) > 80):
+    if base_asset_id == quote_currency_id:
+        raise CexScanError("canonical_asset_ids_must_be_distinct")
+    if isinstance(base_quantity, str) and (
+        not base_quantity or base_quantity != base_quantity.strip() or len(base_quantity) > 80
+    ):
         raise CexScanError("invalid_base_quantity")
     try:
         quantity = base_quantity if isinstance(base_quantity, Decimal) else Decimal(base_quantity)
