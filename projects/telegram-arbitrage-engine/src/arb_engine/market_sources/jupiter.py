@@ -336,14 +336,18 @@ class JupiterPriceBatch:
     data_class: str = "indicative_price"
 
 
-def _price_decimal(value: object, field: str, *, allow_zero: bool = False) -> Decimal:
+def _price_decimal(
+    value: object, field: str, *, allow_zero: bool = False, allow_negative: bool = False
+) -> Decimal:
     if isinstance(value, bool) or not isinstance(value, (int, Decimal, str)):
         raise JupiterPriceError(f"invalid {field}")
     try:
         parsed = value if isinstance(value, Decimal) else Decimal(str(value))
     except InvalidOperation as exc:
         raise JupiterPriceError(f"invalid {field}") from exc
-    if not parsed.is_finite() or (parsed < 0 if allow_zero else parsed <= 0):
+    if not parsed.is_finite():
+        raise JupiterPriceError(f"invalid {field}")
+    if not allow_negative and (parsed < 0 if allow_zero else parsed <= 0):
         raise JupiterPriceError(f"invalid {field}")
     return parsed
 
@@ -436,7 +440,6 @@ class JupiterPriceV3Client:
         except urllib.error.HTTPError as exc:
             if exc.code == 429:
                 delay = _retry_after_seconds(exc.headers)
-                _SHARED_KEYLESS_RATE_LIMITER.defer(delay)
                 raise JupiterPriceRateLimited(delay) from None
             raise JupiterPriceError(f"Jupiter Price API returned HTTP {exc.code}") from None
         except (urllib.error.URLError, TimeoutError, OSError) as exc:
@@ -452,7 +455,11 @@ class JupiterPriceV3Client:
             raise ValueError("mints must not contain duplicates")
         params = urllib.parse.urlencode({"ids": ",".join(requested)})
         self._rate_limiter.acquire(self.min_interval_seconds)
-        raw = self._transport(f"{self.base_url}/price/v3?{params}", self.timeout_seconds)
+        try:
+            raw = self._transport(f"{self.base_url}/price/v3?{params}", self.timeout_seconds)
+        except JupiterPriceRateLimited as exc:
+            self._rate_limiter.defer(exc.retry_after_seconds)
+            raise
         if not isinstance(raw, bytes) or len(raw) > _MAX_RESPONSE_BYTES:
             raise JupiterPriceError("invalid or oversized Jupiter Price API response")
         try:
@@ -487,7 +494,9 @@ class JupiterPriceV3Client:
                 raise JupiterPriceError("invalid blockId")
             change = item.get("priceChange24h")
             if change is not None:
-                change = _price_decimal(change, "priceChange24h", allow_zero=True)
+                change = _price_decimal(
+                    change, "priceChange24h", allow_zero=True, allow_negative=True
+                )
             liquidity = item.get("liquidity")
             if liquidity is not None:
                 liquidity = _price_decimal(liquidity, "liquidity", allow_zero=True)
