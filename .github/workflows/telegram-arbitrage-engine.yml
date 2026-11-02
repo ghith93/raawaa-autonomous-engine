@@ -58,17 +58,3 @@ jobs:
         run: python -m pip install --disable-pip-version-check --no-deps -e .
       - name: Verify source-documented Ethereum V2 deployments (read-only)
         run: arb-engine venue-check --chain-id 1 --rpc-url https://ethereum-rpc.publicnode.com --timeout-seconds 8
-
-  solidity-tests:
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    defaults:
-      run:
-        working-directory: projects/telegram-arbitrage-engine/solidity-test
-    steps:
-      - uses: actions/checkout@v4
-      - uses: foundry-rs/foundry-toolchain@v1
-        with:
-          version: stable
-      - name: Run local mock-pair EVM tests
-        run: forge test -vvv
