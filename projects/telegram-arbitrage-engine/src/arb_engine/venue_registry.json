@@ -169,6 +169,34 @@
       "router02": "0x2ABf469074dc0b54d793850807E6eb5Faf2625b1",
       "deployment_source": "https://github.com/sushiswap/v2-core/tree/master/deployments/optimism",
       "notes": "optimism mainnet SushiSwap V2 factory/router addresses are published in the SushiSwap v2-core deployment artifacts. Pair invariant applies 3/1000 (30 bps); verify factory, pair, and router at the pinned block before use."
+    },
+    {
+      "id": "uniswap_v2_polygon",
+      "name": "Uniswap V2",
+      "dexscreener_id": "uniswap",
+      "network": "polygon",
+      "chain_id": 137,
+      "factory": "0x9e5A52f57b3038F1B8EeE45F28b3C1967e22799C",
+      "router02": "0xedf6066a2b290C185783862C7F4776A2C8077AD1",
+      "swap_fee_bps": 30,
+      "deployment_source": "https://developers.uniswap.org/docs/protocols/v2/deployments",
+      "fee_source": "https://developers.uniswap.org/docs/get-started/concepts/fees",
+      "source_status": "source_documented_not_live_verified",
+      "notes": "Polygon mainnet Uniswap V2 deployment listed in official Uniswap V2 deployment documentation. 30 bps fee assumption follows V2 pair invariant; verify factory, pair, and router at the pinned block before use."
+    },
+    {
+      "id": "quickswap_v2_polygon",
+      "name": "QuickSwap V2",
+      "dexscreener_id": "quickswap",
+      "network": "polygon",
+      "chain_id": 137,
+      "factory": "0x5757371414417b8C6CAad45bAeF941aBc7d3Ab32",
+      "router02": "0xa5E0829CaCEd8fFDD4De3c43696c57F7D7A678ff",
+      "swap_fee_bps": 30,
+      "deployment_source": "https://github.com/QuickSwap/quickswap-core/blob/master/README.md",
+      "fee_source": "https://github.com/QuickSwap/quickswap-core/blob/master/contracts/UniswapV2Pair.sol",
+      "source_status": "source_documented_not_live_verified",
+      "notes": "Polygon POS QuickSwap V2 factory/router addresses are published by QuickSwap. Its core README states the contracts are a Uniswap V2 fork with no core-contract changes; 30 bps fee assumption follows the inherited V2 pair invariant. Verify factory, pair, and router at the pinned block before use."
     }
   ]
 }
