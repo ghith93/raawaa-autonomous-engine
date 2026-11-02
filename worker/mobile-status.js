@@ -43,7 +43,7 @@ h2{font-size:16px;margin:0 0 10px}.rows{display:grid;gap:8px}.item{display:flex;
 <section class="panel"><h2>Paper research events</h2><div id="paper" class="rows"></div></section>
 <section class="panel"><h2>Provider usage · D1</h2><div id="usage" class="rows"></div></section>
 <section class="panel"><h2>Recorded model inference costs · USD</h2><div id="modelCosts" class="rows"></div><p class="muted">Recorded provider costs only; external or unreported spend is not inferred.</p></section>
-<section class="panel"><h2>Latest market snapshot</h2><div id="snapshot" class="muted">—</div></section><section class="panel"><h2>Latest paper event</h2><div id="latest" class="muted">—</div></section><section class="panel"><h2>GitHub CI health</h2><div id="ci" class="rows"></div></section>
+<section class="panel"><h2>Latest market snapshot</h2><div id="snapshot" class="muted">—</div></section><section class="panel"><h2>Latest paper event</h2><div id="latest" class="muted">—</div></section><section class="panel"><h2>Telegram control readiness</h2><div id="telegramSchema" class="rows"></div><p class="muted">Schema presence only; webhook activation still requires operator-managed secrets and Telegram configuration.</p></section><section class="panel"><h2>GitHub CI health</h2><div id="ci" class="rows"></div></section>
 <section class="panel"><h2>Not yet connected to this status feed</h2><div id="gaps" class="rows"></div></section>
 <button id="refresh">Refresh</button><button class="secondary" id="disconnect">Disconnect</button>
 <p class="muted" id="updated"></p>
@@ -89,6 +89,7 @@ async function load() {
   ],"No recorded model inference costs");
   $("snapshot").textContent=data.latest_market_snapshot?data.latest_market_snapshot.candidate_id+" · chain "+(data.latest_market_snapshot.chain_id??"—")+" · block "+(data.latest_market_snapshot.block_number??"—")+" · "+data.latest_market_snapshot.occurred_at:"No market snapshot recorded";
   $("latest").textContent=data.latest_paper_event?data.latest_paper_event.event_type+" · "+data.latest_paper_event.candidate_id+" · "+data.latest_paper_event.occurred_at:"No paper event recorded";
+  rows("telegramSchema",[[ "Webhook receipt schema", data.telegram_webhook_schema?.status || "Unknown" ]],"Schema status unavailable");
   await loadCi();
   rows("gaps",Object.entries(data.unavailable_metrics||{}),"No unavailable metrics");
   $("updated").textContent="Snapshot generated: "+data.generated_at;
@@ -118,7 +119,7 @@ export async function handleMobileStatus(request, env, url) {
   try {
     const [tasks, migrations] = await Promise.all([
       env.DB.prepare("SELECT status,COUNT(*) AS count FROM tasks GROUP BY status").all(),
-      env.DB.prepare("SELECT version FROM schema_migrations WHERE version IN ('0003_durable_quota_ledger','0004_paper_event_ledger')").all(),
+      env.DB.prepare("SELECT version FROM schema_migrations WHERE version IN ('0003_durable_quota_ledger','0004_paper_event_ledger','0005_telegram_webhook_receipts')").all(),
     ]);
     const applied = new Set((migrations.results || []).map(row => row.version));
     const [paper, latest, snapshot, usage, modelCosts] = await Promise.all([
@@ -150,6 +151,12 @@ export async function handleMobileStatus(request, env, url) {
       provider_usage: (usage.results || []).map(row => ({
         route_id: row.route_id, requests: Number(row.requests) || 0, tokens: Number(row.tokens) || 0,
       })),
+      telegram_webhook_schema: {
+        available: applied.has("0005_telegram_webhook_receipts"),
+        status: applied.has("0005_telegram_webhook_receipts")
+          ? "Migration 0005 applied; webhook activation remains separately gated"
+          : "Migration 0005 is not applied to this database",
+      },
       model_costs_usd: {
         total: (modelCosts.results || []).reduce((sum, row) => sum + (Number(row.cost_usd) || 0), 0),
         by_provider: (modelCosts.results || []).map(row => ({
