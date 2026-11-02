@@ -81,3 +81,7 @@ def test_token0_input_overflow_fallback_uses_protocol_safe_denominator() -> None
     expected = ((liquidity << 96) + (liquidity + amount) - 1) // (liquidity + amount)
     actual = get_next_sqrt_price_from_input(Q96, liquidity, amount, True)
     assert actual == expected
+
+def test_token0_input_rejects_fallback_denominator_uint256_overflow() -> None:
+    with pytest.raises(ValueError):
+        get_next_sqrt_price_from_input(Q96, MAX_UINT128, (1 << 256) - 1, True)
