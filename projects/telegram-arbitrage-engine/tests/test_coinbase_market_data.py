@@ -195,8 +195,8 @@ def test_registry_and_comparator_use_coinbase_metadata_and_minimum_constraints()
     binance_book = BinanceOrderBookSnapshot(
         source="binance",
         symbol="BTCUSDT",
-        bids=((Decimal("101.70"), Decimal("2")),),
-        asks=((Decimal("101.80"), Decimal("2")),),
+        bids=((Decimal("102.20"), Decimal("2")),),
+        asks=((Decimal("102.30"), Decimal("2")),),
         last_update_id=123,
         fetched_at=book.fetched_at,
     )
