@@ -1,6 +1,7 @@
 """Authenticated D1-backed paper-event ledger client; never falls back to local SQLite."""
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import urllib.error
@@ -78,3 +79,46 @@ class D1PaperTradingLedger:
             raise ValueError("limit must be between 1 and 500")
         query = urllib.parse.urlencode({"candidate_id": candidate_id, "limit": limit})
         return self._request("GET", "/v1/paper-ledger?" + query).get("events", [])
+
+    def verify_chain(self, candidate_id: str, limit: int = 500) -> bool:
+        if not isinstance(candidate_id, str) or not candidate_id.strip():
+            raise ValueError("candidate_id is required")
+        if type(limit) is not int or not 1 <= limit <= 500:
+            raise ValueError("limit must be between 1 and 500")
+        query = urllib.parse.urlencode({"candidate_id": candidate_id, "limit": limit})
+        result = self._request("GET", "/v1/paper-ledger?" + query)
+        events = result.get("events", [])
+        checkpoints = result.get("checkpoints", [])
+        if not isinstance(events, list) or not isinstance(checkpoints, list) or len(events) != len(checkpoints):
+            return False
+        fields = (
+            "candidate_id", "event_id", "event_type", "occurred_at", "chain_id",
+            "block_number", "block_hash", "strategy_id", "source_pool",
+            "destination_pool", "token_in", "token_out", "gross_profit_raw",
+            "gas_used", "gas_price_wei", "gas_cost_profit_raw", "net_profit_raw",
+            "payload_json",
+        )
+        previous_hash = "0" * 64
+        for sequence, (event, checkpoint) in enumerate(zip(events, checkpoints, strict=True), start=1):
+            if not isinstance(event, dict) or not isinstance(checkpoint, dict):
+                return False
+            if event.get("sequence") != sequence or event.get("candidate_id") != candidate_id:
+                return False
+            if event.get("previous_hash") != previous_hash:
+                return False
+            if (
+                checkpoint.get("sequence") != sequence
+                or checkpoint.get("event_id") != event.get("event_id")
+                or checkpoint.get("event_hash") != event.get("event_hash")
+            ):
+                return False
+            record = {key: event.get(key) for key in fields}
+            envelope = {"previous_hash": previous_hash, "record": {"sequence": sequence, **record}}
+            canonical = json.dumps(
+                envelope, sort_keys=True, separators=(",", ":"), ensure_ascii=True, allow_nan=False,
+            ).encode("utf-8")
+            expected = hashlib.sha256(canonical).hexdigest()
+            if event.get("event_hash") != expected:
+                return False
+            previous_hash = expected
+        return len(events) < limit
