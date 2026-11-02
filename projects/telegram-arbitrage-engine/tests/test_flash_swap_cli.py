@@ -4,6 +4,7 @@ import sys
 import pytest
 
 from arb_engine.cli import main
+import arb_engine.flash_swap_cli as flash_swap_module
 from arb_engine.flash_swap_cli import run_flash_swap_simulation
 from arb_engine.rpc import EvmPoolSnapshot
 from arb_engine.v2 import V2PoolState
@@ -194,3 +195,77 @@ def test_flash_swap_cli_help_is_registered(monkeypatch, capsys):
         main()
     assert exit_info.value.code == 0
     assert "--record-paper" in capsys.readouterr().out
+
+
+
+def test_explicit_d1_backend_records_deterministic_idempotent_events(monkeypatch, tmp_path):
+    class FakeD1Ledger:
+        records = {}
+
+        def __init__(self):
+            self.verify_calls = []
+
+        def append_event(self, **event):
+            event_id = event["event_id"]
+            if event_id in self.records:
+                assert self.records[event_id] == event
+            else:
+                self.records[event_id] = event
+            return {"event_id": event_id, "replay": event_id in self.records}
+
+        def verify_chain(self, candidate_id):
+            self.verify_calls.append(candidate_id)
+            return True
+
+    monkeypatch.setenv("RAAWAA_PAPER_LEDGER_BACKEND", "d1")
+    monkeypatch.setattr(flash_swap_module, "D1PaperTradingLedger", FakeD1Ledger)
+    monkeypatch.setattr(
+        flash_swap_module, "PaperTradingLedger",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("D1 must not fall back to SQLite")),
+    )
+    first = run_flash_swap_simulation(
+        **base_args(), reader=reader(), record_paper=True,
+        ledger_path=str(tmp_path / "must-not-exist.sqlite3"),
+    )
+    second = run_flash_swap_simulation(
+        **base_args(), reader=reader(), record_paper=True,
+        ledger_path=str(tmp_path / "must-not-exist.sqlite3"),
+    )
+    assert first["paper_ledger"]["backend"] == "d1"
+    assert second["paper_ledger"]["candidate_id"] == first["paper_ledger"]["candidate_id"]
+    assert first["paper_ledger"]["event_count"] == 3
+    assert len(FakeD1Ledger.records) == 3
+    assert not (tmp_path / "must-not-exist.sqlite3").exists()
+
+
+def test_d1_backend_initialization_failure_does_not_fallback_to_sqlite(monkeypatch, tmp_path):
+    from arb_engine.d1_paper_ledger import D1PaperLedgerError
+
+    monkeypatch.setenv("RAAWAA_PAPER_LEDGER_BACKEND", "d1")
+
+    def unavailable():
+        raise D1PaperLedgerError("D1 endpoint is not configured")
+
+    monkeypatch.setattr(flash_swap_module, "D1PaperTradingLedger", unavailable)
+    monkeypatch.setattr(
+        flash_swap_module, "PaperTradingLedger",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("must fail closed")),
+    )
+    with pytest.raises(D1PaperLedgerError, match="not configured"):
+        run_flash_swap_simulation(
+            **base_args(), reader=reader(), record_paper=True,
+            ledger_path=str(tmp_path / "must-not-exist.sqlite3"),
+        )
+    assert not (tmp_path / "must-not-exist.sqlite3").exists()
+
+
+def test_unknown_paper_backend_is_rejected_and_default_read_only_ignores_backend(monkeypatch):
+    monkeypatch.setenv("RAAWAA_PAPER_LEDGER_BACKEND", "remote-magic")
+    with pytest.raises(ValueError, match="either 'sqlite' or 'd1'"):
+        run_flash_swap_simulation(**base_args(), reader=reader(), record_paper=True)
+    monkeypatch.setattr(
+        flash_swap_module, "D1PaperTradingLedger",
+        lambda: (_ for _ in ()).throw(AssertionError("read-only mode must not instantiate D1")),
+    )
+    result = run_flash_swap_simulation(**base_args(), reader=reader(), record_paper=False)
+    assert result["paper_ledger"] is None

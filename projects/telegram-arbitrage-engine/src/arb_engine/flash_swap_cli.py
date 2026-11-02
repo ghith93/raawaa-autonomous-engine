@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 import hashlib
+import os
 import re
-import uuid
 from datetime import datetime, timezone
 from decimal import Decimal
 
+from .d1_paper_ledger import D1PaperTradingLedger
 from .flash_swap import simulate_cross_venue_flash_swap
 from .flash_swap_economics import estimate_flash_swap_economics
 from .paper_ledger import PaperTradingLedger
@@ -245,16 +246,32 @@ def run_flash_swap_simulation(
         }
 
     if record_paper:
-        now = datetime.now(timezone.utc)
-        run_id = uuid.uuid4().hex
-        candidate_id = "flashswap-" + hashlib.sha256(
-            f"{run_id}|{source_state.chain_id}|{block_hash}|{source_state.pair_address}|"
-            f"{destination_state.pair_address}|{borrowed_token.lower()}|{amount_borrowed_raw}".encode()
-        ).hexdigest()[:32]
-        ledger = PaperTradingLedger(ledger_path)
+        ledger_backend = os.getenv("RAAWAA_PAPER_LEDGER_BACKEND", "sqlite").strip().casefold()
+        if ledger_backend == "sqlite":
+            ledger = PaperTradingLedger(ledger_path)
+        elif ledger_backend == "d1":
+            # D1 mode requires the separately configured HTTPS Worker endpoint and bearer token.
+            # Constructor/transport errors are propagated; there is deliberately no SQLite fallback.
+            ledger = D1PaperTradingLedger()
+        else:
+            raise ValueError("RAAWAA_PAPER_LEDGER_BACKEND must be either 'sqlite' or 'd1'")
+        candidate_key = "|".join((
+            str(source_state.chain_id), block_hash.casefold(),
+            source_state.pair_address.casefold(), destination_state.pair_address.casefold(),
+            borrowed_token.casefold(), str(amount_borrowed_raw),
+            str(source_state.fee_bps), str(destination_state.fee_bps),
+            str(gas_used) if gas_used is not None else "",
+            str(gas_price_wei) if gas_price_wei is not None else "",
+            native_token.casefold() if native_token else "",
+            native_quote_snapshot.state.pair_address.casefold() if native_quote_snapshot else "",
+            str(native_quote_fee) if native_quote_snapshot else "",
+        ))
+        candidate_id = "flashswap-" + hashlib.sha256(candidate_key.encode()).hexdigest()[:32]
+        # Block time makes retries of the same pinned simulation content-identical for D1 idempotency.
+        occurred_at = datetime.fromtimestamp(source_snapshot.block_timestamp, timezone.utc)
         common = {
             "candidate_id": candidate_id,
-            "occurred_at": now,
+            "occurred_at": occurred_at,
         }
         ledger.append_event(
             **common, event_id=f"{candidate_id}:detected",
@@ -265,7 +282,6 @@ def run_flash_swap_simulation(
             **common, event_id=f"{candidate_id}:snapshot",
             event_type="snapshot_captured",
             payload={
-                "rpc_endpoint": rpc_url,
                 "pool_addresses": [item.state.pair_address for item in snapshots],
                 "token_decimals": {
                     item.state.token0: item.token0_decimals for item in snapshots
@@ -335,6 +351,11 @@ def run_flash_swap_simulation(
             "candidate_id": candidate_id,
             "event_count": recorded,
             "chain_verified": True,
-            "classification": "local_research_events_only_no_order_created_or_submitted",
+            "backend": ledger_backend,
+            "classification": (
+                "remote_d1_research_events_only_no_order_created_or_submitted"
+                if ledger_backend == "d1"
+                else "local_research_events_only_no_order_created_or_submitted"
+            ),
         }
     return output
