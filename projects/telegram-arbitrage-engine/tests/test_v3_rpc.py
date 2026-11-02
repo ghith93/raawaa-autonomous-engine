@@ -335,3 +335,33 @@ def test_v3_reader_defaults_to_keyless_nodely_with_documented_heavy_call_spacing
     rpc = EvmV3PoolReader()
     assert rpc.endpoint == "https://eth.nodely.dev"
     assert rpc.min_request_interval >= 0.5
+
+
+def test_v3_reader_fetches_only_initialized_ticks_inside_requested_price_path(monkeypatch):
+    rpc = reader()
+    fake, calls = make_fake_rpc(
+        bitmap={
+            -1: 1 << 255,  # tick -60: inside zeroForOne path
+            0: (1 << 0) | (1 << 1) | (1 << 2),  # ticks 0, 60, 120
+        },
+        liquidity_net={-60: 500, 0: -500},
+    )
+    monkeypatch.setattr(rpc, "_rpc", fake)
+    snapshot = rpc.read_snapshot(
+        POOL,
+        zero_for_one=True,
+        sqrt_price_limit_x96=get_sqrt_ratio_at_tick(-60),
+        expected_factory=FACTORY,
+        max_bitmap_words=2,
+        max_initialized_ticks=2,
+    )
+
+    tick_calls = [
+        signed_arg(call["data"], 24)
+        for method, params in calls
+        if method == "eth_call"
+        for call, _ in [params]
+        if call["data"].startswith("0xf30dba93")
+    ]
+    assert tick_calls == [-60, 0]
+    assert dict(snapshot.initialized_ticks) == {-60: 500, 0: -500}
