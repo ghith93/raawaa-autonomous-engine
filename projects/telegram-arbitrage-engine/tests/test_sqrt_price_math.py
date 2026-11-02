@@ -74,3 +74,10 @@ def test_output_token0_rejects_non_positive_denominator() -> None:
 def test_next_price_must_fit_uint160() -> None:
     with pytest.raises(ValueError):
         get_next_sqrt_price_from_input(MAX_UINT160, MAX_UINT128, (1 << 256) - 1, False)
+
+def test_token0_input_overflow_fallback_uses_protocol_safe_denominator() -> None:
+    liquidity = MAX_UINT128
+    amount = 1 << 200
+    expected = ((liquidity << 96) + (liquidity + amount) - 1) // (liquidity + amount)
+    actual = get_next_sqrt_price_from_input(Q96, liquidity, amount, True)
+    assert actual == expected
