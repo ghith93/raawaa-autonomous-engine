@@ -302,7 +302,7 @@ def main() -> None:
                 "warning": "ERC-20 metadata methods are optional. Code and metadata do not prove transfer semantics, proxy implementation safety, absence of taxes, blacklist behavior, or honeypot resistance.",
             }, indent=2))
         except (RpcReadError, ValueError, ArithmeticError) as exc:
-            parser.exit(2, f"token-check failed: {exc}\\n")
+            parser.exit(2, f"token-check failed: {exc}\n")
     elif args.command == "fork-call":
         try:
             result = AnvilForkSimulator(args.anvil_rpc).simulate_call(
