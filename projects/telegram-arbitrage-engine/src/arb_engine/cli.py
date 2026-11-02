@@ -448,10 +448,11 @@ def main() -> None:
                 "data_classification": "indicative_heuristic_prices_not_executable_quotes",
                 "live_execution": False,
                 "warning": (
-                    "Jupiter Price API V3 is a heuristic USD mark derived from on-chain activity. "
-                    "Missing mints have no reliable returned price. source_block_id is provider provenance, "
-                    "not a synchronized current-block quote; fetched_at is local retrieval time only. "
-                    "This is not an executable price, order book, or evidence of profit."
+                    "Jupiter Price API V3 is a heuristic mark based on the last qualifying on-chain trade. "
+                    "Missing mints have no reliable returned price. source_block_id identifies that trade's "
+                    "Solana block, not the current slot; this command does not calculate block age. "
+                    "fetched_at is local retrieval time only. This is not an executable price, order book, "
+                    "or evidence of profit."
                 ),
             }, indent=2))
         except (JupiterQuoteError, ValueError, ArithmeticError) as exc:
