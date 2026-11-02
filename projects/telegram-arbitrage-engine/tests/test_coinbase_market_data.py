@@ -105,8 +105,9 @@ def test_fetch_instrument_fails_closed_for_mismatch_and_restricted_products():
     with pytest.raises(CoinbaseMarketDataError, match="did not match"):
         client.fetch_instrument(product_id="BTC-USDT")
 
-    client, _ = make_client([product_payload(post_only=True)])
-    assert client.fetch_instrument(product_id="BTC-USDT").status == "RESTRICTED"
+    for flag in ("post_only", "limit_only", "cancel_only", "trading_disabled"):
+        client, _ = make_client([product_payload(**{flag: True})])
+        assert client.fetch_instrument(product_id="BTC-USDT").status == "RESTRICTED"
 
     client, _ = make_client([product_payload(auction_mode=True)])
     assert client.fetch_instrument(product_id="BTC-USDT").status == "AUCTION"
