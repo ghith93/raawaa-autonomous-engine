@@ -105,7 +105,7 @@ class AndroidHarnessBridgeTests(unittest.TestCase):
                 SimpleNamespace(returncode=1, stdout="", stderr="temporary network failure"),
                 SimpleNamespace(returncode=1, stdout="", stderr="temporary network failure"),
                 SimpleNamespace(returncode=0, stdout="", stderr=""),
-                SimpleNamespace(returncode=0, stdout=COMMIT + "\\n", stderr=""),
+                SimpleNamespace(returncode=0, stdout=COMMIT + "\n", stderr=""),
             ]
             with patch("scripts.androidharness_issue_bridge.subprocess.run", side_effect=outputs) as run, \\
                  patch("scripts.androidharness_issue_bridge.time.sleep") as sleep:
