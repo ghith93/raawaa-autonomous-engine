@@ -37,3 +37,14 @@
 7. Replay captured snapshots and test quote stability across blocks before enabling paper-trade accounting.
 
 No item in this list authorizes live trading.
+
+
+## Telegram Bot API
+
+- Official reference: https://core.telegram.org/bots/api
+- The optional controller uses HTTPS `getUpdates` long polling and `sendMessage` replies only.
+- Incoming commands are accepted only from explicitly allowlisted private chat IDs where sender ID matches chat ID.
+- The bot does not set webhooks, manage chats, publish to channels, place trades, or accept arbitrary command execution.
+- The polling offset is stored in the local SQLite state table to avoid replaying already handled updates after a restart.
+- One bot polling process should run at a time for a given token and ledger.
+- A bot token is a secret. Supply it only as `TELEGRAM_BOT_TOKEN` in the runtime secret environment; set `TELEGRAM_ALLOWED_CHAT_IDS` to the operator's numeric private chat ID(s).
