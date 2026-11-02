@@ -16,7 +16,7 @@ For a requested direction and sqrt-price limit, it:
 8. Reads liquidityGross/liquidityNet/initialized for every set bit, within a caller-configured initialized-tick bound.
 9. Rechecks the canonical block hash before returning the snapshot.
 
-The default factory is the official Uniswap V3 Ethereum mainnet factory. Other chains require an explicit factory address; do not reuse Ethereum addresses on other networks.
+The default RPC is Nodely's keyless Ethereum endpoint (`https://eth.nodely.dev`); the live smoke workflow has bounded fallbacks for provider-level transport failures. Nodely documents a 2 requests/second limit for heavy `eth_call` methods, so the reader is rate-limited below that ceiling. The default factory is the official Uniswap V3 Ethereum mainnet factory. Other chains require an explicit factory address; do not reuse Ethereum addresses on other networks.
 
 ## Important limits
 
@@ -44,6 +44,8 @@ Positive `--amount-specified` means exact input; negative means exact output. Th
 ## Sources
 
 - [Official Uniswap V3 Ethereum deployment addresses](https://developers.uniswap.org/docs/protocols/v3/deployments/v3-ethereum-deployments) — Ethereum factory: `0x1F98431c8aD98523631AE4a59f267346ea31F984`.
+- [Nodely Ethereum public RPC documentation](https://nodely.io/docs/ethereum) — keyless Ethereum endpoint and documented per-IP heavy-call limits.
+- [rpcfree Ethereum RPC documentation](https://rpcfree.com/ethereum-rpc/) — keyless fallback endpoint and published request/compute-unit limits.
 - [Official Uniswap V3 pool data guide](https://developers.uniswap.org/docs/sdks/v3/guides/pool-data) — slot0, liquidity, bitmap words and initialized tick data retrieval.
 - [Uniswap V3 factory interface](https://github.com/Uniswap/v3-core/blob/main/contracts/interfaces/IUniswapV3Factory.sol) — getPool and feeAmountTickSpacing.
 - [Uniswap V3 pool immutables](https://github.com/Uniswap/v3-core/blob/main/contracts/interfaces/pool/IUniswapV3PoolImmutables.sol).
