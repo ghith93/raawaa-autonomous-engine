@@ -166,8 +166,11 @@ def test_default_scan_venue_ids_are_selected_per_chain_without_cross_chain_fallb
     assert default_scan_venue_ids(43114) == (
         "uniswap_v2_avalanche", "sushiswap_v2_avalanche",
     )
+    assert default_scan_venue_ids(137) == (
+        "uniswap_v2_polygon", "quickswap_v2_polygon",
+    )
     with pytest.raises(ValueError, match="has 0 registered V2 venues"):
-        default_scan_venue_ids(137)
+        default_scan_venue_ids(84532)
     with pytest.raises(ValueError, match="positive integer"):
         default_scan_venue_ids(True)
 
@@ -193,3 +196,18 @@ def test_additional_evm_v2_registry_entries_have_distinct_factory_router_and_sou
         assert all(item.swap_fee_bps == 30 for item in venues)
         assert all(item.source_status == "source_documented_not_live_verified" for item in venues)
         assert all(item.deployment_source.startswith("https://") for item in venues)
+
+
+
+def test_polygon_v2_registry_uses_quickswap_as_independent_second_venue():
+    from arb_engine.venues import list_venues
+
+    venues = list_venues(137)
+    assert {item.id for item in venues} == {
+        "uniswap_v2_polygon", "quickswap_v2_polygon",
+    }
+    assert {item.dexscreener_id for item in venues} == {"uniswap", "quickswap"}
+    assert len({item.factory.lower() for item in venues}) == 2
+    assert len({item.router02.lower() for item in venues}) == 2
+    assert all(item.swap_fee_bps == 30 for item in venues)
+    assert all(item.source_status == "source_documented_not_live_verified" for item in venues)
