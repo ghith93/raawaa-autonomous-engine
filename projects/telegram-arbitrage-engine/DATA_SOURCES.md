@@ -149,6 +149,19 @@ No item in this list authorizes live trading.
 - Coinbase public product metadata does not provide the account's actual trading fee tier. Fees remain unknown unless separately supplied from the account's current fee schedule; no net-positive estimate is allowed to infer them.
 - Coinbase's market-data terms of use apply. Public market data availability does not establish account eligibility or regional trading access. CI uses deterministic fixtures only; no live Coinbase requests, API keys, orders or account endpoints are used.
 
+## Perpetual funding history (read-only)
+
+- Binance USD-M funding history: `GET https://fapi.binance.com/fapi/v1/fundingRate`; official reference: https://developers.binance.info/en/docs/catalog/core-trading-derivatives-trading-usd-s-m-futures/api/rest-api/market-data
+- Binance funding interval adjustments: `GET /fapi/v1/fundingInfo`. Only an explicitly returned `fundingIntervalHours` is attached to an observation; absent metadata remains unknown rather than assuming the common 8-hour interval.
+- Bybit funding intervals: `GET /v5/market/instruments-info?category=linear|inverse&symbol=...`. The documented `fundingInterval` is in minutes; the adapter converts it to hours only when it is a positive whole-hour interval and the exact contract is confirmed active.
+- Bybit linear/inverse funding history: `GET https://api.bybit.com/v5/market/funding/history`; official reference: https://bybit-exchange.github.io/docs/v5/market/history-fund-rate
+- Both adapters are public unauthenticated GET-only readers. They normalize funding rates as signed `Decimal` values and preserve exact symbol, contract family, settlement timestamp, optional mark price/interval metadata, and local fetch time. Any returned interval carries `funding_interval_source=current_instrument_metadata`; it describes metadata observed at fetch time and is not proof of the interval used at every historical settlement.
+- Binance USD-M linear perpetuals and Bybit linear/inverse perpetuals are supported by this first reader. Binance COIN-M, options, mark/index basis history, contract sizing, margin tiers, liquidation prices, account-specific fees, borrow costs, and execution are not implemented here.
+- Binance's interval metadata is queried separately; Bybit's funding-history response does not itself include the interval, so the adapter makes a bounded exact-symbol instruments-info request when history rows exist. Missing, non-hour-aligned or unverified intervals remain unknown. No annualization is performed without a verified interval.
+- HTTP 429 and Bybit rate-limit response codes defer a shared per-venue process limiter; the client does not immediately retry. Request count, response size, host, symbol, contract category and result row count are bounded.
+- Funding history is a settled historical observation, not a guaranteed next funding payment or a standalone profit signal. A funding/basis strategy additionally needs synchronized spot/perpetual books, mark/index prices, contract multipliers, funding schedule, account fee tiers, margin/borrow costs, slippage, liquidation and basis-risk modelling. The current adapter does not compute net returns or place orders.
+- CI uses deterministic fixtures only; no live futures endpoints, credentials, account methods or trading endpoints are used.
+
 ## Telegram Bot API
 
 - Official reference: https://core.telegram.org/bots/api
