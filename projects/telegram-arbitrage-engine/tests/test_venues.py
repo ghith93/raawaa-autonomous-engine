@@ -154,7 +154,42 @@ def test_default_scan_venue_ids_are_selected_per_chain_without_cross_chain_fallb
     assert default_scan_venue_ids(56) == (
         "pancakeswap_v2_bsc", "apeswap_v2_bsc",
     )
+    assert default_scan_venue_ids(42161) == (
+        "uniswap_v2_arbitrum", "sushiswap_v2_arbitrum",
+    )
+    assert default_scan_venue_ids(10) == (
+        "uniswap_v2_optimism", "sushiswap_v2_optimism",
+    )
+    assert default_scan_venue_ids(8453) == (
+        "uniswap_v2_base", "sushiswap_v2_base",
+    )
+    assert default_scan_venue_ids(43114) == (
+        "uniswap_v2_avalanche", "sushiswap_v2_avalanche",
+    )
     with pytest.raises(ValueError, match="has 0 registered V2 venues"):
-        default_scan_venue_ids(8453)
+        default_scan_venue_ids(137)
     with pytest.raises(ValueError, match="positive integer"):
         default_scan_venue_ids(True)
+
+
+
+def test_additional_evm_v2_registry_entries_have_distinct_factory_router_and_source_metadata():
+    from arb_engine.venues import list_venues
+
+    expected = {
+        42161: "arbitrum",
+        10: "optimism",
+        8453: "base",
+        43114: "avalanche",
+    }
+    for chain_id, network in expected.items():
+        venues = list_venues(chain_id)
+        assert {item.id for item in venues} == {
+            f"uniswap_v2_{network}", f"sushiswap_v2_{network}",
+        }
+        assert {item.dexscreener_id for item in venues} == {"uniswap", "sushiswap"}
+        assert len({item.factory.lower() for item in venues}) == 2
+        assert len({item.router02.lower() for item in venues}) == 2
+        assert all(item.swap_fee_bps == 30 for item in venues)
+        assert all(item.source_status == "source_documented_not_live_verified" for item in venues)
+        assert all(item.deployment_source.startswith("https://") for item in venues)
