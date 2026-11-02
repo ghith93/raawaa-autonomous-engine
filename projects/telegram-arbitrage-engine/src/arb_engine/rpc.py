@@ -218,6 +218,16 @@ class EthereumV2PoolReader:
         return snapshots
 
 
+
+    def verify_canonical_block(self, block_number: int, expected_hash: str) -> None:
+        if not isinstance(block_number, int) or isinstance(block_number, bool) or block_number < 0:
+            raise ValueError("Block number must be a non-negative integer")
+        if not isinstance(expected_hash, str) or not re.fullmatch(r"0x[0-9a-fA-F]{64}", expected_hash):
+            raise ValueError("Expected block hash must be a 32-byte hexadecimal value")
+        block = self._rpc("eth_getBlockByNumber", [hex(block_number), False])
+        if not isinstance(block, dict) or str(block.get("hash", "")).lower() != expected_hash.lower():
+            raise RpcReadError("Pinned block is no longer canonical (possible reorg)")
+
     def quote_v2_router_exact_input(
         self,
         router_address: str,
