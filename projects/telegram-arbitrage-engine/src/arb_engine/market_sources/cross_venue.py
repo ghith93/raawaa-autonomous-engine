@@ -207,6 +207,7 @@ def _direction(
     costs: OpportunityCosts,
     now: datetime | None,
     max_quote_age_seconds: int,
+    max_quote_skew_seconds: int,
 ) -> CrossVenueOpportunity:
     buy_filled, buy_spent, buy_vwap, buy_fraction = _sweep(buy_book.asks, quantity)
     sell_filled, sell_received, sell_vwap, sell_fraction = _sweep(sell_book.bids, quantity)
@@ -276,6 +277,7 @@ def _direction(
         costs=costs,
         now=now,
         max_quote_age_seconds=max_quote_age_seconds,
+        max_quote_skew_seconds=max_quote_skew_seconds,
         buy_fill_fraction=buy_fraction,
         sell_fill_fraction=sell_fraction,
     )
@@ -308,6 +310,7 @@ def compare_cex_spot_orderbooks(
     costs_by_direction: Mapping[tuple[str, str], OpportunityCosts] | None = None,
     now: datetime | None = None,
     max_quote_age_seconds: int = 5,
+    max_quote_skew_seconds: int = 2,
 ) -> tuple[CrossVenueOpportunity, CrossVenueOpportunity]:
     """Sweep both books at a fixed base quantity and evaluate both directions.
 
@@ -316,6 +319,8 @@ def compare_cex_spot_orderbooks(
     """
     if not isinstance(registry, InstrumentRegistry):
         raise InstrumentMappingError("registry must be an InstrumentRegistry")
+    if type(max_quote_skew_seconds) is not int or not 0 <= max_quote_skew_seconds <= 3600:
+        raise InstrumentMappingError("max_quote_skew_seconds must be between 0 and 3600")
     quantity = _positive_decimal(base_quantity, "base_quantity")
     venue_a = getattr(book_a, "source", None)
     instrument_a = getattr(book_a, "symbol", None)
@@ -368,9 +373,9 @@ def compare_cex_spot_orderbooks(
 
     return (
         _direction(book_a, spec_a, time_a, book_b, spec_b, time_b, quantity,
-                   costs_for(spec_a, spec_b), now, max_quote_age_seconds),
+                   costs_for(spec_a, spec_b), now, max_quote_age_seconds, max_quote_skew_seconds),
         _direction(book_b, spec_b, time_b, book_a, spec_a, time_a, quantity,
-                   costs_for(spec_b, spec_a), now, max_quote_age_seconds),
+                   costs_for(spec_b, spec_a), now, max_quote_age_seconds, max_quote_skew_seconds),
     )
 
 
@@ -405,6 +410,7 @@ def compare_cex_spot_orderbook_universe(
     source_failures: Mapping[str, str] | None = None,
     now: datetime | None = None,
     max_quote_age_seconds: int = 5,
+    max_quote_skew_seconds: int = 2,
     max_venues: int = 8,
 ) -> CrossVenueUniverseResult:
     """Compare all bounded CEX spot venue pairs, preserving partial source failures.
@@ -475,6 +481,7 @@ def compare_cex_spot_orderbook_universe(
                 costs_by_direction=costs_by_direction,
                 now=now,
                 max_quote_age_seconds=max_quote_age_seconds,
+                max_quote_skew_seconds=max_quote_skew_seconds,
             )
             if all(item.status == "asset_or_quote_identity_mismatch" for item in pair_results):
                 skipped_pairs.append((
