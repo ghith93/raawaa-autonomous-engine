@@ -306,3 +306,12 @@ def test_malformed_and_oversized_coinbase_responses_fail_closed():
     )
     with pytest.raises(CoinbaseMarketDataError, match="oversized"):
         client.fetch_orderbook(product_id="BTC-USDT")
+
+
+
+@pytest.mark.parametrize("flag", [
+    "post_only", "limit_only", "cancel_only", "trading_disabled",
+])
+def test_any_coinbase_restriction_flag_prevents_trading_status(flag):
+    client, _ = make_client([product_payload(**{flag: True})])
+    assert client.fetch_instrument(product_id="BTC-USDT").status == "RESTRICTED"
