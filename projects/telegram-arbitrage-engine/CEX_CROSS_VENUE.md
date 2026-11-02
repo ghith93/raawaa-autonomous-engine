@@ -1,6 +1,33 @@
 CEX cross-venue spot depth scanner
 
-Status: deterministic read-only comparison component; not yet connected to a scheduler or live strategy loop.
+Status: deterministic read-only comparison component with a manual CLI entry point; not connected to a scheduler or live strategy loop.
+
+CLI entry point
+
+`arb-engine cex-scan` composes public metadata and order-book clients for Bybit, Binance, Kraken, Coinbase Exchange and OKX. It fetches one instrument and one bounded Spot book from each selected venue, then calls `compare_cex_spot_orderbooks` for both directions.
+
+The CLI requires:
+- Exact venue IDs and instrument IDs (Kraken accepts a pair alias and resolves it through AssetPairs).
+- Explicit canonical base-asset and quote-currency IDs for each venue. Different IDs block the comparison even when symbols match.
+- One base quantity that conforms to both venues' lot steps and minimum order rules.
+- Optional operator-supplied taker fee bps per venue and a combined latency-risk bps assumption. If fees or latency are omitted, the evaluator leaves net_profit_quote unset.
+- Freshness/skew limits (defaults: 5-second maximum quote age and 2-second maximum inter-venue skew).
+
+Depth-swept VWAP includes the observed book-walk price impact, so the CLI supplies explicit zero for the separate slippage fields only for that depth-swept calculation. It does not infer account fee tiers, custody/inventory availability, rebalancing, coordinated fills or settlement. A positive net estimate is not executable PnL.
+
+Example:
+
+```bash
+arb-engine cex-scan \
+  --venue-a bybit --instrument-a BTCUSDT \
+  --a-base-asset-id asset:canonical:BTC --a-quote-currency-id currency:canonical:USDT \
+  --fee-a-bps 10 \
+  --venue-b binance --instrument-b BTCUSDT \
+  --b-base-asset-id asset:canonical:BTC --b-quote-currency-id currency:canonical:USDT \
+  --fee-b-bps 10 --latency-cost-bps 2 \
+  --base-quantity 0.001
+```
+
 
 Purpose
 
