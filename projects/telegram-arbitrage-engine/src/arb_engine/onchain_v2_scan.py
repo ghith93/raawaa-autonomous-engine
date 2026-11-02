@@ -98,19 +98,38 @@ def scan_onchain_v2_candidates(
     token_address: str,
     quote_token_address: str,
     capital_quote: str | Decimal,
-    rpc_url: str = "https://ethereum-rpc.publicnode.com",
+    rpc_url: str | None = None,
+    chain_id: int = 1,
+    chain_slug: str | None = None,
+    venue_ids: tuple[str, str] | list[str] = ("uniswap_v2_ethereum", "sushiswap_v2_ethereum"),
     max_candidate_pairs: int = 4,
     max_rpc_requests: int = 32,
     min_request_interval: float = 0.55,
     dex_client: DexScreenerClient | None = None,
     reader: EthereumV2PoolReader | None = None,
 ) -> dict[str, Any]:
-    """Discover with DEX Screener, then verify and quote both V2 routes on one pinned block.
+    """Discover with DEX Screener, then verify and quote two V2 venues on one pinned EVM block.
 
     DEX Screener contributes candidate pair addresses and display metadata only.
-    All pool identity, decimals, and swap amounts are read from Ethereum at one block.
+    All pool identity, decimals, and swap amounts are read from the selected chain at one block.
     This is a read-only gross router quote, not a flash-swap settlement or net-profit claim.
     """
+    if not isinstance(chain_id, int) or isinstance(chain_id, bool) or chain_id <= 0:
+        raise ValueError("chain_id must be a positive integer")
+    if not isinstance(venue_ids, (tuple, list)) or len(venue_ids) != 2:
+        raise ValueError("venue_ids must contain exactly two registered V2 venue IDs")
+    if any(not isinstance(item, str) or not item.strip() for item in venue_ids):
+        raise ValueError("venue_ids must contain non-empty strings")
+    if len(set(venue_ids)) != 2:
+        raise ValueError("venue_ids must be distinct")
+    venue_configs = [get_venue(item, chain_id) for item in venue_ids]
+    configured_networks = {venue.network for venue in venue_configs}
+    if len(configured_networks) != 1:
+        raise ValueError("both registered venues must belong to the same network")
+    registered_chain_slug = venue_configs[0].network
+    if chain_slug is not None and chain_slug != registered_chain_slug:
+        raise ValueError("chain_slug does not match the registered venues")
+    chain_slug = registered_chain_slug
     token = _address(token_address, "token_address")
     quote_token = _address(quote_token_address, "quote_token_address")
     if token == quote_token:
@@ -133,20 +152,25 @@ def scan_onchain_v2_candidates(
     capital_amount = _capital_decimal(capital_quote)
 
     dex_client = dex_client or DexScreenerClient()
-    reader = reader or EthereumV2PoolReader(
-        rpc_url, expected_chain_id=1, max_rpc_requests=max_rpc_requests,
-        min_request_interval=float(min_request_interval),
-    )
-    discovered = dex_client.token_pair_candidates("ethereum", token)
+    if reader is None:
+        if rpc_url is None:
+            if chain_id != 1:
+                raise ValueError("rpc_url is required for non-Ethereum EVM chains")
+            rpc_url = "https://ethereum-rpc.publicnode.com"
+        reader = EthereumV2PoolReader(
+            rpc_url, expected_chain_id=chain_id, max_rpc_requests=max_rpc_requests,
+            min_request_interval=float(min_request_interval),
+        )
+    discovered = dex_client.token_pair_candidates(chain_slug, token)
     filtered: list[tuple[DexPairCandidate, Venue]] = []
     seen_pairs: set[str] = set()
     for candidate in discovered:
-        if candidate.chain != "ethereum":
+        if candidate.chain != chain_slug:
             continue
         if {candidate.base_address, candidate.quote_address} != {token, quote_token}:
             continue
         try:
-            venue = get_venue_by_dexscreener_id(candidate.dex, 1)
+            venue = get_venue_by_dexscreener_id(candidate.dex, chain_id)
             pair_address = _address(candidate.pair_address, "candidate pair address")
         except ValueError:
             continue
@@ -164,7 +188,7 @@ def scan_onchain_v2_candidates(
         return {
             "mode": "read_only_onchain_v2_candidate_scan",
             "status": "no_registered_venue_candidates",
-            "chain_id": 1,
+            "chain_id": chain_id,
             "token_address": token,
             "quote_token_address": quote_token,
             "capital_quote_human": str(capital_amount),
@@ -179,8 +203,8 @@ def scan_onchain_v2_candidates(
         }
 
     context: EvmBlockContext = reader.latest_block_context()
-    if context.chain_id != 1:
-        raise ValueError("On-chain candidate scan is restricted to Ethereum mainnet (chain ID 1)")
+    if context.chain_id != chain_id:
+        raise ValueError(f"RPC chain ID {context.chain_id} does not match configured chain ID {chain_id}")
     candidate_verification: list[dict] = []
     verified_by_venue: dict[str, tuple[DexPairCandidate, Venue]] = {}
     for candidate, venue in filtered:
@@ -198,12 +222,14 @@ def scan_onchain_v2_candidates(
         verified_by_venue[venue.id] = (candidate, venue)
         candidate_verification.append(_candidate_record(candidate, venue, verified=True))
 
-    required_venues = {"uniswap_v2_ethereum", "sushiswap_v2_ethereum"}
+    required_venues = set(venue_ids)
     # Discovery APIs can omit a lower-volume venue from their ranked token-pair results.
     # Resolve any missing registered venue directly from its trusted factory; DEX Screener
     # remains a hint only, and the returned pair is still factory-verified below.
-    for venue_id in sorted(required_venues - set(verified_by_venue)):
-        venue = get_venue(venue_id, 1)
+    for venue_id in venue_ids:
+        if venue_id in verified_by_venue:
+            continue
+        venue = get_venue(venue_id, chain_id)
         pair_address = reader.lookup_v2_pair_address(
             venue.factory, token, quote_token, context.block_number,
         )
@@ -213,7 +239,7 @@ def scan_onchain_v2_candidates(
         if any(item.get("pair_address", "").lower() == pair_address for item in candidate_verification):
             continue
         candidate = DexPairCandidate(
-            chain="ethereum",
+            chain=chain_slug,
             dex=venue.dexscreener_id,
             pair_address=pair_address,
             base_address=token,
@@ -258,13 +284,10 @@ def scan_onchain_v2_candidates(
             "rpc_requests_budget": max_rpc_requests,
             "live_execution": False,
             "transaction_submitted": False,
-            "warning": "Both trusted V2 venues must be factory-verified at the same pinned block before route quotes are attempted.",
+            "warning": "Both configured V2 venues must be factory-verified at the same pinned block before route quotes are attempted.",
         }
 
-    ordered = [
-        verified_by_venue["uniswap_v2_ethereum"],
-        verified_by_venue["sushiswap_v2_ethereum"],
-    ]
+    ordered = [verified_by_venue[venue_id] for venue_id in venue_ids]
     snapshots = reader.read_pools(
         [(candidate.pair_address, venue.swap_fee_bps) for candidate, venue in ordered],
         block_context=context,

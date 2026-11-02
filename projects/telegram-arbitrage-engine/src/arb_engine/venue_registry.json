@@ -29,6 +29,34 @@
       "fee_source": "https://github.com/sushiswap/v2-core/blob/master/contracts/UniswapV2Pair.sol",
       "source_status": "source_documented_not_live_verified",
       "notes": "The Sushi V2 pair invariant applies a 3/1000 input deduction (30 bps). Verify factory, pair, and router on-chain at the pinned block before using."
+    },
+    {
+      "id": "pancakeswap_v2_bsc",
+      "name": "PancakeSwap V2",
+      "dexscreener_id": "pancakeswap",
+      "network": "bsc",
+      "chain_id": 56,
+      "factory": "0xcA143Ce32Fe78f1f7019d7d551a6402fC5350c73",
+      "router02": "0x10ED43C718714eb63d5aA57B78B54704E256024E",
+      "swap_fee_bps": 25,
+      "deployment_source": "https://bscscan.com/address/0xca143ce32fe78f1f7019d7d551a6402fc5350c73",
+      "fee_source": "https://blog.pancakeswap.finance/articles/introducing-pancake-swap-v3-a-more-efficient-and-user-friendly-dex-on-bnb-chain-and-ethereum",
+      "source_status": "source_documented_not_live_verified",
+      "notes": "BNB Smart Chain mainnet V2. Factory and router are documented/verified public contracts. V2 pool fee assumed 25 bps from PancakeSwap documentation; verify router/factory bindings and live pair at the requested block before use."
+    },
+    {
+      "id": "apeswap_v2_bsc",
+      "name": "ApeSwap V2",
+      "dexscreener_id": "apeswap",
+      "network": "bsc",
+      "chain_id": 56,
+      "factory": "0x0841BD0B734E4F5853f0dD8d7Ea041c241fb0Da6",
+      "router02": "0xcF0feBd3f17CEf5b47b0cD257aCf6025c5BFf3b7",
+      "swap_fee_bps": 20,
+      "deployment_source": "https://github.com/ApeSwapFinance/apeswap-banana-farm",
+      "fee_source": "https://www.fairyproof.com/doc/104.ApeSwapFinance-Audit-Report-102521.pdf",
+      "source_status": "source_documented_not_live_verified",
+      "notes": "BNB Smart Chain mainnet V2. Official ApeSwap repository lists factory/router deployments. 20 bps pool fee is documented in the cited audit; treat as an assumption until current fee configuration is verified on-chain."
     }
   ]
 }
