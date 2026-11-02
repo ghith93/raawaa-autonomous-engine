@@ -116,11 +116,12 @@ def scan_onchain_v2_candidates(
             continue
         try:
             venue = get_venue_by_dexscreener_id(candidate.dex, 1)
+            pair_address = _address(candidate.pair_address, "candidate pair address")
         except ValueError:
             continue
-        if candidate.pair_address in seen_pairs:
+        if pair_address in seen_pairs:
             continue
-        seen_pairs.add(candidate.pair_address)
+        seen_pairs.add(pair_address)
         filtered.append((candidate, venue))
 
     if len(filtered) > max_candidate_pairs:
