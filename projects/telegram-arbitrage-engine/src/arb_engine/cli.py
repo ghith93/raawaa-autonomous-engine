@@ -2,10 +2,12 @@ from __future__ import annotations
 
 import argparse
 import json
+import sqlite3
 from datetime import datetime, timezone
 from decimal import Decimal
 
 from .dexscreener import DexScreenerClient, MarketDataError
+from .flash_swap_cli import run_flash_swap_simulation
 from .fork_sim import AnvilForkSimulator, ForkSimulationError
 from .ledger import OpportunityLedger
 from .models import MarketQuote, Opportunity
@@ -111,6 +113,29 @@ def main() -> None:
     v2_parser.add_argument("--sell-router", help="optional V2 router contract for same-block getAmountsOut validation")
     v2_parser.add_argument("--buy-factory", help="expected V2 factory for the buy pair; verifies factory() and getPair()")
     v2_parser.add_argument("--sell-factory", help="expected V2 factory for the sell pair; verifies factory() and getPair()")
+    flash_parser = sub.add_parser(
+        "flash-swap-sim",
+        help="read-only V2 flash-swap reserve simulation with optional local paper-ledger capture",
+    )
+    flash_parser.add_argument("--source-pair", required=True)
+    flash_parser.add_argument("--source-venue", help="source-documented V2 venue ID")
+    flash_parser.add_argument("--source-fee-bps", type=int, help="required without --source-venue")
+    flash_parser.add_argument("--destination-pair", required=True)
+    flash_parser.add_argument("--destination-venue", help="source-documented V2 venue ID")
+    flash_parser.add_argument("--destination-fee-bps", type=int, help="required without --destination-venue")
+    flash_parser.add_argument("--borrow-token", required=True)
+    flash_parser.add_argument("--borrow-amount-raw", required=True, type=int)
+    flash_parser.add_argument("--rpc-url", default=DEFAULT_ETHEREUM_RPC)
+    flash_parser.add_argument("--chain-id", type=int, default=1)
+    flash_parser.add_argument("--gas-used", type=int, help="explicit gas-units scenario; include caller-estimated overhead")
+    flash_parser.add_argument("--gas-price-wei", type=int, help="explicit gas-price scenario in wei")
+    flash_parser.add_argument("--native-token", help="wrapped native token address used for gas valuation")
+    flash_parser.add_argument("--native-quote-pair", help="same-block V2 pair for native/repayment-token valuation")
+    flash_parser.add_argument("--native-quote-venue", help="source-documented V2 venue for the native quote pair")
+    flash_parser.add_argument("--native-quote-fee-bps", type=int, help="required with --native-quote-pair unless a venue is supplied")
+    flash_parser.add_argument("--record-paper", action="store_true", help="opt in to local append-only research event recording")
+    flash_parser.add_argument("--ledger", default="data/paper-trading.sqlite3")
+
     token_parser = sub.add_parser(
         "token-check", help="read-only contract-code and ERC-20 metadata preflight at one pinned block"
     )
@@ -337,6 +362,31 @@ def main() -> None:
             print(json.dumps(output, indent=2))
         except (RpcReadError, ValueError, ArithmeticError) as exc:
             parser.exit(2, f"v2-sim failed: {exc}\n")
+    elif args.command == "flash-swap-sim":
+        try:
+            result = run_flash_swap_simulation(
+                source_pair=args.source_pair,
+                source_venue=args.source_venue,
+                source_fee_bps=args.source_fee_bps,
+                destination_pair=args.destination_pair,
+                destination_venue=args.destination_venue,
+                destination_fee_bps=args.destination_fee_bps,
+                borrowed_token=args.borrow_token,
+                amount_borrowed_raw=args.borrow_amount_raw,
+                chain_id=args.chain_id,
+                rpc_url=args.rpc_url,
+                gas_used=args.gas_used,
+                gas_price_wei=args.gas_price_wei,
+                native_token=args.native_token,
+                native_quote_pair=args.native_quote_pair,
+                native_quote_venue=args.native_quote_venue,
+                native_quote_fee_bps=args.native_quote_fee_bps,
+                record_paper=args.record_paper,
+                ledger_path=args.ledger,
+            )
+            print(json.dumps(result, indent=2))
+        except (RpcReadError, ValueError, ArithmeticError, OSError, RuntimeError, sqlite3.Error) as exc:
+            parser.exit(2, f"flash-swap-sim failed: {exc}\n")
     elif args.command == "token-check":
         try:
             reader = EthereumV2PoolReader(args.rpc_url, expected_chain_id=args.chain_id)

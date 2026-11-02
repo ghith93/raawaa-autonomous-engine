@@ -14,6 +14,23 @@ Simulation-first spot-arbitrage research module, isolated inside the autonomous-
 - An optional local Anvil fork-call adapter accepts exact caller-supplied calldata and performs read-only eth_call/eth_estimateGas with optional callTracer output; it refuses non-loopback endpoints and never submits transactions. It simulates one call only, not an atomic two-venue arbitrage route.
 - A read-only EVM JSON-RPC adapter retrieves two V2 pool states and token decimals at one pinned block. The V2 constant-product calculator uses integer raw units and requires two distinct pools at the same block; it is reserve math only and excludes gas, transfer taxes, dynamic fees, reverts, MEV, and execution. Pool fee basis points can be supplied manually or selected from the source-documented Ethereum V2 registry. Registry entries remain unverified until the CLI confirms pair.factory(), factory.getPair(), and router.factory() at the pinned block; the fee model is still a documented assumption.
 
+## Read-only flash-swap simulation
+
+The `flash-swap-sim` command reads two V2 pools at one canonical block, models the opposite-token repayment invariant, and optionally applies a caller-supplied gas-used/gas-price scenario. It can optionally record local research events with `--record-paper`.
+
+Example (replace every placeholder with verified pair/token addresses):
+
+```bash
+python -m arb_engine.cli flash-swap-sim \
+  --source-pair 0x<SOURCE_PAIR> --source-fee-bps 30 \
+  --destination-pair 0x<DESTINATION_PAIR> --destination-fee-bps 30 \
+  --borrow-token 0x<BORROW_TOKEN> --borrow-amount-raw 1000000000000000000
+```
+
+To add a gas scenario in which the repayment token is USDC and gas is paid in WETH, also supply `--gas-used`, `--gas-price-wei`, `--native-token`, and a same-block `--native-quote-pair` with its fee or venue. Gas units must be a conservative caller estimate including the overhead the caller intends to model; the command does not claim to measure full transaction gas.
+
+Add `--record-paper` to append candidate/snapshot/route/gas events to the local `PaperTradingLedger`. Without this flag, no ledger file is written. The command never creates a paper order, wallet, signer, calldata, approval, or on-chain transaction. See [PAPER_TRADING_LEDGER.md](PAPER_TRADING_LEDGER.md).
+
 ## Paper-trading research ledger
 
 An isolated SQLite event ledger is available for provenance-linked research records. It is append-only, hash-chained, idempotent by caller-supplied event ID, and stores raw-unit economics as decimal strings. It is a storage primitive only: no order is created or submitted, and its records are not realized PnL. See [PAPER_TRADING_LEDGER.md](PAPER_TRADING_LEDGER.md).
