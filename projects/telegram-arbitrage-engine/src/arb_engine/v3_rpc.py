@@ -17,7 +17,10 @@ from .rpc import (
 )
 
 from .tick_bitmap import tick_bitmap_position
-from .v3_math import MAX_SQRT_RATIO, MIN_SQRT_RATIO, get_tick_at_sqrt_ratio
+from .v3_math import (
+    MAX_SQRT_RATIO, MIN_SQRT_RATIO, MIN_TICK,
+    get_sqrt_ratio_at_tick, get_tick_at_sqrt_ratio,
+)
 from .v3_simulator import V3PoolSnapshot, V3SnapshotError
 
 
