@@ -115,10 +115,10 @@ python -m arb_engine.cli v3-sim \
   --pool 0x<VERIFIED_V3_POOL_ADDRESS> \
   --direction token0_to_token1 \
   --amount-specified 1000000 \
-  --limit-tick <LOWER_TICK_THAN_CURRENT>
+  --limit-ticks 120
 ```
 
-Positive `--amount-specified` is exact input; negative is exact output. Values are raw token units. `amount_in_excluding_fee_raw` and `fee_amount_raw` are separate; gross input is their sum. Other chains require both `--rpc-url` and an explicitly trusted `--factory`. Bitmap-word, initialized-tick, step and RPC request bounds are configurable; missing state fails closed and step-limited results are explicitly incomplete.
+Positive `--amount-specified` is exact input; negative is exact output. Values are raw token units. `--limit-ticks` derives a lower/upper price boundary relative to current slot0.tick; use `--limit-tick` for an absolute boundary. `amount_in_excluding_fee_raw` and `fee_amount_raw` are separate; gross input is their sum. Other chains require both `--rpc-url` and an explicitly trusted `--factory`. Bitmap-word, initialized-tick, step and RPC request bounds are configurable; missing state fails closed and step-limited results are explicitly incomplete.
 
 This is a read-only pool simulation, not an arbitrage or net-profit result. It does not model gas, token transfer taxes, router behavior, MEV, inclusion, or transaction execution. No wallet, signing, transaction or trade method exists.
 
