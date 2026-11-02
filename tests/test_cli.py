@@ -192,6 +192,8 @@ class CliTests(unittest.TestCase):
             self.assertEqual(result["pending_reservations"][0]["task_id"], "task-test")
             self.assertEqual(result["pending_reservations"][0]["provider"], "groq")
             self.assertEqual(result["pending_reservations"][0]["estimated_cost_usd"], 0.05)
+            self.assertEqual(result["per_task_usage"][0]["task_id"], "task-test")
+            self.assertTrue(result["per_task_usage"][0]["over_budget"])
             self.assertTrue(result["budget_status"]["daily_over_budget"])
             self.assertIn("Do not release", result["reconciliation_note"])
             self.assertNotIn("gsk_", output.getvalue())
