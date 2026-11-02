@@ -6,7 +6,10 @@ import pytest
 
 from arb_engine.market_sources.binance import BinanceOrderBookSnapshot
 from arb_engine.market_sources.cross_venue import (
-    InstrumentMappingError, InstrumentRegistry, InstrumentSpec, compare_cex_spot_orderbooks,
+    InstrumentMappingError,
+    InstrumentRegistry,
+    InstrumentSpec,
+    compare_cex_spot_orderbooks,
 )
 from arb_engine.market_sources.okx import (
     OKXMarketDataError,
@@ -94,7 +97,7 @@ def test_fetch_instrument_preserves_suspended_state_and_rejects_identity_mismatc
         client.fetch_instrument(inst_id="BTC-USDT")
 
 
-def test_okx_instrument_metadata_builds_explicit_registry_and_skips_suspended_markets():
+def test_okx_metadata_registry_mapping_and_suspended_market_exclusion():
     client, _ = make_client([instrument_payload()])
     metadata = client.fetch_instrument(inst_id="BTC-USDT")
     registry = InstrumentRegistry.from_metadata(
@@ -134,6 +137,17 @@ def test_fetch_instrument_rejects_invalid_precision_and_currency_metadata():
         client.fetch_instrument(inst_id="BTC-USDT")
 
 
+def test_deprecated_orderbook_field_is_retained_without_semantic_interpretation():
+    # OKX documents the third field as deprecated and currently always zero.
+    # Keep it opaque if a response contains another value; do not label it as a metric.
+    payload = orderbook_payload(
+        bids=[["101.10", "1", "7", "2"], ["101.00", "2", "0", "1"]],
+    )
+    client, _ = make_client([payload])
+    book = client.fetch_orderbook(inst_id="BTC-USDT")
+    assert book.bid_deprecated_field_values == (7, 0)
+
+
 def test_fetch_orderbook_preserves_decimal_depth_sequence_and_order_counts():
     client, calls = make_client([orderbook_payload()])
     book = client.fetch_orderbook(inst_id="BTC-USDT", depth=2)
@@ -155,8 +169,6 @@ def test_fetch_orderbook_preserves_decimal_depth_sequence_and_order_counts():
     assert book.ask_deprecated_field_values == (0, 0)
     assert book.sequence == 3235851742
     assert book.exchange_timestamp_ms == 1793628000000
-    assert book.bid_deprecated_field_values == (0, 0)
-    assert book.ask_deprecated_field_values == (0, 0)
     assert book.fetched_at.tzinfo is not None
     parsed = urlsplit(calls[0][0])
     assert parsed.path == "/api/v5/market/books"
