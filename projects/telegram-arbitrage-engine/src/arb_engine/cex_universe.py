@@ -217,11 +217,20 @@ def scan_cex_universe(
                 fetched[request.venue_id] = (request, metadata, book)
             except CexUniverseScanError as exc:
                 failures[request.venue_id] = str(exc)[:120]
+            except ValueError:
+                failures[request.venue_id] = "invalid_instrument"
             except Exception:
                 # Never expose raw provider response text, URLs, or credentials.
                 failures[request.venue_id] = "provider_request_failed"
 
     venue_ids = tuple(sorted(fetched))
+    if venue_ids:
+        required_quote_code = fetched[venue_ids[0]][1].quote_asset_code
+        for venue in tuple(venue_ids):
+            if fetched[venue][1].quote_asset_code != required_quote_code:
+                failures[venue] = "quote_asset_code_mismatch"
+                del fetched[venue]
+        venue_ids = tuple(sorted(fetched))
     if len(fetched) < 2:
         return {
             "mode": "read_only_cex_spot_universe_scan",
