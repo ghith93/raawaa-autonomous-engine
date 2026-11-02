@@ -57,7 +57,20 @@ jobs:
       - name: Install isolated package
         run: python -m pip install --disable-pip-version-check --no-deps -e .
       - name: Verify source-documented Ethereum V2 deployments (read-only)
-        run: arb-engine venue-check --chain-id 1 --rpc-url https://ethereum-rpc.publicnode.com --timeout-seconds 8
+        run: |
+          set -euo pipefail
+          verified=0
+          for endpoint in https://ethereum-rpc.publicnode.com https://eth.nodely.dev https://ethereum.publicnode.com; do
+            echo "Trying read-only Ethereum RPC provider: $endpoint"
+            if arb-engine venue-check --chain-id 1 --rpc-url "$endpoint" --timeout-seconds 8; then
+              verified=1
+              break
+            fi
+          done
+          if [ "$verified" -ne 1 ]; then
+            echo "All configured Ethereum RPC providers failed the read-only venue check"
+            exit 1
+          fi
       - name: Verify live WETH-USDC cross-venue scanner (read-only)
         env:
           WETH_MAINNET: "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2"
