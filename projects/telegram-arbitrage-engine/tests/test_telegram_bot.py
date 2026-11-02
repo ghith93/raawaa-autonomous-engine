@@ -1,6 +1,6 @@
 import pytest
 
-from arb_engine.telegram_bot import TelegramController
+from arb_engine.telegram_bot import TelegramBotAPI, TelegramApiError, TelegramController
 
 
 class FakeAPI:
@@ -60,8 +60,10 @@ def test_empty_allowlist_fails_closed():
 
 def test_rate_limit_is_per_chat():
     controller = TelegramController(FakeAPI([]), frozenset({123}), min_request_interval_seconds=60)
-    first = controller.response_for_update(message_update(text="/help"))
-    second = controller.response_for_update(message_update(update_id=2, text="/status"))
+    from unittest.mock import patch
+    with patch("arb_engine.telegram_bot.time.monotonic", side_effect=[0.0, 1.0]):
+        first = controller.response_for_update(message_update(text="/help"))
+        second = controller.response_for_update(message_update(update_id=2, text="/status"))
     assert first is not None and "read-only research mode" in first[1]
     assert second is not None and "Rate limit" in second[1]
 
@@ -71,3 +73,18 @@ def test_bot_rejects_boolean_sender_id():
     update = message_update(chat_id=1)
     update["message"]["from"]["id"] = True
     assert controller.response_for_update(update) is None
+
+
+def test_telegram_api_errors_never_expose_bot_token_or_request_url(monkeypatch):
+    from urllib.error import HTTPError
+
+    token = "123456:secret-token-value"
+    def reject(request, timeout):
+        raise HTTPError(request.full_url, 401, "unauthorized", {}, None)
+
+    monkeypatch.setattr("arb_engine.telegram_bot.urlopen", reject)
+    api = TelegramBotAPI(token)
+    with pytest.raises(TelegramApiError) as captured:
+        api.call("getMe", {})
+    assert token not in str(captured.value)
+    assert captured.value.__cause__ is None
