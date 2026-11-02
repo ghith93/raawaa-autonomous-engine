@@ -11,6 +11,7 @@ from .flash_swap_cli import run_flash_swap_simulation
 from .fork_sim import AnvilForkSimulator, ForkSimulationError
 from .ledger import OpportunityLedger
 from .models import MarketQuote, Opportunity
+from .onchain_discovery import scan_onchain_v2
 from .risk import validate_opportunity
 from .rpc import DEFAULT_ETHEREUM_RPC, EthereumV2PoolReader, RpcReadError
 from .scanner import find_spreads
@@ -159,6 +160,16 @@ def main() -> None:
     scan_parser.add_argument("--min-liquidity", default="10000")
     scan_parser.add_argument("--min-volume", default="1000")
     scan_parser.add_argument("--ledger", default="data/opportunities.sqlite3")
+    discover_parser = sub.add_parser(
+        "v2-discover",
+        help="discover Ethereum V2 pairs then verify same-block router quotes read-only",
+    )
+    discover_parser.add_argument("query", help="DEX Screener discovery query")
+    discover_parser.add_argument("--quote-token", required=True, help="exact quote-token contract address")
+    discover_parser.add_argument("--capital-quote", required=True, help="human quote-token amount, e.g. 50")
+    discover_parser.add_argument("--min-liquidity", default="10000")
+    discover_parser.add_argument("--max-candidates", type=int, default=5)
+    discover_parser.add_argument("--rpc-url", default=DEFAULT_ETHEREUM_RPC)
     args = parser.parse_args()
     if args.command in (None, "demo"):
         print(json.dumps(demo(), indent=2))
@@ -444,6 +455,19 @@ def main() -> None:
         except (MarketDataError, ValueError) as exc:
             parser.exit(2, f"scan failed: {exc}\n")
         print(json.dumps(result, indent=2))
+    elif args.command == "v2-discover":
+        try:
+            result = scan_onchain_v2(
+                args.query,
+                quote_token=args.quote_token,
+                capital_quote=Decimal(args.capital_quote),
+                min_liquidity_usd=Decimal(args.min_liquidity),
+                max_candidates=args.max_candidates,
+                rpc_url=args.rpc_url,
+            )
+            print(json.dumps(result, indent=2))
+        except (MarketDataError, RpcReadError, ValueError, ArithmeticError) as exc:
+            parser.exit(2, f"v2-discover failed: {exc}\\n")
 
 
 if __name__ == "__main__":
