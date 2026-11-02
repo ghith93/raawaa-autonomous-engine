@@ -145,3 +145,38 @@ def test_fork_simulation_validates_calldata_addresses_and_gas():
         simulator.simulate_call(
             expected_chain_id=1, fork_block=100, to=TO, data="0x12345678", gas_limit=1,
         )
+
+
+def test_fork_simulation_rejects_estimate_above_supplied_gas_limit(monkeypatch):
+    simulator = AnvilForkSimulator()
+
+    def fake(method, params):
+        if method == "web3_clientVersion":
+            return "anvil/v1"
+        if method == "eth_chainId":
+            return "0x1"
+        if method == "eth_blockNumber":
+            return "0x64"
+        if method == "eth_getBlockByNumber":
+            return {"hash": HASH}
+        if method == "eth_call":
+            return "0x"
+        if method == "eth_estimateGas":
+            return "0x10000"
+        raise AssertionError(method)
+
+    monkeypatch.setattr(simulator, "_rpc", fake)
+    with pytest.raises(ForkSimulationError, match="exceeds the caller-supplied"):
+        simulator.simulate_call(
+            expected_chain_id=1, fork_block=100, to=TO,
+            data="0x12345678", gas_limit=30_000,
+            include_trace=False,
+        )
+
+
+def test_fork_simulation_rpc_allowlist_excludes_state_changes():
+    simulator = AnvilForkSimulator()
+    with pytest.raises(ForkSimulationError, match="not permitted"):
+        simulator._rpc("eth_sendTransaction", [])
+    with pytest.raises(ForkSimulationError, match="not permitted"):
+        simulator._rpc("anvil_impersonateAccount", [])
