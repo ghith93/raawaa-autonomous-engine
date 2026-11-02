@@ -10,6 +10,7 @@ from __future__ import annotations
 from decimal import Decimal
 import json
 import os
+import re
 from urllib.parse import urlsplit
 
 from arb_engine.rpc import DEFAULT_ETHEREUM_RPC, RpcReadError
@@ -52,6 +53,14 @@ def is_retryable_transport_error(exc: RpcReadError) -> bool:
     return False
 
 
+def _has_valid_runtime_bytecode(code: object) -> bool:
+    return (
+        isinstance(code, str)
+        and re.fullmatch(r"0x(?:[0-9a-fA-F]{2})+", code) is not None
+        and len(code) <= 250_002
+    )
+
+
 def run_endpoint(endpoint: str) -> dict[str, object]:
     reader = EvmV3PoolReader(
         endpoint,
@@ -88,8 +97,8 @@ def run_endpoint(endpoint: str) -> dict[str, object]:
     block_tag = hex(snapshot.block_number)
     for token, label in ((USDC, "USDC"), (WETH, "WETH")):
         code = reader._rpc("eth_getCode", [token, block_tag])
-        if not isinstance(code, str) or not code.startswith("0x") or len(code) <= 2:
-            raise RuntimeError(f"{label} token contract has no runtime bytecode at the pinned block")
+        if not _has_valid_runtime_bytecode(code):
+            raise RuntimeError(f"{label} token contract has invalid or oversized runtime bytecode at the pinned block")
     usdc_decimals = reader._eth_call_uint(USDC, "0x313ce567", block_tag, "USDC decimals")
     weth_decimals = reader._eth_call_uint(WETH, "0x313ce567", block_tag, "WETH decimals")
     if (usdc_decimals, weth_decimals) != (6, 18):
