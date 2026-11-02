@@ -162,3 +162,23 @@ def test_http_429_defers_shared_limiter_and_does_not_retry_automatically():
         api.fetch_funding_history(symbol="BTCUSDT")
     api.fetch_funding_history(symbol="BTCUSDT")
     assert sleeps == [9.0]
+
+
+
+def test_bybit_json_rate_limit_code_defers_without_retry():
+    now = [0.0]
+    sleeps = []
+
+    def sleep(seconds):
+        sleeps.append(seconds)
+        now[0] += seconds
+
+    limiter = _RateLimiter(clock=lambda: now[0], sleeper=sleep)
+    api, _ = client("bybit", [
+        {"retCode": 10006, "retMsg": "Too many visits", "result": {}},
+        {"retCode": 0, "result": {"category": "linear", "list": []}},
+    ], rate_limiter=limiter)
+    with pytest.raises(FundingRateLimited):
+        api.fetch_funding_history(symbol="BTCUSDT")
+    api.fetch_funding_history(symbol="BTCUSDT")
+    assert sleeps == [2.0]
