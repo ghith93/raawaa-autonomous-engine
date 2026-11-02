@@ -19,9 +19,13 @@ def test_live_v3_smoke_script_parses_and_contains_no_transaction_submission() ->
     assert "re.fullmatch" in source
     assert "250_002" in source
     assert "RpcTransportError" in source
-    assert '"https://eth.nodely.dev"' in source
+    assert "DEFAULT_V3_ETHEREUM_RPC" in source
+    assert '"https://eth.drpc.org"' in source
+    assert '"https://public.1rpc.io/eth"' in source
     assert "MAX_TOTAL_RPC_REQUESTS = 512" in source
     assert "remaining_budget = MAX_TOTAL_RPC_REQUESTS - requests_used" in source
+    assert "DEFAULT_V3_ETHEREUM_RPC" in source
+    assert "min_request_interval=0.55" in source
     assert "rpc_endpoint" in source
 
 def test_v3_cli_help_exposes_absolute_and_relative_tick_limits(monkeypatch, capsys) -> None:
@@ -74,9 +78,10 @@ def test_live_smoke_retries_next_provider_with_one_shared_request_budget(monkeyp
             attempts.append(self)
 
     def fake_run(reader):
-        if reader.endpoint == module.RPC_ENDPOINTS[0]:
+        if reader.endpoint in module.RPC_ENDPOINTS[:3]:
             reader.rpc_request_count = 3
-            raise RpcTransportError("EVM RPC HTTP error: 403")
+            status = 403 if reader.endpoint == module.RPC_ENDPOINTS[0] else 429
+            raise RpcTransportError(f"EVM RPC HTTP error: {status}")
         reader.rpc_request_count = 7
         return {"status": "success", "rpc_requests_used": 0}
 
@@ -85,9 +90,8 @@ def test_live_smoke_retries_next_provider_with_one_shared_request_budget(monkeyp
     module.main()
 
     assert [attempt.endpoint for attempt in attempts] == list(module.RPC_ENDPOINTS)
-    assert attempts[0].max_rpc_requests == module.MAX_TOTAL_RPC_REQUESTS
-    assert attempts[1].max_rpc_requests == module.MAX_TOTAL_RPC_REQUESTS - 3
+    assert [attempt.max_rpc_requests for attempt in attempts] == [512, 509, 506, 503]
     output = __import__("json").loads(capsys.readouterr().out)
-    assert output["rpc_endpoint"] == module.RPC_ENDPOINTS[1]
-    assert output["rpc_requests_used"] == 10
+    assert output["rpc_endpoint"] == module.RPC_ENDPOINTS[3]
+    assert output["rpc_requests_used"] == 16
     assert output["rpc_requests_budget"] == module.MAX_TOTAL_RPC_REQUESTS
