@@ -53,6 +53,87 @@ function dbMock() {
   };
 }
 
+function usageDbMock(reservationId = 17) {
+  const DB = dbMock();
+  const originalPrepare = DB.prepare.bind(DB);
+  DB.prepare = (sql) => {
+    const statement = originalPrepare(sql);
+    if (sql.includes("INSERT INTO model_usage_reservations")) {
+      statement.first = async () => {
+        DB.calls.push({ kind: "first", sql, values: statement.values });
+        return { id: reservationId };
+      };
+    }
+    return statement;
+  };
+  return DB;
+}
+
+test("monetary usage endpoint is authenticated and reports zeroed spend", async () => {
+  const DB = dbMock();
+  const response = await worker.fetch(request("/v1/usage"), { DB, ENGINE_API_TOKEN: TOKEN });
+  assert.equal(response.status, 200);
+  const result = await response.json();
+  assert.equal(result.daily_actual_nanos, 0);
+  assert.equal(result.monthly_actual_nanos, 0);
+  assert.equal(result.pending_nanos, 0);
+  assert.equal(result.pending_count, 0);
+  assert.ok(DB.calls.some(x => x.sql.includes("SUM(cost_nanos)")));
+});
+
+test("monetary usage endpoint rejects unauthenticated callers", async () => {
+  const response = await worker.fetch(request("/v1/usage", { token: null }), { DB: dbMock(), ENGINE_API_TOKEN: TOKEN });
+  assert.equal(response.status, 401);
+});
+
+test("monetary usage reservation is atomic, task-attributed, and policy-bounded", async () => {
+  const DB = usageDbMock(23);
+  const response = await worker.fetch(request("/v1/usage", {
+    method: "POST",
+    body: {
+      action: "reserve", provider: "groq", model: "openai/gpt-oss-20b",
+      task_kind: "research", task_id: "task-1",
+      estimated_cost_nanos: 0, daily_budget_nanos: 0,
+      monthly_budget_nanos: 0, per_task_budget_nanos: 0,
+    },
+  }), { DB, ENGINE_API_TOKEN: TOKEN });
+  assert.equal(response.status, 201);
+  assert.deepEqual(await response.json(), { reservation_id: 23 });
+  const query = DB.calls.find(x => x.sql.includes("INSERT INTO model_usage_reservations"));
+  assert.match(query.sql, /SUM\(cost_nanos\)/);
+  assert.match(query.sql, /SUM\(estimated_cost_nanos\)/);
+  assert.match(query.sql, /RETURNING id/);
+  assert.equal(query.values[3], "task-1");
+});
+
+test("monetary usage reservation rejects missing task identity for a per-task cap", async () => {
+  const DB = dbMock();
+  const response = await worker.fetch(request("/v1/usage", {
+    method: "POST",
+    body: {
+      action: "reserve", provider: "groq", model: "model", task_kind: "research",
+      task_id: null, estimated_cost_nanos: 0, daily_budget_nanos: 0,
+      monthly_budget_nanos: 0, per_task_budget_nanos: 1,
+    },
+  }), { DB, ENGINE_API_TOKEN: TOKEN });
+  assert.equal(response.status, 400);
+  assert.deepEqual(await response.json(), { error: "task_id_required" });
+  assert.equal(DB.calls.length, 0);
+});
+
+test("monetary usage reservation fails closed when the atomic budget insert returns no row", async () => {
+  const response = await worker.fetch(request("/v1/usage", {
+    method: "POST",
+    body: {
+      action: "reserve", provider: "groq", model: "model", task_kind: "research",
+      task_id: "task-1", estimated_cost_nanos: 1, daily_budget_nanos: 0,
+      monthly_budget_nanos: 0, per_task_budget_nanos: 0,
+    },
+  }), { DB: dbMock(), ENGINE_API_TOKEN: TOKEN });
+  assert.equal(response.status, 409);
+  assert.deepEqual(await response.json(), { error: "budget_exceeded" });
+});
+
 test("health is read-only and does not require a token", async () => {
   const DB = dbMock();
   const response = await worker.fetch(request("/health", { token: null }), { DB });
