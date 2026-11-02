@@ -36,6 +36,7 @@ class D1QuotaLedgerTests(unittest.TestCase):
         request = open_url.call_args.args[0]
         self.assertEqual(request.full_url, "https://engine.example/v1/quota")
         self.assertEqual(request.get_header("Authorization"), "Bearer test-token")
+        self.assertEqual(request.get_header("User-agent"), "RaawaaAutonomousEngine/1.0")
         payload = json.loads(request.data)
         self.assertEqual(payload["action"], "reserve")
         self.assertEqual(payload["task_id"], "task-1")
@@ -53,7 +54,6 @@ class D1QuotaLedgerTests(unittest.TestCase):
 
     @patch("urllib.request.urlopen")
     def test_worker_conflict_fails_closed(self, open_url):
-        open_url.return_value = Response({"error": "settlement_conflict"}, status=409)
         from urllib.error import HTTPError
         open_url.side_effect = HTTPError(
             "https://engine.example/v1/quota", 409, "conflict", {}, None
