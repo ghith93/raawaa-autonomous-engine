@@ -54,6 +54,7 @@ def test_binance_usdm_history_preserves_signed_decimal_mark_and_adjusted_interva
     assert item.funding_time_ms == 1793620800000
     assert item.mark_price == Decimal("101234.56789012")
     assert item.funding_interval_hours == 4
+    assert item.funding_interval_source == "current_instrument_metadata"
     assert item.rate_type == "Regular"
     assert item.fetched_at.tzinfo is not None
     assert urlsplit(calls[0][0]).hostname == "fapi.binance.com"
@@ -70,6 +71,7 @@ def test_binance_unknown_interval_is_not_filled_with_an_assumed_default():
     api, _ = client("binance", [history, []])
     row = api.fetch_funding_history(symbol="ETHUSDT")[0]
     assert row.funding_interval_hours is None
+    assert row.funding_interval_source is None
 
 
 @pytest.mark.parametrize("category", ["linear", "inverse"])
@@ -105,6 +107,7 @@ def test_bybit_funding_history_normalizes_category_and_settlement_timestamp(cate
     assert rows[0].funding_time_ms == 1793620800000
     assert rows[0].mark_price is None
     assert rows[0].funding_interval_hours == 8
+    assert rows[0].funding_interval_source == "current_instrument_metadata"
     assert parse_qs(urlsplit(calls[0][0]).query) == {
         "category": [category], "symbol": ["BTCUSDT"], "limit": ["20"],
     }
