@@ -101,7 +101,8 @@ def observe_flash_swap_outcome(
     source_fee = _integer(route.get("source_fee_bps"), "source_fee_bps")
     destination_fee = _integer(route.get("destination_fee_bps"), "destination_fee_bps")
     amount_borrowed = _integer(route.get("amount_borrowed_raw"), "amount_borrowed_raw", minimum=1)
-    if route.get("borrowed_token", "").casefold() != borrowed_token.casefold():
+    route_borrowed_token = route.get("borrowed_token")
+    if not isinstance(route_borrowed_token, str) or route_borrowed_token.casefold() != borrowed_token.casefold():
         raise ValueError("Candidate borrowed-token metadata does not match its route event")
 
     chain_id = _integer(captured.get("chain_id"), "candidate chain_id", minimum=1)
@@ -173,20 +174,17 @@ def observe_flash_swap_outcome(
         native_quote_snapshot = snapshots[2] if len(snapshots) == 3 else None
         if native_token.casefold() != simulation.repayment_token.casefold() and native_quote_snapshot is None:
             raise ValueError("Candidate is missing the native/repayment-token quote pool")
-        profit_decimals = (
-            observed.token0_decimals if simulation.repayment_token.casefold() == observed_state.token0.casefold()
-            else observed.token1_decimals
-        )
-        native_decimals = (
-            observed.token0_decimals if native_token.casefold() == observed_state.token0.casefold()
-            else observed.token1_decimals if native_token.casefold() == observed_state.token1.casefold()
-            else (
-                native_quote_snapshot.token0_decimals
-                if native_quote_snapshot.state.token0.casefold() == native_token.casefold()
-                else native_quote_snapshot.token1_decimals
-            ) if native_quote_snapshot is not None
-            else profit_decimals
-        )
+        decimals_by_token = {
+            item.state.token0.casefold(): item.token0_decimals
+            for item in snapshots
+        } | {
+            item.state.token1.casefold(): item.token1_decimals
+            for item in snapshots
+        }
+        profit_decimals = decimals_by_token.get(simulation.repayment_token.casefold())
+        native_decimals = decimals_by_token.get(native_token.casefold())
+        if profit_decimals is None or native_decimals is None:
+            raise ValueError("Forward snapshot is missing token-decimal metadata")
         economics = estimate_flash_swap_economics(
             simulation,
             gas_used=gas_used,
