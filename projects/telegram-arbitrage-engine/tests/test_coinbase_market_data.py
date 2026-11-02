@@ -173,6 +173,8 @@ def test_fetch_orderbook_rejects_bad_sequence_levels_order_and_product_id():
         client.fetch_orderbook(product_id="BTC-USDT")
 
     client, calls = make_client([book_payload()])
+    with pytest.raises(ValueError, match="level 3"):
+        client.fetch_orderbook(product_id="BTC-USDT", level=3)
     with pytest.raises(ValueError, match="BASE-QUOTE"):
         client.fetch_orderbook(product_id="BTC/USDT")
     assert calls == []
