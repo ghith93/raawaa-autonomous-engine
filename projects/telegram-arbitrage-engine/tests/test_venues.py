@@ -125,3 +125,19 @@ def test_dexscreener_ids_resolve_only_to_registered_ethereum_v2_venues():
     assert get_venue_by_dexscreener_id("sushiswap", 1).id == "sushiswap_v2_ethereum"
     with pytest.raises(ValueError, match="No unique registered V2 venue"):
         get_venue_by_dexscreener_id("unknown-dex", 1)
+
+
+def test_bsc_pancakeswap_and_apeswap_v2_registry_entries_are_source_documented():
+    from arb_engine.venues import list_venues
+
+    venues = {venue.id: venue for venue in list_venues(56)}
+    assert set(venues) == {"pancakeswap_v2_bsc", "apeswap_v2_bsc"}
+    pancake = venues["pancakeswap_v2_bsc"]
+    ape = venues["apeswap_v2_bsc"]
+    assert pancake.network == "bsc"
+    assert pancake.dexscreener_id == "pancakeswap"
+    assert pancake.swap_fee_bps == 25
+    assert ape.network == "bsc"
+    assert ape.dexscreener_id == "apeswap"
+    assert ape.swap_fee_bps == 20
+    assert all(v.source_status == "source_documented_not_live_verified" for v in venues.values())
