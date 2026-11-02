@@ -91,6 +91,13 @@ def _normalize_raw_fields(event: dict[str, Any]) -> None:
         event[name] = text
 
 
+class _RejectRedirects(urllib.request.HTTPRedirectHandler):
+    """Never forward bearer or Cloudflare Access credentials to a redirect target."""
+
+    def redirect_request(self, request, file_pointer, code, message, headers, new_url):
+        return None
+
+
 class D1PaperTradingLedger:
     def __init__(self, base_url: str | None = None, token: str | None = None, timeout: int = 15):
         self.base_url = (base_url or os.getenv("RAAWAA_ENGINE_API_URL", "")).rstrip("/")
@@ -127,7 +134,8 @@ class D1PaperTradingLedger:
             headers["Content-Type"] = "application/json"
         request = urllib.request.Request(self.base_url + path, data=data, headers=headers, method=method)
         try:
-            with urllib.request.urlopen(request, timeout=self.timeout) as response:
+            opener = urllib.request.build_opener(_RejectRedirects())
+            with opener.open(request, timeout=self.timeout) as response:
                 result = json.loads(response.read().decode("utf-8"))
         except urllib.error.HTTPError as exc:
             raise D1PaperLedgerError(f"paper ledger Worker returned HTTP {exc.code}") from None
