@@ -18,6 +18,23 @@
 - Public/free availability is not an SLA, and rate limits or service terms may change.
 - No key, wallet, signer, transaction submission, or paid access is required by the current code.
 
+## Source-documented V2 venue registry
+
+The packaged registry currently contains Ethereum mainnet only:
+
+| Venue | Factory | Router02 | Swap fee assumption |
+|---|---|---|---:|
+| Uniswap V2 | `0x5C69bEe701ef814a2B6a3EDD4B1652CB9cc5aA6f` | `0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D` | 30 bps |
+| SushiSwap V2 | `0xC0AEe478e3658e2610c5F7A4A2E1777cE9e4f2Ac` | `0xd9e1cE17f2641f24aE83637ab66a2cca9C378B9F` | 30 bps |
+
+- Uniswap deployment source: https://developers.uniswap.org/docs/protocols/v2/deployments
+- Uniswap fee source: https://developers.uniswap.org/docs/get-started/concepts/fees (0.30% total V2 swap fee; protocol fee affects distribution, not the total trader fee).
+- SushiSwap deployment source: https://github.com/sushiswap/v2-core/tree/master/deployments/ethereum
+- SushiSwap fee source: https://github.com/sushiswap/v2-core/blob/master/contracts/UniswapV2Pair.sol (pair invariant deducts 3/1000 from input).
+- Registry status is `source_documented_not_live_verified`. Selecting a venue auto-fills its fee, factory, and Router02, then the CLI verifies `pair.factory()`, `factory.getPair(token0,token1)`, and `router.factory()` via `eth_call` at the pinned block.
+- These checks establish contract relationships at the selected block; they do not prove proxy implementation safety, actual token transfer behavior, gas cost, atomic route success, or profitability. Fee assumptions remain explicitly sourced assumptions until separately validated against the actual pair implementation.
+- Only Ethereum mainnet (chain ID 1) is currently registered. Other networks must continue to use explicit manual addresses and fee assumptions until separately researched and verified.
+
 ## V2 reserve-math simulator
 
 - The simulator consumes explicit pool reserves, fee basis points, token addresses, and matching block number/hash.

@@ -13,6 +13,7 @@ from .risk import validate_opportunity
 from .rpc import DEFAULT_ETHEREUM_RPC, EthereumV2PoolReader, RpcReadError
 from .scanner import find_spreads
 from .v2 import simulate_round_trip
+from .venues import list_venues, resolve_venue_config
 
 
 def demo() -> dict:
@@ -75,11 +76,15 @@ def main() -> None:
     report_parser = sub.add_parser("report", help="summarize repeated indicative observations from the local ledger")
     report_parser.add_argument("--ledger", default="data/opportunities.sqlite3")
     report_parser.add_argument("--limit", type=int, default=500)
+    venues_parser = sub.add_parser("venues", help="list source-documented V2 venue deployments")
+    venues_parser.add_argument("--chain-id", type=int, help="filter by EVM chain ID")
     v2_parser = sub.add_parser("v2-sim", help="read-only same-block Ethereum V2 reserve simulation")
     v2_parser.add_argument("--buy-pair", required=True)
-    v2_parser.add_argument("--buy-fee-bps", required=True, type=int)
+    v2_parser.add_argument("--buy-venue", help="known source-documented venue ID; auto-fills fee/factory/router")
+    v2_parser.add_argument("--buy-fee-bps", type=int, help="required when --buy-venue is not supplied")
     v2_parser.add_argument("--sell-pair", required=True)
-    v2_parser.add_argument("--sell-fee-bps", required=True, type=int)
+    v2_parser.add_argument("--sell-venue", help="known source-documented venue ID; auto-fills fee/factory/router")
+    v2_parser.add_argument("--sell-fee-bps", type=int, help="required when --sell-venue is not supplied")
     v2_parser.add_argument("--quote-token", required=True)
     v2_parser.add_argument("--base-token", required=True)
     v2_parser.add_argument("--capital-quote", required=True, help="human quote-token amount, e.g. 50")
@@ -139,8 +144,28 @@ def main() -> None:
             }, indent=2))
         except (ValueError, ArithmeticError) as exc:
             parser.exit(2, f"report failed: {exc}\n")
+    elif args.command == "venues":
+        try:
+            print(json.dumps({
+                "mode": "read_only_source_documented_venue_registry",
+                "chain_id_filter": args.chain_id,
+                "live_verified": False,
+                "venues": [venue.public_dict() for venue in list_venues(args.chain_id)],
+                "warning": (
+                    "Registry entries are sourced from protocol documentation/source code, not live-verified. "
+                    "v2-sim must verify pair.factory(), factory.getPair(), and router.factory() at the pinned block."
+                ),
+            }, indent=2))
+        except (ValueError, OSError, json.JSONDecodeError) as exc:
+            parser.exit(2, f"venue registry failed: {exc}\n")
     elif args.command == "v2-sim":
         try:
+            args.buy_fee_bps, args.buy_factory, args.buy_router, buy_venue = resolve_venue_config(
+                args.buy_venue, args.chain_id, args.buy_fee_bps, args.buy_factory, args.buy_router,
+            )
+            args.sell_fee_bps, args.sell_factory, args.sell_router, sell_venue = resolve_venue_config(
+                args.sell_venue, args.chain_id, args.sell_fee_bps, args.sell_factory, args.sell_router,
+            )
             if bool(args.buy_router) != bool(args.sell_router):
                 raise ValueError("Supply both --buy-router and --sell-router, or neither")
             if bool(args.buy_factory) != bool(args.sell_factory):
@@ -211,6 +236,14 @@ def main() -> None:
                 "sell_seconds_since_last_reserve_update": sell_snapshot.seconds_since_last_reserve_update,
                 "buy_pool_fee_bps_assumed": buy_snapshot.state.fee_bps,
                 "sell_pool_fee_bps_assumed": sell_snapshot.state.fee_bps,
+                "buy_venue_registry_id": buy_venue.id if buy_venue else None,
+                "sell_venue_registry_id": sell_venue.id if sell_venue else None,
+                "buy_venue_registry_status": buy_venue.source_status if buy_venue else "manual_assumption",
+                "sell_venue_registry_status": sell_venue.source_status if sell_venue else "manual_assumption",
+                "buy_deployment_source": buy_venue.deployment_source if buy_venue else None,
+                "sell_deployment_source": sell_venue.deployment_source if sell_venue else None,
+                "buy_fee_source": buy_venue.fee_source if buy_venue else "user_supplied_fee_bps",
+                "sell_fee_source": sell_venue.fee_source if sell_venue else "user_supplied_fee_bps",
                 "capital_quote": human(result.capital_quote_raw, quote_decimals),
                 "bought_base": human(result.buy.amount_out_raw, base_decimals),
                 "final_quote": human(result.final_quote_raw, quote_decimals),

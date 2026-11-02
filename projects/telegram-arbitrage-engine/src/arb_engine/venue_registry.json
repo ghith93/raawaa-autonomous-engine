@@ -1,0 +1,32 @@
+{
+  "schema_version": 1,
+  "description": "Source-documented Ethereum V2 deployments. Addresses and fee assumptions are not treated as live verified until v2-sim confirms pair.factory(), factory.getPair(), and router.factory() at the pinned block.",
+  "venues": [
+    {
+      "id": "uniswap_v2_ethereum",
+      "name": "Uniswap V2",
+      "network": "ethereum",
+      "chain_id": 1,
+      "factory": "0x5C69bEe701ef814a2B6a3EDD4B1652CB9cc5aA6f",
+      "router02": "0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D",
+      "swap_fee_bps": 30,
+      "deployment_source": "https://developers.uniswap.org/docs/protocols/v2/deployments",
+      "fee_source": "https://developers.uniswap.org/docs/get-started/concepts/fees",
+      "source_status": "source_documented_not_live_verified",
+      "notes": "The total V2 swap fee is 0.30% (30 bps). The current protocol-fee split changes how that fee is distributed, not the total trader swap fee. Verify factory, pair, and router on-chain at the pinned block before using."
+    },
+    {
+      "id": "sushiswap_v2_ethereum",
+      "name": "SushiSwap V2",
+      "network": "ethereum",
+      "chain_id": 1,
+      "factory": "0xC0AEe478e3658e2610c5F7A4A2E1777cE9e4f2Ac",
+      "router02": "0xd9e1cE17f2641f24aE83637ab66a2cca9C378B9F",
+      "swap_fee_bps": 30,
+      "deployment_source": "https://github.com/sushiswap/v2-core/tree/master/deployments/ethereum",
+      "fee_source": "https://github.com/sushiswap/v2-core/blob/master/contracts/UniswapV2Pair.sol",
+      "source_status": "source_documented_not_live_verified",
+      "notes": "The Sushi V2 pair invariant applies a 3/1000 input deduction (30 bps). Verify factory, pair, and router on-chain at the pinned block before using."
+    }
+  ]
+}

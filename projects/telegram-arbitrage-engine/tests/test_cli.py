@@ -275,3 +275,65 @@ def test_token_check_cli_reports_metadata_preflight_without_claiming_safety(monk
     assert result["symbol"] == "TKN"
     assert result["transfer_tax_or_blacklist_checks"] == "not_performed"
     assert result["live_execution"] is False
+
+
+def test_v2_sim_cli_registry_auto_fills_and_verifies_both_venues(monkeypatch, capsys):
+    from arb_engine.venues import get_venue
+
+    buy_venue = get_venue("uniswap_v2_ethereum", 1)
+    sell_venue = get_venue("sushiswap_v2_ethereum", 1)
+
+    class FakeReader:
+        def __init__(self, endpoint, expected_chain_id=1):
+            assert expected_chain_id == 1
+
+        def read_pools(self, pools):
+            assert pools == [(POOL_A, 30), (POOL_B, 30)]
+            return [
+                snapshot(POOL_A, 1_000_000_000_000, 10**24, 30),
+                snapshot(POOL_B, 1_000_000_000_000, 10**24, 30),
+            ]
+
+        def verify_v2_pool_factory(self, pair, factory, token0, token1, block):
+            assert (pair, block) in {(POOL_A, 123), (POOL_B, 123)}
+            assert factory in {buy_venue.factory, sell_venue.factory}
+
+        def verify_v2_router_factory(self, router, factory, block):
+            assert block == 123
+            assert (router, factory) in {
+                (buy_venue.router02, buy_venue.factory),
+                (sell_venue.router02, sell_venue.factory),
+            }
+
+        def quote_v2_router_exact_input(self, router, amount_in, path, block):
+            assert block == 123
+            if path == [QUOTE, BASE]:
+                assert router == buy_venue.router02
+                return [amount_in, 2 * 10**18]
+            assert path == [BASE, QUOTE]
+            assert router == sell_venue.router02
+            return [amount_in, 52_000_000]
+
+        def verify_canonical_block(self, block, block_hash):
+            assert block == 123
+            assert block_hash == HASH
+
+    monkeypatch.setattr(cli, "EthereumV2PoolReader", FakeReader)
+    monkeypatch.setattr(sys, "argv", [
+        "arb-engine", "v2-sim",
+        "--buy-pair", POOL_A, "--buy-venue", "uniswap_v2_ethereum",
+        "--sell-pair", POOL_B, "--sell-venue", "sushiswap_v2_ethereum",
+        "--quote-token", QUOTE, "--base-token", BASE,
+        "--capital-quote", "50", "--chain-id", "1",
+    ])
+    cli.main()
+    result = json.loads(capsys.readouterr().out)
+    assert result["buy_venue_registry_id"] == "uniswap_v2_ethereum"
+    assert result["sell_venue_registry_id"] == "sushiswap_v2_ethereum"
+    assert result["buy_pool_fee_bps_assumed"] == 30
+    assert result["sell_pool_fee_bps_assumed"] == 30
+    assert result["buy_venue_registry_status"] == "source_documented_not_live_verified"
+    assert result["sell_venue_registry_status"] == "source_documented_not_live_verified"
+    assert result["factory_verification"] == "passed"
+    assert result["router_validation"]["mode"] == "read_only_router_eth_call"
+    assert result["live_execution"] is False
