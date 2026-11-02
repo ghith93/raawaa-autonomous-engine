@@ -160,6 +160,8 @@ def main() -> None:
                 "block_number": buy_snapshot.state.block_number,
                 "block_hash": buy_snapshot.state.block_hash,
                 "block_timestamp": buy_snapshot.block_timestamp,
+                "buy_pool_fee_bps_assumed": buy_snapshot.state.fee_bps,
+                "sell_pool_fee_bps_assumed": sell_snapshot.state.fee_bps,
                 "capital_quote": human(result.capital_quote_raw, quote_decimals),
                 "bought_base": human(result.buy.amount_out_raw, base_decimals),
                 "final_quote": human(result.final_quote_raw, quote_decimals),
