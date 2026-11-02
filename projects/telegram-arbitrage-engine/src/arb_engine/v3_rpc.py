@@ -182,6 +182,31 @@ class EvmV3PoolReader(EthereumV2PoolReader):
         if not 1 <= tick_spacing < 16_384:
             raise RpcReadError("V3 pool tickSpacing is outside Uniswap V3 factory bounds")
 
+        # Verify both directions of factory identity, not only pool.factory().
+        get_pool_calldata = (
+            "0x1698ee82"
+            + ("0" * 24 + token0[2:])
+            + ("0" * 24 + token1[2:])
+            + fee.to_bytes(32, "big").hex()
+        )
+        registered_pool = self._address(
+            self._eth_call_word(factory, get_pool_calldata, block_tag, "factory.getPool()"),
+            "V3 factory getPool",
+        )
+        if registered_pool != pool:
+            raise V3PoolFactoryMismatch("Trusted V3 factory does not register this pool for its tokens and fee")
+
+        factory_spacing = self._signed_word(
+            self._eth_call_word(
+                factory, "0x22afcccb" + fee.to_bytes(32, "big").hex(),
+                block_tag, "factory.feeAmountTickSpacing()",
+            ),
+            24,
+            "factory feeAmountTickSpacing",
+        )
+        if factory_spacing != tick_spacing:
+            raise RpcReadError("V3 pool tickSpacing does not match trusted factory fee tier")
+
         slot0_words = self._abi_words(
             self._rpc("eth_call", [{"to": pool, "data": "0x3850c7bd"}, block_tag]),
             7,
