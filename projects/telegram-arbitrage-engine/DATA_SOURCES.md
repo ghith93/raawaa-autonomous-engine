@@ -112,6 +112,19 @@ No item in this list authorizes live trading.
 - Binance documents HTTP 429 for rate-limit violations and HTTP 418 for an IP ban after continued violations; it requires clients to back off and provides `Retry-After`. This adapter fails visibly and does not retry in a tight loop.
 - CI uses deterministic fixtures only; no live Binance calls or API keys are used. Taker fees, depth-based fill probability, WebSocket synchronization, withdrawal costs, account/regional eligibility and net cross-venue profitability remain unimplemented.
 
+## Kraken Spot public market data (read-only)
+
+- Official public endpoint examples: https://support.kraken.com/articles/360000919986-public-endpoint-examples-you-can-try-them-directly-in-a-web-browser
+- Official pair-symbol and metadata reference: https://support.kraken.com/articles/360000920306-api-symbols-and-tickers
+- Official public REST rate-limit policy: https://support.kraken.com/ca/articles/206548367-what-are-the-api-rate-limits-
+- The adapter calls only `GET /0/public/AssetPairs?pair=...` and `GET /0/public/Depth?pair=...&count=...` on `https://api.kraken.com`. Kraken documents public market-data endpoints as available without an account or API key.
+- `AssetPairs` resolves user-supplied aliases (e.g. `XBTUSDT` or `XBT/USDT`) to Kraken's internal REST instrument ID (e.g. `XXBTUSDT`). The depth method deliberately requires this canonical internal ID so the response cannot be joined to another pair by a loose symbol guess.
+- Instrument metadata preserves Kraken's internal base/quote codes, lot precision/multiplier, price precision/tick, minimum order quantity, minimum cost and 30-day taker/maker fee tiers. Fee schedules are normalized from percent to basis points but the current account tier is not guessed; the caller must supply the correct 30-day volume tier and fee-volume currency before net estimates.
+- Order-book prices and quantities are parsed as `Decimal`; per-level exchange timestamps are preserved in milliseconds alongside local `fetched_at`. The common `exchange_timestamp_ms` is the latest timestamp among returned levels, not a single atomic book snapshot timestamp.
+- Kraken states public REST market-data endpoints should be called at one request per second or less. The adapter uses a shared process-wide 1-second limiter across its client instances, a bounded response size, HTTPS host allowlist, timeout and redirect rejection. This limiter cannot coordinate with other processes or devices using the same public IP.
+- HTTP 429 and Kraken rate-limit error payloads defer the shared limiter; requests are not retried in a tight loop. CI uses deterministic fixtures only; no live Kraken calls, account methods or API keys are used.
+- Fee tiers and order-book depth are not proof of executable fills. Cross-venue net estimates still require current account-specific fee selection, latency, transfer/settlement, liquidity and risk costs.
+
 ## Telegram Bot API
 
 - Official reference: https://core.telegram.org/bots/api
