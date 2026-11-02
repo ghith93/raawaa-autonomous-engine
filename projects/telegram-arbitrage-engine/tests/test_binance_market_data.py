@@ -135,7 +135,13 @@ def test_conservative_rate_limit_is_one_request_per_second():
         current[0] += seconds
 
     client, calls = make_client(
-        orderbook_payload(),
+        {
+            "symbol": "BTCUSDT",
+            "bidPrice": "65000.00",
+            "bidQty": "1.0",
+            "askPrice": "65000.20",
+            "askQty": "1.0",
+        },
         clock=lambda: current[0],
         sleeper=sleep,
     )
