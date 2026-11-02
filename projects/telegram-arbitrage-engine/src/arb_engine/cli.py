@@ -160,6 +160,9 @@ def main() -> None:
                     args.sell_router, buy_amounts[-1],
                     [base_address, quote_address], result.sell.block_number,
                 )
+                reader.verify_canonical_block(
+                    result.buy.block_number, result.buy.block_hash,
+                )
                 output["router_validation"] = {
                     "mode": "read_only_router_eth_call",
                     "buy_router": args.buy_router.lower(),
