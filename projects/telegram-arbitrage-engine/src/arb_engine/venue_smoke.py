@@ -46,6 +46,8 @@ class JsonRpcClient:
         self.endpoint = endpoint
         self.timeout_seconds = timeout_seconds
         self.request_id = 0
+        self.min_request_interval_seconds = 1.1
+        self._last_request_at = 0.0
 
     def call(self, method: str, params: list[Any]) -> Any:
         payload = {"jsonrpc": "2.0", "id": self.request_id + 1, "method": method, "params": params}
@@ -60,7 +62,11 @@ class JsonRpcClient:
             },
             method="POST",
         )
-        for attempt in range(3):
+        for attempt in range(4):
+            wait = self.min_request_interval_seconds - (time.monotonic() - self._last_request_at)
+            if wait > 0:
+                time.sleep(wait)
+            self._last_request_at = time.monotonic()
             try:
                 with urlopen(request, timeout=self.timeout_seconds) as response:
                     body = json.loads(response.read().decode("utf-8"))
@@ -74,12 +80,17 @@ class JsonRpcClient:
                     raise VenueVerificationError(f"{method} response has no result")
                 return body["result"]
             except HTTPError as exc:
-                if exc.code not in (429, 500, 502, 503, 504) or attempt == 2:
+                if exc.code not in (429, 500, 502, 503, 504) or attempt == 3:
                     raise VenueVerificationError(f"{method} HTTP {exc.code}") from exc
+                retry_after = exc.headers.get("Retry-After") if exc.headers else None
+                try:
+                    delay = float(retry_after) if retry_after else 2 ** (attempt + 1)
+                except ValueError:
+                    delay = 2 ** (attempt + 1)
+                time.sleep(min(15.0, max(2.0, delay)))
             except (URLError, TimeoutError, OSError) as exc:
-                if attempt == 2:
+                if attempt == 3:
                     raise VenueVerificationError(f"{method} transport failure ({type(exc).__name__})") from exc
-            if attempt < 2:
                 time.sleep(1 + attempt)
         raise VenueVerificationError(f"{method} exhausted bounded retries")
 
