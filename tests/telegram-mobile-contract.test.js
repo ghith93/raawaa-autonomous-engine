@@ -187,7 +187,7 @@ test("Telegram webhook sends an allowlisted read-only status reply and records i
   });
   assert.ok(DB.calls.some(call => call.sql.includes("INSERT OR IGNORE INTO telegram_update_receipts")));
   assert.ok(DB.calls.some(call => call.sql.includes("UPDATE telegram_update_receipts")));
-  assert.ok(DB.calls.some(call => call.sql.includes("telegram_reply_sent")));
+  assert.ok(DB.calls.some(call => call.values[0] === "telegram_reply_sent"));
 });
 
 test("duplicate Telegram update is acknowledged without sending a second message", async () => {
