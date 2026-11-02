@@ -47,7 +47,8 @@ class OpportunityLedger:
             payload = {
                 "buy_pair_url": item.buy_pair_url,
                 "sell_pair_url": item.sell_pair_url,
-                "data_age_seconds": str(item.data_age_seconds),
+                "retrieval_age_seconds": str(item.retrieval_age_seconds),
+                "quote_timestamp_status": item.quote_timestamp_status,
             }
             rows.append((observed_at, item.chain, item.base_symbol, item.quote_symbol,
                          item.buy_venue, item.sell_venue, str(item.buy_price_usd),
