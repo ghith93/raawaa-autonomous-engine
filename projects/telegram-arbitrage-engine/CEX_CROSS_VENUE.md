@@ -14,7 +14,7 @@ A caller must register each venue/instrument pair in an InstrumentRegistry with 
 
 Multi-venue comparison and partial source coverage
 
-`compare_cex_spot_orderbook_universe` accepts two to eight available order-book snapshots from different CEX spot venues and compares every venue pair in both directions. It uses the same InstrumentRegistry and cost evaluator as the two-venue function; no venue-specific symbol conversion is inferred. Binance, Bybit, Kraken and Coinbase snapshots satisfy the shared read-only book contract (`source`, `symbol`, `bids`, `asks`, timezone-aware `fetched_at`, optional `category`).
+`compare_cex_spot_orderbook_universe` accepts two to eight available order-book snapshots from different CEX spot venues and compares every venue pair in both directions. It uses the same InstrumentRegistry and cost evaluator as the two-venue function; no venue-specific symbol conversion is inferred. Binance, Bybit, Kraken, Coinbase and OKX snapshots satisfy the shared read-only book contract (`source`, `symbol`, `bids`, `asks`, timezone-aware `fetched_at`, optional `category`).
 
 The result includes:
 - every valid pairwise direction as a `CrossVenueOpportunity`;
