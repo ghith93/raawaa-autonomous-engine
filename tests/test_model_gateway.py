@@ -128,7 +128,7 @@ class ModelGatewayTests(unittest.TestCase):
             allow_paid_calls=True, network_calls_enabled=True,
         )
         with self.assertRaises(BudgetExceeded):
-            gateway.generate(GenerationRequest("research", "short prompt", 10))
+            gateway.generate(GenerationRequest("research", "short prompt", 10, task_id="task-a"))
         self.assertEqual(adapter.calls, 0)
         self.assertEqual(self.ledger.totals()["daily_reserved_usd"], 0.0)
 
@@ -141,7 +141,7 @@ class ModelGatewayTests(unittest.TestCase):
             allow_paid_calls=True, network_calls_enabled=True,
         )
         with self.assertRaises(TimeoutError):
-            gateway.generate(GenerationRequest("research", "short prompt", 10))
+            gateway.generate(GenerationRequest("research", "short prompt", 10, task_id="task-a"))
         self.assertEqual(adapter.calls, 1)
         self.assertGreater(self.ledger.totals()["daily_reserved_usd"], 0.0)
         with self.assertRaises(BudgetExceeded):
@@ -156,7 +156,7 @@ class ModelGatewayTests(unittest.TestCase):
             allow_paid_calls=False, network_calls_enabled=True,
         )
         with self.assertRaisesRegex(BudgetExceeded, "actual usage was recorded"):
-            gateway.generate(GenerationRequest("research", "short prompt", 10))
+            gateway.generate(GenerationRequest("research", "short prompt", 10, task_id="task-a"))
         self.assertEqual(adapter.calls, 1)
         self.assertEqual(self.ledger.totals()["daily_usd"], 0.02)
 
