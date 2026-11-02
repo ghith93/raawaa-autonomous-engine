@@ -171,6 +171,8 @@ class QuotaAwareGatewayTests(unittest.TestCase):
         row = manager.snapshot()[0]
         self.assertEqual(row["daily_requests_used"], 1)
         self.assertEqual(row["daily_tokens_used"], 12)
+        self.assertEqual(self.usage.totals()["pending_reservations"], 0)
+        self.assertEqual(self.usage.totals()["daily_reserved_usd"], 0.0)
         events = self.quota.audit_events()
         self.assertEqual({event["event"] for event in events},
                          {"quota_reserved", "completion_received"})
@@ -190,6 +192,7 @@ class QuotaAwareGatewayTests(unittest.TestCase):
         self.assertTrue(self.quota.cooldown_active(first.route_id))
         self.assertEqual(limited.calls, 1)
         self.assertEqual(backup.calls, 1)
+        self.assertEqual(self.usage.totals()["pending_reservations"], 0)
 
 
     def test_timeout_does_not_rotate_to_another_provider(self):
@@ -207,6 +210,7 @@ class QuotaAwareGatewayTests(unittest.TestCase):
         self.assertEqual(timed_out.calls, 1)
         self.assertEqual(backup.calls, 0)
         self.assertEqual(self.quota.usage_for_task("task-1")["requests"], 1)
+        self.assertEqual(self.usage.totals()["pending_reservations"], 1)
         events = self.quota.audit_events()
         self.assertIn("provider_failure_stopped", {event["event"] for event in events})
 
@@ -325,17 +329,45 @@ class QuotaAwareGatewayTests(unittest.TestCase):
 
     def test_unexpected_nonzero_cost_is_recorded_and_route_quarantined(self):
         class ChargedAdapter:
+            def __init__(self):
+                self.calls = 0
+
             def generate(self, model, request):
+                self.calls += 1
                 return GenerationResponse("groq", model, "result", 6, 8, 0.02, mocked=False)
 
+        charged = ChargedAdapter()
+        backup = FakeAdapter("cerebras")
         profile = self.profile()
-        manager = QuotaManager([profile], self.quota)
-        gateway = QuotaAwareLiveGateway(manager, {"groq": ChargedAdapter()}, self.usage, True, environ={"RAAWAA_ENGINE_LIVE_INFERENCE": "enabled"})
+        backup_profile = self.profile(provider="cerebras", account="backup", priority=20)
+        manager = QuotaManager([profile, backup_profile], self.quota)
+        gateway = QuotaAwareLiveGateway(
+            manager, {"groq": charged, "cerebras": backup}, self.usage, True,
+            environ={"RAAWAA_ENGINE_LIVE_INFERENCE": "enabled"},
+        )
         with self.assertRaisesRegex(ProviderUnavailable, "non-zero cost"):
             gateway.generate(self.request)
         self.assertTrue(self.quota.cooldown_active(profile.route_id))
         self.assertEqual(manager.snapshot()[0]["daily_tokens_used"], 14)
         self.assertEqual(self.usage.totals()["daily_usd"], 0.02)
+        # A charge on one supposedly-free route blocks every subsequent zero-budget route.
+        with self.assertRaises(ProviderUnavailable):
+            gateway.generate(self.request)
+        self.assertEqual(charged.calls, 1)
+        self.assertEqual(backup.calls, 0)
+
+    def test_existing_spend_blocks_live_gateway_before_provider_call(self):
+        adapter = FakeAdapter("groq")
+        self.usage.record("groq", "model-x", "research", 1, 1, 0.01)
+        manager = QuotaManager([self.profile()], self.quota)
+        gateway = QuotaAwareLiveGateway(
+            manager, {"groq": adapter}, self.usage, True,
+            environ={"RAAWAA_ENGINE_LIVE_INFERENCE": "enabled"},
+            daily_budget_usd=0.0, monthly_budget_usd=0.0,
+        )
+        with self.assertRaisesRegex(ProviderUnavailable, "monetary budget"):
+            gateway.generate(self.request)
+        self.assertEqual(adapter.calls, 0)
 
     def test_request_above_profile_output_ceiling_never_calls_provider(self):
         adapter = FakeAdapter("groq")
