@@ -52,7 +52,7 @@ def run_batch(
         active = set()
         queue_idle = False
         with ThreadPoolExecutor(max_workers=max_parallel, thread_name_prefix="raawaa-agent") as pool:
-            while len(results) + len(active) < max_tasks:
+            while True:
                 while (
                     not queue_idle
                     and len(active) < max_parallel
@@ -62,7 +62,14 @@ def run_batch(
                     active.add(pool.submit(execute, store))
 
                 if not active:
-                    stop_reason = "queue_idle" if queue_idle else "time_limit"
+                    if queue_idle:
+                        stop_reason = "queue_idle"
+                    elif len(results) >= max_tasks:
+                        stop_reason = "task_limit"
+                    elif clock() - started >= max_seconds:
+                        stop_reason = "time_limit"
+                    else:
+                        stop_reason = "queue_idle"
                     break
 
                 completed, active = wait(active, return_when=FIRST_COMPLETED)
@@ -95,8 +102,10 @@ def run_batch(
                                 results.append(result)
                     stop_reason = "time_limit"
                     break
-            else:
-                stop_reason = "task_limit"
+
+                if len(results) >= max_tasks:
+                    stop_reason = "task_limit"
+                    break
 
     elapsed = max(0.0, clock() - started)
     return {
