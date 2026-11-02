@@ -103,7 +103,7 @@ Before selecting a host, verify free-tier limits, sleep behavior, persistent dis
 
 ### D1 migration inventory (read-only first)
 
-Use the manual [D1 Migration Inventory workflow](../.github/workflows/d1-migration-inventory.yml) to inspect the remote production migration ledger without applying changes. Follow the [D1 migration runbook](d1-migration-runbook.md) and record the exact run URL and checked-out SHA before considering a production migration. The separate `d1-migrate.yml` workflow applies **all** pending migrations after its typed confirmation; never dispatch it as a status check. Worker deployment and `/health` success do not establish D1 schema readiness.
+Use the manual [D1 Migration Inventory workflow](../.github/workflows/d1-migration-inventory.yml) to inspect the remote production migration ledger without applying changes. Follow the [D1 migration runbook](d1-migration-runbook.md) and record the exact run URL and checked-out SHA before considering a production migration. The separate `d1-migrate.yml` workflow applies **all** pending migrations after its typed confirmation; never dispatch it as a status check. Worker deployment and `/health` success do not establish D1 schema readiness. The latest recorded production application of migrations `0004` and `0005` is documented in the runbook; repeat read-only inventory before any subsequent migration.
 
 ### Production deployment and D1 migration gates
 
