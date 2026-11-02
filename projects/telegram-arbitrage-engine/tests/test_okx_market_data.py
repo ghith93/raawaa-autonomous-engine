@@ -6,7 +6,7 @@ import pytest
 
 from arb_engine.market_sources.binance import BinanceOrderBookSnapshot
 from arb_engine.market_sources.cross_venue import (
-    InstrumentRegistry, InstrumentSpec, compare_cex_spot_orderbooks,
+    InstrumentMappingError, InstrumentRegistry, InstrumentSpec, compare_cex_spot_orderbooks,
 )
 from arb_engine.market_sources.okx import (
     OKXMarketDataError,
@@ -94,6 +94,36 @@ def test_fetch_instrument_preserves_suspended_state_and_rejects_identity_mismatc
         client.fetch_instrument(inst_id="BTC-USDT")
 
 
+def test_okx_instrument_metadata_builds_explicit_registry_and_skips_suspended_markets():
+    client, _ = make_client([instrument_payload()])
+    metadata = client.fetch_instrument(inst_id="BTC-USDT")
+    registry = InstrumentRegistry.from_metadata(
+        [metadata],
+        {
+            ("okx", "BTC"): "asset:canonical:BTC",
+            ("okx", "USDT"): "currency:canonical:USDT",
+        },
+    )
+    spec = registry.resolve("okx", "BTC-USDT")
+    assert spec.base_step_size == Decimal("0.0001")
+    assert spec.min_base_quantity == Decimal("0.0001")
+    assert spec.min_quote_notional is None
+    assert spec.base_asset_id == "asset:canonical:BTC"
+    assert spec.quote_currency_id == "currency:canonical:USDT"
+
+    suspended_client, _ = make_client([instrument_payload(state="suspend")])
+    suspended = suspended_client.fetch_instrument(inst_id="BTC-USDT")
+    suspended_registry = InstrumentRegistry.from_metadata(
+        [suspended],
+        {
+            ("okx", "BTC"): "asset:canonical:BTC",
+            ("okx", "USDT"): "currency:canonical:USDT",
+        },
+    )
+    with pytest.raises(InstrumentMappingError, match="no explicit canonical mapping"):
+        suspended_registry.resolve("okx", "BTC-USDT")
+
+
 def test_fetch_instrument_rejects_invalid_precision_and_currency_metadata():
     client, _ = make_client([instrument_payload(lotSz="NaN")])
     with pytest.raises(OKXMarketDataError, match="lotSz"):
@@ -121,10 +151,12 @@ def test_fetch_orderbook_preserves_decimal_depth_sequence_and_order_counts():
     )
     assert book.bid_order_counts == (3, 1)
     assert book.ask_order_counts == (2, 1)
-    assert book.bid_liquidation_order_counts == (0, 0)
-    assert book.ask_liquidation_order_counts == (0, 0)
+    assert book.bid_deprecated_field_values == (0, 0)
+    assert book.ask_deprecated_field_values == (0, 0)
     assert book.sequence == 3235851742
     assert book.exchange_timestamp_ms == 1793628000000
+    assert book.bid_deprecated_field_values == (0, 0)
+    assert book.ask_deprecated_field_values == (0, 0)
     assert book.fetched_at.tzinfo is not None
     parsed = urlsplit(calls[0][0])
     assert parsed.path == "/api/v5/market/books"
