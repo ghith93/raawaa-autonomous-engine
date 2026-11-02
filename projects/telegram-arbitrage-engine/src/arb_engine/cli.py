@@ -26,7 +26,7 @@ from .venue_smoke import (
     verify_registry_venue_deployments, verify_registry_venues,
 )
 from .v3_math import get_sqrt_ratio_at_tick
-from .v3_rpc import DEFAULT_V3_ETHEREUM_RPC, EvmV3PoolReader
+from .v3_rpc import DEFAULT_V3_ETHEREUM_RPC, DEFAULT_V3_MIN_REQUEST_INTERVAL, EvmV3PoolReader
 from .v3_simulator import simulate_v3_swap
 
 
@@ -161,7 +161,7 @@ def main() -> None:
     v3_parser.add_argument("--max-bitmap-words", type=int, default=16)
     v3_parser.add_argument("--max-initialized-ticks", type=int, default=128)
     v3_parser.add_argument("--max-steps", type=int, default=512)
-    v3_parser.add_argument("--min-request-interval", type=float, default=0.1)
+    v3_parser.add_argument("--min-request-interval", type=float, default=DEFAULT_V3_MIN_REQUEST_INTERVAL)
     v3_parser.add_argument("--timeout-seconds", type=float, default=8.0)
     solana_price_parser = sub.add_parser(
         "solana-price",
