@@ -101,7 +101,7 @@ class D1PaperTradingLedger:
             parsed_url.scheme != "https" or not parsed_url.hostname
             or parsed_url.username or parsed_url.password
             or parsed_url.query or parsed_url.fragment
-            or not self.token.strip()
+            or not isinstance(self.token, str) or not self.token.strip()
         ):
             raise D1PaperLedgerError("RAAWAA_ENGINE_API_URL must be an HTTPS URL without credentials/query/fragment and a bearer token is required")
         if type(self.timeout) is not int or not 1 <= self.timeout <= 60:
