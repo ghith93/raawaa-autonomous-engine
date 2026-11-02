@@ -24,6 +24,8 @@ def test_live_v3_smoke_script_parses_and_contains_no_transaction_submission() ->
     assert '"https://public.1rpc.io/eth"' in source
     assert "MAX_TOTAL_RPC_REQUESTS = 512" in source
     assert "remaining_budget = MAX_TOTAL_RPC_REQUESTS - requests_used" in source
+    assert "DEFAULT_V3_ETHEREUM_RPC" in source
+    assert "min_request_interval=0.55" in source
     assert "rpc_endpoint" in source
 
 def test_v3_cli_help_exposes_absolute_and_relative_tick_limits(monkeypatch, capsys) -> None:
