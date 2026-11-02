@@ -85,7 +85,18 @@ def test_bybit_funding_history_normalizes_category_and_settlement_timestamp(cate
             }],
         },
     }
-    api, calls = client("bybit", [payload])
+    instrument = {
+        "retCode": 0, "result": {
+            "category": category,
+            "list": [{
+                "symbol": "BTCUSDT",
+                "contractType": "LinearPerpetual" if category == "linear" else "InversePerpetual",
+                "status": "Trading",
+                "fundingInterval": 480,
+            }],
+        },
+    }
+    api, calls = client("bybit", [payload, instrument])
     rows = api.fetch_funding_history(symbol="BTCUSDT", contract_type=category, limit=20)
     assert len(rows) == 1
     assert rows[0].venue_id == "bybit"
@@ -93,10 +104,11 @@ def test_bybit_funding_history_normalizes_category_and_settlement_timestamp(cate
     assert rows[0].funding_rate == Decimal("0.00010000")
     assert rows[0].funding_time_ms == 1793620800000
     assert rows[0].mark_price is None
-    assert rows[0].funding_interval_hours is None
+    assert rows[0].funding_interval_hours == 8
     assert parse_qs(urlsplit(calls[0][0]).query) == {
         "category": [category], "symbol": ["BTCUSDT"], "limit": ["20"],
     }
+    assert urlsplit(calls[1][0]).path == "/v5/market/instruments-info"
 
 
 def test_funding_rows_reject_wrong_symbols_duplicate_times_and_malformed_rates():
@@ -157,6 +169,10 @@ def test_http_429_defers_shared_limiter_and_does_not_retry_automatically():
     api, _ = client("bybit", [
         FundingRateLimited(9),
         {"retCode": 0, "result": {"category": "linear", "list": []}},
+        {"retCode": 0, "result": {"category": "linear", "list": [{
+            "symbol": "BTCUSDT", "contractType": "LinearPerpetual",
+            "status": "Trading", "fundingInterval": 480,
+        }]}},
     ], rate_limiter=limiter)
     with pytest.raises(FundingRateLimited):
         api.fetch_funding_history(symbol="BTCUSDT")
@@ -177,6 +193,10 @@ def test_bybit_json_rate_limit_code_defers_without_retry():
     api, _ = client("bybit", [
         {"retCode": 10006, "retMsg": "Too many visits", "result": {}},
         {"retCode": 0, "result": {"category": "linear", "list": []}},
+        {"retCode": 0, "result": {"category": "linear", "list": [{
+            "symbol": "BTCUSDT", "contractType": "LinearPerpetual",
+            "status": "Trading", "fundingInterval": 480,
+        }]}},
     ], rate_limiter=limiter)
     with pytest.raises(FundingRateLimited):
         api.fetch_funding_history(symbol="BTCUSDT")
