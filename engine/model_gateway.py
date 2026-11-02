@@ -184,6 +184,26 @@ class UsageLedger:
             "pending_reservations": pending,
         }
 
+    def task_summaries(self, per_task_budget_usd: float = 0.0) -> list[dict[str, Any]]:
+        """Return per-task spend totals and exact hard-cap status."""
+        cap = _money_nanos(per_task_budget_usd, round_up=False)
+        with self._connect() as db:
+            rows = db.execute(
+                "SELECT task_id FROM model_usage WHERE task_id IS NOT NULL "
+                "UNION SELECT task_id FROM model_usage_reservations WHERE task_id IS NOT NULL "
+                "ORDER BY task_id"
+            ).fetchall()
+        summaries = []
+        for row in rows:
+            task_id = row["task_id"]
+            totals = self.task_totals(task_id)
+            summaries.append({
+                "task_id": task_id,
+                **totals,
+                "over_budget": totals["total_nanos"] > cap,
+            })
+        return summaries
+
     def budget_status(self, daily_budget_usd: float, monthly_budget_usd: float,
                       now: datetime | None = None, task_id: str | None = None,
                       per_task_budget_usd: float = 0.0) -> dict[str, bool]:
