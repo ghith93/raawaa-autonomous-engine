@@ -147,9 +147,11 @@ Kraken's internal asset codes (such as `XXBT` and `ZUSD`) must be explicitly map
 
 ## Multi-chain EVM V2 scanning
 
-The V2 candidate scanner now accepts an explicit EVM chain ID, DEX Screener slug and two registered venue IDs. BNB Chain (chain ID 56) has source-documented PancakeSwap V2 and ApeSwap V2 registry entries. Non-Ethereum runs require an explicit RPC URL and verify the chain ID, factory/pair identity and router binding at one pinned block.
+The V2 candidate scanner now accepts an explicit EVM chain ID, DEX Screener slug and two registered venue IDs. The source-documented registry includes Ethereum (1), BNB Chain (56), Arbitrum One (42161), Optimism (10), Base (8453), Avalanche C-Chain (43114) and Polygon PoS (137). It selects a registered two-venue pair per chain by default; an operator may override the exact pair.
 
-See [BSC_V2_SUPPORT.md](BSC_V2_SUPPORT.md). BSC deployments are source-documented but not yet live-verified by CI; no BSC profitability or execution claim is made.
+Non-Ethereum runs require an explicit read-only RPC URL and verify the RPC chain ID, factory/pair identity and router binding at one pinned block before returning a route. Registry addresses and fee assumptions are not live attestations. The automated live venue/scanner smoke remains Ethereum-only; the other chains remain source-documented but not live-verified. No cross-chain bridge or transfer route is inferred, and no profitability or execution claim is made.
+
+See [DATA_SOURCES.md](DATA_SOURCES.md) for the full venue matrix and deployment sources.
 
 ## Conservative opportunity cost evaluator
 
