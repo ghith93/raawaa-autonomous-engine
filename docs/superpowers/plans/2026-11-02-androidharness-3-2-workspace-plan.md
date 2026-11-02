@@ -1,4 +1,6 @@
-# AndroidHarness 3.2 Workspace Integration Implementation Plan
+# Archived plan — AndroidHarness 3.2 Workspace Integration
+
+> **Superseded on 2026-11-02:** This plan was completed as a repository-side configuration exercise. The operator later chose to remove AndroidHarness from the runtime path. Do not execute remaining device setup, model, SDK, worker, or recurring automation steps. The retained project configuration and doctor are optional diagnostics only.
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [x]`) syntax for tracking.
 
