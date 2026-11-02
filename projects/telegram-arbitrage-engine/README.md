@@ -16,22 +16,22 @@ Simulation-first spot-arbitrage research module, isolated inside the autonomous-
 
 ## Same-block on-chain V2 cross-venue scan
 
-The \`onchain-v2-scan\` command uses DEX Screener only to discover candidate pair addresses and token metadata. It then verifies each candidate against the registered Ethereum V2 factory, reads both verified pools at one pinned block, verifies each Router02 factory, and obtains \`getAmountsOut\` quotes for both buy/sell directions at that same block.
+The `onchain-v2-scan` command uses DEX Screener only to discover candidate pair addresses and token metadata. It then verifies each candidate against the registered Ethereum V2 factory, reads both verified pools at one pinned block, verifies each Router02 factory, and obtains `getAmountsOut` quotes for both buy/sell directions at that same block.
 
 Example (replace the token addresses with verified contracts; the quote token is always explicit):
 
-\`\`\`bash
-python -m arb_engine.cli onchain-v2-scan \\
-  --token-address 0x<BASE_TOKEN_ADDRESS> \\
-  --quote-token-address 0x<QUOTE_TOKEN_ADDRESS> \\
-  --capital-quote 1000 \\
-  --max-candidate-pairs 4 \\
+```bash
+python -m arb_engine.cli onchain-v2-scan \
+  --token-address 0x<BASE_TOKEN_ADDRESS> \
+  --quote-token-address 0x<QUOTE_TOKEN_ADDRESS> \
+  --capital-quote 1000 \
+  --max-candidate-pairs 4 \
   --max-rpc-requests 32
-\`\`\`
+```
 
 The result reports raw and human-readable router outputs and gross quote-token surplus for each direction. It is **not net profit** and does not model flash-swap repayment, gas, MEV, inclusion/revert risk, transfer taxes, or execution overhead. Candidate discovery is bounded to four pairs and the Ethereum reader enforces the RPC request budget. No transaction, calldata, wallet, signer, approval, or order is created or submitted.
 
-Use \`flash-swap-sim\` separately for the V2 pair-invariant flash-swap repayment simulation; neither command enables live execution.
+Use `flash-swap-sim` separately for the V2 pair-invariant flash-swap repayment simulation; neither command enables live execution.
 
 ## Read-only flash-swap simulation
 
