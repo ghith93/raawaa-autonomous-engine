@@ -148,6 +148,8 @@ Do not label an opportunity `net_profitable` unless all required cost components
 - Reuse CCXT exchange instances; do not create one per symbol or worker.
 - Jupiter keyless Price API budget: 0.5 RPS, with a shared limiter and a 429 backoff.
 - Kraken public REST budget: <=1 request/second.
+- Binance public market data: respect per-endpoint IP request weights and response headers; back off on 429 and stop on 418 until the documented Retry-After expires.
+- Bybit public APIs: stay well below the documented IP and endpoint/UID limits; do not equate the 600/5-second IP ceiling with a safe polling rate.
 - EVM RPC: per-provider request budget and timeout; bounded concurrency; pinned block; no assumption that a public RPC is archive-capable.
 - Cache token/market metadata separately from fast price observations.
 - Circuit-break an unhealthy source without suppressing healthy sources; return partial results with per-source status.
