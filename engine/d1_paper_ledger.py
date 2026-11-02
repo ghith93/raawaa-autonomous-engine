@@ -18,6 +18,7 @@ class D1PaperLedgerError(RuntimeError):
 
 MAX_SAFE_JSON_INTEGER = (2**53) - 1
 MAX_RAW_INTEGER = (2**256) - 1
+MAX_D1_PAYLOAD_BYTES = 24_576
 RAW_FIELDS = {
     "gross_profit_raw": True,
     "gas_used": False,
@@ -95,8 +96,16 @@ class D1PaperTradingLedger:
         self.base_url = (base_url or os.getenv("RAAWAA_ENGINE_API_URL", "")).rstrip("/")
         self.token = token or os.getenv("RAAWAA_ENGINE_API_TOKEN", "")
         self.timeout = timeout
-        if not self.base_url.startswith("https://") or not self.token:
-            raise D1PaperLedgerError("RAAWAA_ENGINE_API_URL (HTTPS) and RAAWAA_ENGINE_API_TOKEN are required")
+        parsed_url = urllib.parse.urlsplit(self.base_url)
+        if (
+            parsed_url.scheme != "https" or not parsed_url.hostname
+            or parsed_url.username or parsed_url.password
+            or parsed_url.query or parsed_url.fragment
+            or not self.token.strip()
+        ):
+            raise D1PaperLedgerError("RAAWAA_ENGINE_API_URL must be an HTTPS URL without credentials/query/fragment and a bearer token is required")
+        if type(self.timeout) is not int or not 1 <= self.timeout <= 60:
+            raise D1PaperLedgerError("D1 request timeout must be between 1 and 60 seconds")
 
     def _request(self, method: str, path: str, payload: dict[str, Any] | None = None) -> dict:
         data = None if payload is None else json.dumps(
@@ -141,6 +150,11 @@ class D1PaperTradingLedger:
         if not isinstance(payload, dict):
             raise ValueError("payload must be an object")
         _validate_payload(payload)
+        payload_json = json.dumps(
+            payload, sort_keys=True, separators=(",", ":"), ensure_ascii=True, allow_nan=False,
+        )
+        if len(payload_json.encode("utf-8")) > MAX_D1_PAYLOAD_BYTES:
+            raise ValueError("payload exceeds the D1 24 KiB limit")
         _normalize_raw_fields(normalized)
         return self._request("POST", "/v1/paper-ledger", {
             "action": "append", "event": {**normalized, "payload": payload},
