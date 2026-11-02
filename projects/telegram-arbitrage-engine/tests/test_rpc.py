@@ -244,3 +244,17 @@ def test_v2_router_factory_verification_rejects_mismatch(monkeypatch):
         reader.verify_v2_router_factory(
             "0x" + "9" * 40, "0x" + "8" * 40, 100,
         )
+
+
+def test_gas_price_reader_returns_wei_and_rejects_unsafe_values(monkeypatch):
+    import pytest
+
+    reader = EthereumV2PoolReader(min_request_interval=0)
+    monkeypatch.setattr(reader, "_rpc", lambda method, params: "0x3b9aca00")
+    assert reader.read_gas_price_wei() == 1_000_000_000
+    monkeypatch.setattr(reader, "_rpc", lambda method, params: "0x0")
+    with pytest.raises(RpcReadError, match="zero"):
+        reader.read_gas_price_wei()
+    monkeypatch.setattr(reader, "_rpc", lambda method, params: hex(10**15))
+    with pytest.raises(RpcReadError, match="safety ceiling"):
+        reader.read_gas_price_wei()
