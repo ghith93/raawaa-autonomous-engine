@@ -107,3 +107,15 @@ def test_reader_rejects_reorg_during_snapshot(monkeypatch):
     import pytest
     with pytest.raises(RpcReadError, match="possible reorg"):
         reader.read_pool(POOL_A, 30)
+
+def test_rpc_rejects_noncanonical_hex_and_nonzero_abi_address_padding():
+    import pytest
+
+    reader = EthereumV2PoolReader(min_request_interval=0)
+    with pytest.raises(RpcReadError, match="Invalid hexadecimal"):
+        reader._uint("0x+1", "chain ID")
+    with pytest.raises(RpcReadError, match="non-zero address padding"):
+        reader._address("0x" + "1" * 24 + "2" * 40, "token0")
+    with pytest.raises(ValueError, match="hexadecimal EVM address"):
+        reader._pool_address("0x+" + "1" * 39)
+    assert reader._address("0x" + "0" * 24 + "2" * 40, "token0") == "0x" + "2" * 40
