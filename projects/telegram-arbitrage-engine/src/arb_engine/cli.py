@@ -124,7 +124,7 @@ def main() -> None:
                 "warning": "Repeated indicative spreads are not executable opportunities, a backtest, or realized PnL.",
             }, indent=2))
         except (ValueError, ArithmeticError) as exc:
-            parser.exit(2, f"report failed: {exc}\\n")
+            parser.exit(2, f"report failed: {exc}\n")
     elif args.command == "v2-sim":
         try:
             if bool(args.buy_router) != bool(args.sell_router):
@@ -273,7 +273,7 @@ def main() -> None:
                 }
             print(json.dumps(output, indent=2))
         except (RpcReadError, ValueError, ArithmeticError) as exc:
-            parser.exit(2, f"v2-sim failed: {exc}\\n")
+            parser.exit(2, f"v2-sim failed: {exc}\n")
     elif args.command == "fork-call":
         try:
             result = AnvilForkSimulator(args.anvil_rpc).simulate_call(
