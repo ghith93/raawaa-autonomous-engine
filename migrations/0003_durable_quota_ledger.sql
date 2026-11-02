@@ -6,7 +6,7 @@ CREATE TABLE IF NOT EXISTS quota_usage (
   tokens INTEGER NOT NULL CHECK(tokens >= 0),
   occurred_at TEXT NOT NULL,
   settled_at TEXT,
-  task_id TEXT NOT NULL,
+  task_id TEXT,
   settlement_key TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_quota_usage_route_time
