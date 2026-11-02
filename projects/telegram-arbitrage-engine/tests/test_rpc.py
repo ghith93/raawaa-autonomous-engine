@@ -282,7 +282,7 @@ def test_token_preflight_reads_code_and_optional_metadata_at_one_pinned_block(mo
         if method == "eth_blockNumber":
             return "0x64"
         if method == "eth_getBlockByNumber":
-            return {"hash": BLOCK_HASH, "timestamp": "0x1"}
+            return {"hash": BLOCK_HASH, "timestamp": hex(int(__import__("time").time()))}
         if method == "eth_getCode":
             assert params == [token, "0x64"]
             return "0x6001600055"
@@ -363,3 +363,17 @@ def test_optional_metadata_decoder_supports_legacy_bytes32_and_rejects_malformed
     ) == "USDC"
     assert EthereumV2PoolReader._decode_optional_string("0x1234") is None
     assert EthereumV2PoolReader._decode_optional_string("0x" + "ff" * 32) is None
+
+
+def test_token_preflight_rejects_stale_pinned_block(monkeypatch):
+    import pytest
+
+    reader = EthereumV2PoolReader(min_request_interval=0)
+    token = "0x" + "5" * 40
+    monkeypatch.setattr(reader, "_rpc", lambda method, params: {
+        "eth_chainId": "0x1",
+        "eth_blockNumber": "0x64",
+        "eth_getBlockByNumber": {"hash": BLOCK_HASH, "timestamp": "0x1"},
+    }.get(method))
+    with pytest.raises(RpcReadError, match="stale"):
+        reader.read_token_preflight(token)
