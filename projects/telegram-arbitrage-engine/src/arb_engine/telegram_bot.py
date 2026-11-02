@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import sqlite3
 import time
@@ -17,6 +18,7 @@ from .ledger import OpportunityLedger
 TELEGRAM_API = "https://api.telegram.org"
 MAX_TELEGRAM_RESPONSE_BYTES = 500_000
 MAX_MESSAGE_LENGTH = 4000
+LOGGER = logging.getLogger(__name__)
 
 
 class TelegramApiError(RuntimeError):
@@ -178,7 +180,13 @@ class TelegramController:
             response = self.response_for_update(update)
             if response is not None:
                 chat_id, text = response
-                self.api.send_message(chat_id, text)
+                try:
+                    self.api.send_message(chat_id, text)
+                except TelegramApiError as exc:
+                    # The command may already have performed a read-only scan.
+                    # Consume this update rather than replaying it indefinitely
+                    # when the reply fails or its delivery outcome is ambiguous.
+                    LOGGER.warning("Telegram reply failed for consumed update %s: %s", update_id, exc)
             if isinstance(update_id, int) and not isinstance(update_id, bool):
                 next_offset = max(next_offset, update_id + 1)
         return next_offset
