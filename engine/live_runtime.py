@@ -80,4 +80,6 @@ def build_live_gateway(
         UsageLedger(db_path),
         network_calls_enabled=True,
         environ=source,
+        daily_budget_usd=policy.get("daily_budget_usd", 0),
+        monthly_budget_usd=policy.get("monthly_budget_usd", 0),
     )
