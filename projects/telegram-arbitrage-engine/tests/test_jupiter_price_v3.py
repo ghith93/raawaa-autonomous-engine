@@ -224,7 +224,7 @@ def test_price_v3_rejects_malformed_and_oversized_responses():
 def test_price_v3_parses_json_number_precision_without_binary_float_rounding():
     raw = (
         f'{{"{SOL}":{{"usdPrice":147.481234567890123456,'
-        '"decimals":9,"blockId":348004023}}}'
+        '"decimals":9,"blockId":348004023}}'
     ).encode("utf-8")
     client = JupiterPriceV3Client(
         transport=lambda _url, _timeout: raw,
