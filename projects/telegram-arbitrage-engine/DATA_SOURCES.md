@@ -101,3 +101,10 @@ No item in this list authorizes live trading.
 - The caller must supply correct calldata and a caller address whose fork-state balances/allowances are representative. A successful single call is not proof that a multi-DEX round trip is atomic, profitable, or executable in a future block. It does not submit a transaction or alter the fork.
 - Anvil's default development accounts are publicly known; this simulator never requests or uses them. Do not expose the Anvil RPC port to a network or use account impersonation for this workflow.
 - Anvil fork simulation depends on the upstream RPC serving state at the selected block. Keep the fork pinned and treat unavailable/pruned state as a hard failure.
+
+
+## Open-source tracing evaluation
+
+- Evaluated `shottah/tracer` (Rust; MIT OR Apache-2.0) as a candidate for richer call-tree, token-balance-delta, fund-flow, and historical transaction replay reports: https://github.com/shottah/tracer
+- It can use an Anvil-fork backend to replay an already-mined transaction and compare the replay with the original receipt. This is useful for later audit/replay tooling, but it does not directly replace the current exact-calldata `fork-call` interface for a hypothetical, not-yet-submitted route.
+- Not added as a dependency in this release: it introduces a Rust toolchain and a separate multi-crate executable, while the Python adapter is intentionally small, stdlib-only, loopback-restricted, and read-only. Reconsider only when trace decoding, ERC-20 balance deltas, or historical receipt replay become a concrete requirement.
