@@ -66,6 +66,8 @@ def run_flash_swap_simulation(
         raise ValueError("Native-token and quote-pool options require a gas scenario")
     if native_quote_pair and not native_token:
         raise ValueError("A native quote pool requires a native token")
+    if not native_quote_pair and (native_quote_venue or native_quote_fee_bps is not None):
+        raise ValueError("Native quote venue/fee options require --native-quote-pair")
 
     source_fee, source_factory, source_router, source_venue_info = resolve_venue_config(
         source_venue, chain_id, source_fee_bps, None, None,
@@ -87,6 +89,8 @@ def run_flash_swap_simulation(
         native_quote_fee = None
 
     snapshots = reader.read_pools(pool_requests)
+    if len(snapshots) != len(pool_requests):
+        raise ValueError("RPC reader returned an incomplete pool snapshot set")
     source_snapshot, destination_snapshot = snapshots[:2]
     native_quote_snapshot = snapshots[2] if len(snapshots) == 3 else None
     source_state = source_snapshot.state
