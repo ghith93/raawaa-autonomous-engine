@@ -83,3 +83,13 @@ def test_wrong_input_token_and_non_integer_amount_are_rejected():
         quote_exact_input(p, "0x" + "3" * 40, 100)
     with pytest.raises(ValueError, match="positive integer"):
         quote_exact_input(p, QUOTE, 100.0)
+
+
+def test_stale_pool_state_is_rejected():
+    from dataclasses import replace
+    from datetime import timedelta
+
+    current = pool("0xpool", QUOTE, BASE, 10000, 10000)
+    stale = replace(current, observed_at=datetime.now(timezone.utc) - timedelta(seconds=31))
+    with pytest.raises(ValueError, match="stale"):
+        quote_exact_input(stale, QUOTE, 100)
