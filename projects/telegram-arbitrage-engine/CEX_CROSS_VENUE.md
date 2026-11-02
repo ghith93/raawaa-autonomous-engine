@@ -22,7 +22,7 @@ The result includes:
 - bounded `source_failures` codes supplied by the caller, so one unavailable exchange does not erase valid comparisons from other sources;
 - `status=complete`, `partial`, or `insufficient_sources` and the number of compared venue pairs.
 
-The caller owns bounded/concurrent fetching and must pass only sanitized failure codes (not raw exception text or credentials). A maximum of eight total venues is enforced to bound pairwise work. Each venue's rate limiter remains independent and shared by its adapter instances. This function performs no network calls and does not itself schedule or execute scans.
+The library comparator performs no network calls; its caller owns fetching and passes only sanitized failure codes (not raw exception text or credentials). The operator-invoked cex-scan CLI adds a bounded concurrent fetch layer for up to four selected public venues. The underlying comparator supports up to eight books for deterministic callers. Each venue adapter retains its own process-local rate limiter. Neither the library comparator nor CLI schedules scans or executes trades.
 
 Depth and cost behavior
 
