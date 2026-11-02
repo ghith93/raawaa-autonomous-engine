@@ -16,18 +16,22 @@ QUOTE = "0x" + "2" * 40
 UNISWAP_PAIR = "0x" + "3" * 40
 SUSHI_PAIR = "0x" + "4" * 40
 UNISWAP_V3_PAIR = "0x" + "5" * 40
+PANCAKE_PAIR = "0x" + "6" * 40
+APESWAP_PAIR = "0x" + "7" * 40
 HASH = "0x" + "a" * 64
 UNISWAP = get_venue("uniswap_v2_ethereum", 1)
 SUSHI = get_venue("sushiswap_v2_ethereum", 1)
+PANCAKE = get_venue("pancakeswap_v2_bsc", 56)
+APESWAP = get_venue("apeswap_v2_bsc", 56)
 
 
-def candidate(dex, pair_address):
+def candidate(dex, pair_address, chain="ethereum"):
     return DexPairCandidate(
-        chain="ethereum", dex=dex, pair_address=pair_address,
+        chain=chain, dex=dex, pair_address=pair_address,
         base_address=BASE, base_symbol="BASE",
         quote_address=QUOTE, quote_symbol="QUOTE",
         fetched_at=datetime.now(timezone.utc), pair_created_at_ms=None,
-        source_url="https://dexscreener.com/ethereum/" + pair_address,
+        source_url=f"https://dexscreener.com/{chain}/" + pair_address,
         labels=("v2",),
     )
 
@@ -108,6 +112,51 @@ class FakeReader:
 
     def verify_canonical_block(self, block_number, block_hash):
         self.canonical_checks.append((block_number, block_hash))
+
+
+class FakeBscReader(FakeReader):
+    def __init__(self):
+        super().__init__()
+        self.context = EvmBlockContext(
+            56, 100, HASH, int(datetime.now(timezone.utc).timestamp()),
+        )
+
+    def lookup_v2_pair_address(self, factory, token0, token1, block_number):
+        self.lookup_calls.append((factory, token0, token1, block_number))
+        if factory == PANCAKE.factory:
+            return PANCAKE_PAIR
+        if factory == APESWAP.factory:
+            return APESWAP_PAIR
+        return None
+
+    def read_pools(self, pools, *, block_context=None):
+        self.read_requests.append((pools, block_context))
+        now = datetime.now(timezone.utc)
+        snapshots = []
+        for pair, fee in pools:
+            state = V2PoolState(
+                chain_id=56, pair_address=pair, token0=BASE, token1=QUOTE,
+                reserve0_raw=1_000 * 10**18, reserve1_raw=2_000_000 * 10**18,
+                fee_bps=fee, block_number=100, block_hash=HASH,
+                observed_at=now,
+            )
+            snapshots.append(EvmPoolSnapshot(
+                state=state, token0_decimals=18, token1_decimals=18,
+                block_timestamp=self.context.timestamp,
+            ))
+        return snapshots
+
+    def quote_v2_router_exact_input(self, router, amount_in, token_path, block_number):
+        self.quotes.append((router, amount_in, token_path, block_number))
+        if router == PANCAKE.router02 and token_path == [QUOTE, BASE]:
+            return [amount_in, 500 * 10**18]
+        if router == APESWAP.router02 and token_path == [BASE, QUOTE]:
+            return [amount_in, 1_010 * 10**18]
+        if router == APESWAP.router02 and token_path == [QUOTE, BASE]:
+            return [amount_in, 490 * 10**18]
+        if router == PANCAKE.router02 and token_path == [BASE, QUOTE]:
+            return [amount_in, 980 * 10**18]
+        raise AssertionError((router, token_path))
 
 
 def test_scan_uses_dexscreener_only_for_discovery_and_quotes_both_routes_onchain():
@@ -290,3 +339,61 @@ def test_scan_rejects_unsafe_rpc_request_interval():
             capital_quote="1000", dex_client=FakeDexScreener([]),
             reader=FakeReader(), min_request_interval=0,
         )
+
+
+def test_bsc_v2_scan_uses_chain_specific_venues_and_pinned_chain_context():
+    dex = FakeDexScreener([
+        candidate("pancakeswap", PANCAKE_PAIR, chain="bsc"),
+        candidate("apeswap", APESWAP_PAIR, chain="bsc"),
+    ])
+    reader = FakeBscReader()
+    result = scan_onchain_v2_candidates(
+        token_address=BASE,
+        quote_token_address=QUOTE,
+        capital_quote="1000",
+        chain_id=56,
+        chain_slug="bsc",
+        venue_ids=(PANCAKE.id, APESWAP.id),
+        dex_client=dex,
+        reader=reader,
+    )
+
+    assert dex.calls == [("bsc", BASE)]
+    assert result["status"] == "quoted"
+    assert result["chain_id"] == 56
+    assert [item["venue_id"] for item in result["venues"]] == [PANCAKE.id, APESWAP.id]
+    assert result["candidate_pairs_factory_verified"] == 2
+    assert len(result["routes"]) == 2
+    assert result["routes"][0]["buy_venue_id"] == PANCAKE.id
+    assert result["routes"][0]["sell_venue_id"] == APESWAP.id
+    assert result["live_execution"] is False
+    assert result["transaction_submitted"] is False
+    assert reader.context.chain_id == 56
+    assert reader.canonical_checks == [(100, HASH)]
+
+
+def test_bsc_scanner_rejects_network_slug_mismatch_and_wrong_rpc_chain():
+    dex = FakeDexScreener([])
+    with pytest.raises(ValueError, match="chain_slug does not match"):
+        scan_onchain_v2_candidates(
+            token_address=BASE, quote_token_address=QUOTE, capital_quote="1000",
+            chain_id=56, chain_slug="ethereum",
+            venue_ids=(PANCAKE.id, APESWAP.id), dex_client=dex, reader=FakeBscReader(),
+        )
+
+    with pytest.raises(ValueError, match="RPC chain ID"):
+        scan_onchain_v2_candidates(
+            token_address=BASE, quote_token_address=QUOTE, capital_quote="1000",
+            chain_id=56, venue_ids=(PANCAKE.id, APESWAP.id),
+            dex_client=dex, reader=FakeReader(),
+        )
+
+
+def test_non_ethereum_registry_contains_two_documented_bsc_v2_venues():
+    from arb_engine.venues import list_venues
+
+    bsc_venues = list_venues(56)
+    assert {venue.id for venue in bsc_venues} == {PANCAKE.id, APESWAP.id}
+    assert PANCAKE.swap_fee_bps == 25
+    assert APESWAP.swap_fee_bps == 20
+    assert all(venue.network == "bsc" for venue in bsc_venues)
