@@ -11,7 +11,7 @@ from urllib.parse import urlencode, urlsplit
 from urllib.request import Request, urlopen
 
 BASE_URL = "https://api.dexscreener.com"
-USER_AGENT = "telegram-arbitrage-engine/0.9 (+read-only research)"
+USER_AGENT = "telegram-arbitrage-engine/0.10 (+read-only research)"
 MAX_RESPONSE_BYTES = 2_000_000
 
 
