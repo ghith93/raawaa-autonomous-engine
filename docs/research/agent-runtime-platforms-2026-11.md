@@ -64,7 +64,7 @@ Agno documents team coordination modes, task decomposition, shared state, sessio
 
 ### Goose
 
-Goose provides a CLI, desktop app and API; supports MCP extensions, recipes, subagents and multiple model providers. It is useful as a reference for portable workflow recipes and extension patterns. Installing it on the tablet would duplicate AndroidHarness's Code agent, shell, Git, browser, skills, nested agents and MCP client.
+Goose provides a CLI, desktop app and API; supports MCP extensions, recipes, subagents and multiple model providers. It is useful as a reference for portable workflow recipes and extension patterns. It is a candidate for a future hosted or cloud workspace only if it demonstrates a measurable advantage over the existing GitHub-based workflow.
 
 ### OpenHands
 
@@ -84,7 +84,7 @@ Decision: do not add now. First measure whether agents fail to retrieve relevant
 
 Letta's memory is git-backed: agents own a memory repository with always-in-context system blocks and on-demand notes. It also supports background consolidation. This is a useful pattern, but a separate Letta server would duplicate the existing project memory.
 
-Decision: borrow the distinction between compact core memory and on-demand topic memory. The repository's `.harness/memory.md`, project skill and Git-backed docs already provide a simpler implementation.
+Decision: borrow the distinction between compact core memory and on-demand topic memory. The engine's existing SQLite memory and Git-backed documentation remain the baseline; do not add a separate memory service without benchmark evidence.
 
 ### Graphiti / Zep
 
@@ -98,17 +98,10 @@ Qdrant supports dense and hybrid retrieval; Qdrant Edge offers embedded/offline 
 
 Decision: defer vector search. Start with indexed Markdown/SQLite/D1 retrieval and add Qdrant Edge only if a benchmark demonstrates semantic-recall gains at acceptable memory cost.
 
-## 5. AndroidHarness is optional diagnostics only (superseded)
-
-The previous recommendation to use AndroidHarness Code as a tablet-side execution surface is superseded. The installed version is 3.1 and the operator chose to remove the device from the critical path. Use GitHub Actions for reproducible CI, Cloudflare Worker + D1 for the remote control plane and durable task ledger, and authenticated GitHub/ChatGPT integrations for code review and repository operations. AndroidHarness may be used only for occasional operator-initiated diagnostics.
-
-Do not assume a direct ChatGPT-to-AndroidHarness control channel. A future MCP bridge must be authenticated, workspace-bound, allowlisted, audited, rate-limited, cancellable and protected from arbitrary command execution.
-
-## 6. Priority roadmap
+## 5. Priority roadmap
 
 | Priority | Work | Why | Gate |
 |---|---|---|---|
-| Deferred | AndroidHarness 3.2 setup / device worker | Not required for engine operation | Revisit only if the operator explicitly requests device-specific compatibility work |
 | P1 | Cloudflare Workflows deterministic spike | Best fit for durable task execution on current platform | Local/CI only; no providers or deploy |
 | P2 | Restart/resume and interrupted-write tests for file-backed checkpoint adapter | Prove persistence before D1 | Fresh adapter instance, HMAC verification, failure injection |
 | P3 | Compare Pydantic AI StepPersistence with MAF adapter | Check whether a smaller agent runtime improves reliability | No-provider isolated benchmark |
