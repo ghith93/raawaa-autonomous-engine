@@ -26,8 +26,7 @@ def demo() -> dict:
 
 
 def scan(query: str, min_liquidity: Decimal, min_volume: Decimal, ledger_path: str) -> dict:
-    client = DexScreenerClient()
-    pairs = client.search_pairs(query)
+    pairs = DexScreenerClient().search_pairs(query)
     spreads = find_spreads(pairs, min_liquidity_usd=min_liquidity,
                            min_volume_24h_usd=min_volume)
     recorded = OpportunityLedger(ledger_path).record(spreads)
@@ -36,7 +35,11 @@ def scan(query: str, min_liquidity: Decimal, min_volume: Decimal, ledger_path: s
         "query": query, "pairs_received": len(pairs),
         "cross_dex_comparisons": len(spreads), "observations_recorded": recorded,
         "live_execution": False,
-        "warning": "Indicative USD pool marks only; not router quotes, executable prices, or profit guarantees.",
+        "warning": (
+            "Indicative USD pool marks only; not router quotes or executable prices. "
+            "The source does not provide an on-chain quote timestamp here; retrieval age "
+            "is not proof that the quoted pool state is fresh."
+        ),
         "opportunities": [
             {
                 "chain": x.chain, "pair": f"{x.base_symbol}/{x.quote_symbol}",
@@ -45,6 +48,8 @@ def scan(query: str, min_liquidity: Decimal, min_volume: Decimal, ledger_path: s
                 "gross_spread_bps": str(x.gross_spread_bps),
                 "min_pool_liquidity_usd": str(x.min_pool_liquidity_usd),
                 "combined_24h_volume_usd": str(x.total_24h_volume_usd),
+                "retrieval_age_seconds": str(x.retrieval_age_seconds),
+                "quote_timestamp_status": x.quote_timestamp_status,
                 "buy_pair_url": x.buy_pair_url, "sell_pair_url": x.sell_pair_url,
                 "classification": x.classification,
             } for x in spreads[:25]
