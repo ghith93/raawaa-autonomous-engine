@@ -11,6 +11,16 @@
 - The client's `fetched_at` is the local response retrieval time only. It must never be interpreted as proof that the on-chain pool state was fresh at that time.
 - API marks are useful for discovery and ranking only. They are not executable swap quotes, guaranteed depth, or evidence of profit.
 
+## Jupiter Solana public market data (keyless, read-only)
+
+- Official docs: [Jupiter Price API V3](https://developers.jup.ag/docs/price/index.md), [Swap API V2](https://developers.jup.ag/docs/swap/index.md), [keyless access and rate limits](https://developers.jup.ag/docs/portal/rate-limits.md).
+- Price API: `GET https://api.jup.ag/price/v3?ids=<comma-separated-mints>`; up to 50 SPL mint addresses per request. It returns heuristic `usdPrice`, token `decimals`, provider `blockId`, `priceChange24h`, `liquidity`, and `createdAt`. Mints without a reliable price (including tokens with no trade in seven days) are omitted and reported as missing; they are never coerced to zero.
+- Keyless access is documented at 0.5 requests/second (one request every two seconds), without sign-up or API key. The adapter shares a process-wide limiter between price and quote clients and defers after HTTP 429 using `Retry-After`. No API key or paid plan is configured.
+- Quote API: `GET /swap/v2/order` is called without a taker. The quote-only client requires the response to explicitly contain `transaction=null`; it rejects any response containing a transaction or missing that field. No `/build`, `/execute`, transaction landing, wallet, signer, or submit endpoint is called.
+- CLI: `arb-engine solana-price --mint <mint> [--mint <mint> ...]` and `arb-engine solana-quote --input-mint <mint> --output-mint <mint> --amount-raw <uint64>`.
+- Trust boundary: Price API V3 is a heuristic USD mark based on on-chain activity and liquidity/holder/trading heuristics, not an executable price or order book. Its `blockId` is provider provenance, not proof that the returned price is a synchronized current-block snapshot. `createdAt` is preserved as provider metadata, not treated as quote time; `fetched_at` is local retrieval time only. The no-taker Swap API quote is a route quote, not an execution guarantee or realized PnL.
+- Solana observations are not fed into the EVM/CEX cross-venue evaluator. A future cross-family comparison must first establish explicit mint-to-canonical-asset mappings, synchronized quote timestamps/slots, decimals, depth, fees, and execution-risk comparability. Until then they are isolated Solana research data.
+
 ## Public EVM JSON-RPC candidate
 
 - Default PublicNode endpoint: https://ethereum-rpc.publicnode.com (Ethereum mainnet, chain ID 1). The CLI accepts `--chain-id` and a custom HTTPS `--rpc-url` for other EVM networks.
