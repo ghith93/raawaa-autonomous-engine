@@ -64,7 +64,7 @@ This example records only a discovery event. It does not create or submit a pape
 
 ## Remote D1 persistence adapter (staged)
 
-The repository also contains an authenticated Worker endpoint at `POST /v1/paper-ledger` and a Python HTTP client, backed by additive migration `0004_paper_event_ledger.sql`. This is a staged API/client implementation; it is **not** yet enabled in the Telegram arbitrage scanner, deployed, or migrated against production D1.
+The repository also contains an authenticated Worker endpoint at `POST /v1/paper-ledger` and a Python HTTP client, backed by additive migration `0004_paper_event_ledger.sql`. The flash-swap CLI has an explicit opt-in D1 backend, but it is **not** deployed or migrated against any production D1 database. It requires a separately deployed Worker and an explicitly migrated non-production database before use.
 
 - D1 is intended to be the cross-run source of truth for scheduled ephemeral workers; local SQLite remains the deterministic offline/test adapter.
 - The Worker accepts only the fixed event vocabulary, validates timezone-aware timestamps, block provenance, uint256 raw integer strings, and cross-runtime canonical JSON payloads; it caps request/payload sizes and requires the existing bearer authentication.
