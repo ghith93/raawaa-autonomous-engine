@@ -85,6 +85,8 @@ def _candidate_record(candidate: DexPairCandidate, venue: Venue, *, verified: bo
         "base_symbol_metadata_only": candidate.base_symbol,
         "quote_symbol_metadata_only": candidate.quote_symbol,
         "source_url": candidate.source_url,
+        "labels_metadata_only": list(candidate.labels),
+        "pair_created_at_ms_metadata_only": candidate.pair_created_at_ms,
         "factory_verified": verified,
         "rejection_reason": reason,
     }
