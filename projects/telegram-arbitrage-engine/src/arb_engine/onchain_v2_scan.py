@@ -146,15 +146,11 @@ def scan_onchain_v2_candidates(
         or not 1 <= max_rpc_requests <= 64
     ):
         raise ValueError("max_rpc_requests must be an integer from 1 to 64")
-    minimum_interval = 0.0 if reader is not None else 0.1
     if (
         isinstance(min_request_interval, bool) or not isinstance(min_request_interval, (int, float))
-        or not math.isfinite(min_request_interval)
-        or not minimum_interval <= min_request_interval <= 5.0
+        or not math.isfinite(min_request_interval) or not 0.1 <= min_request_interval <= 5.0
     ):
-        raise ValueError(
-            f"min_request_interval must be between {minimum_interval:g} and 5 seconds"
-        )
+        raise ValueError("min_request_interval must be between 0.1 and 5 seconds")
     capital_amount = _capital_decimal(capital_quote)
 
     dex_client = dex_client or DexScreenerClient()
