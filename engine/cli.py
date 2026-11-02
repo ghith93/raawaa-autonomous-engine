@@ -73,6 +73,9 @@ def audit() -> int:
         errors.append("Paid model calls must remain disabled.")
     if policy.get("allow_external_writes") is not False:
         errors.append("External writes must remain disabled.")
+    parallel_limit = policy.get("max_parallel_agents")
+    if type(parallel_limit) is not int or not 1 <= parallel_limit <= 5:
+        errors.append("max_parallel_agents must be an integer between 1 and 5.")
     ids = [agent.get("id") for agent in roster.get("agents", [])]
     if len(ids) != len(set(ids)):
         errors.append("Agent IDs must be unique.")
@@ -146,9 +149,10 @@ def build_parser() -> argparse.ArgumentParser:
     listing.add_argument("--limit", type=int, default=50)
     sub.add_parser("run-once")
 
-    batch = sub.add_parser("run-batch", help="Run a bounded batch of dry-run tasks")
+    batch = sub.add_parser("run-batch", help="Run a bounded task batch with policy-limited concurrency")
     batch.add_argument("--max-tasks", type=int, default=5)
     batch.add_argument("--max-seconds", type=int, default=60)
+    batch.add_argument("--max-parallel", type=int, default=None)
 
     log = sub.add_parser("audit-log")
     log.add_argument("--limit", type=int, default=100)
@@ -231,8 +235,17 @@ def main() -> int:
         runner = lambda current_store: run_once(
             current_store, live_gateway=gateway, environ=os.environ
         )
-        print(json.dumps(run_batch(store(), args.max_tasks, args.max_seconds, runner=runner),
-                         indent=2, ensure_ascii=False))
+        execution_policy = load_json(ROOT / "config" / "policy.json")
+        policy_parallel_limit = execution_policy.get("max_parallel_agents")
+        if type(policy_parallel_limit) is not int or not 1 <= policy_parallel_limit <= 5:
+            raise ValueError("max_parallel_agents policy must be an integer between 1 and 5")
+        max_parallel = policy_parallel_limit if args.max_parallel is None else args.max_parallel
+        if type(max_parallel) is not int or not 1 <= max_parallel <= policy_parallel_limit:
+            raise ValueError("max_parallel must be between 1 and the configured max_parallel_agents policy")
+        print(json.dumps(run_batch(
+            store(), args.max_tasks, args.max_seconds,
+            runner=runner, max_parallel=max_parallel,
+        ), indent=2, ensure_ascii=False))
     elif args.command == "audit-log":
         print(json.dumps(store().audit_events(args.limit), indent=2, ensure_ascii=False))
     elif args.command == "memory-add":
