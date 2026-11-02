@@ -89,6 +89,15 @@ class LiveRuntimeFactoryTests(unittest.TestCase):
         )
         self.assertIsNone(gateway)
 
+    def test_nonzero_budget_is_rejected_by_current_free_only_runtime(self):
+        self.policy["daily_budget_usd"] = 0.01
+        self.write_files()
+        gateway = build_live_gateway(
+            self.db_path, self.policy_path, self.registry_path,
+            environ={"RAAWAA_ENGINE_LIVE_INFERENCE": "enabled", "GROQ_API_KEY": "test-key"},
+        )
+        self.assertIsNone(gateway)
+
     def test_paid_policy_is_rejected(self):
         self.policy["allow_paid_model_calls"] = True
         self.write_files()
