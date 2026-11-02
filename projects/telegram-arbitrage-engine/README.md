@@ -213,7 +213,7 @@ An isolated SQLite event ledger is available for provenance-linked research reco
 
 ## Read-only perpetual funding history
 
-The first normalized funding-history reader supports Binance USD-M linear perpetuals and Bybit linear/inverse perpetuals. It returns signed `Decimal` rates, exact contract symbol and settlement timestamp, and optional mark-price/interval metadata. It does not infer an 8-hour interval when the source has not supplied one.
+The first normalized funding-history reader supports Binance USD-M linear perpetuals and Bybit linear/inverse perpetuals. It returns signed `Decimal` rates, exact contract symbol and settlement timestamp, Binance mark-price/interval metadata, and Bybit interval metadata only when the active instrument specification confirms a whole-hour interval. It does not infer an 8-hour interval when the source has not supplied one.
 
 ```python
 from arb_engine.market_sources.funding import PublicPerpetualFundingClient
