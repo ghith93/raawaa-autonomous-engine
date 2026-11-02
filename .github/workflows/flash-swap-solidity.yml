@@ -30,6 +30,6 @@ jobs:
       - uses: actions/checkout@v4
       - uses: foundry-rs/foundry-toolchain@v1
         with:
-          version: stable
+          version: v1.8.7
       - name: Run local mock-pair EVM tests
-        run: forge test -vvv
+        run: forge test --match-path test/FlashSwapHarness.t.sol -vvv

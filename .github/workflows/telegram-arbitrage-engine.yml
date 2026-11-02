@@ -58,3 +58,41 @@ jobs:
         run: python -m pip install --disable-pip-version-check --no-deps -e .
       - name: Verify source-documented Ethereum V2 deployments (read-only)
         run: arb-engine venue-check --chain-id 1 --rpc-url https://ethereum-rpc.publicnode.com --timeout-seconds 8
+
+  anvil-fork-smoke:
+    needs: live-venue-smoke
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: projects/telegram-arbitrage-engine/solidity-test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: v1.8.7
+      - name: Resolve and pin a public Ethereum block
+        id: fork
+        env:
+          RPC_URL: https://ethereum-rpc.publicnode.com
+        run: |
+          set -euo pipefail
+          block_response="$(curl --fail --silent --show-error --retry 4 --retry-all-errors --retry-delay 1 --max-time 15 -H "Content-Type: application/json" --data '{"jsonrpc":"2.0","id":1,"method":"eth_blockNumber","params":[]}' "$RPC_URL")"
+          block_hex="$(jq -er '.result | select(test("^0x[0-9a-fA-F]+$"))' <<< "$block_response")"
+          block_digits="$(printf '%s' "$block_hex" | sed 's/^0x//')"
+          block="$((16#$block_digits))"
+          echo "Resolved Ethereum block number: $block"
+          block_json="$(curl --fail --silent --show-error --retry 4 --retry-all-errors --retry-delay 1 --max-time 15 -H "Content-Type: application/json" --data "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"eth_getBlockByNumber\",\"params\":[\"$block_hex\",false]}" "$RPC_URL")"
+          block_hash="$(jq -er '.result.hash | select(test("^0x[0-9a-fA-F]{64}$"))' <<< "$block_json")"
+          parent_hash="$(jq -er '.result.parentHash | select(test("^0x[0-9a-fA-F]{64}$"))' <<< "$block_json")"
+          echo "block=$block" >> "$GITHUB_OUTPUT"
+          echo "hash=$block_hash" >> "$GITHUB_OUTPUT"
+          echo "parent_hash=$parent_hash" >> "$GITHUB_OUTPUT"
+          echo "Pinned Ethereum block: $block ($block_hash)"
+      - name: Execute real V2 pair callback only on the local fork
+        env:
+          MAINNET_RPC_URL: https://ethereum-rpc.publicnode.com
+          FORK_BLOCK: ${{ steps.fork.outputs.block }}
+          FORK_BLOCK_HASH: ${{ steps.fork.outputs.hash }}
+          FORK_PARENT_HASH: ${{ steps.fork.outputs.parent_hash }}
+        run: forge test --match-path test/AnvilForkFlashSwap.t.sol -vvv
