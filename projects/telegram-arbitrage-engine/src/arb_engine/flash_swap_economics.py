@@ -51,9 +51,11 @@ def estimate_flash_swap_economics(
 ) -> V2FlashSwapEconomics:
     """Estimate gas in repayment-token raw units using explicit same-block reserve pricing.
 
-    Decimal counts are mandatory because reserve ratios are raw-unit ratios. For example,
-    a WETH/USDC pool requires 18 native-token decimals and 6 repayment-token decimals.
-    gas_used must include the caller's chosen transaction/calldata overhead. gas_price_wei
+    Decimal counts are required audit metadata. The conversion itself uses the ratio of
+    raw reserves directly: the decimal scales cancel when converting raw native units to
+    raw repayment-token units. For example, this correctly maps WETH wei to USDC micro-units
+    for an 18/6 pool. gas_used must include the caller's chosen transaction/calldata overhead.
+    gas_price_wei
     must be an explicit scenario (for example base fee plus a chosen tip). If repayment is
     not in the wrapped native token, native_quote_pool must contain exactly those two
     tokens and be pinned to the flash-swap block.
@@ -115,22 +117,15 @@ def estimate_flash_swap_economics(
             native_reserve = native_quote_pool.reserve1_raw
             profit_reserve = native_quote_pool.reserve0_raw
 
-        # raw quote = raw native * quote reserve/native reserve * 10**(native decimals - quote decimals)
-        decimal_scale_num = 10 ** native_token_decimals
-        decimal_scale_den = 10 ** profit_token_decimals
-        conversion_numerator = native_gas_cost * profit_reserve * decimal_scale_num
-        conversion_denominator = native_reserve * decimal_scale_den
-        gas_cost = (
-            conversion_numerator + conversion_denominator - 1
-        ) // conversion_denominator
+        # Both sides are raw units: raw repayment = raw native * reserve_quote / reserve_native.
+        # Token decimal scales cancel exactly; retaining them above is audit metadata.
+        conversion_numerator = native_gas_cost * profit_reserve
+        gas_cost = (conversion_numerator + native_reserve - 1) // native_reserve
 
-        # Largest integer gas price whose ceiling-rounded token cost does not exceed gross.
-        break_even_denominator = (
-            gas_used * profit_reserve * decimal_scale_num
-        )
-        break_even_numerator = gross * native_reserve * decimal_scale_den
+        # Largest integer gas price whose ceiling-rounded raw-token cost does not exceed gross.
+        break_even_denominator = gas_used * profit_reserve
         break_even = (
-            max(0, break_even_numerator // break_even_denominator)
+            max(0, (gross * native_reserve) // break_even_denominator)
             if gross > 0 else 0
         )
         price_pair = native_quote_pool.pair_address
