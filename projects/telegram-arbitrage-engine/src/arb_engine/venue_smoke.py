@@ -4,6 +4,7 @@ import json
 import time
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
+from urllib.parse import urlsplit
 from typing import Any, Protocol
 
 from .venues import Venue
@@ -20,6 +21,14 @@ TOKEN1_SELECTOR = "0xd21220a7"  # token1()
 
 class VenueVerificationError(RuntimeError):
     pass
+
+
+def _safe_endpoint_label(endpoint: str) -> str:
+    parts = urlsplit(endpoint)
+    if not parts.scheme or not parts.hostname:
+        return "custom_rpc_endpoint"
+    port = f":{parts.port}" if parts.port else ""
+    return f"{parts.scheme}://{parts.hostname}{port}"
 
 
 class RpcCaller(Protocol):
@@ -65,7 +74,7 @@ class JsonRpcClient:
                     raise VenueVerificationError(f"{method} HTTP {exc.code}") from exc
             except (URLError, TimeoutError, OSError) as exc:
                 if attempt == 2:
-                    raise VenueVerificationError(f"{method} transport failure: {exc}") from exc
+                    raise VenueVerificationError(f"{method} transport failure ({type(exc).__name__})") from exc
             if attempt < 2:
                 time.sleep(1 + attempt)
         raise VenueVerificationError(f"{method} exhausted bounded retries")
@@ -190,7 +199,7 @@ def verify_registry_venues(
         "chain_id": chain_id,
         "block_number": block_number,
         "block_hash": block_hash,
-        "rpc_endpoint": getattr(rpc, "endpoint", "injected_rpc_test_double"),
+        "rpc_endpoint": _safe_endpoint_label(rpc.endpoint) if getattr(rpc, "endpoint", None) else "injected_rpc_test_double",
         "verification_status": "live_read_only_onchain_checks_passed",
         "venues": pair_results,
         "warning": (
