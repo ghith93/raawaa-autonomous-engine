@@ -88,6 +88,20 @@ class CliTests(unittest.TestCase):
                     with self.assertRaisesRegex(ValueError, "configured max_parallel_agents"):
                         cli.main()
 
+    def test_run_batch_allows_override_below_policy_cap(self):
+        fake_store = object()
+        expected = {"status": "completed", "stop_reason": "task_limit", "tasks_processed": 0}
+        output = io.StringIO()
+        with patch("sys.argv", ["engine", "run-batch", "--max-parallel", "1"]):
+            with patch("engine.cli.build_live_gateway", return_value=None):
+                with patch("engine.cli.store", return_value=fake_store):
+                    with patch("engine.cli.run_batch", return_value=expected) as batch:
+                        with contextlib.redirect_stdout(output):
+                            self.assertEqual(cli.main(), 0)
+        self.assertEqual(json.loads(output.getvalue()), expected)
+        self.assertEqual(batch.call_args.args[:3], (fake_store, 5, 60))
+        self.assertEqual(batch.call_args.kwargs["max_parallel"], 1)
+
     def test_run_once_uses_live_runtime_factory_but_default_remains_dry_run(self):
         with tempfile.TemporaryDirectory() as tmp:
             db_path = os.path.join(tmp, "engine.db")
