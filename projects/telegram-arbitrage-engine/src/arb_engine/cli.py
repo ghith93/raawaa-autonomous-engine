@@ -26,7 +26,7 @@ from .venue_smoke import (
     verify_registry_venue_deployments, verify_registry_venues,
 )
 from .v3_math import get_sqrt_ratio_at_tick
-from .v3_rpc import EvmV3PoolReader
+from .v3_rpc import DEFAULT_V3_ETHEREUM_RPC, EvmV3PoolReader
 from .v3_simulator import simulate_v3_swap
 
 
@@ -476,7 +476,7 @@ def main() -> None:
                 raise ValueError("--amount-specified must fit int256 raw units")
             if not 1 <= args.max_steps <= 2048:
                 raise ValueError("--max-steps must be between 1 and 2048")
-            rpc_url = args.rpc_url or DEFAULT_ETHEREUM_RPC
+            rpc_url = args.rpc_url or DEFAULT_V3_ETHEREUM_RPC
             zero_for_one = args.direction == "token0_to_token1"
             reader = EvmV3PoolReader(
                 rpc_url,
