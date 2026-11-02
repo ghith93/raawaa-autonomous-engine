@@ -316,7 +316,10 @@ class EthereumV2PoolReader:
             if not isinstance(block_context, EvmBlockContext):
                 raise ValueError("block_context must be an EvmBlockContext")
             if (
-                not isinstance(block_context.block_number, int)
+                not isinstance(block_context.chain_id, int)
+                or isinstance(block_context.chain_id, bool)
+                or block_context.chain_id <= 0
+                or not isinstance(block_context.block_number, int)
                 or isinstance(block_context.block_number, bool)
                 or block_context.block_number < 0
                 or not isinstance(block_context.block_hash, str)
