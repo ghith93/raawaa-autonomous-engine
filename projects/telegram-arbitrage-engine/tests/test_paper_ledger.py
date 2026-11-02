@@ -196,9 +196,15 @@ def test_hash_chain_detects_modified_payload_and_deleted_tail(tmp_path):
     assert ledger.verify_chain("candidate-001") is False
 
 
-def test_payload_is_bounded_and_rejects_non_finite_json(tmp_path):
+def test_payload_is_bounded_and_rejects_non_canonical_numbers(tmp_path):
     ledger = PaperTradingLedger(tmp_path / "payload.sqlite3")
-    with pytest.raises(ValueError, match="finite JSON"):
+    with pytest.raises(ValueError, match="floating-point"):
+        candidate_event(ledger, payload={"fraction": 1.25})
+    with pytest.raises(ValueError, match="JavaScript-safe"):
+        candidate_event(ledger, payload={"unsafe_integer": 2**53})
+    with pytest.raises(ValueError, match="floating-point"):
         candidate_event(ledger, payload={"not_finite": float("nan")})
+    with pytest.raises(ValueError, match="keys must be strings"):
+        candidate_event(ledger, payload={1: "numeric-key"})
     with pytest.raises(ValueError, match="64 KiB"):
         candidate_event(ledger, payload={"large": "x" * 70_000})

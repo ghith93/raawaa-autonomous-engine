@@ -106,6 +106,18 @@ GitHub Actions runs CI and is configured to invoke a scheduled, bounded D1 queue
 
 Before selecting a host, verify free-tier limits, sleep behavior, persistent disk availability, outbound network rules, and whether the service can run without a payment method. Do not assume a free trial is a recurring free tier.
 
+
+### Production deployment and D1 migration gates
+
+Production side effects are deliberately separated from code merge:
+
+- `.github/workflows/deploy-worker.yml` is manual-only. Dispatch requires the exact confirmation string `DEPLOY_CONTROL_WORKER`; a push or PR merge does not deploy the Worker.
+- The automatic production migration workflow was removed. The retained `.github/workflows/d1-migrate.yml` is manual-only and requires the exact database confirmation `raawaa-autonomous-e`.
+- A merge that changes `worker/**` or `migrations/**` therefore does not deploy code or apply schema changes by itself.
+- Do not dispatch either workflow as part of routine CI or PR completion. First review the exact main SHA, migration status, rollback/recovery plan, and non-production integration evidence; production deployment/migration requires a separate explicit operator decision.
+
+This gate exists because automatic migration on every push to main could have applied the new paper-ledger schema to the production D1 database immediately after merge, before non-production concurrency/restart validation.
+
 ## Secrets and permissions
 
 Never commit API keys, access tokens, passwords, customer data, or private order data. Configure secrets only through repository Settings → Secrets and variables → Actions, and only for a reviewed integration that needs them. Prefer short-lived, narrowly scoped credentials. Do not paste secrets into chat, issues, logs, or memory.

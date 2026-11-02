@@ -338,3 +338,290 @@ test("quota settlement retries identical usage and rejects conflicting usage", a
   assert.equal(conflict.status, 409);
   assert.deepEqual(await conflict.json(), { error: "settlement_conflict" });
 });
+
+
+function paperLedgerDbMock() {
+  const calls = [];
+  let head = null;
+  let event = null;
+  return {
+    calls,
+    prepare(sql) {
+      return {
+        sql, values: [],
+        bind(...values) { this.values = values; return this; },
+        async first() {
+          calls.push({ kind: "first", sql, values: this.values });
+          if (sql.includes("SELECT * FROM paper_events WHERE event_id")) return event;
+          if (sql.includes("SELECT sequence,event_hash FROM paper_candidate_heads")) return head;
+          return null;
+        },
+        async run() {
+          calls.push({ kind: "run", sql, values: this.values });
+          if (sql.includes("INSERT OR IGNORE INTO paper_candidate_heads")) {
+            if (!head) head = {
+              candidate_id: this.values[0], sequence: 0, event_hash: this.values[1],
+            };
+          }
+          return { meta: { changes: 1 } };
+        },
+        async all() {
+          calls.push({ kind: "all", sql, values: this.values });
+          return { results: [] };
+        },
+      };
+    },
+    async batch(statements) {
+      calls.push({ kind: "batch", statements: statements.map(x => ({ sql: x.sql, values: x.values })) });
+      const [update, insert] = statements;
+      if (head && update.values[3] === head.candidate_id && head.sequence === update.values[4] && head.event_hash === update.values[5]) {
+        head = { candidate_id: update.values[3], sequence: update.values[0], event_hash: update.values[1] };
+        event = Object.fromEntries([
+          "candidate_id","event_id","event_type","occurred_at","chain_id","block_number","block_hash",
+          "strategy_id","source_pool","destination_pool","token_in","token_out","gross_profit_raw",
+          "gas_used","gas_price_wei","gas_cost_profit_raw","net_profit_raw","payload_json",
+        ].map((key, i) => [key, insert.values[i] ?? null]));
+        event.sequence = update.values[0];
+        event.previous_hash = update.values[5];
+        event.event_hash = update.values[1];
+        return [{ meta: { changes: 1 } }, { meta: { changes: 1 } }, { meta: { changes: 1 } }];
+      }
+      return [{ meta: { changes: 0 } }, { meta: { changes: 0 } }, { meta: { changes: 0 } }];
+    },
+  };
+}
+
+test("paper ledger append is authenticated and writes CAS head, event, and checkpoint", async () => {
+  const DB = paperLedgerDbMock();
+  const response = await worker.fetch(request("/v1/paper-ledger", {
+    method: "POST",
+    body: { action: "append", event: {
+      candidate_id: "candidate-1", event_id: "event-1", event_type: "candidate_detected",
+      occurred_at: "2026-11-02T11:00:00Z", payload: { source: "café" },
+    } },
+  }), { DB, ENGINE_API_TOKEN: TOKEN });
+  assert.equal(response.status, 201);
+  const result = await response.json();
+  assert.equal(result.sequence, 1);
+  assert.equal(result.event_hash.length, 64);
+  const batch = DB.calls.find(x => x.kind === "batch");
+  assert.equal(batch.statements.length, 3);
+  assert.match(batch.statements[0].sql, /WHERE candidate_id=\? AND sequence=\? AND event_hash=\?/);
+  assert.match(batch.statements[1].sql, /INSERT INTO paper_events/);
+  assert.equal(batch.statements[1].values[17], String.raw`{"source":"caf\u00e9"}`);
+  assert.match(batch.statements[2].sql, /INSERT INTO paper_event_checkpoints/);
+});
+
+test("paper ledger rejects missing block provenance for outcome events before writes", async () => {
+  const DB = paperLedgerDbMock();
+  const response = await worker.fetch(request("/v1/paper-ledger", {
+    method: "POST",
+    body: { action: "append", event: {
+      candidate_id: "candidate-1", event_id: "event-2", event_type: "outcome_observed",
+      occurred_at: "2026-11-02T11:00:00Z", payload: {},
+    } },
+  }), { DB, ENGINE_API_TOKEN: TOKEN });
+  assert.equal(response.status, 400);
+  assert.equal(DB.calls.length, 0);
+});
+
+test("paper ledger rejects unauthenticated append requests", async () => {
+  const DB = paperLedgerDbMock();
+  const response = await worker.fetch(request("/v1/paper-ledger", {
+    method: "POST", token: null,
+    body: { action: "append", event: {} },
+  }), { DB, ENGINE_API_TOKEN: TOKEN });
+  assert.equal(response.status, 401);
+  assert.equal(DB.calls.length, 0);
+});
+
+test("paper ledger rejects arbitrary event types and malformed raw integer strings", async () => {
+  for (const event of [
+    { candidate_id: "candidate-1", event_id: "event-3", event_type: "execute_trade", occurred_at: "2026-11-02T11:00:00Z", payload: {} },
+    { candidate_id: "candidate-1", event_id: "event-4", event_type: "candidate_detected", occurred_at: "2026-11-02T11:00:00Z", gas_used: 12, payload: {} },
+  ]) {
+    const DB = paperLedgerDbMock();
+    const response = await worker.fetch(request("/v1/paper-ledger", {
+      method: "POST", body: { action: "append", event },
+    }), { DB, ENGINE_API_TOKEN: TOKEN });
+    assert.equal(response.status, 400);
+    assert.equal(DB.calls.length, 0);
+  }
+});
+
+
+test("paper ledger rejects non-canonical payload numbers and naive timestamps before writes", async () => {
+  const invalidEvents = [
+    { candidate_id: "candidate-1", event_id: "float-1", event_type: "candidate_detected",
+      occurred_at: "2026-11-02T11:00:00Z", payload: { fraction: 1.5 } },
+    { candidate_id: "candidate-1", event_id: "unsafe-1", event_type: "candidate_detected",
+      occurred_at: "2026-11-02T11:00:00Z", payload: { unsafe: 9007199254740992 } },
+    { candidate_id: "candidate-1", event_id: "naive-1", event_type: "candidate_detected",
+      occurred_at: "2026-11-02T11:00:00", payload: {} },
+  ];
+  for (const event of invalidEvents) {
+    const DB = paperLedgerDbMock();
+    const response = await worker.fetch(request("/v1/paper-ledger", {
+      method: "POST", body: { action: "append", event },
+    }), { DB, ENGINE_API_TOKEN: TOKEN });
+    assert.equal(response.status, 400);
+    assert.equal(DB.calls.length, 0);
+  }
+});
+
+test("paper ledger rejects raw-unit integers outside uint256 bounds", async () => {
+  const DB = paperLedgerDbMock();
+  const response = await worker.fetch(request("/v1/paper-ledger", {
+    method: "POST",
+    body: { action: "append", event: {
+      candidate_id: "candidate-1", event_id: "too-large", event_type: "route_simulated",
+      occurred_at: "2026-11-02T11:00:00Z", chain_id: 1, block_number: 1,
+      block_hash: "0x" + "a".repeat(64), strategy_id: "v2",
+      source_pool: "0x" + "1".repeat(40), destination_pool: "0x" + "2".repeat(40),
+      token_in: "0x" + "3".repeat(40), token_out: "0x" + "4".repeat(40),
+      gross_profit_raw: "115792089237316195423570985008687907853269984665640564039457584007913129639936",
+      payload: {},
+    } },
+  }), { DB, ENGINE_API_TOKEN: TOKEN });
+  assert.equal(response.status, 400);
+  assert.deepEqual(await response.json(), { error: "invalid_gross_profit_raw" });
+  assert.equal(DB.calls.length, 0);
+});
+
+
+function concurrentPaperLedgerDbMock() {
+  const state = { head: null, events: new Map(), checkpoints: [] };
+  let headReads = 0;
+  let releaseHeadReads;
+  const bothHeadReads = new Promise(resolve => { releaseHeadReads = resolve; });
+  let batchTail = Promise.resolve();
+  return {
+    state,
+    prepare(sql) {
+      return {
+        sql, values: [],
+        bind(...values) { this.values = values; return this; },
+        async first() {
+          if (sql.includes("SELECT * FROM paper_events WHERE event_id")) {
+            return state.events.get(this.values[0]) || null;
+          }
+          if (sql.includes("SELECT sequence,event_hash FROM paper_candidate_heads")) {
+            const snapshot = { ...state.head };
+            headReads += 1;
+            if (headReads === 2) releaseHeadReads();
+            await bothHeadReads;
+            return snapshot;
+          }
+          return null;
+        },
+        async run() {
+          if (sql.includes("INSERT OR IGNORE INTO paper_candidate_heads") && !state.head) {
+            state.head = { candidate_id: this.values[0], sequence: 0, event_hash: this.values[1] };
+          }
+          return { meta: { changes: 1 } };
+        },
+      };
+    },
+    async batch(statements) {
+      const previous = batchTail;
+      let release;
+      batchTail = new Promise(resolve => { release = resolve; });
+      await previous;
+      try {
+        const [update, insert, checkpoint] = statements;
+        const [nextSequence, nextHash, _now, candidateId, oldSequence, oldHash] = update.values;
+        let updateChanges = 0;
+        if (state.head.candidate_id === candidateId &&
+            state.head.sequence === oldSequence && state.head.event_hash === oldHash) {
+          state.head = { candidate_id: candidateId, sequence: nextSequence, event_hash: nextHash };
+          updateChanges = 1;
+        }
+        const insertValues = insert.values;
+        const recordFields = [
+          "candidate_id", "event_id", "event_type", "occurred_at", "chain_id", "block_number",
+          "block_hash", "strategy_id", "source_pool", "destination_pool", "token_in", "token_out",
+          "gross_profit_raw", "gas_used", "gas_price_wei", "gas_cost_profit_raw", "net_profit_raw",
+          "payload_json",
+        ];
+        const expectedHead = [insertValues[21], insertValues[22], insertValues[23]];
+        let insertChanges = 0;
+        if (state.head.candidate_id === expectedHead[0] &&
+            state.head.sequence === expectedHead[1] && state.head.event_hash === expectedHead[2] &&
+            !state.events.has(insertValues[1])) {
+          const event = Object.fromEntries(recordFields.map((key, index) => [key, insertValues[index] ?? null]));
+          event.sequence = insertValues[18];
+          event.previous_hash = insertValues[19];
+          event.event_hash = insertValues[20];
+          state.events.set(event.event_id, event);
+          insertChanges = 1;
+        }
+        let checkpointChanges = 0;
+        const checkpointValues = checkpoint.values;
+        if (state.events.has(checkpointValues[2])) {
+          state.checkpoints.push({
+            sequence: checkpointValues[1], event_id: checkpointValues[2], event_hash: checkpointValues[3],
+          });
+          checkpointChanges = 1;
+        }
+        return [
+          { meta: { changes: updateChanges } },
+          { meta: { changes: insertChanges } },
+          { meta: { changes: checkpointChanges } },
+        ];
+      } finally {
+        release();
+      }
+    },
+  };
+}
+
+test("concurrent appends for one candidate cannot fork its sequence or hash chain", async () => {
+  const DB = concurrentPaperLedgerDbMock();
+  const makeRequest = eventId => request("/v1/paper-ledger", {
+    method: "POST",
+    body: { action: "append", event: {
+      candidate_id: "candidate-race", event_id: eventId, event_type: "candidate_detected",
+      occurred_at: "2026-11-02T11:00:00Z", payload: { event: eventId },
+    } },
+  });
+  const responses = await Promise.all([
+    worker.fetch(makeRequest("race-a"), { DB, ENGINE_API_TOKEN: TOKEN }),
+    worker.fetch(makeRequest("race-b"), { DB, ENGINE_API_TOKEN: TOKEN }),
+  ]);
+  assert.deepEqual(responses.map(response => response.status).sort(), [201, 409]);
+  assert.equal(DB.state.head.sequence, 1);
+  assert.equal(DB.state.events.size, 1);
+  assert.equal(DB.state.checkpoints.length, 1);
+});
+
+
+test("paper ledger canonicalizes supplementary Unicode keys in Python code-point order", async () => {
+  const DB = paperLedgerDbMock();
+  const payload = { "\u{10000}": 2, "\uE000": 1, a: 3 };
+  const response = await worker.fetch(request("/v1/paper-ledger", {
+    method: "POST",
+    body: { action: "append", event: {
+      candidate_id: "candidate-unicode", event_id: "unicode-1",
+      event_type: "candidate_detected", occurred_at: "2026-11-02T11:00:00Z", payload,
+    } },
+  }), { DB, ENGINE_API_TOKEN: TOKEN });
+  assert.equal(response.status, 201);
+  const batch = DB.calls.find(call => call.kind === "batch");
+  assert.equal(batch.statements[1].values[17], String.raw`{"a":3,"\ue000":1,"\ud800\udc00":2}`);
+});
+
+
+test("paper ledger canonicalizes integer-like object keys lexicographically like Python", async () => {
+  const DB = paperLedgerDbMock();
+  const response = await worker.fetch(request("/v1/paper-ledger", {
+    method: "POST",
+    body: { action: "append", event: {
+      candidate_id: "candidate-numeric-keys", event_id: "numeric-keys-1",
+      event_type: "candidate_detected", occurred_at: "2026-11-02T11:00:00Z",
+      payload: { "2": "two", "10": "ten", a: "letter" },
+    } },
+  }), { DB, ENGINE_API_TOKEN: TOKEN });
+  assert.equal(response.status, 201);
+  const batch = DB.calls.find(call => call.kind === "batch");
+  assert.equal(batch.statements[1].values[17], String.raw`{"10":"ten","2":"two","a":"letter"}`);
+});
