@@ -7,7 +7,7 @@ This increment connects the V3 math primitives into a bounded multi-range simula
 - Bitmap words keyed by signed int16 word position.
 - Initialized tick records keyed by raw tick index with signed int128 liquidityNet.
 
-The simulator applies exact-input or exact-output steps, crosses initialized ticks in the correct direction, updates active liquidity, supports zero-liquidity gaps, and stops at an explicit price limit or amount completion. It fails closed if any bitmap word or initialized tick record needed for the simulated path is absent. A bounded step limit returns `complete=False`, never a silently complete quote.
+The simulator applies exact-input or exact-output steps, crosses initialized ticks in the correct direction, updates active liquidity, supports zero-liquidity gaps, and stops at an explicit price limit or amount completion. In the result, `amount_in` excludes fees and `fee_amount` is reported separately; gross input paid is their sum. It fails closed if any bitmap word or initialized tick record needed for the simulated path is absent. A bounded step limit returns `complete=False`, never a silently complete quote.
 
 ## Trust boundary
 
