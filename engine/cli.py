@@ -289,6 +289,7 @@ def main() -> int:
             daily_budget_usd=policy.get("daily_budget_usd", 0),
             monthly_budget_usd=policy.get("monthly_budget_usd", 0),
             allow_paid_calls=policy.get("allow_paid_model_calls", False),
+            per_task_budget_usd=policy.get("per_task_budget_usd", 0),
             network_calls_enabled=False,
         )
         print(json.dumps(gateway.status(), indent=2))
