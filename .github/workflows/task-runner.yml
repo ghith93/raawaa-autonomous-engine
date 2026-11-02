@@ -100,6 +100,14 @@ jobs:
 
           with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
               output.write("status=unknown\nray=not_supplied\n")
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
+              for key in (
+                  "http", "paper_ledger", "provider_usage", "last_scan",
+                  "source_freshness", "ci_health", "kill_switch",
+                  "tasks_pending", "tasks_running", "paper_events",
+              ):
+                  output.write(f"{key}=unknown\\n")
+
           headers = {
               "Authorization": "Bearer " + os.environ["ENGINE_API_TOKEN"],
               "Content-Type": "application/json",
