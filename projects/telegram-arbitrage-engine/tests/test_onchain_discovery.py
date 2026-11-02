@@ -43,7 +43,7 @@ def snapshot(address, token0=QUOTE, token1=BASE, decimals0=6, decimals1=18, bloc
             observed_at=datetime.now(timezone.utc),
         ),
         token0_decimals=decimals0, token1_decimals=decimals1,
-        block_timestamp=1_798_000_000,
+        block_timestamp=int(datetime.now(timezone.utc).timestamp()),
     )
 
 
