@@ -10,7 +10,9 @@ Simulation-first spot-arbitrage research module, isolated inside the autonomous-
 - Optional Telegram bot uses long polling, private-chat allowlisting, a per-chat rate limit, and a persisted update offset. It exposes only status, indicative scans, and read-only observation reports. Configure the token and comma-separated allowed private chat IDs through environment variables; never commit secrets.
 - DEX Screener USD marks are indicative only, not executable quotes or proof of available depth. Its search response does not provide an on-chain quote timestamp; retrieval age must not be mistaken for pool-state freshness.
 - No AI decision can authorize a trade. Any future AI use is restricted to research and explanation.
-- An optional local Anvil fork-call adapter accepts exact caller-supplied calldata and performs read-only eth_call/eth_estimateGas with optional callTracer output; it refuses non-loopback endpoints and never submits transactions. It simulates one call only, not an atomic two-venue arbitrage route.\n- A read-only EVM JSON-RPC adapter retrieves two V2 pool states and token decimals at one pinned block. The V2 constant-product calculator uses integer raw units and requires two distinct pools at the same block; it is reserve math only and excludes gas, transfer taxes, dynamic fees, reverts, MEV, and execution. Pool fee basis points must be supplied explicitly and independently verified.
+- Telegram polling is **at-least-once**, not exactly-once: the update offset is checkpointed after a poll batch returns. A process crash after a scan writes observations but before the offset is saved can cause the same update and DEX read to be replayed. The local ledger is an observation log, not an exactly-once command journal; duplicate observations after a crash are possible until update-id idempotency is implemented transactionally.
+- An optional local Anvil fork-call adapter accepts exact caller-supplied calldata and performs read-only eth_call/eth_estimateGas with optional callTracer output; it refuses non-loopback endpoints and never submits transactions. It simulates one call only, not an atomic two-venue arbitrage route.
+- A read-only EVM JSON-RPC adapter retrieves two V2 pool states and token decimals at one pinned block. The V2 constant-product calculator uses integer raw units and requires two distinct pools at the same block; it is reserve math only and excludes gas, transfer taxes, dynamic fees, reverts, MEV, and execution. Pool fee basis points must be supplied explicitly and independently verified.
 
 ## Run in isolation
 Requires Python 3.11+.
@@ -23,7 +25,10 @@ arb-engine demo
 arb-engine report --limit 500
 arb-engine scan WETH/USDC --min-liquidity 10000 --min-volume 1000
 arb-telegram  # optional read-only polling bot; requires TELEGRAM_BOT_TOKEN + TELEGRAM_ALLOWED_CHAT_IDS
-arb-engine v2-sim --buy-pair 0x... --buy-fee-bps 30 --sell-pair 0x... --sell-fee-bps 30 --quote-token 0x... --base-token 0x... --capital-quote 50 --chain-id 1 --slippage-bps 50 --gas-units-assumption 350000 --gas-safety-bps 2000 --buy-router 0x... --sell-router 0x... --buy-factory 0x... --sell-factory 0x...\n# optional exact-calldata simulation against a separately started local Anvil fork\nanvil --fork-url https://ethereum-rpc.publicnode.com --fork-block-number 20000000 --chain-id 1 --host 127.0.0.1 --port 8545\narb-engine fork-call --chain-id 1 --fork-block 20000000 --to 0x... --data 0x... --from-address 0x... --trace
+arb-engine v2-sim --buy-pair 0x... --buy-fee-bps 30 --sell-pair 0x... --sell-fee-bps 30 --quote-token 0x... --base-token 0x... --capital-quote 50 --chain-id 1 --slippage-bps 50 --gas-units-assumption 350000 --gas-safety-bps 2000 --buy-router 0x... --sell-router 0x... --buy-factory 0x... --sell-factory 0x...
+# optional exact-calldata simulation against a separately started local Anvil fork
+anvil --fork-url https://ethereum-rpc.publicnode.com --fork-block-number 20000000 --chain-id 1 --host 127.0.0.1 --port 8545
+arb-engine fork-call --chain-id 1 --fork-block 20000000 --to 0x... --data 0x... --from-address 0x... --trace
 ```
 
 Scan snapshots are saved to `data/opportunities.sqlite3`. Avoid tight polling and respect upstream rate limits.
