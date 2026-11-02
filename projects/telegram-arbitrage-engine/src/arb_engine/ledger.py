@@ -23,6 +23,8 @@ class OpportunityLedger:
                 chain TEXT NOT NULL,
                 base_symbol TEXT NOT NULL,
                 quote_symbol TEXT NOT NULL,
+                base_address TEXT NOT NULL DEFAULT '',
+                quote_address TEXT NOT NULL DEFAULT '',
                 buy_venue TEXT NOT NULL,
                 sell_venue TEXT NOT NULL,
                 buy_price TEXT NOT NULL,
@@ -34,6 +36,11 @@ class OpportunityLedger:
                 payload_json TEXT NOT NULL,
                 UNIQUE(observed_at, chain, base_symbol, quote_symbol, buy_venue, sell_venue)
             )""")
+            columns = {row[1] for row in db.execute("PRAGMA table_info(observations)")}
+            if "base_address" not in columns:
+                db.execute("ALTER TABLE observations ADD COLUMN base_address TEXT NOT NULL DEFAULT ''")
+            if "quote_address" not in columns:
+                db.execute("ALTER TABLE observations ADD COLUMN quote_address TEXT NOT NULL DEFAULT ''")
             db.execute("CREATE INDEX IF NOT EXISTS idx_observations_pair_time ON observations(chain, base_symbol, observed_at)")
             db.execute("""CREATE TABLE IF NOT EXISTS engine_state (
                 key TEXT PRIMARY KEY,
@@ -58,7 +65,7 @@ class OpportunityLedger:
                 "quote_timestamp_status": item.quote_timestamp_status,
             }
             rows.append((observed_at, item.chain, item.base_symbol, item.quote_symbol,
-                         item.buy_venue, item.sell_venue, str(item.buy_price_usd),
+                         item.base_address, item.quote_address, item.buy_venue, item.sell_venue, str(item.buy_price_usd),
                          str(item.sell_price_usd), str(item.gross_spread_bps),
                          str(item.min_pool_liquidity_usd), str(item.total_24h_volume_usd),
                          item.classification, json.dumps(payload, separators=(",", ":"))))
@@ -67,10 +74,10 @@ class OpportunityLedger:
         with self._connect() as db:
             before = db.total_changes
             db.executemany("""INSERT OR IGNORE INTO observations
-                (observed_at, chain, base_symbol, quote_symbol, buy_venue, sell_venue,
-                 buy_price, sell_price, gross_spread_bps, min_liquidity_usd,
-                 total_volume_24h_usd, classification, payload_json)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""", rows)
+                (observed_at, chain, base_symbol, quote_symbol, base_address, quote_address,
+                 buy_venue, sell_venue, buy_price, sell_price, gross_spread_bps,
+                 min_liquidity_usd, total_volume_24h_usd, classification, payload_json)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""", rows)
             return db.total_changes - before
 
     def recent(self, limit: int = 20) -> list[dict[str, str]]:
@@ -88,6 +95,7 @@ class OpportunityLedger:
         for row in rows:
             key = (
                 row["chain"], row["base_symbol"], row["quote_symbol"],
+                row["base_address"], row["quote_address"],
                 row["buy_venue"], row["sell_venue"],
             )
             grouped.setdefault(key, []).append(row)
@@ -99,8 +107,10 @@ class OpportunityLedger:
             summaries.append({
                 "chain": key[0],
                 "pair": f"{key[1]}/{key[2]}",
-                "buy_venue": key[3],
-                "sell_venue": key[4],
+                "base_address": key[3],
+                "quote_address": key[4],
+                "buy_venue": key[5],
+                "sell_venue": key[6],
                 "observation_count": len(observations),
                 "mean_gross_spread_bps": str(sum(spreads) / len(spreads)),
                 "median_gross_spread_bps": str(median(spreads)),
