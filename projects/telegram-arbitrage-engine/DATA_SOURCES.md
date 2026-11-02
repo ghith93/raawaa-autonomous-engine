@@ -64,6 +64,19 @@ The packaged registry currently contains Ethereum mainnet only:
 No item in this list authorizes live trading.
 
 
+## Bybit public market data (read-only adapter)
+
+- Official V5 ticker API: https://bybit-exchange.github.io/docs/v5/market/tickers
+- Official V5 order-book API: https://bybit-exchange.github.io/docs/v5/market/orderbook
+- Official rate-limit rules: https://bybit-exchange.github.io/docs/v5/rate-limit
+- The adapter calls only `GET /v5/market/orderbook` and `GET /v5/market/tickers` on the allowlisted HTTPS host `api.bybit.com` (or the documented testnet host for controlled tests). It sends no API key and exposes no account, order, asset, transfer, or withdrawal endpoint.
+- Supports public `spot`, `linear`, `inverse`, and `option` categories. Order-book depth is capped at 1,000 levels for spot/linear/inverse and 25 for options, matching the documented API constraints.
+- Order-book snapshots preserve bid/ask levels as `Decimal`, exchange timestamp, matching-engine timestamp, update ID and cross-sequence. Crossed, unsorted, malformed, mismatched-symbol, non-finite and invalid-precision responses are rejected.
+- Ticker snapshots preserve exact decimal strings for last/bid/ask, volume/turnover, mark/index, open interest, funding rate and basis where the venue supplies them. Empty optional fields remain `None`; funding/basis may be negative.
+- The adapter applies a conservative default of one request per second per instance, below the documented platform limits. Bybit documents a default 600 requests per 5-second IP window, plus endpoint/UID-specific rolling limits; these are ceilings, not targets. The adapter does not attempt to run near those limits.
+- Data is a timestamped public snapshot, not a guarantee that the same depth remains executable at order time. The adapter does not estimate taker fees, account-specific tier fees, slippage beyond returned levels, withdrawal costs, transfer delays, or regional/account restrictions. Cross-venue net profitability is not calculated.
+- CI uses deterministic fixtures and does not call Bybit. Live access must be separately checked in the deployment environment; rate-limit errors (including `retCode=10006`) fail visibly and are not retried in a tight loop.
+
 ## Telegram Bot API
 
 - Official reference: https://core.telegram.org/bots/api
