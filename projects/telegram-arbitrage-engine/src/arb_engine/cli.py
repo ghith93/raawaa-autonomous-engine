@@ -9,7 +9,9 @@ from .dexscreener import DexScreenerClient, MarketDataError
 from .ledger import OpportunityLedger
 from .models import MarketQuote, Opportunity
 from .risk import validate_opportunity
+from .rpc import DEFAULT_ETHEREUM_RPC, EthereumV2PoolReader, RpcReadError
 from .scanner import find_spreads
+from .v2 import simulate_round_trip
 
 
 def demo() -> dict:
@@ -64,6 +66,15 @@ def main() -> None:
     report_parser = sub.add_parser("report", help="summarize repeated indicative observations from the local ledger")
     report_parser.add_argument("--ledger", default="data/opportunities.sqlite3")
     report_parser.add_argument("--limit", type=int, default=500)
+    v2_parser = sub.add_parser("v2-sim", help="read-only same-block Ethereum V2 reserve simulation")
+    v2_parser.add_argument("--buy-pair", required=True)
+    v2_parser.add_argument("--buy-fee-bps", required=True, type=int)
+    v2_parser.add_argument("--sell-pair", required=True)
+    v2_parser.add_argument("--sell-fee-bps", required=True, type=int)
+    v2_parser.add_argument("--quote-token", required=True)
+    v2_parser.add_argument("--base-token", required=True)
+    v2_parser.add_argument("--capital-quote", required=True, help="human quote-token amount, e.g. 50")
+    v2_parser.add_argument("--rpc-url", default=DEFAULT_ETHEREUM_RPC)
     scan_parser = sub.add_parser("scan", help="read-only indicative DEX price-spread scan")
     scan_parser.add_argument("query", help="token symbol, pair, or address accepted by DEX Screener")
     scan_parser.add_argument("--min-liquidity", default="10000")
@@ -84,6 +95,59 @@ def main() -> None:
             }, indent=2))
         except (ValueError, ArithmeticError) as exc:
             parser.exit(2, f"report failed: {exc}\\n")
+    elif args.command == "v2-sim":
+        try:
+            snapshots = EthereumV2PoolReader(args.rpc_url).read_pools([
+                (args.buy_pair, args.buy_fee_bps),
+                (args.sell_pair, args.sell_fee_bps),
+            ])
+            buy_snapshot, sell_snapshot = snapshots
+            quote_address = args.quote_token.lower()
+            base_address = args.base_token.lower()
+
+            def decimals_for(snapshot, token_address):
+                if snapshot.state.token0.lower() == token_address:
+                    return snapshot.token0_decimals
+                if snapshot.state.token1.lower() == token_address:
+                    return snapshot.token1_decimals
+                raise ValueError("Token address is not part of the supplied pool")
+
+            quote_decimals = decimals_for(buy_snapshot, quote_address)
+            base_decimals = decimals_for(buy_snapshot, base_address)
+            if decimals_for(sell_snapshot, quote_address) != quote_decimals or decimals_for(sell_snapshot, base_address) != base_decimals:
+                raise ValueError("Token decimals disagree between pools")
+            capital = Decimal(args.capital_quote)
+            if not capital.is_finite() or capital <= 0:
+                raise ValueError("capital-quote must be finite and positive")
+            capital_raw_decimal = capital * (10 ** quote_decimals)
+            if capital_raw_decimal != capital_raw_decimal.to_integral_value():
+                raise ValueError("capital-quote exceeds token precision")
+            result = simulate_round_trip(
+                buy_snapshot.state, sell_snapshot.state,
+                quote_token=quote_address, base_token=base_address,
+                capital_quote_raw=int(capital_raw_decimal),
+            )
+            def human(raw, decimals):
+                return str(Decimal(raw) / (Decimal(10) ** decimals))
+            print(json.dumps({
+                "mode": "read_only_same_block_v2_reserve_simulation",
+                "source": "Ethereum JSON-RPC eth_call",
+                "rpc_endpoint": args.rpc_url,
+                "chain_id": buy_snapshot.state.chain_id,
+                "block_number": buy_snapshot.state.block_number,
+                "block_hash": buy_snapshot.state.block_hash,
+                "block_timestamp": buy_snapshot.block_timestamp,
+                "capital_quote": human(result.capital_quote_raw, quote_decimals),
+                "bought_base": human(result.buy.amount_out_raw, base_decimals),
+                "final_quote": human(result.final_quote_raw, quote_decimals),
+                "gross_profit_quote": human(result.gross_profit_quote_raw, quote_decimals),
+                "gross_return_bps": str(result.gross_return_bps),
+                "classification": result.classification,
+                "live_execution": False,
+                "warning": "Excludes gas, transfer taxes, dynamic fees, reverts, MEV, and execution. Not paper PnL or a trade recommendation.",
+            }, indent=2))
+        except (RpcReadError, ValueError, ArithmeticError) as exc:
+            parser.exit(2, f"v2-sim failed: {exc}\\n")
     elif args.command == "scan":
         try:
             result = scan(args.query, Decimal(args.min_liquidity), Decimal(args.min_volume), args.ledger)
