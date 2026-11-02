@@ -2,15 +2,29 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from .v2 import V2PoolState, V2SwapQuote, _validate_pool, quote_exact_input
+from .v2 import V2PoolState, _validate_pool, quote_exact_input
+
+
+@dataclass(frozen=True, slots=True)
+class V2FlashBorrow:
+    """A modelled pair output and the opposite-token repayment required by its invariant."""
+
+    pool_address: str
+    borrowed_token: str
+    repayment_token: str
+    amount_borrowed_raw: int
+    repayment_amount_raw: int
+    fee_bps: int
+    block_number: int
+    block_hash: str
 
 
 @dataclass(frozen=True, slots=True)
 class V2FlashSwapSimulation:
     """Reserve-math estimate for borrowing one asset and repaying the source pair in the other."""
 
-    borrow: V2SwapQuote
-    sale: V2SwapQuote
+    borrow: V2FlashBorrow
+    sale: object
     repayment_token: str
     repayment_amount_raw: int
     sale_proceeds_raw: int
@@ -101,18 +115,18 @@ def simulate_cross_venue_flash_swap(
     sale = quote_exact_input(destination_pool, borrowed_token, amount_borrowed_raw)
     if sale.token_out.casefold() != repayment_token.casefold():
         raise ValueError("Destination swap did not return the source repayment token")
+    borrow = V2FlashBorrow(
+        pool_address=source_pool.pair_address,
+        borrowed_token=borrowed_token,
+        repayment_token=repayment_token,
+        amount_borrowed_raw=amount_borrowed_raw,
+        repayment_amount_raw=repayment_amount,
+        fee_bps=source_pool.fee_bps,
+        block_number=source_pool.block_number,
+        block_hash=source_pool.block_hash,
+    )
     return V2FlashSwapSimulation(
-        borrow=V2SwapQuote(
-            pool_address=source_pool.pair_address,
-            token_in=repayment_token,
-            token_out=borrowed_token,
-            amount_in_raw=repayment_amount,
-            amount_out_raw=amount_borrowed_raw,
-            fee_bps=source_pool.fee_bps,
-            block_number=source_pool.block_number,
-            block_hash=source_pool.block_hash,
-            price_impact_bps=sale.price_impact_bps * 0,
-        ),
+        borrow=borrow,
         sale=sale,
         repayment_token=repayment_token,
         repayment_amount_raw=repayment_amount,
