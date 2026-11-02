@@ -1,4 +1,6 @@
-# AndroidHarness 3.2 Workspace Integration — Design
+# Archived design — AndroidHarness 3.2 Workspace Integration
+
+> **Superseded on 2026-11-02:** The device is no longer an execution worker. Keep AndroidHarness 3.1 only for occasional operator-initiated diagnostics; do not activate WorkManager, recurring prompts, auto-continue, or a poller.
 
 **Date:** 2026-11-02  
 **Status:** Implementation authorized by the operator's request to prepare AndroidHarness infrastructure and continue the engine.
