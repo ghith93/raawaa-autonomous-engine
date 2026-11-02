@@ -307,6 +307,13 @@ class EthereumV2PoolReader:
             or isinstance(pinned.block_timestamp, bool)
         ):
             raise ValueError("pinned_block must be a valid block snapshot for the expected chain")
+        now_timestamp = int(datetime.now(timezone.utc).timestamp())
+        if (
+            pinned.block_timestamp < 0
+            or pinned.block_timestamp > now_timestamp + 30
+            or now_timestamp - pinned.block_timestamp > 60
+        ):
+            raise RpcReadError("Pinned block timestamp is future-dated or stale")
         chain_id = pinned.chain_id
         block_number = pinned.block_number
         block_tag = hex(block_number)
