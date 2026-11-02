@@ -53,6 +53,8 @@ def test_v2_sim_cli_converts_human_amount_to_raw_units(monkeypatch, capsys):
     assert result["block_number"] == 123
     assert result["buy_pool_fee_bps_assumed"] == 30
     assert result["sell_pool_fee_bps_assumed"] == 25
+    assert Decimal(result["buy_price_impact_bps_excluding_fee"]) >= 0
+    assert Decimal(result["sell_price_impact_bps_excluding_fee"]) >= 0
     assert result["live_execution"] is False
     assert "Excludes gas" in result["warning"]
 
@@ -154,3 +156,35 @@ def test_v2_sim_cli_router_validation_requires_factories(monkeypatch):
     with pytest.raises(SystemExit) as exc:
         cli.main()
     assert exc.value.code == 2
+
+
+def test_v2_sim_cli_reports_native_gas_budget_separately(monkeypatch, capsys):
+    class FakeReader:
+        def __init__(self, endpoint, expected_chain_id=1):
+            pass
+
+        def read_pools(self, pools):
+            return [
+                snapshot(POOL_A, 1_000_000_000_000, 10**24, 30),
+                snapshot(POOL_B, 1_000_000_000_000, 10**24, 25),
+            ]
+
+        def read_gas_price_wei(self):
+            return 2_000_000_000
+
+    monkeypatch.setattr(cli, "EthereumV2PoolReader", FakeReader)
+    monkeypatch.setattr(sys, "argv", [
+        "arb-engine", "v2-sim",
+        "--buy-pair", POOL_A, "--buy-fee-bps", "30",
+        "--sell-pair", POOL_B, "--sell-fee-bps", "25",
+        "--quote-token", QUOTE, "--base-token", BASE,
+        "--capital-quote", "50", "--gas-units-assumption", "300000",
+        "--gas-safety-bps", "2000",
+    ])
+    cli.main()
+    result = json.loads(capsys.readouterr().out)
+    gas = result["gas_cost_estimate"]
+    assert gas["buffered_gas_units"] == 360000
+    assert gas["estimated_native_asset_cost_wei"] == "720000000000000"
+    assert gas["valuation_in_quote_token"] is None
+    assert "gas" in result["warning"].lower()
