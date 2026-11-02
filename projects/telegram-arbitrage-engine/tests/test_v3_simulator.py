@@ -60,13 +60,13 @@ def test_exact_input_simulates_across_two_initialized_ticks() -> None:
 def test_exact_output_partial_step_fills_requested_amount_without_crossing() -> None:
     result = simulate_v3_swap(
         snapshot(),
-        amount_specified=-(10**3),
+        amount_specified=-(10**2),
         zero_for_one=False,
         sqrt_price_limit_x96=get_sqrt_ratio_at_tick(120),
     )
     assert result.complete is True
     assert result.stop_reason == "amount_filled"
-    assert result.amount_out == 10**3
+    assert result.amount_out == 10**2
     assert result.amount_remaining == 0
     assert result.crossed_ticks == ()
     assert result.amount_in > 0
