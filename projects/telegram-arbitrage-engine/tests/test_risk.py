@@ -106,3 +106,24 @@ def test_float_capital_rejected():
     result = validate_opportunity(op)
     assert not result.accepted
     assert "Decimal" in result.reason
+
+
+def test_malformed_opportunity_fails_closed_without_attribute_error():
+    result = validate_opportunity(None)
+    assert not result.accepted
+    assert "Opportunity instance" in result.reason
+
+
+def test_malformed_quote_fails_closed_without_attribute_error():
+    op = Opportunity(D("50"), None, quote("dex-b", "102"))
+    result = validate_opportunity(op)
+    assert not result.accepted
+    assert "MarketQuote instance" in result.reason
+
+
+def test_non_string_identity_fields_fail_closed():
+    q = MarketQuote("dex-a", "ethereum", "TOKEN", "USDC", D("100"), D("10000"), D("25"), D("15"), D("0.04"), datetime.now(timezone.utc))
+    object.__setattr__(q, "venue", 123)
+    result = validate_opportunity(opportunity(buy=q))
+    assert not result.accepted
+    assert "identity" in result.reason
