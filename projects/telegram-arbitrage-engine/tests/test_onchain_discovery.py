@@ -74,7 +74,7 @@ class FakeReader:
 
     def verify_v2_router_factory(self, router, factory, block):
         expected_factory = UNI_FACTORY if router == UNI_ROUTER else SUSHI_FACTORY
-        assert factory == expected_factory
+        assert factory.casefold() == expected_factory.casefold()
         assert block == 100
         self.verified_routers.append((router, factory, block))
 
