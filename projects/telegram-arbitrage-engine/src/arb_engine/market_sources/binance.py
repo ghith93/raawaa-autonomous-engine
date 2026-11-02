@@ -13,6 +13,8 @@ from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
 from typing import Callable
 
+from .instruments import InstrumentMetadata
+
 
 DEFAULT_BASE_URL = "https://data-api.binance.vision"
 _SYMBOL = re.compile(r"^[A-Z0-9]{2,30}$")
@@ -158,6 +160,54 @@ class BinancePublicMarketData:
         if isinstance(payload, dict) and "code" in payload and payload.get("code") != 0:
             raise BinanceMarketDataError("Binance public API returned an error payload")
         return payload
+
+    def fetch_instrument(self, *, symbol: str) -> InstrumentMetadata:
+        """Fetch one public Spot instrument specification from exchangeInfo."""
+        symbol = _symbol(symbol)
+        payload = self._get("/api/v3/exchangeInfo", {"symbol": symbol})
+        if not isinstance(payload, dict):
+            raise BinanceMarketDataError("Binance exchangeInfo response was not an object")
+        symbols = payload.get("symbols")
+        if not isinstance(symbols, list) or len(symbols) != 1 or not isinstance(symbols[0], dict):
+            raise BinanceMarketDataError("Binance did not return exactly one instrument")
+        item = symbols[0]
+        if item.get("symbol") != symbol:
+            raise BinanceMarketDataError("Binance instrument symbol did not match request")
+        if item.get("isSpotTradingAllowed") is False:
+            raise BinanceMarketDataError("Binance instrument is not enabled for Spot trading")
+        base_code = item.get("baseAsset")
+        quote_code = item.get("quoteAsset")
+        status = item.get("status")
+        filters = item.get("filters")
+        if not all(isinstance(value, str) and value for value in (base_code, quote_code, status)):
+            raise BinanceMarketDataError("Binance instrument omitted asset codes or status")
+        if not isinstance(filters, list):
+            raise BinanceMarketDataError("Binance instrument omitted filters")
+        filter_map = {
+            entry.get("filterType"): entry
+            for entry in filters
+            if isinstance(entry, dict) and isinstance(entry.get("filterType"), str)
+        }
+        lot_filter = filter_map.get("LOT_SIZE")
+        price_filter = filter_map.get("PRICE_FILTER")
+        if not isinstance(lot_filter, dict) or not isinstance(price_filter, dict):
+            raise BinanceMarketDataError("Binance instrument omitted LOT_SIZE or PRICE_FILTER")
+        notional_filter = filter_map.get("NOTIONAL") or filter_map.get("MIN_NOTIONAL") or {}
+        min_notional = notional_filter.get("minNotional")
+        min_quantity = lot_filter.get("minQty")
+        return InstrumentMetadata(
+            venue_id="binance",
+            instrument_id=symbol,
+            market_family="cex_spot",
+            base_asset_code=base_code,
+            quote_asset_code=quote_code,
+            base_step_size=lot_filter.get("stepSize"),
+            price_tick_size=price_filter.get("tickSize"),
+            status=status,
+            fetched_at=datetime.now(timezone.utc),
+            min_base_quantity=min_quantity if min_quantity not in (None, "") else None,
+            min_quote_notional=min_notional if min_notional not in (None, "") else None,
+        )
 
     def fetch_orderbook(self, *, symbol: str, limit: int = 100) -> BinanceOrderBookSnapshot:
         symbol = _symbol(symbol)
