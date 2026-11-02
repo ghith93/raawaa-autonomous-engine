@@ -36,8 +36,8 @@ integer break-even gas price separately. It does not silently select a gas price
 query an oracle.
 
 For non-native repayment, callers must provide a same-chain, same-block native/repayment
-V2 pool and both token decimal counts. The conversion normalizes raw reserve units before
-applying the reserve ratio and rounds gas cost upward. For example, WETH/USDC requires
+V2 pool and both token decimal counts. The conversion maps raw native-token units directly to raw repayment-token units using
+the raw reserve ratio (decimal scales cancel algebraically) and rounds gas cost upward. For example, WETH/USDC requires
 18 and 6 decimals respectively. A pool's spot ratio is only a rough valuation and can
 be stale or manipulable; this helper is not a substitute for an executable route quote.
 
