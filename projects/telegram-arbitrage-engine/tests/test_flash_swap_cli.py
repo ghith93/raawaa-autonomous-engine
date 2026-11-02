@@ -1,0 +1,158 @@
+from datetime import datetime, timezone
+
+import pytest
+
+from arb_engine.flash_swap_cli import run_flash_swap_simulation
+from arb_engine.rpc import EvmPoolSnapshot
+from arb_engine.v2 import V2PoolState
+
+
+QUOTE = "0x" + "1" * 40
+BASE = "0x" + "2" * 40
+NATIVE = "0x" + "3" * 40
+SOURCE = "0x" + "4" * 40
+DESTINATION = "0x" + "5" * 40
+NATIVE_QUOTE = "0x" + "6" * 40
+HASH = "0x" + "a" * 64
+
+
+def snapshot(pair, token0, token1, reserve0, reserve1, decimals0, decimals1, *, block=100, block_hash=HASH):
+    state = V2PoolState(
+        chain_id=1, pair_address=pair, token0=token0, token1=token1,
+        reserve0_raw=reserve0, reserve1_raw=reserve1, fee_bps=30,
+        block_number=block, block_hash=block_hash,
+        observed_at=datetime.now(timezone.utc),
+    )
+    return EvmPoolSnapshot(
+        state=state, token0_decimals=decimals0, token1_decimals=decimals1,
+        block_timestamp=1_798_000_000,
+    )
+
+
+class FakeReader:
+    def __init__(self, states):
+        self.states = states
+        self.requested = None
+        self.canonical_checks = []
+
+    def read_pools(self, pools):
+        self.requested = pools
+        return [self.states[address] for address, _fee in pools]
+
+    def verify_canonical_block(self, block_number, block_hash):
+        self.canonical_checks.append((block_number, block_hash))
+
+    def verify_v2_pool_factory(self, *args):
+        raise AssertionError("Manual fee mode must not invent factory verification")
+
+    def verify_v2_router_factory(self, *args):
+        raise AssertionError("Manual fee mode must not invent router verification")
+
+
+def reader():
+    return FakeReader({
+        SOURCE: snapshot(SOURCE, QUOTE, BASE, 2_000_000 * 10**6, 1_000 * 10**18, 6, 18),
+        DESTINATION: snapshot(DESTINATION, QUOTE, BASE, 2_100_000 * 10**6, 1_000 * 10**18, 6, 18),
+        NATIVE_QUOTE: snapshot(NATIVE_QUOTE, QUOTE, NATIVE, 2_000_000 * 10**6, 1_000 * 10**18, 6, 18),
+    })
+
+
+def base_args():
+    return dict(
+        source_pair=SOURCE, source_venue=None, source_fee_bps=30,
+        destination_pair=DESTINATION, destination_venue=None, destination_fee_bps=30,
+        borrowed_token=BASE, amount_borrowed_raw=10**18,
+        chain_id=1, rpc_url="https://rpc.example.invalid",
+    )
+
+
+def test_flash_swap_cli_is_read_only_and_does_not_write_without_opt_in(tmp_path):
+    fake = reader()
+    result = run_flash_swap_simulation(**base_args(), reader=fake, ledger_path=str(tmp_path / "paper.db"))
+    assert result["mode"] == "read_only_v2_flash_swap_simulation"
+    assert int(result["gross_profit_raw"]) > 0
+    assert result["gas_economics"] is None
+    assert result["paper_ledger"] is None
+    assert result["transaction_submitted"] is False
+    assert result["wallet_or_signer_used"] is False
+    assert result["live_execution"] is False
+    assert fake.requested == [(SOURCE, 30), (DESTINATION, 30)]
+    assert fake.canonical_checks == [(100, HASH)]
+    assert not (tmp_path / "paper.db").exists()
+
+
+def test_gas_scenario_uses_same_block_weth_usdc_and_reports_net(tmp_path):
+    fake = reader()
+    result = run_flash_swap_simulation(
+        **base_args(), reader=fake,
+        gas_used=100_000, gas_price_wei=20_000_000_000,
+        native_token=NATIVE, native_quote_pair=NATIVE_QUOTE,
+        native_quote_fee_bps=30,
+        ledger_path=str(tmp_path / "paper.db"),
+    )
+    gas = result["gas_economics"]
+    assert fake.requested == [(SOURCE, 30), (DESTINATION, 30), (NATIVE_QUOTE, 30)]
+    assert result["borrowed_token_decimals"] == 18
+    assert result["repayment_token_decimals"] == 6
+    assert gas["native_token_decimals"] == 18
+    assert gas["gas_cost_profit_token_raw"] == "4000000"
+    assert int(gas["net_profit_raw"]) > 0
+    assert gas["net_positive_under_scenario"] is True
+    assert gas["native_quote_pool"]["block_hash"] == HASH
+
+
+def test_opt_in_paper_capture_records_events_and_verifies_hash_chain(tmp_path):
+    result = run_flash_swap_simulation(
+        **base_args(), reader=reader(),
+        gas_used=100_000, gas_price_wei=20_000_000_000,
+        native_token=NATIVE, native_quote_pair=NATIVE_QUOTE,
+        native_quote_fee_bps=30,
+        record_paper=True, ledger_path=str(tmp_path / "paper.db"),
+    )
+    capture = result["paper_ledger"]
+    assert capture["recorded"] is True
+    assert capture["event_count"] == 4
+    assert capture["chain_verified"] is True
+    assert capture["classification"] == "local_research_events_only_no_order_created_or_submitted"
+
+
+def test_rejects_partial_gas_inputs_and_missing_native_quote_pool():
+    with pytest.raises(ValueError, match="both"):
+        run_flash_swap_simulation(
+            **base_args(), reader=reader(), gas_used=100_000,
+        )
+    with pytest.raises(ValueError, match="native-quote-pair"):
+        run_flash_swap_simulation(
+            **base_args(), reader=reader(),
+            gas_used=100_000, gas_price_wei=20_000_000_000,
+            native_token=NATIVE,
+        )
+
+
+def test_rejects_mismatched_block_across_quote_pool():
+    fake = reader()
+    fake.states[NATIVE_QUOTE] = snapshot(
+        NATIVE_QUOTE, QUOTE, NATIVE, 2_000_000 * 10**6, 1_000 * 10**18,
+        6, 18, block=101,
+    )
+    with pytest.raises(ValueError, match="one canonical chain and block"):
+        run_flash_swap_simulation(
+            **base_args(), reader=fake,
+            gas_used=100_000, gas_price_wei=20_000_000_000,
+            native_token=NATIVE, native_quote_pair=NATIVE_QUOTE,
+            native_quote_fee_bps=30,
+        )
+
+
+def test_rejects_wrong_native_quote_assets_and_inconsistent_decimals():
+    fake = reader()
+    fake.states[NATIVE_QUOTE] = snapshot(
+        NATIVE_QUOTE, QUOTE, BASE, 2_000_000 * 10**6, 1_000 * 10**18, 6, 18,
+    )
+    with pytest.raises(ValueError, match="exactly the native"):
+        run_flash_swap_simulation(
+            **base_args(), reader=fake,
+            gas_used=100_000, gas_price_wei=20_000_000_000,
+            native_token=NATIVE, native_quote_pair=NATIVE_QUOTE,
+            native_quote_fee_bps=30,
+        )
