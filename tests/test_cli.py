@@ -195,6 +195,7 @@ class CliTests(unittest.TestCase):
             self.assertEqual(result["per_task_usage"][0]["task_id"], "task-test")
             self.assertTrue(result["per_task_usage"][0]["over_budget"])
             self.assertTrue(result["budget_status"]["daily_over_budget"])
+            self.assertIn("Legacy usage rows", result["per_task_attribution_note"])
             self.assertIn("Do not release", result["reconciliation_note"])
             self.assertNotIn("gsk_", output.getvalue())
 
