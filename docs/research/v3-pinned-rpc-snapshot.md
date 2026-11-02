@@ -46,6 +46,8 @@ Positive `--amount-specified` means exact input; negative means exact output. Th
 - [Official Uniswap V3 Ethereum deployment addresses](https://developers.uniswap.org/docs/protocols/v3/deployments/v3-ethereum-deployments) — Ethereum factory: `0x1F98431c8aD98523631AE4a59f267346ea31F984`.
 - [Nodely Ethereum public RPC documentation](https://nodely.io/docs/ethereum) — keyless Ethereum endpoint and documented per-IP heavy-call limits.
 - [rpcfree Ethereum RPC documentation](https://rpcfree.com/ethereum-rpc/) — keyless fallback endpoint and published request/compute-unit limits.
+- [dRPC Ethereum API documentation](https://drpc.org/docs/ethereum-api) — public Ethereum JSON-RPC endpoint.
+- [1RPC usage guide](https://docs.1rpc.io/guide/how-to-use-1rpc) — public Ethereum endpoint at `https://public.1rpc.io/eth`.
 - [Official Uniswap V3 pool data guide](https://developers.uniswap.org/docs/sdks/v3/guides/pool-data) — slot0, liquidity, bitmap words and initialized tick data retrieval.
 - [Uniswap V3 factory interface](https://github.com/Uniswap/v3-core/blob/main/contracts/interfaces/IUniswapV3Factory.sol) — getPool and feeAmountTickSpacing.
 - [Uniswap V3 pool immutables](https://github.com/Uniswap/v3-core/blob/main/contracts/interfaces/pool/IUniswapV3PoolImmutables.sol).
