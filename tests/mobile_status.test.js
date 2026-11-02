@@ -17,7 +17,9 @@ function dbMock() {
           if(sql.includes("FROM tasks")) return {results:[{status:"pending",count:2}]};
           if(sql.includes("schema_migrations")) return {results:[{version:"0003_durable_quota_ledger"},{version:"0004_paper_event_ledger"}]};
           if(sql.includes("FROM paper_events")) return {results:[{event_type:"candidate_detected",count:4}]};
-          return {results:[{route_id:"groq:gpt-oss-20b",requests:3,tokens:1200}]};
+          if(sql.includes("FROM quota_usage")) return {results:[{route_id:"groq:gpt-oss-20b",requests:3,tokens:1200}]};
+          if(sql.includes("FROM model_usage")) return {results:[{provider:"groq",requests:2,input_tokens:900,output_tokens:300,cost_usd:0.0125}]};
+          return {results:[]};
         },
       };
     },
@@ -57,7 +59,8 @@ test("mobile status endpoint returns read-only D1 metrics and explicit unknowns"
  assert.equal(body.latest_paper_event.candidate_id,"candidate-1");
  assert.deepEqual(body.latest_market_snapshot,{candidate_id:"candidate-2",occurred_at:"2026-11-02T12:30:00.000Z",chain_id:1,block_number:123});
  assert.deepEqual(body.provider_usage,[{route_id:"groq:gpt-oss-20b",requests:3,tokens:1200}]);
- assert.match(body.unavailable_metrics.monetary_costs,/local SQLite/);
+ assert.deepEqual(body.model_costs_usd,{total:0.0125,by_provider:[{provider:"groq",requests:2,input_tokens:900,output_tokens:300,cost_usd:0.0125}],source:"model_usage D1 ledger; recorded provider costs only"});
+ assert.equal(body.unavailable_metrics.monetary_costs,undefined);
  assert.ok(DB.calls.every(call=>call.kind==="all"||call.kind==="first"));
 });
 
