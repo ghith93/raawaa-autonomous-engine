@@ -164,6 +164,10 @@ def build_parser() -> argparse.ArgumentParser:
     archive.add_argument("--id", required=True)
 
     sub.add_parser("model-status")
+    sub.add_parser(
+        "monetary-status",
+        help="Inspect spend budgets, actual usage, and unresolved reservations; no network calls",
+    )
     sub.add_parser("provider-profile-status", help="Inspect provider profiles; never enables inference")
     sub.add_parser("quota-status", help="Inspect local provider quota usage and threshold alerts; no network calls")
     research = sub.add_parser("research-discover", help="Read-only discovery of public GitHub research candidates")
@@ -282,6 +286,33 @@ def main() -> int:
             "verification_note": entry.verification_note,
         } for entry in entries]
         print(json.dumps({"network_calls_performed": 0, "runtime_activation": "separate_explicit_gates", "profiles": result}, indent=2))
+    elif args.command == "monetary-status":
+        policy = load_json(ROOT / "config" / "policy.json")
+        ledger = UsageLedger(db_path())
+        daily_budget = policy.get("daily_budget_usd", 0)
+        monthly_budget = policy.get("monthly_budget_usd", 0)
+        per_task_budget = policy.get("per_task_budget_usd", 0)
+        print(json.dumps({
+            "network_calls_performed": 0,
+            "paid_calls_enabled": policy.get("allow_paid_model_calls", False),
+            "budgets": {
+                "daily_usd": daily_budget,
+                "monthly_usd": monthly_budget,
+                "per_task_usd": per_task_budget,
+            },
+            "budget_status": ledger.budget_status(daily_budget, monthly_budget),
+            "usage": ledger.totals(),
+            "per_task_usage": ledger.task_summaries(per_task_budget),
+            "per_task_attribution_note": (
+                "Legacy usage rows without task_id remain included in global totals but "
+                "cannot be attributed to an individual task."
+            ),
+            "pending_reservations": ledger.pending_reservations(),
+            "reconciliation_note": (
+                "Ambiguous reservations are intentionally retained. Do not release one "
+                "without provider-side evidence that the request was not billed."
+            ),
+        }, indent=2, ensure_ascii=False))
     elif args.command == "model-status":
         policy = load_json(ROOT / "config" / "policy.json")
         gateway = ModelGateway(
