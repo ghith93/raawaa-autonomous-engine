@@ -32,6 +32,14 @@ GitHub Actions is used first for CI and bounded scheduled jobs. It is event-driv
 
 Provider profiles are now staged in `config/provider_profiles.json` but all remain disabled. Groq GPT-OSS 20B/120B are production-model candidates; Qwen 3.8-27B is preview-only. The read-only profile registry does not load secret values or enable network calls. Future live adapters must read credentials only from environment variables or secret stores, never from committed files. The router enforces per-minute, per-task, daily, and monthly request/token quotas before making a request and records usage after it returns. Paid routes additionally require a monetary ledger and explicit approval.
 
+## Durable provider quota ledger
+
+Provider request/token usage, reservations, cooldowns, and metadata-only audit events are stored in D1 through the authenticated Worker route `/v1/quota`. The Python `D1QuotaLedger` uses only this narrow action API; it does not expose arbitrary SQL. A reservation is a single conditional `INSERT ... SELECT ... WHERE ... RETURNING` statement, so the quota predicates and reservation insert share one database write statement. Identical settlement retries are accepted; conflicting settlements return a conflict. A transport failure is treated as ambiguous and raises without local-ledger fallback.
+
+Cloud/scheduled execution selects this ledger whenever `RAAWAA_ENGINE_API_URL` is configured. It requires `RAAWAA_ENGINE_API_TOKEN` and, when Cloudflare Access protects the Worker, the paired `RAAWAA_ENGINE_CF_ACCESS_CLIENT_ID` and `RAAWAA_ENGINE_CF_ACCESS_CLIENT_SECRET` secrets. Missing credentials or Worker errors fail closed. Local development and unit tests may continue to use SQLite when no Worker URL is configured.
+
+The D1 schema is additive in `migrations/0003_durable_quota_ledger.sql`; it does not copy or migrate historical rows from runner-local SQLite. Therefore prior local usage cannot be reconstructed centrally and must not be treated as available capacity. The live inference kill switch remains off until CI verifies the Worker routes and Python client and a real D1 concurrency/restart test has been run against a non-production test database. The monetary ledger remains a separate SQLite subsystem; current routing permits only verified zero-cost profiles and paid calls remain disabled.
+
 ## Optional AndroidHarness execution backend
 
 AndroidHarness is registered as an external Android/Linux runtime in `config/runtime_backends.json`. Its intended role is a bounded compatibility lab and optional execution target for Python/Node tools, local-model experiments, agent-framework evaluation, and device-specific validation. It is complementary to GitHub Actions (reproducible CI) and Cloudflare (deployed control plane), not a replacement for either.

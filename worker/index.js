@@ -1,3 +1,4 @@
+import { handleQuota } from "./quota.js";
 const JSON_HEADERS = { "content-type": "application/json; charset=utf-8", "cache-control": "no-store" };
 const MAX_BODY_BYTES = 32 * 1024;
 
@@ -174,11 +175,15 @@ export default {
         url.pathname !== "/v1/tasks/claim" && url.pathname !== "/v1/tasks/recover" &&
         url.pathname !== "/v1/diagnostics/auth" &&
         url.pathname !== "/v1/research/candidates" &&
+        url.pathname !== "/v1/quota" &&
         url.pathname !== "/v1/research/candidates/review" &&
         !/^\/v1\/tasks\/[A-Za-z0-9-]+\/(heartbeat|finish|retry)$/.test(url.pathname)) {
       return json({ error: "not_found" }, 404);
     }
     if (!(await authorized(request, env))) return json({ error: "unauthorized" }, 401);
+
+    const quotaResponse = await handleQuota(request, env, url);
+    if (quotaResponse) return quotaResponse;
 
     if (url.pathname === "/v1/research/candidates" && request.method === "GET") return listResearchCandidates(url, env);
     if (url.pathname === "/v1/research/candidates" && request.method === "POST") return ingestResearchCandidates(request, env);
