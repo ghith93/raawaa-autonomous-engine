@@ -82,6 +82,16 @@ class EvmV3PoolReader(EthereumV2PoolReader):
         raw = self._rpc("eth_call", [{"to": target, "data": calldata}, block_tag])
         return self._abi_words(raw, 1, label)[0]
 
+    def _eth_call_address(self, target: str, calldata: str, block_tag: str, label: str) -> str:
+        return self._address(
+            "0x" + self._eth_call_word(target, calldata, block_tag, label), label,
+        )
+
+    def _eth_call_uint(self, target: str, calldata: str, block_tag: str, label: str) -> int:
+        return self._uint(
+            "0x" + self._eth_call_word(target, calldata, block_tag, label), label,
+        )
+
     def read_snapshot(
         self,
         pool_address: str,
@@ -150,28 +160,18 @@ class EvmV3PoolReader(EthereumV2PoolReader):
             ):
                 raise RpcReadError(f"V3 {label} has no valid runtime bytecode at the pinned block")
 
-        actual_factory = self._address(
-            self._eth_call_word(pool, "0xc45a0155", block_tag, "pool.factory()"),
-            "V3 pool factory",
+        actual_factory = self._eth_call_address(
+            pool, "0xc45a0155", block_tag, "V3 pool factory",
         )
         if actual_factory != factory:
             raise V3PoolFactoryMismatch("V3 pool factory does not match the configured trusted factory")
 
-        token0 = self._address(
-            self._eth_call_word(pool, "0x0dfe1681", block_tag, "pool.token0()"),
-            "V3 token0",
-        )
-        token1 = self._address(
-            self._eth_call_word(pool, "0xd21220a7", block_tag, "pool.token1()"),
-            "V3 token1",
-        )
+        token0 = self._eth_call_address(pool, "0x0dfe1681", block_tag, "V3 token0")
+        token1 = self._eth_call_address(pool, "0xd21220a7", block_tag, "V3 token1")
         if token0 >= token1:
             raise RpcReadError("V3 pool token0/token1 order is not canonical")
 
-        fee = self._uint(
-            self._eth_call_word(pool, "0xddca3f43", block_tag, "pool.fee()"),
-            "V3 fee",
-        )
+        fee = self._eth_call_uint(pool, "0xddca3f43", block_tag, "V3 fee")
         tick_spacing = self._signed_word(
             self._eth_call_word(pool, "0xd0c93a7c", block_tag, "pool.tickSpacing()"),
             24,
@@ -189,9 +189,8 @@ class EvmV3PoolReader(EthereumV2PoolReader):
             + ("0" * 24 + token1[2:])
             + fee.to_bytes(32, "big").hex()
         )
-        registered_pool = self._address(
-            self._eth_call_word(factory, get_pool_calldata, block_tag, "factory.getPool()"),
-            "V3 factory getPool",
+        registered_pool = self._eth_call_address(
+            factory, get_pool_calldata, block_tag, "V3 factory getPool",
         )
         if registered_pool != pool:
             raise V3PoolFactoryMismatch("Trusted V3 factory does not register this pool for its tokens and fee")
@@ -226,10 +225,7 @@ class EvmV3PoolReader(EthereumV2PoolReader):
         if unlocked != 1:
             raise RpcReadError("V3 pool is locked at the pinned block")
 
-        liquidity = self._uint(
-            self._eth_call_word(pool, "0x1a686502", block_tag, "pool.liquidity()"),
-            "V3 active liquidity",
-        )
+        liquidity = self._eth_call_uint(pool, "0x1a686502", block_tag, "V3 active liquidity")
         if liquidity >= (1 << 128):
             raise RpcReadError("V3 active liquidity exceeds uint128")
 
