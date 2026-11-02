@@ -38,7 +38,7 @@ def test_flash_swap_repayment_matches_v2_get_amount_in_rounding():
     assert result.repayment_token == QUOTE
     assert result.repayment_amount_raw == expected
     assert result.borrow.amount_borrowed_raw == 10_000
-    assert result.borrow.amount_in_raw == expected
+    assert result.borrow.repayment_amount_raw == expected
 
 
 def test_profitable_and_unprofitable_routes_are_reported_without_execution():
