@@ -438,20 +438,30 @@ class EthereumV2PoolReader:
         if not isinstance(block_number, int) or isinstance(block_number, bool) or block_number < 0:
             raise ValueError("Factory verification block must be non-negative")
         block_tag = hex(block_number)
-        factory_word = self._rpc(
-            "eth_call", [{"to": pair, "data": "0xc45a0155"}, block_tag],
-        )
-        actual_factory = self._address(factory_word, "pair factory")
+        try:
+            factory_word = self._rpc(
+                "eth_call", [{"to": pair, "data": "0xc45a0155"}, block_tag],
+            )
+            actual_factory = self._address(factory_word, "pair factory")
+        except RpcReadError as exc:
+            if "EVM RPC returned an error" in str(exc) or "Invalid ABI address word for pair factory" in str(exc):
+                raise PoolFactoryMismatch("Candidate does not expose a valid V2 pair factory()") from exc
+            raise
         if actual_factory != factory:
-            raise RpcReadError("Pair factory does not match configured trusted factory")
+            raise PoolFactoryMismatch("Pair factory does not match configured trusted factory")
         # getPair(address,address) selector; addresses are ABI-padded to 32 bytes.
         calldata = "0xe6a43905" + ("0" * 24 + token_a[2:]) + ("0" * 24 + token_b[2:])
-        pair_word = self._rpc(
-            "eth_call", [{"to": factory, "data": calldata}, block_tag],
-        )
-        registered_pair = self._address(pair_word, "factory getPair")
+        try:
+            pair_word = self._rpc(
+                "eth_call", [{"to": factory, "data": calldata}, block_tag],
+            )
+            registered_pair = self._address(pair_word, "factory getPair")
+        except RpcReadError as exc:
+            if "EVM RPC returned an error" in str(exc) or "Invalid ABI address word for factory getPair" in str(exc):
+                raise PoolFactoryMismatch("Configured factory does not expose a valid V2 getPair() result") from exc
+            raise
         if registered_pair != pair:
-            raise RpcReadError("Configured factory does not register this pair for the supplied tokens")
+            raise PoolFactoryMismatch("Configured factory does not register this pair for the supplied tokens")
 
     def verify_canonical_block(self, block_number: int, expected_hash: str) -> None:
         if not isinstance(block_number, int) or isinstance(block_number, bool) or block_number < 0:
