@@ -5,7 +5,7 @@ import math
 import os
 
 from engine.live_adapters import LiveAdapterError
-from engine.model_gateway import ProviderUnavailable, UsageLedger
+from engine.model_gateway import BudgetExceeded, ProviderUnavailable, UsageLedger
 from engine.provider import GenerationRequest
 from engine.quota_manager import QuotaManager
 
@@ -15,7 +15,8 @@ class QuotaAwareLiveGateway:
 
     def __init__(self, quota_manager: QuotaManager, adapters: dict, usage_ledger: UsageLedger,
                  network_calls_enabled: bool = False, cooldown_seconds: int = 900,
-                 environ=None):
+                 environ=None, daily_budget_usd: float = 0.0,
+                 monthly_budget_usd: float = 0.0):
         if cooldown_seconds < 1:
             raise ValueError("cooldown_seconds must be positive")
         self.quota_manager = quota_manager
@@ -24,6 +25,10 @@ class QuotaAwareLiveGateway:
         self.network_calls_enabled = network_calls_enabled
         self.cooldown_seconds = cooldown_seconds
         self.environ = os.environ if environ is None else environ
+        self.daily_budget_usd = daily_budget_usd
+        self.monthly_budget_usd = monthly_budget_usd
+        # Validate configured caps before the gateway can make any provider request.
+        self.usage_ledger.budget_status(daily_budget_usd, monthly_budget_usd)
 
     def _live_enabled(self) -> bool:
         return (
@@ -73,6 +78,30 @@ class QuotaAwareLiveGateway:
             adapter = self.adapters.get(profile.route_id) or self.adapters.get(profile.provider)
             if adapter is None:
                 continue
+            input_price = profile.input_cost_per_million_usd
+            output_price = profile.output_cost_per_million_usd
+            if (type(input_price) not in (int, float)
+                    or type(output_price) not in (int, float)
+                    or not math.isfinite(input_price) or not math.isfinite(output_price)
+                    or input_price < 0 or output_price < 0):
+                continue
+            estimated_cost_usd = (
+                estimated_input_tokens * input_price
+                + request.max_output_tokens * output_price
+            ) / 1_000_000
+            try:
+                monetary_reservation_id = self.usage_ledger.reserve(
+                    profile.provider, profile.model, request.task_kind,
+                    estimated_cost_usd, self.daily_budget_usd, self.monthly_budget_usd,
+                )
+            except BudgetExceeded as exc:
+                last_error = exc
+                self._audit(
+                    "live_request_blocked", request, profile,
+                    reason="monetary_budget_exceeded",
+                )
+                continue
+
             try:
                 reservation_id = self.quota_manager.ledger.reserve(
                     profile.route_id,
@@ -88,7 +117,9 @@ class QuotaAwareLiveGateway:
                     minute_token_limit=profile.minute_token_limit,
                 )
             except RuntimeError:
-                # Another worker may have reserved the remaining capacity.
+                # Another worker may have reserved the remaining token capacity.
+                # No provider request was sent, so releasing the monetary reservation is safe.
+                self.usage_ledger.release(monetary_reservation_id)
                 continue
 
             self._audit(
@@ -120,6 +151,8 @@ class QuotaAwareLiveGateway:
                 # reservation conservatively; request count is already consumed.
                 self.quota_manager.ledger.settle(reservation_id, estimated_tokens)
                 if exc.status_code == 429:
+                    # An explicit 429 rejects the request; no provider charge is expected.
+                    self.usage_ledger.release(monetary_reservation_id)
                     self.quota_manager.ledger.cool_down(
                         profile.route_id, self.cooldown_seconds, "http_429"
                     )
@@ -154,12 +187,10 @@ class QuotaAwareLiveGateway:
                     "Live adapter failed unexpectedly; route rotation was stopped."
                 ) from exc
 
-            actual_tokens = max(0, response.input_tokens) + max(0, response.output_tokens)
+            actual_tokens = response.input_tokens + response.output_tokens
             self.quota_manager.ledger.settle(reservation_id, actual_tokens)
-            self.usage_ledger.record(
-                response.provider,
-                response.model,
-                request.task_kind,
+            monetary_settlement = self.usage_ledger.settle(
+                monetary_reservation_id,
                 response.input_tokens,
                 response.output_tokens,
                 response.cost_usd,
@@ -200,8 +231,27 @@ class QuotaAwareLiveGateway:
                 raise ProviderUnavailable(
                     "Provider reported non-zero cost for a verified-free route; route quarantined."
                 )
+            budget_status = self.usage_ledger.budget_status(
+                self.daily_budget_usd, self.monthly_budget_usd
+            )
+            if budget_status["daily_over_budget"] or budget_status["monthly_over_budget"]:
+                self.quota_manager.ledger.cool_down(
+                    profile.route_id, self.cooldown_seconds, "monetary_budget_exceeded"
+                )
+                self._audit(
+                    "route_quarantined", request, profile,
+                    reason="monetary_budget_exceeded",
+                    cooldown_seconds=self.cooldown_seconds,
+                )
+                raise ProviderUnavailable(
+                    "Actual provider cost exceeded the configured monetary budget; route quarantined."
+                )
             return response
 
+        if isinstance(last_error, BudgetExceeded):
+            raise ProviderUnavailable(
+                "No eligible provider route remains within the configured monetary budget."
+            ) from last_error
         if last_error is not None:
             raise ProviderUnavailable(
                 "All eligible free routes failed or were rate-limited."
@@ -217,7 +267,14 @@ class QuotaAwareLiveGateway:
             "paid_fallback_enabled": False,
             "quota_routes": self.quota_manager.snapshot(),
             "registered_adapters": sorted(self.adapters),
+            "monetary_budgets": {
+                "daily_usd": self.daily_budget_usd,
+                "monthly_usd": self.monthly_budget_usd,
+            },
+            "monetary_usage": self.usage_ledger.totals(),
             "cost_accounting_note": (
-                "Only profiles with verified zero input/output prices are eligible; any reported non-zero response cost is recorded and quarantines the route."
+                "Monetary spend is reserved before provider I/O and settled idempotently; "
+                "ambiguous outcomes retain reservations. Only verified zero-cost profiles "
+                "are currently eligible; unexpected charges are recorded and quarantine the route."
             ),
         }
