@@ -19,6 +19,8 @@ def test_live_v3_smoke_script_parses_and_contains_no_transaction_submission() ->
     assert "re.fullmatch" in source
     assert "250_002" in source
     assert "RpcTransportError" in source
+    assert '"https://eth.drpc.org"' in source
+    assert '"https://public.1rpc.io/eth"' in source
     assert '"https://eth.nodely.dev"' in source
     assert "MAX_TOTAL_RPC_REQUESTS = 512" in source
     assert "remaining_budget = MAX_TOTAL_RPC_REQUESTS - requests_used" in source
@@ -84,7 +86,7 @@ def test_live_smoke_retries_next_provider_with_one_shared_request_budget(monkeyp
     monkeypatch.setattr(module, "_run_smoke", fake_run)
     module.main()
 
-    assert [attempt.endpoint for attempt in attempts] == list(module.RPC_ENDPOINTS)
+    assert [attempt.endpoint for attempt in attempts] == list(module.RPC_ENDPOINTS[:2])
     assert attempts[0].max_rpc_requests == module.MAX_TOTAL_RPC_REQUESTS
     assert attempts[1].max_rpc_requests == module.MAX_TOTAL_RPC_REQUESTS - 3
     output = __import__("json").loads(capsys.readouterr().out)
