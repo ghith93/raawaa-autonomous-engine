@@ -137,6 +137,12 @@ def observe_flash_swap_outcome(
         raise ValueError("Candidate gas scenario metadata is malformed")
     if (gas is None) != (gas_event is None):
         raise ValueError("Candidate gas scenario metadata and ledger event disagree")
+    if gas_event is not None and (
+        _integer(gas_event.get("chain_id"), "gas chain_id", minimum=1) != chain_id
+        or _integer(gas_event.get("block_number"), "gas block_number") != candidate_block
+        or str(gas_event.get("block_hash", "")).casefold() != candidate_hash.casefold()
+    ):
+        raise ValueError("Candidate gas scenario must share the original canonical block")
     pool_requests = [(source_pool, source_fee), (destination_pool, destination_fee)]
     native_quote_pair = None
     if gas is not None:
@@ -145,6 +151,10 @@ def observe_flash_swap_outcome(
             raise ValueError("Candidate gas scenario is missing its native token")
         native_quote_pair = gas.get("native_quote_pair")
         if native_quote_pair:
+            if not isinstance(native_quote_pair, str) or native_quote_pair.casefold() not in {
+                str(value).casefold() for value in pool_addresses
+            }:
+                raise ValueError("Candidate snapshot does not contain its native quote pool")
             native_quote_fee = _integer(gas.get("native_quote_fee_bps"), "native_quote_fee_bps")
             pool_requests.append((native_quote_pair, native_quote_fee))
 
