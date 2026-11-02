@@ -6,7 +6,7 @@ Simulation-first spot-arbitrage research module, isolated inside the autonomous-
 - Read-only public DEX Screener market data.
 - Deterministic risk calculations use Decimal; floats are rejected.
 - SQLite stores observations only. A repeated-observation report measures persistence, not historical PnL or executable performance.
-- No wallet connection, signing, approvals, swaps, exchange orders, or live trading code.
+- No wallet connection, signing, approvals, swaps, exchange orders, or live trading code.\n- Optional Telegram bot is private-chat allowlisted and exposes only status, indicative scans, and read-only observation reports.
 - DEX Screener USD marks are indicative only, not executable quotes or proof of available depth. Its search response does not provide an on-chain quote timestamp; retrieval age must not be mistaken for pool-state freshness.
 - No AI decision can authorize a trade. Any future AI use is restricted to research and explanation.
 - A read-only Ethereum JSON-RPC adapter retrieves two V2 pool states and token decimals at one pinned block. The V2 constant-product calculator uses integer raw units and requires two distinct pools at the same block; it is reserve math only and excludes gas, transfer taxes, dynamic fees, reverts, MEV, and execution. Pool fee basis points must be supplied explicitly and independently verified.
@@ -21,7 +21,7 @@ pytest
 arb-engine demo
 arb-engine report --limit 500
 arb-engine scan WETH/USDC --min-liquidity 10000 --min-volume 1000
-arb-engine v2-sim --buy-pair 0x... --buy-fee-bps 30 --sell-pair 0x... --sell-fee-bps 30 --quote-token 0x... --base-token 0x... --capital-quote 50
+arb-telegram  # optional read-only polling bot; requires token + private chat allowlist\narb-engine v2-sim --buy-pair 0x... --buy-fee-bps 30 --sell-pair 0x... --sell-fee-bps 30 --quote-token 0x... --base-token 0x... --capital-quote 50
 ```
 
 Scan snapshots are saved to `data/opportunities.sqlite3`. Avoid tight polling and respect upstream rate limits.
