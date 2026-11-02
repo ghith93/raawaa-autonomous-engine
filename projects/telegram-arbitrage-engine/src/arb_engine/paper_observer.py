@@ -132,8 +132,11 @@ def observe_flash_swap_outcome(
         raise ValueError("Candidate timestamp must be timezone-aware")
 
     gas = metadata.get("gas_scenario")
+    gas_event = next((item for item in events if item.get("event_type") == "gas_scenario_evaluated"), None)
     if gas is not None and not isinstance(gas, dict):
         raise ValueError("Candidate gas scenario metadata is malformed")
+    if (gas is None) != (gas_event is None):
+        raise ValueError("Candidate gas scenario metadata and ledger event disagree")
     pool_requests = [(source_pool, source_fee), (destination_pool, destination_fee)]
     native_quote_pair = None
     if gas is not None:
@@ -151,6 +154,11 @@ def observe_flash_swap_outcome(
         raise ValueError("RPC reader returned an incomplete forward-observation snapshot")
     observed = snapshots[0]
     observed_state = observed.state
+    if (
+        observed_state.pair_address.casefold() != source_pool.casefold()
+        or snapshots[1].state.pair_address.casefold() != destination_pool.casefold()
+    ):
+        raise ValueError("RPC reader returned a different pool than the candidate route")
     if observed_state.chain_id != chain_id:
         raise ValueError("Forward observation belongs to a different chain")
     if observed_state.block_number <= candidate_block:
@@ -183,6 +191,8 @@ def observe_flash_swap_outcome(
         borrowed_token=borrowed_token,
         amount_borrowed_raw=amount_borrowed,
     )
+    if simulation.repayment_token.casefold() != str(route_event.get("token_out", "")).casefold():
+        raise ValueError("Forward route repayment token differs from the captured candidate")
     economics = None
     if gas is not None:
         gas_used = _integer(gas.get("gas_used"), "gas_used", minimum=1)
