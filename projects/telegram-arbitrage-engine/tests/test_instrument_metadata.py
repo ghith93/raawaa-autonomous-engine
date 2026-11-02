@@ -1,3 +1,4 @@
+import json
 from datetime import datetime, timezone
 from decimal import Decimal
 from urllib.parse import parse_qs, urlsplit
@@ -62,7 +63,7 @@ def test_bybit_fetch_instrument_uses_public_metadata_and_exact_precision():
     client = BybitPublicMarketData(
         transport=lambda url, timeout: (
             calls.append((url, timeout))
-            or __import__("json").dumps(bybit_payload()).encode()
+            or json.dumps(bybit_payload()).encode()
         ),
         min_interval_seconds=0,
     )
@@ -183,7 +184,9 @@ def test_registry_skips_nontrading_instruments_and_rejects_duplicate_mappings():
         ("binance", "BTC"): "asset:canonical:BTC",
         ("binance", "USDT"): "currency:canonical:USDT",
     }
-    assert InstrumentRegistry.from_metadata([item], aliases).resolve if False else True
+    registry = InstrumentRegistry.from_metadata([item], aliases)
+    with pytest.raises(InstrumentMappingError, match="no explicit canonical mapping"):
+        registry.resolve("binance", "BTCUSDT")
 
     trading = InstrumentMetadata(
         venue_id="binance", instrument_id="BTCUSDT", market_family="cex_spot",
