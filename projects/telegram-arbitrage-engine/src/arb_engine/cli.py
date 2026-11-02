@@ -467,7 +467,7 @@ def main() -> None:
             )
             print(json.dumps(result, indent=2))
         except (MarketDataError, RpcReadError, ValueError, ArithmeticError) as exc:
-            parser.exit(2, f"v2-discover failed: {exc}\\n")
+            parser.exit(2, f"v2-discover failed: {exc}\n")
 
 
 if __name__ == "__main__":
