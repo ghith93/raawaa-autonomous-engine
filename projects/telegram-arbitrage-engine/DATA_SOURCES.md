@@ -137,6 +137,18 @@ No item in this list authorizes live trading.
 - HTTP 429 and Kraken rate-limit error payloads defer the shared limiter; requests are not retried in a tight loop. CI uses deterministic fixtures only; no live Kraken calls, account methods or API keys are used.
 - Fee tiers and order-book depth are not proof of executable fills. Cross-venue net estimates still require current account-specific fee selection, latency, transfer/settlement, liquidity and risk costs.
 
+## OKX Spot public market data (read-only)
+
+- Official API guide: https://www.okx.com/docs-v5/en/
+- Public Spot instruments: `GET /api/v5/public/instruments?instType=SPOT&instId=...`; the public-data API does not require authentication. Official endpoint rate limit: 20 requests per 2 seconds per IP + instrument type.
+- Aggregated Spot order book: `GET /api/v5/market/books?instId=...&sz=...`; official endpoint rate limit: 40 requests per 2 seconds per IP. The adapter deliberately uses a shared process-wide one-request-per-second limiter for both endpoints.
+- Regional API host selection is mandatory for some registrations: OKX documents `us.okx.com` for US/AU registrations and `eea.okx.com` for EEA registrations; `www.okx.com` is the global default. The adapter allowlists only these official HTTPS hosts. The operator must select the domain that matches their registration region; geographic location alone does not establish account eligibility.
+- Instrument metadata preserves exact `instId`, `baseCcy`, `quoteCcy`, `lotSz`, `tickSz`, `minSz` and `state`. The adapter maps `minSz` to minimum base quantity and leaves minimum quote notional unknown rather than inventing one.
+- Order-book rows preserve exact Decimal price/size, order count, liquidation-order count, sequence ID, exchange timestamp and local `fetched_at`. The endpoint returns an aggregated REST L2 snapshot; it is not a synchronized incremental WebSocket feed.
+- Public REST requests are bounded by HTTPS host allowlist, redirect rejection, 1-second pacing, 8-second default timeout, 1 MB response cap, instrument/depth validation, strict JSON shape and HTTP/API rate-limit cooldown.
+- Account-specific OKX trading fees are not available through the public endpoints used here. Fee tiers, regional trading eligibility, borrow/margin access and account status remain unknown. No private API key, order endpoint, wallet, withdrawal or execution method is used. OKX API agreement and regional terms apply.
+- CI uses deterministic fixtures only; no live OKX requests or credentials are used.
+
 ## Coinbase Exchange Spot public market data (read-only)
 
 - Official single-product metadata reference: https://docs.cdp.coinbase.com/api-reference/exchange-api/rest-api/products/get-single-product
