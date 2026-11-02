@@ -82,7 +82,7 @@ def main() -> None:
     )
     v2_parser.add_argument(
         "--gas-safety-bps", type=int, default=2000,
-        help="extra gas-unit buffer in basis points (default: 2000 = 20%%)",
+        help="extra gas-unit buffer in basis points (default: 2000 = 20%)",
     )
     v2_parser.add_argument("--buy-router", help="optional V2 router contract for same-block getAmountsOut validation")
     v2_parser.add_argument("--sell-router", help="optional V2 router contract for same-block getAmountsOut validation")
