@@ -14,6 +14,10 @@ Simulation-first spot-arbitrage research module, isolated inside the autonomous-
 - An optional local Anvil fork-call adapter accepts exact caller-supplied calldata and performs read-only eth_call/eth_estimateGas with optional callTracer output; it refuses non-loopback endpoints and never submits transactions. It simulates one call only, not an atomic two-venue arbitrage route.
 - A read-only EVM JSON-RPC adapter retrieves two V2 pool states and token decimals at one pinned block. The V2 constant-product calculator uses integer raw units and requires two distinct pools at the same block; it is reserve math only and excludes gas, transfer taxes, dynamic fees, reverts, MEV, and execution. Pool fee basis points can be supplied manually or selected from the source-documented Ethereum V2 registry. Registry entries remain unverified until the CLI confirms pair.factory(), factory.getPair(), and router.factory() at the pinned block; the fee model is still a documented assumption.
 
+## Paper-trading research ledger
+
+An isolated SQLite event ledger is available for provenance-linked research records. It is append-only, hash-chained, idempotent by caller-supplied event ID, and stores raw-unit economics as decimal strings. It is a storage primitive only: no order is created or submitted, and its records are not realized PnL. See [PAPER_TRADING_LEDGER.md](PAPER_TRADING_LEDGER.md).
+
 ## Run in isolation
 Requires Python 3.11+.
 
