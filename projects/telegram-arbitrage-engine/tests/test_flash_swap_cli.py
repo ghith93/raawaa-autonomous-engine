@@ -156,3 +156,30 @@ def test_rejects_wrong_native_quote_assets_and_inconsistent_decimals():
             native_token=NATIVE, native_quote_pair=NATIVE_QUOTE,
             native_quote_fee_bps=30,
         )
+
+def test_rejects_decimal_disagreement_in_native_quote_snapshot():
+    fake = reader()
+    fake.states[NATIVE_QUOTE] = snapshot(
+        NATIVE_QUOTE, QUOTE, NATIVE, 2_000_000 * 10**6, 1_000 * 10**18, 18, 18,
+    )
+    with pytest.raises(ValueError, match="decimals disagree"):
+        run_flash_swap_simulation(
+            **base_args(), reader=fake,
+            gas_used=100_000, gas_price_wei=20_000_000_000,
+            native_token=NATIVE, native_quote_pair=NATIVE_QUOTE,
+            native_quote_fee_bps=30,
+        )
+
+
+def test_negative_gross_surplus_is_recorded_as_rejected_not_as_profit(tmp_path):
+    fake = reader()
+    fake.states[DESTINATION] = snapshot(
+        DESTINATION, QUOTE, BASE, 1_900_000 * 10**6, 1_000 * 10**18, 6, 18,
+    )
+    result = run_flash_swap_simulation(
+        **base_args(), reader=fake, record_paper=True,
+        ledger_path=str(tmp_path / "rejected.sqlite3"),
+    )
+    assert int(result["gross_profit_raw"]) < 0
+    assert result["paper_ledger"]["event_count"] == 4
+    assert result["paper_ledger"]["chain_verified"] is True
