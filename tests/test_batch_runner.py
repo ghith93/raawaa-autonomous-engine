@@ -1,3 +1,5 @@
+import threading
+import time
 import unittest
 from unittest.mock import Mock
 
@@ -27,10 +29,37 @@ class BatchRunnerTests(unittest.TestCase):
         self.assertEqual(result["stop_reason"], "time_limit")
         self.assertEqual(runner.call_count, 1)
 
+    def test_runs_bounded_tasks_in_parallel(self):
+        lock = threading.Lock()
+        active = 0
+        maximum_active = 0
+        completed = 0
+        pair_barrier = threading.Barrier(2)
+
+        def runner(_store):
+            nonlocal active, maximum_active, completed
+            with lock:
+                active += 1
+                maximum_active = max(maximum_active, active)
+                completed += 1
+                position = completed
+            if position % 2 == 0:
+                pair_barrier.wait(timeout=2)
+            time.sleep(0.005)
+            with lock:
+                active -= 1
+            return {"status": "succeeded"}
+
+        result = run_batch(object(), max_tasks=4, max_parallel=2, runner=runner)
+        self.assertEqual(result["tasks_processed"], 4)
+        self.assertEqual(result["stop_reason"], "task_limit")
+        self.assertEqual(maximum_active, 2)
+
     def test_rejects_unbounded_limits(self):
         for kwargs in ({"max_tasks": 0}, {"max_tasks": 21},
                        {"max_seconds": 0}, {"max_seconds": 301},
-                       {"max_tasks": True}):
+                       {"max_tasks": True}, {"max_parallel": 0},
+                       {"max_parallel": 6}, {"max_parallel": True}):
             with self.subTest(kwargs=kwargs), self.assertRaises(ValueError):
                 run_batch(object(), runner=Mock(), **kwargs)
 
