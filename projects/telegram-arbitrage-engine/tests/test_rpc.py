@@ -165,3 +165,24 @@ def test_router_quote_rejects_bad_path_and_amount():
         reader.quote_v2_router_exact_input("0x" + "9" * 40, True, [TOKEN0, TOKEN1], 100)
     with pytest.raises(ValueError, match="repeat"):
         reader.quote_v2_router_exact_input("0x" + "9" * 40, 10, [TOKEN0, TOKEN0], 100)
+
+
+def test_canonical_block_revalidation_detects_late_reorg(monkeypatch):
+    import pytest
+
+    reader = EthereumV2PoolReader(min_request_interval=0)
+    monkeypatch.setattr(
+        reader, "_rpc",
+        lambda method, params: {"hash": "0x" + "b" * 64} if method == "eth_getBlockByNumber" else None,
+    )
+    with pytest.raises(RpcReadError, match="no longer canonical"):
+        reader.verify_canonical_block(100, BLOCK_HASH)
+
+
+def test_canonical_block_revalidation_accepts_matching_hash(monkeypatch):
+    reader = EthereumV2PoolReader(min_request_interval=0)
+    monkeypatch.setattr(
+        reader, "_rpc",
+        lambda method, params: {"hash": BLOCK_HASH} if method == "eth_getBlockByNumber" else None,
+    )
+    reader.verify_canonical_block(100, BLOCK_HASH)
