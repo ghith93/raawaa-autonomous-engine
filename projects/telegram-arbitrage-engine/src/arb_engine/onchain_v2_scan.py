@@ -34,8 +34,8 @@ def _token_decimals(snapshot: Any, token: str) -> int:
 
 
 def _human(raw: int, decimals: int) -> str:
-    with localcontext() as context:
-        context.prec = 100
+    with localcontext() as decimal_context:
+        decimal_context.prec = 100
         return format(Decimal(raw) / (Decimal(10) ** decimals), "f")
 
 
@@ -52,8 +52,8 @@ def _capital_decimal(value: str | Decimal) -> Decimal:
 
 
 def _capital_to_raw(amount: Decimal, decimals: int) -> int:
-    with localcontext() as context:
-        context.prec = max(
+    with localcontext() as decimal_context:
+        decimal_context.prec = max(
             100, len(amount.as_tuple().digits) + abs(amount.as_tuple().exponent) + decimals + 5,
         )
         scaled = amount * (Decimal(10) ** decimals)
