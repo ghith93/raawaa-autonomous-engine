@@ -62,15 +62,25 @@ This example records only a discovery event. It does not create or submit a pape
 6. Validate event replay and hash-chain verification across process restart and backup/restore.
 7. Keep all signing and transaction submission absent until a separate operator-approved security and execution gate.
 
-## Remote D1 persistence adapter (staged)
+## Remote D1 persistence adapter (explicit opt-in)
 
-The repository also contains an authenticated Worker endpoint at `POST /v1/paper-ledger` and a Python HTTP client, backed by additive migration `0004_paper_event_ledger.sql`. This is a staged API/client implementation; it is **not** yet enabled in the Telegram arbitrage scanner, deployed, or migrated against production D1.
+The authenticated Worker endpoint at `POST /v1/paper-ledger` now has a narrow Python client and is wired into `flash-swap-sim` behind an explicit backend selector. Local SQLite remains the default. D1 is selected only when `RAAWAA_PAPER_LEDGER_BACKEND=d1`; it then requires `RAAWAA_PAPER_LEDGER_URL` (HTTPS) and `RAAWAA_PAPER_LEDGER_TOKEN` from environment variables. The client never accepts credentials on CLI arguments, prints them, or falls back to SQLite after a D1 error.
 
-- D1 is intended to be the cross-run source of truth for scheduled ephemeral workers; local SQLite remains the deterministic offline/test adapter.
-- The Worker accepts only the fixed event vocabulary, validates timezone-aware timestamps, block provenance, uint256 raw integer strings, and cross-runtime canonical JSON payloads; it caps request/payload sizes and requires the existing bearer authentication.
-- Appends use a candidate-head compare-and-swap followed by conditional event/checkpoint inserts in one D1 batch. A stale concurrent writer cannot advance the head or create a fork; the caller receives a conflict and may retry with bounded backoff.
-- Replaying an identical event ID and content returns the original sequence/hash; conflicting event-ID reuse is rejected.
-- Event and checkpoint UPDATE/DELETE operations are rejected by D1 triggers. The candidate head is mutable only through the CAS path.
-- The Python D1 client fails closed on HTTP, transport, or malformed-response errors; it never silently falls back to a local SQLite file.
+Example environment configuration (set these in the process environment, not in source control):
 
-The current unit suite exercises the Worker compare-and-swap path with a deterministic concurrency mock and validates the migration against SQLite. This is not proof of Cloudflare D1 transaction semantics. Before activation, apply the migration only to a dedicated non-production D1 database and test concurrent appends, identical replay, conflicting replay, event/checkpoint integrity, restart, and backup/restore. Production migration/deployment and wiring the scanner to this adapter require a separate reviewed release step. No live trading or external transaction capability is provided.
+```bash
+export RAAWAA_PAPER_LEDGER_BACKEND=d1
+export RAAWAA_PAPER_LEDGER_URL=https://YOUR-WORKER.example.workers.dev
+export RAAWAA_PAPER_LEDGER_TOKEN=...
+arb-engine flash-swap-sim ... --record-paper
+```
+
+- Without `--record-paper`, neither backend is written.
+- Without the backend variable, local SQLite remains the default and existing offline tests are unchanged.
+- D1 mode requires a separately deployed Worker and applied migration `0004_paper_event_ledger.sql` on a non-production database before use. This change does not deploy a Worker or apply any migration.
+- The D1 client uses only the fixed `/v1/paper-ledger` append/list API; it does not expose arbitrary SQL or other Worker routes.
+- Candidate IDs are derived from chain, pinned block hash, pool identities, borrowed token, and amount. Event times are derived from the pinned block timestamp so identical retries reproduce the same event content and IDs.
+- D1 appends use the Worker's compare-and-swap candidate head, conditional event/checkpoint writes, and hash-chain verification. HTTP, transport, malformed-response, event conflict, and integrity failures stop the operation; no SQLite fallback occurs.
+- The local SQLite adapter retains its existing storage and deterministic tests.
+
+Before any production use, validate the adapter against a dedicated non-production D1 database: apply migration 0004 there, test concurrent appends, identical and conflicting replay, chain verification, process restart, and backup/restore. Production migration/deployment remains a separate approval-gated action. No wallet, signer, order, or transaction capability is introduced.
