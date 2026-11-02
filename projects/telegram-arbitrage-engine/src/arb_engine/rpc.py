@@ -222,6 +222,24 @@ class EthereumV2PoolReader:
 
 
 
+    def verify_v2_router_factory(
+        self,
+        router_address: str,
+        expected_factory: str,
+        block_number: int,
+    ) -> None:
+        """Verify a V2 router's factory() against the configured trusted factory."""
+        router = self._pool_address(router_address)
+        factory = self._pool_address(expected_factory)
+        if not isinstance(block_number, int) or isinstance(block_number, bool) or block_number < 0:
+            raise ValueError("Router factory verification block must be non-negative")
+        factory_word = self._rpc(
+            "eth_call", [{"to": router, "data": "0xc45a0155"}, hex(block_number)],
+        )
+        actual_factory = self._address(factory_word, "router factory")
+        if actual_factory != factory:
+            raise RpcReadError("Router factory does not match configured trusted factory")
+
     def verify_v2_pool_factory(
         self,
         pair_address: str,
