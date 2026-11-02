@@ -73,4 +73,17 @@ The repository also contains an authenticated Worker endpoint at `POST /v1/paper
 - Event and checkpoint UPDATE/DELETE operations are rejected by D1 triggers. The candidate head is mutable only through the CAS path.
 - The Python D1 client fails closed on HTTP, transport, or malformed-response errors; it never silently falls back to a local SQLite file.
 
-The current unit suite exercises the Worker compare-and-swap path with a deterministic concurrency mock and validates the migration against SQLite. This is not proof of Cloudflare D1 transaction semantics. Before activation, apply the migration only to a dedicated non-production D1 database and test concurrent appends, identical replay, conflicting replay, event/checkpoint integrity, restart, and backup/restore. Production migration/deployment and wiring the scanner to this adapter require a separate reviewed release step. No live trading or external transaction capability is provided.
+The flash-swap CLI can now select this adapter only when both `--record-paper` and `RAAWAA_PAPER_LEDGER_BACKEND=d1` are explicitly set. It reads `RAAWAA_ENGINE_API_URL` and `RAAWAA_ENGINE_API_TOKEN` from the environment (and optional paired Cloudflare Access service-token variables). It never accepts or prints secrets as command-line arguments. D1 initialization, HTTP, and verification errors fail closed; there is no SQLite fallback. The default backend remains local SQLite, and no ledger is written without `--record-paper`.
+
+Example environment setup (supply secrets through the runtime's secret store, not shell history or committed files):
+
+```bash
+export RAAWAA_PAPER_LEDGER_BACKEND=d1
+export RAAWAA_ENGINE_API_URL=https://<deployed-worker-host>
+# Set RAAWAA_ENGINE_API_TOKEN through a protected secret environment.
+arb-engine flash-swap-sim ... --record-paper
+```
+
+Candidate IDs and event timestamps are derived deterministically from the pinned block, pools, borrowed asset/amount, fees, and gas scenario so a retry of the same simulation reuses the same event IDs and block-time timestamp. A changed scenario creates a distinct candidate.
+
+The current unit suite exercises the Worker compare-and-swap path with a deterministic concurrency mock and validates the migration against SQLite. This is not proof of Cloudflare D1 transaction semantics. Before activation, apply the migration only to a dedicated non-production D1 database and test concurrent appends, identical replay, conflicting replay, event/checkpoint integrity, restart, and backup/restore. Production migration/deployment remains a separate reviewed release step. No live trading or external transaction capability is provided.
