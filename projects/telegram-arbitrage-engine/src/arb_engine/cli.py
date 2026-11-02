@@ -17,7 +17,10 @@ from .rpc import DEFAULT_ETHEREUM_RPC, EthereumV2PoolReader, RpcReadError
 from .scanner import find_spreads
 from .v2 import simulate_round_trip
 from .venues import list_venues, resolve_venue_config
-from .venue_smoke import JsonRpcClient, VenueVerificationError, verify_registry_venues
+from .venue_smoke import (
+    JsonRpcClient, VenueVerificationError,
+    verify_registry_venue_deployments, verify_registry_venues,
+)
 
 
 def demo() -> dict:
@@ -86,6 +89,13 @@ def main() -> None:
     venue_check_parser.add_argument("--chain-id", type=int, default=1)
     venue_check_parser.add_argument("--rpc-url", default=DEFAULT_ETHEREUM_RPC)
     venue_check_parser.add_argument("--timeout-seconds", type=float, default=8.0)
+    venue_deployment_parser = sub.add_parser(
+        "venue-deployment-check",
+        help="verify registered V2 factory/router deployments on any EVM chain using read-only RPC calls",
+    )
+    venue_deployment_parser.add_argument("--chain-id", type=int, required=True)
+    venue_deployment_parser.add_argument("--rpc-url", required=True)
+    venue_deployment_parser.add_argument("--timeout-seconds", type=float, default=8.0)
     v2_parser = sub.add_parser("v2-sim", help="read-only same-block Ethereum V2 reserve simulation")
     v2_parser.add_argument("--buy-pair", required=True)
     v2_parser.add_argument("--buy-venue", help="known source-documented venue ID; auto-fills fee/factory/router")
@@ -222,6 +232,17 @@ def main() -> None:
             print(json.dumps(result, indent=2))
         except (VenueVerificationError, ValueError, OSError, json.JSONDecodeError) as exc:
             parser.exit(2, f"venue-check failed: {exc}\n")
+    elif args.command == "venue-deployment-check":
+        try:
+            venues = list_venues(args.chain_id)
+            result = verify_registry_venue_deployments(
+                JsonRpcClient(args.rpc_url, timeout_seconds=args.timeout_seconds),
+                venues,
+                expected_chain_id=args.chain_id,
+            )
+            print(json.dumps(result, indent=2))
+        except (VenueVerificationError, ValueError, OSError, json.JSONDecodeError) as exc:
+            parser.exit(2, f"venue-deployment-check failed: {exc}\n")
     elif args.command == "v2-sim":
         try:
             args.buy_fee_bps, args.buy_factory, args.buy_router, buy_venue = resolve_venue_config(

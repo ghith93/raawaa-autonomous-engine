@@ -9,6 +9,7 @@ from arb_engine.venue_smoke import (
     WETH_MAINNET,
     JsonRpcClient,
     VenueVerificationError,
+    verify_registry_venue_deployments,
     verify_registry_venues,
 )
 from arb_engine.venues import list_venues
@@ -119,3 +120,78 @@ def test_live_venue_check_redacts_rpc_url_credentials_and_paths():
     assert result["rpc_endpoint"] == "https://rpc.example"
     assert "password" not in result["rpc_endpoint"]
     assert "SECRET_API_KEY" not in result["rpc_endpoint"]
+
+
+
+class FakeDeploymentRpc:
+    endpoint = "injected://deployment-test"
+
+    def __init__(self, venues, chain_id, *, wrong_router=False, reorg=False):
+        self.chain_id = chain_id
+        self.router_factory = {v.router02.lower(): v.factory.lower() for v in venues}
+        if wrong_router and venues:
+            self.router_factory[venues[0].router02.lower()] = "0x" + "9" * 40
+        self.reorg = reorg
+        self.block_reads = 0
+
+    def call(self, method, params):
+        if method == "eth_chainId":
+            return hex(self.chain_id)
+        if method == "eth_blockNumber":
+            return "0x456"
+        if method == "eth_getBlockByNumber":
+            self.block_reads += 1
+            return {"hash": "0x" + ("b" if self.reorg and self.block_reads > 1 else "c") * 64}
+        if method == "eth_getCode":
+            return "0x60006000"
+        if method == "eth_call":
+            target = params[0]["to"].lower()
+            data = params[0]["data"].lower()
+            assert params[1] == "0x456"
+            if data == FACTORY_SELECTOR and target in self.router_factory:
+                return word(self.router_factory[target])
+        raise AssertionError(f"Unexpected RPC method/params: {method} {params}")
+
+
+@pytest.mark.parametrize("chain_id", [10, 56, 137, 8453, 42161, 43114])
+def test_multichain_deployment_smoke_verifies_registered_factory_router_pairs(chain_id):
+    venues = list_venues(chain_id)
+    result = verify_registry_venue_deployments(
+        FakeDeploymentRpc(venues, chain_id), venues, expected_chain_id=chain_id,
+    )
+    assert result["chain_id"] == chain_id
+    assert result["block_number"] == 0x456
+    assert result["verification_status"] == "live_read_only_deployment_checks_passed"
+    assert {item["venue_id"] for item in result["venues"]} == {item.id for item in venues}
+    assert all(
+        item["onchain_relationship_checks"]
+        == "factory_and_router_code_present_router_factory_matches"
+        for item in result["venues"]
+    )
+
+
+def test_multichain_deployment_smoke_fails_closed_on_wrong_chain_router_or_reorg():
+    venues = list_venues(56)
+    with pytest.raises(VenueVerificationError, match="RPC chain ID"):
+        verify_registry_venue_deployments(
+            FakeDeploymentRpc(venues, 1), venues, expected_chain_id=56,
+        )
+    with pytest.raises(VenueVerificationError, match="Router02 factory"):
+        verify_registry_venue_deployments(
+            FakeDeploymentRpc(venues, 56, wrong_router=True), venues, expected_chain_id=56,
+        )
+    with pytest.raises(VenueVerificationError, match="Pinned block hash changed"):
+        verify_registry_venue_deployments(
+            FakeDeploymentRpc(venues, 56, reorg=True), venues, expected_chain_id=56,
+        )
+
+
+def test_multichain_deployment_smoke_rejects_empty_or_cross_chain_venue_lists():
+    with pytest.raises(VenueVerificationError, match="No source-documented venues"):
+        verify_registry_venue_deployments(FakeDeploymentRpc([], 8453), [], expected_chain_id=8453)
+    with pytest.raises(VenueVerificationError, match="not registered for chain"):
+        verify_registry_venue_deployments(
+            FakeDeploymentRpc(list_venues(56), 8453),
+            list_venues(56),
+            expected_chain_id=8453,
+        )

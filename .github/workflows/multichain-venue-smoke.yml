@@ -1,0 +1,76 @@
+name: Multi-chain V2 venue deployment smoke
+
+on:
+  pull_request:
+    paths:
+      - "projects/telegram-arbitrage-engine/**"
+      - ".github/workflows/multichain-venue-smoke.yml"
+  push:
+    branches: [main]
+    paths:
+      - "projects/telegram-arbitrage-engine/**"
+      - ".github/workflows/multichain-venue-smoke.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: multichain-venue-smoke-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify-registered-deployments:
+    name: verify chain ${{ matrix.chain_id }} (${{ matrix.network }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - network: bnb-smart-chain
+            chain_id: 56
+            rpc_urls: "https://bsc-rpc.publicnode.com|https://bsc-dataseed.bnbchain.org"
+          - network: arbitrum-one
+            chain_id: 42161
+            rpc_urls: "https://arb1.arbitrum.io/rpc|https://arbitrum-one-rpc.publicnode.com"
+          - network: optimism
+            chain_id: 10
+            rpc_urls: "https://mainnet.optimism.io|https://optimism-rpc.publicnode.com"
+          - network: base
+            chain_id: 8453
+            rpc_urls: "https://mainnet.base.org|https://base-rpc.publicnode.com"
+          - network: polygon-pos
+            chain_id: 137
+            rpc_urls: "https://polygon-bor-rpc.publicnode.com"
+          - network: avalanche-c
+            chain_id: 43114
+            rpc_urls: "https://api.avax.network/ext/bc/C/rpc|https://avalanche-c-chain-rpc.publicnode.com"
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install isolated package
+        working-directory: projects/telegram-arbitrage-engine
+        run: python -m pip install --no-deps -e .
+      - name: Verify factory and router deployments at a pinned block
+        working-directory: projects/telegram-arbitrage-engine
+        env:
+          CHAIN_ID: ${{ matrix.chain_id }}
+          RPC_URLS: ${{ matrix.rpc_urls }}
+        run: |
+          IFS='|' read -r -a endpoints <<< "$RPC_URLS"
+          verified=0
+          for endpoint in "${endpoints[@]}"; do
+            echo "Trying read-only RPC provider: $endpoint"
+            if python -m arb_engine.cli venue-deployment-check --chain-id "$CHAIN_ID" --rpc-url "$endpoint"; then
+              verified=1
+              break
+            fi
+          done
+          if [ "$verified" -ne 1 ]; then
+            echo "All configured public RPC endpoints failed for chain $CHAIN_ID"
+            exit 1
+          fi
