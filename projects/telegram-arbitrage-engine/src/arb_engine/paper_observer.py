@@ -45,6 +45,19 @@ def _integer(value: Any, name: str, *, minimum: int = 0) -> int:
     return result
 
 
+def _event_time(event: dict[str, Any], label: str) -> datetime:
+    value = event.get("occurred_at")
+    if not isinstance(value, str):
+        raise ValueError(f"{label} event is missing its block timestamp")
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError as exc:
+        raise ValueError(f"{label} event has an invalid block timestamp") from exc
+    if parsed.tzinfo is None or parsed.utcoffset() is None:
+        raise ValueError(f"{label} event timestamp must be timezone-aware")
+    return parsed
+
+
 def _resolve_ledger(ledger_path: str):
     backend = os.getenv("RAAWAA_PAPER_LEDGER_BACKEND", "sqlite").strip().casefold()
     if backend == "sqlite":
@@ -127,9 +140,9 @@ def observe_flash_swap_outcome(
         for address in (source_pool, destination_pool)
     ):
         raise ValueError("Candidate snapshot does not contain its route pools")
-    candidate_time = datetime.fromisoformat(str(detected.get("occurred_at")).replace("Z", "+00:00"))
-    if candidate_time.tzinfo is None or candidate_time.utcoffset() is None:
-        raise ValueError("Candidate timestamp must be timezone-aware")
+    candidate_time = _event_time(detected, "candidate")
+    if _event_time(captured, "snapshot") != candidate_time or _event_time(route_event, "route") != candidate_time:
+        raise ValueError("Candidate detection, snapshot, and route must share one block timestamp")
 
     gas = metadata.get("gas_scenario")
     gas_event = next((item for item in events if item.get("event_type") == "gas_scenario_evaluated"), None)
@@ -141,8 +154,9 @@ def observe_flash_swap_outcome(
         _integer(gas_event.get("chain_id"), "gas chain_id", minimum=1) != chain_id
         or _integer(gas_event.get("block_number"), "gas block_number") != candidate_block
         or str(gas_event.get("block_hash", "")).casefold() != candidate_hash.casefold()
+        or _event_time(gas_event, "gas scenario") != candidate_time
     ):
-        raise ValueError("Candidate gas scenario must share the original canonical block")
+        raise ValueError("Candidate gas scenario must share the original canonical block and timestamp")
     pool_requests = [(source_pool, source_fee), (destination_pool, destination_fee)]
     native_quote_pair = None
     if gas is not None:
