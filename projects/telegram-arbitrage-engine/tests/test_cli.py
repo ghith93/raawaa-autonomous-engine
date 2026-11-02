@@ -130,3 +130,19 @@ def test_v2_sim_cli_requires_both_factory_addresses(monkeypatch):
     with pytest.raises(SystemExit) as exc:
         cli.main()
     assert exc.value.code == 2
+
+
+def test_v2_sim_cli_router_validation_requires_factories(monkeypatch):
+    import pytest
+
+    monkeypatch.setattr(sys, "argv", [
+        "arb-engine", "v2-sim",
+        "--buy-pair", POOL_A, "--buy-fee-bps", "30",
+        "--sell-pair", POOL_B, "--sell-fee-bps", "25",
+        "--quote-token", QUOTE, "--base-token", BASE,
+        "--capital-quote", "50",
+        "--buy-router", "0x" + "5" * 40, "--sell-router", "0x" + "6" * 40,
+    ])
+    with pytest.raises(SystemExit) as exc:
+        cli.main()
+    assert exc.value.code == 2
