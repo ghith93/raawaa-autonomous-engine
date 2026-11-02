@@ -71,12 +71,20 @@ def _next_sqrt_from_amount0(
     numerator1 = liquidity << 96
     product = amount * sqrt_price_x96
     if add:
-        denominator = numerator1 + product
-        result = _ceil_div(numerator1 * sqrt_price_x96, denominator)
+        if product <= MAX_UINT256:
+            denominator = numerator1 + product
+            if denominator <= MAX_UINT256 and denominator >= numerator1:
+                result = _ceil_div(numerator1 * sqrt_price_x96, denominator)
+            else:
+                # Match v3-core's overflow-safe fallback, including its
+                # intermediate floor division before the final ceil.
+                result = _ceil_div(numerator1, numerator1 // sqrt_price_x96 + amount)
+        else:
+            result = _ceil_div(numerator1, numerator1 // sqrt_price_x96 + amount)
     else:
-        denominator = numerator1 - product
-        if denominator <= 0:
+        if product > MAX_UINT256 or numerator1 <= product:
             raise ValueError("amount removes all available virtual token0 liquidity")
+        denominator = numerator1 - product
         result = _ceil_div(numerator1 * sqrt_price_x96, denominator)
     return _uint(result, 160, "next sqrt price", allow_zero=False)
 
