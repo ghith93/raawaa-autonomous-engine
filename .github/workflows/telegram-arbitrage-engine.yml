@@ -28,8 +28,8 @@ jobs:
       run:
         working-directory: projects/telegram-arbitrage-engine
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
       - name: Install test tooling
@@ -50,8 +50,8 @@ jobs:
       run:
         working-directory: projects/telegram-arbitrage-engine
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
       - name: Install isolated package
@@ -89,32 +89,98 @@ jobs:
       run:
         working-directory: projects/telegram-arbitrage-engine/solidity-test
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: foundry-rs/foundry-toolchain@v1
         with:
           version: v1.8.7
-      - name: Resolve and pin a public Ethereum block
+      - name: Select a public RPC with pinned-hash state support
         id: fork
         env:
-          RPC_URL: https://ethereum-rpc.publicnode.com
+          RPC_ENDPOINTS: "https://eth.drpc.org https://public.1rpc.io/eth https://eth.nodely.dev https://ethereum-rpc.publicnode.com"
+          UNISWAP_FACTORY: "0x5C69bEe701ef814a2B6a3EDD4B1652CB9cc5aA6f"
         run: |
           set -euo pipefail
-          block_response="$(curl --fail --silent --show-error --retry 4 --retry-all-errors --retry-delay 1 --max-time 15 -H "Content-Type: application/json" --data '{"jsonrpc":"2.0","id":1,"method":"eth_blockNumber","params":[]}' "$RPC_URL")"
-          block_hex="$(jq -er '.result | select(test("^0x[0-9a-fA-F]+$"))' <<< "$block_response")"
-          block_digits="$(printf '%s' "$block_hex" | sed 's/^0x//')"
-          block="$((16#$block_digits))"
-          echo "Resolved Ethereum block number: $block"
-          block_json="$(curl --fail --silent --show-error --retry 4 --retry-all-errors --retry-delay 1 --max-time 15 -H "Content-Type: application/json" --data "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"eth_getBlockByNumber\",\"params\":[\"$block_hex\",false]}" "$RPC_URL")"
-          block_hash="$(jq -er '.result.hash | select(test("^0x[0-9a-fA-F]{64}$"))' <<< "$block_json")"
-          parent_hash="$(jq -er '.result.parentHash | select(test("^0x[0-9a-fA-F]{64}$"))' <<< "$block_json")"
-          echo "block=$block" >> "$GITHUB_OUTPUT"
-          echo "hash=$block_hash" >> "$GITHUB_OUTPUT"
-          echo "parent_hash=$parent_hash" >> "$GITHUB_OUTPUT"
-          echo "Pinned Ethereum block: $block ($block_hash)"
+          selected=""
+          for endpoint in $RPC_ENDPOINTS; do
+            echo "Probing public Ethereum RPC for EIP-1898 state support: $endpoint"
+            finalized="$(curl --fail --silent --show-error --max-time 8 -H "Content-Type: application/json" --data '{"jsonrpc":"2.0","id":1,"method":"eth_getBlockByNumber","params":["finalized",false]}' "$endpoint" 2>/dev/null || true)"
+            block_json="$finalized"
+            block_hex="$(jq -r '.result.number // empty' <<< "$block_json" 2>/dev/null || true)"
+            if ! [[ "$block_hex" =~ ^0x[0-9a-fA-F]+$ ]]; then
+              latest="$(curl --fail --silent --show-error --max-time 8 -H "Content-Type: application/json" --data '{"jsonrpc":"2.0","id":2,"method":"eth_blockNumber","params":[]}' "$endpoint" 2>/dev/null || true)"
+              latest_hex="$(jq -r '.result // empty' <<< "$latest" 2>/dev/null || true)"
+              if ! [[ "$latest_hex" =~ ^0x[0-9a-fA-F]+$ ]]; then
+                echo "Provider did not return a usable block number."
+                continue
+              fi
+              latest_digits="$(printf '%s' "$latest_hex" | sed 's/^0x//')"
+              latest_number="$((16#$latest_digits))"
+              if [ "$latest_number" -le 64 ]; then
+                echo "Provider returned an implausibly low latest block."
+                continue
+              fi
+              block_hex="$(printf '0x%x' "$((latest_number - 64))")"
+              block_json="$(curl --fail --silent --show-error --max-time 8 -H "Content-Type: application/json" --data "{\"jsonrpc\":\"2.0\",\"id\":3,\"method\":\"eth_getBlockByNumber\",\"params\":[\"$block_hex\",false]}" "$endpoint" 2>/dev/null || true)"
+            fi
+            block_hex="$(jq -r '.result.number // empty' <<< "$block_json" 2>/dev/null || true)"
+            block_hash="$(jq -r '.result.hash // empty' <<< "$block_json" 2>/dev/null || true)"
+            parent_hash="$(jq -r '.result.parentHash // empty' <<< "$block_json" 2>/dev/null || true)"
+            if ! [[ "$block_hex" =~ ^0x[0-9a-fA-F]+$ && "$block_hash" =~ ^0x[0-9a-fA-F]{64}$ && "$parent_hash" =~ ^0x[0-9a-fA-F]{64}$ ]]; then
+              echo "Provider did not return a complete pinned block."
+              continue
+            fi
+            probe="$(jq -nc --arg address "$UNISWAP_FACTORY" --arg hash "$block_hash" '{jsonrpc:"2.0",id:4,method:"eth_getCode",params:[$address,{blockHash:$hash,requireCanonical:true}]}')"
+            code_response="$(curl --fail --silent --show-error --max-time 8 -H "Content-Type: application/json" --data "$probe" "$endpoint" 2>/dev/null || true)"
+            code="$(jq -r '.result // empty' <<< "$code_response" 2>/dev/null || true)"
+            if [[ "$code" =~ ^0x([0-9a-fA-F]{2})+$ ]]; then
+              selected="$endpoint"
+              block_digits="$(printf '%s' "$block_hex" | sed 's/^0x//')"
+              block="$((16#$block_digits))"
+              echo "Selected provider supports EIP-1898 state reads at a finalized/pinned block."
+              echo "rpc_url=$selected" >> "$GITHUB_OUTPUT"
+              echo "block=$block" >> "$GITHUB_OUTPUT"
+              echo "hash=$block_hash" >> "$GITHUB_OUTPUT"
+              echo "parent_hash=$parent_hash" >> "$GITHUB_OUTPUT"
+              break
+            fi
+            echo "Provider could not serve contract code by canonical block hash; trying next endpoint."
+          done
+          if [ -z "$selected" ]; then
+            echo "No configured public Ethereum RPC passed the pinned-hash state-read probe."
+            exit 1
+          fi
+          echo "Pinned Ethereum block $block via $selected ($block_hash)"
+      - name: Start Anvil fork at the pinned block
+        env:
+          RPC_URL: ${{ steps.fork.outputs.rpc_url }}
+          FORK_BLOCK: ${{ steps.fork.outputs.block }}
+          FORK_BLOCK_HASH: ${{ steps.fork.outputs.hash }}
+        run: |
+          set -euo pipefail
+          anvil --fork-url "$RPC_URL" --fork-block-number "$FORK_BLOCK" --host 127.0.0.1 --port 8545 --silent > /tmp/raawaa-anvil.log 2>&1 &
+          echo "$!" > /tmp/raawaa-anvil.pid
+          for attempt in $(seq 1 60); do
+            response="$(curl --silent --show-error --max-time 5 -H "Content-Type: application/json" --data '{"jsonrpc":"2.0","id":1,"method":"eth_getBlockByNumber","params":["latest",false]}' http://127.0.0.1:8545 || true)"
+            local_hash="$(jq -r '.result.hash // empty' <<< "$response" 2>/dev/null || true)"
+            if [ "$local_hash" = "$FORK_BLOCK_HASH" ]; then
+              echo "Local Anvil is serving the exact pinned block $FORK_BLOCK ($local_hash)"
+              exit 0
+            fi
+            sleep 1
+          done
+          cat /tmp/raawaa-anvil.log
+          echo "Local Anvil did not serve the expected pinned block hash"
+          exit 1
       - name: Execute real V2 pair callback only on the local fork
         env:
-          MAINNET_RPC_URL: https://ethereum-rpc.publicnode.com
+          MAINNET_RPC_URL: http://127.0.0.1:8545
           FORK_BLOCK: ${{ steps.fork.outputs.block }}
           FORK_BLOCK_HASH: ${{ steps.fork.outputs.hash }}
           FORK_PARENT_HASH: ${{ steps.fork.outputs.parent_hash }}
         run: forge test --match-path test/AnvilForkFlashSwap.t.sol -vvv
+      - name: Stop local Anvil fork
+        if: always()
+        run: |
+          if [ -f /tmp/raawaa-anvil.pid ]; then
+            kill "$(cat /tmp/raawaa-anvil.pid)" 2>/dev/null || true
+          fi

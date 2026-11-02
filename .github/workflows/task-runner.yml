@@ -28,9 +28,9 @@ jobs:
       RAAWAA_ENGINE_CF_ACCESS_CLIENT_SECRET: ${{ secrets.CF_ACCESS_CLIENT_SECRET }}
     steps:
       - name: Check out reviewed main
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
           python-version: "3.11"
       - name: Validate safe execution policy
@@ -219,7 +219,7 @@ jobs:
           raise SystemExit(result.returncode)
       - name: Publish bounded Task Runner status
         if: always()
-        uses: actions/github-script@v7
+        uses: actions/github-script@v9
         env:
           HEALTH_STATUS: ${{ steps.health.outputs.status }}
           HEALTH_RAY: ${{ steps.health.outputs.ray }}

@@ -230,7 +230,7 @@ jobs:
           PY
       - name: Publish workers.dev route status to tracking issue
         if: always()
-        uses: actions/github-script@v7
+        uses: actions/github-script@v9
         env:
           WORKERS_DEV_ENABLED: ${{ steps.subdomain.outputs.enabled }}
           WORKER_PREVIEWS_ENABLED: ${{ steps.subdomain.outputs.previews }}

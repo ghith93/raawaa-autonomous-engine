@@ -20,9 +20,9 @@ jobs:
     timeout-minutes: 5
     steps:
       - name: Check out source
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
           python-version: "3.12"
       - name: Validate policy and agent roster
@@ -30,7 +30,7 @@ jobs:
       - name: Run Python unit tests
         run: python -m unittest discover -s tests -v
       - name: Set up Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           node-version: "22"
       - name: Run Cloudflare Worker unit tests
@@ -39,5 +39,7 @@ jobs:
         run: npm run test:workflow-spike
       - name: Install pinned Wrangler CLI without credentials
         run: npx --yes wrangler@4.156.1 --version
+      - name: Run local Cloudflare D1 Worker integration smoke test
+        run: npm run test:d1-local
       - name: Run local Cloudflare Workflows runtime smoke test
         run: npm run test:workflow-local

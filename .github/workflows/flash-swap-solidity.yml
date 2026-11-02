@@ -27,7 +27,7 @@ jobs:
       run:
         working-directory: projects/telegram-arbitrage-engine/solidity-test
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: foundry-rs/foundry-toolchain@v1
         with:
           version: v1.8.7
