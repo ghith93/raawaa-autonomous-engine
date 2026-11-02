@@ -68,13 +68,23 @@ The packaged registry contains source-documented Ethereum mainnet and BNB Smart 
 No item in this list authorizes live trading.
 
 
+## Jupiter Solana Price API V3 (indicative price only)
+
+- Official endpoint and field reference: https://developers.jup.ag/docs/price/index.md and https://developers.jup.ag/docs/api-reference/price/index.md
+- Official API documentation describes `GET https://api.jup.ag/price/v3?ids=<comma-separated-mints>`, up to 50 exact mint addresses per request, with `usdPrice`, `decimals`, `blockId`, `priceChange24h`, `liquidity`, and `createdAt`.
+- Keyless requests are documented at 0.5 requests/second. The Price V3 client shares the same process-wide limiter as the existing Jupiter quote-only client. HTTP 429 responses from either Jupiter quote or Price V3 defer that shared limiter using Retry-After (bounded to 2–300 seconds); clients do not retry immediately.
+- Mint identity is exact base58 public-key identity and must decode to 32 bytes. No symbol lookup, token discovery, wallet, API key, RPC write, transaction build, or swap execution is used.
+- JSON floating-point fields are parsed directly as `Decimal`; price, liquidity, change, decimal count, block ID, and timezone-aware `createdAt` are validated. Missing/unreliable mint prices are returned in `missing_mints`, never as zero.
+- Every observation is labelled `indicative_price`. Jupiter says the price is derived from the last qualifying on-chain swap and is a lagging reference; it is not a size-specific executable quote. Use the existing quote-only endpoint for size-specific route quotes, then model fees and execution separately.
+- CI uses deterministic fixtures; no live Jupiter Price API calls or API keys are used.
+
 ## Jupiter Solana Swap API V2 (quote-only)
 
 - Official API overview and quote-only quick start: https://developers.jup.ag/docs/swap
 - Official rate-limit policy: https://developers.jup.ag/docs/rate-limits
 - The adapter calls only `GET https://api.jup.ag/swap/v2/order` with `inputMint`, `outputMint`, and raw `amount`. It deliberately omits `taker`, API keys, wallet identifiers, and all build/execute/submit parameters.
 - Jupiter documents that calling `/order` without `taker` returns the quote only with `transaction: null`; adding `taker` returns a transaction. The adapter fails closed unless the response explicitly contains `transaction: null`.
-- Keyless access is documented at 0.5 requests/second. The adapter enforces at least 2 seconds between requests per client instance, uses bounded timeouts/response sizes, allowlists the official HTTPS host, and rejects redirects.
+- Keyless access is documented at 0.5 requests/second. The quote and Price V3 clients share one process-wide, thread-safe 2-second limiter by default; callers may inject an isolated limiter for deterministic tests. Both use bounded timeouts/response sizes, allowlist the official HTTPS host, and reject redirects.
 - The returned amount is a Jupiter aggregator quote, not a guaranteed fill. The Meta-Aggregator can combine on-chain routing and off-chain RFQ sources (Metis, JupiterZ, Dflow, OKX). Quotes can change; JupiterZ market makers retain last-look rights. The response's `feeBps`, `feeMint`, route and price-impact fields must be retained and costed separately.
 - The adapter never requests an unsigned transaction, signs, builds, submits, or lands a swap. It does not calculate cross-venue profit, Solana priority fees, account-specific costs, or final fill probability.
 - CI uses deterministic response fixtures only; no live Jupiter calls or API keys are used.
