@@ -237,6 +237,7 @@ def test_onchain_v2_scan_cli_requires_explicit_quote_and_capital(monkeypatch, ca
     help_text = capsys.readouterr().out
     assert "--quote-token-address" in help_text
     assert "--capital-quote" in help_text
+    assert "--min-request-interval" in help_text
 
 
 
@@ -249,3 +250,13 @@ def test_scan_rejects_unbounded_capital_decimal_before_dex_discovery():
                 capital_quote=value, dex_client=dex, reader=FakeReader(),
             )
         assert dex.calls == []
+
+
+
+def test_scan_rejects_unsafe_rpc_request_interval():
+    with pytest.raises(ValueError, match="min_request_interval"):
+        scan_onchain_v2_candidates(
+            token_address=BASE, quote_token_address=QUOTE,
+            capital_quote="1000", dex_client=FakeDexScreener([]),
+            reader=FakeReader(), min_request_interval=0,
+        )
