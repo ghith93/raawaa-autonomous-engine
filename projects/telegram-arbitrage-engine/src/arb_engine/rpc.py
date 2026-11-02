@@ -250,9 +250,16 @@ class EthereumV2PoolReader:
         )
         if not isinstance(raw, str) or not re.fullmatch(r"0x(?:[0-9a-fA-F]{64})+", raw):
             raise RpcReadError("Router getAmountsOut returned malformed ABI data")
-        words = [int(raw[i:i + 64], 16) for i in range(2, len(raw), 64)]
-        if len(words) != len(path) or words[0] != amount_in_raw:
+        data = raw[2:]
+        if len(data) < 128:
+            raise RpcReadError("Router quote ABI response is truncated")
+        offset = int(data[0:64], 16)
+        length = int(data[64:128], 16)
+        if offset != 32 or length != len(path) or len(data) != 128 + 64 * length:
             raise RpcReadError("Router quote returned an unexpected amounts array")
+        words = [int(data[128 + i * 64:192 + i * 64], 16) for i in range(length)]
+        if words[0] != amount_in_raw:
+            raise RpcReadError("Router quote input amount does not match request")
         if any(amount <= 0 for amount in words):
             raise RpcReadError("Router quote contains a zero or invalid hop amount")
         return words
