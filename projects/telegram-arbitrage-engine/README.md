@@ -211,6 +211,26 @@ Add `--record-paper` to append candidate/snapshot/route/gas events to the select
 
 An isolated SQLite event ledger is available for provenance-linked research records. It is append-only, hash-chained, idempotent by caller-supplied event ID, and stores raw-unit economics as decimal strings. It is a storage primitive only: no order is created or submitted, and its records are not realized PnL. See [PAPER_TRADING_LEDGER.md](PAPER_TRADING_LEDGER.md).
 
+## Read-only perpetual funding history
+
+The first normalized funding-history reader supports Binance USD-M linear perpetuals and Bybit linear/inverse perpetuals. It returns signed `Decimal` rates, exact contract symbol and settlement timestamp, and optional mark-price/interval metadata. It does not infer an 8-hour interval when the source has not supplied one.
+
+```python
+from arb_engine.market_sources.funding import PublicPerpetualFundingClient
+
+binance = PublicPerpetualFundingClient(venue_id="binance")
+bybit = PublicPerpetualFundingClient(venue_id="bybit")
+
+binance_rows = binance.fetch_funding_history(symbol="BTCUSDT", limit=20)
+bybit_rows = bybit.fetch_funding_history(
+    symbol="BTCUSDT", contract_type="linear", limit=20
+)
+print(binance_rows[-1] if binance_rows else None)
+print(bybit_rows[-1] if bybit_rows else None)
+```
+
+This is historical funding data, not a funding-arbitrage recommendation or profit estimate. No annualization, synchronized spot/perpetual basis, margin/liquidation model, private fee tier, or execution is inferred. See [data sources and trust boundaries](DATA_SOURCES.md).
+
 ## Run in isolation
 Requires Python 3.11+.
 
