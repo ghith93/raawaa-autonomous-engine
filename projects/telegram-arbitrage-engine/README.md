@@ -29,7 +29,7 @@ python -m arb_engine.cli flash-swap-sim \
 
 To add a gas scenario in which the repayment token is USDC and gas is paid in WETH, also supply `--gas-used`, `--gas-price-wei`, `--native-token`, and a same-block `--native-quote-pair` with its fee or venue. Gas units must be a conservative caller estimate including the overhead the caller intends to model; the command does not claim to measure full transaction gas.
 
-Add `--record-paper` to append candidate/snapshot/route/gas events to the local `PaperTradingLedger`. Without this flag, no ledger file is written. The command never creates a paper order, wallet, signer, calldata, approval, or on-chain transaction. See [PAPER_TRADING_LEDGER.md](PAPER_TRADING_LEDGER.md).
+Add `--record-paper` to append candidate/snapshot/route/gas events to the local `PaperTradingLedger`. Without this flag, no ledger file is written. To explicitly select the staged remote backend, set `RAAWAA_PAPER_LEDGER_BACKEND=d1` and provide `RAAWAA_ENGINE_API_URL` plus `RAAWAA_ENGINE_API_TOKEN` through protected environment secrets. D1 errors fail closed and never fall back to SQLite. The Worker must be separately deployed and migration 0004 applied to a non-production D1 database before this mode can work; neither action is performed by this repository change. Candidate/event IDs are deterministic for identical pinned simulation inputs, supporting idempotent retry. The command never creates a paper order, wallet, signer, calldata, approval, or on-chain transaction. See [PAPER_TRADING_LEDGER.md](PAPER_TRADING_LEDGER.md).
 
 ## Paper-trading research ledger
 
