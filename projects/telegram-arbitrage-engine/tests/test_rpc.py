@@ -319,7 +319,7 @@ def test_token_preflight_rejects_eoa_and_wrong_chain(monkeypatch):
     monkeypatch.setattr(reader, "_rpc", lambda method, params: {
         "eth_chainId": "0x1",
         "eth_blockNumber": "0x64",
-        "eth_getBlockByNumber": {"hash": BLOCK_HASH, "timestamp": "0x1"},
+        "eth_getBlockByNumber": {"hash": BLOCK_HASH, "timestamp": hex(int(__import__("time").time()))},
         "eth_getCode": "0x",
     }.get(method))
     with pytest.raises(RpcReadError, match="no contract bytecode"):
@@ -340,7 +340,7 @@ def test_token_preflight_reports_missing_optional_metadata_without_guessing(monk
         if method == "eth_blockNumber":
             return "0x64"
         if method == "eth_getBlockByNumber":
-            return {"hash": BLOCK_HASH}
+            return {"hash": BLOCK_HASH, "timestamp": hex(int(__import__("time").time()))}
         if method == "eth_getCode":
             return "0x6001"
         if method == "eth_call":
