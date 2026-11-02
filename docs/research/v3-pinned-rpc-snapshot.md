@@ -29,7 +29,17 @@ The default factory is the official Uniswap V3 Ethereum mainnet factory. Other c
 
 ## Usage outline
 
-Construct `EvmV3PoolReader` with an HTTPS RPC endpoint and a bounded `max_rpc_requests`. Call `read_snapshot` with the pool address, direction, sqrt-price limit, and (for non-Ethereum networks) the explicitly trusted factory. Pass the returned snapshot to `simulate_v3_swap`. Treat the result as a read-only, block-pinned simulation, not an executable trade.
+The `v3-sim` CLI command composes the reader and simulator using raw token units:
+
+```bash
+python -m arb_engine v3-sim \
+  --pool 0xPOOL_ADDRESS \
+  --direction token1_to_token0 \
+  --amount-specified -1000000 \
+  --limit-tick 120
+```
+
+Positive `--amount-specified` means exact input; negative means exact output. The direction is always relative to the on-chain token0/token1 order. Ethereum uses the official factory default; other chains require both `--rpc-url` and `--factory`. The CLI reports the block hash, raw-unit amounts, fees, crossed ticks, RPC budget usage and whether the simulation completed. Treat the result as a read-only, block-pinned simulation, not an executable trade.
 
 ## Sources
 
