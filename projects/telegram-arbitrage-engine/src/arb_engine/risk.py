@@ -4,18 +4,21 @@ from datetime import datetime, timezone
 from decimal import Decimal
 
 from .economics import calculate_profit
-from .models import Opportunity, ValidationResult
+from .models import MarketQuote, Opportunity, ValidationResult
 
 ZERO = Decimal("0")
 TEN_THOUSAND = Decimal("10000")
 
 
-def _valid_quote(q) -> str | None:
+def _valid_quote(q: object) -> str | None:
+    if not isinstance(q, MarketQuote):
+        return "Quote must be a MarketQuote instance"
+    text_fields = (q.venue, q.chain, q.base_token, q.quote_token)
+    if any(not isinstance(value, str) or not value.strip() for value in text_fields):
+        return "Missing or invalid venue, chain, or token identity"
     numeric_fields = (q.price, q.liquidity_usd, q.fee_bps, q.slippage_bps, q.gas_cost_usd)
     if any(not isinstance(value, Decimal) for value in numeric_fields):
         return "All market numeric fields must be Decimal (float is forbidden)"
-    if not q.venue.strip() or not q.chain.strip() or not q.base_token.strip() or not q.quote_token.strip():
-        return "Missing venue, chain, or token identity"
     if not q.price.is_finite() or q.price <= ZERO:
         return "Price must be finite and positive"
     if not q.liquidity_usd.is_finite() or q.liquidity_usd <= ZERO:
@@ -25,7 +28,7 @@ def _valid_quote(q) -> str | None:
             return f"{label.title()} bps must be finite and in [0, 10000)"
     if not q.gas_cost_usd.is_finite() or q.gas_cost_usd < ZERO:
         return "Gas cost must be finite and non-negative"
-    if q.observed_at.tzinfo is None or q.observed_at.utcoffset() is None:
+    if not isinstance(q.observed_at, datetime) or q.observed_at.tzinfo is None or q.observed_at.utcoffset() is None:
         return "Quote timestamp must be timezone-aware"
     now = datetime.now(timezone.utc)
     observed = q.observed_at.astimezone(timezone.utc)
@@ -41,6 +44,8 @@ def validate_opportunity(
     min_net_bps: Decimal = Decimal("35"),
     safety_margin_usd: Decimal = Decimal("0.05"),
 ) -> ValidationResult:
+    if not isinstance(opportunity, Opportunity):
+        return ValidationResult(False, "Opportunity must be an Opportunity instance")
     cap = opportunity.capital_usd
     if not isinstance(cap, Decimal):
         return ValidationResult(False, "Capital must be Decimal (float is forbidden)")
@@ -66,7 +71,7 @@ def validate_opportunity(
 
     try:
         breakdown = calculate_profit(opportunity, safety_margin_usd)
-    except (ArithmeticError, ValueError) as exc:
+    except (ArithmeticError, ValueError, TypeError) as exc:
         return ValidationResult(False, f"Profit calculation failed: {type(exc).__name__}")
 
     if buy.liquidity_usd < breakdown.buy_notional_usd:
