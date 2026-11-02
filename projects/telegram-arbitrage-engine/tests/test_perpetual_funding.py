@@ -147,6 +147,10 @@ def test_funding_client_rejects_unsupported_symbols_hosts_categories_and_limits(
         api.fetch_funding_history(symbol="btcusdt")
     with pytest.raises(ValueError, match="1 and 200"):
         api.fetch_funding_history(symbol="BTCUSDT", limit=201)
+    with pytest.raises(ValueError, match="min_interval_seconds"):
+        PublicPerpetualFundingClient(
+            venue_id="bybit", min_interval_seconds=0.5, rate_limiter=_RateLimiter(),
+        )
     assert calls == []
 
 
