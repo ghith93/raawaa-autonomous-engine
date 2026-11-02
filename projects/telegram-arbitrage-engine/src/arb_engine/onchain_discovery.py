@@ -178,6 +178,16 @@ def scan_onchain_v2(
         raise ValueError("query must contain 1..120 characters")
     if not isinstance(capital_quote, Decimal) or not capital_quote.is_finite() or capital_quote <= 0:
         raise ValueError("capital_quote must be a finite positive Decimal")
+    if (
+        not isinstance(min_liquidity_usd, Decimal)
+        or not min_liquidity_usd.is_finite()
+        or min_liquidity_usd < 0
+    ):
+        raise ValueError("min_liquidity_usd must be a finite non-negative Decimal")
+    if type(max_candidates) is not int or not 1 <= max_candidates <= 10:
+        raise ValueError("max_candidates must be between 1 and 10")
+    if pairs is not None and not isinstance(pairs, list):
+        raise ValueError("pairs must be a list")
     discovered = pairs if pairs is not None else DexScreenerClient().search_pairs(query)
     candidates = discover_pool_candidates(
         discovered, quote_token=quote,
