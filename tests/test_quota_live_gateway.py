@@ -356,9 +356,28 @@ class QuotaAwareGatewayTests(unittest.TestCase):
         self.assertEqual(charged.calls, 1)
         self.assertEqual(backup.calls, 0)
 
+    def test_per_task_spend_cap_blocks_other_routes_before_provider_call(self):
+        adapter = FakeAdapter("cerebras")
+        self.usage.record(
+            "groq", "model-x", "research", 10, 5, 0.02, task_id="task-1"
+        )
+        manager = QuotaManager(
+            [self.profile(provider="cerebras", account="backup")], self.quota
+        )
+        gateway = QuotaAwareLiveGateway(
+            manager, {"cerebras": adapter}, self.usage, True,
+            environ={"RAAWAA_ENGINE_LIVE_INFERENCE": "enabled"},
+            daily_budget_usd=1.0, monthly_budget_usd=1.0,
+            per_task_budget_usd=0.01,
+        )
+        with self.assertRaisesRegex(ProviderUnavailable, "monetary budget"):
+            gateway.generate(self.request)
+        self.assertEqual(adapter.calls, 0)
+        self.assertEqual(self.usage.task_totals("task-1")["actual_usd"], 0.02)
+
     def test_existing_spend_blocks_live_gateway_before_provider_call(self):
         adapter = FakeAdapter("groq")
-        self.usage.record("groq", "model-x", "research", 1, 1, 0.01)
+        self.usage.record("groq", "model-x", "research", 1, 1, 0.01, task_id="other-task")
         manager = QuotaManager([self.profile()], self.quota)
         gateway = QuotaAwareLiveGateway(
             manager, {"groq": adapter}, self.usage, True,

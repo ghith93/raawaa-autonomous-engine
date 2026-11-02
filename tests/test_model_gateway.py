@@ -51,6 +51,16 @@ class ModelGatewayTests(unittest.TestCase):
         with self.assertRaises(ProviderUnavailable):
             gateway.generate(GenerationRequest("research", "test"))
 
+    def test_live_request_requires_task_id_before_provider_call(self):
+        adapter = CostAdapter(cost_usd=0.0)
+        gateway = ModelGateway(
+            [ModelOption("mock", "free-model", "free", True, 0.0)],
+            {"mock": adapter}, self.ledger, network_calls_enabled=True,
+        )
+        with self.assertRaisesRegex(ProviderUnavailable, "task ID is required"):
+            gateway.generate(GenerationRequest("research", "live request"))
+        self.assertEqual(adapter.calls, 0)
+
     def test_no_model_fails_closed(self):
         gateway = ModelGateway([], {"mock": MockAdapter()}, self.ledger, network_calls_enabled=True)
         with self.assertRaises(ProviderUnavailable):
@@ -92,17 +102,17 @@ class ModelGatewayTests(unittest.TestCase):
 
     def test_reservations_atomically_enforce_daily_and_monthly_budgets(self):
         now = datetime(2026, 11, 2, 12, tzinfo=timezone.utc)
-        reservation = self.ledger.reserve("mock", "model", "research", 0.60, 1.0, 2.0, now)
+        reservation = self.ledger.reserve("mock", "model", "research", 0.60, 1.0, 2.0, now, task_id="task-a", per_task_budget_usd=3.0)
         self.assertGreater(reservation, 0)
         self.assertEqual(self.ledger.totals(now)["daily_reserved_usd"], 0.60)
         with self.assertRaises(BudgetExceeded):
-            self.ledger.reserve("mock", "model", "research", 0.41, 1.0, 2.0, now)
+            self.ledger.reserve("mock", "model", "research", 0.41, 1.0, 2.0, now, task_id="task-a", per_task_budget_usd=3.0)
         with self.assertRaises(BudgetExceeded):
-            self.ledger.reserve("mock", "model", "research", 1.50, 2.0, 1.0, now)
+            self.ledger.reserve("mock", "model", "research", 1.50, 2.0, 1.0, now, task_id="task-a", per_task_budget_usd=3.0)
 
     def test_settlement_records_actual_cost_and_is_idempotent(self):
         now = datetime(2026, 11, 2, 12, tzinfo=timezone.utc)
-        reservation = self.ledger.reserve("mock", "model", "research", 0.50, 1.0, 1.0, now)
+        reservation = self.ledger.reserve("mock", "model", "research", 0.50, 1.0, 1.0, now, task_id="task-a", per_task_budget_usd=1.0)
         result = self.ledger.settle(reservation, 10, 5, 0.25, now)
         self.assertEqual(result["daily_usd"], 0.25)
         self.assertEqual(result["daily_reserved_usd"], 0.0)
@@ -114,9 +124,9 @@ class ModelGatewayTests(unittest.TestCase):
     def test_ambiguous_reservation_is_counted_across_date_boundaries(self):
         before_midnight = datetime(2026, 11, 2, 23, 59, tzinfo=timezone.utc)
         after_midnight = datetime(2026, 11, 3, 0, 1, tzinfo=timezone.utc)
-        self.ledger.reserve("mock", "model", "research", 0.60, 1.0, 2.0, before_midnight)
+        self.ledger.reserve("mock", "model", "research", 0.60, 1.0, 2.0, before_midnight, task_id="task-a", per_task_budget_usd=2.0)
         with self.assertRaises(BudgetExceeded):
-            self.ledger.reserve("mock", "model", "research", 0.50, 1.0, 2.0, after_midnight)
+            self.ledger.reserve("mock", "model", "research", 0.50, 1.0, 2.0, after_midnight, task_id="task-a", per_task_budget_usd=2.0)
         self.assertEqual(self.ledger.totals(after_midnight)["daily_reserved_usd"], 0.60)
 
     def test_estimated_cost_budget_blocks_before_provider_call(self):
@@ -125,10 +135,10 @@ class ModelGatewayTests(unittest.TestCase):
             [ModelOption("mock", "paid-model", "paid", True, 1.0)],
             {"mock": adapter}, self.ledger,
             daily_budget_usd=0.01, monthly_budget_usd=0.10,
-            allow_paid_calls=True, network_calls_enabled=True,
+            allow_paid_calls=True, network_calls_enabled=True, per_task_budget_usd=1.0,
         )
         with self.assertRaises(BudgetExceeded):
-            gateway.generate(GenerationRequest("research", "short prompt", 10))
+            gateway.generate(GenerationRequest("research", "short prompt", 10, task_id="task-a"))
         self.assertEqual(adapter.calls, 0)
         self.assertEqual(self.ledger.totals()["daily_reserved_usd"], 0.0)
 
@@ -138,14 +148,14 @@ class ModelGatewayTests(unittest.TestCase):
             [ModelOption("mock", "paid-model", "paid", True, 0.01)],
             {"mock": adapter}, self.ledger,
             daily_budget_usd=1.0, monthly_budget_usd=1.0,
-            allow_paid_calls=True, network_calls_enabled=True,
+            allow_paid_calls=True, network_calls_enabled=True, per_task_budget_usd=1.0,
         )
         with self.assertRaises(TimeoutError):
-            gateway.generate(GenerationRequest("research", "short prompt", 10))
+            gateway.generate(GenerationRequest("research", "short prompt", 10, task_id="task-a"))
         self.assertEqual(adapter.calls, 1)
         self.assertGreater(self.ledger.totals()["daily_reserved_usd"], 0.0)
         with self.assertRaises(BudgetExceeded):
-            self.ledger.reserve("mock", "model", "research", 1.0, 1.0, 1.0)
+            self.ledger.reserve("mock", "model", "research", 1.0, 1.0, 1.0, task_id="task-a", per_task_budget_usd=1.0)
 
     def test_unexpected_nonzero_cost_is_recorded_even_when_paid_calls_are_disabled(self):
         adapter = CostAdapter(cost_usd=0.02)
@@ -156,7 +166,7 @@ class ModelGatewayTests(unittest.TestCase):
             allow_paid_calls=False, network_calls_enabled=True,
         )
         with self.assertRaisesRegex(BudgetExceeded, "actual usage was recorded"):
-            gateway.generate(GenerationRequest("research", "short prompt", 10))
+            gateway.generate(GenerationRequest("research", "short prompt", 10, task_id="task-a"))
         self.assertEqual(adapter.calls, 1)
         self.assertEqual(self.ledger.totals()["daily_usd"], 0.02)
 
@@ -166,18 +176,82 @@ class ModelGatewayTests(unittest.TestCase):
             [ModelOption("mock", "paid-model", "paid", True, 0.001)],
             {"mock": adapter}, self.ledger,
             daily_budget_usd=0.01, monthly_budget_usd=0.05,
-            allow_paid_calls=True, network_calls_enabled=True,
+            allow_paid_calls=True, network_calls_enabled=True, per_task_budget_usd=1.0,
         )
         with self.assertRaisesRegex(BudgetExceeded, "Actual provider cost exceeded"):
-            gateway.generate(GenerationRequest("research", "short prompt", 10))
+            gateway.generate(GenerationRequest("research", "short prompt", 10, task_id="task-a"))
         self.assertEqual(self.ledger.totals()["daily_usd"], 0.02)
+
+    def test_actual_cost_over_per_task_cap_is_recorded_then_blocked(self):
+        adapter = CostAdapter(cost_usd=0.02)
+        gateway = ModelGateway(
+            [ModelOption("mock", "paid-model", "paid", True, 0.001)],
+            {"mock": adapter}, self.ledger,
+            daily_budget_usd=1.0, monthly_budget_usd=1.0,
+            allow_paid_calls=True, network_calls_enabled=True,
+            per_task_budget_usd=0.001,
+        )
+        with self.assertRaisesRegex(BudgetExceeded, "configured spend budget"):
+            gateway.generate(GenerationRequest(
+                "research", "short prompt", 10, task_id="task-a"
+            ))
+        self.assertEqual(adapter.calls, 1)
+        self.assertEqual(self.ledger.task_totals("task-a")["actual_usd"], 0.02)
+
+    def test_per_task_budget_is_aggregated_across_provider_routes(self):
+        now = datetime(2026, 11, 2, 12, tzinfo=timezone.utc)
+        first = self.ledger.reserve(
+            "groq", "model-a", "research", 0.30, 1.0, 1.0, now,
+            task_id="task-a", per_task_budget_usd=0.50,
+        )
+        with self.assertRaisesRegex(BudgetExceeded, "per-task"):
+            self.ledger.reserve(
+                "cerebras", "model-b", "research", 0.21, 1.0, 1.0, now,
+                task_id="task-a", per_task_budget_usd=0.50,
+            )
+        second = self.ledger.reserve(
+            "cerebras", "model-b", "research", 0.30, 1.0, 1.0, now,
+            task_id="task-b", per_task_budget_usd=0.50,
+        )
+        self.assertGreater(first, 0)
+        self.assertGreater(second, 0)
+        self.assertEqual(self.ledger.task_totals("task-a")["reserved_usd"], 0.30)
+        self.assertEqual(self.ledger.task_totals("task-b")["reserved_usd"], 0.30)
+
+    def test_task_settlement_preserves_task_id_and_actual_cost(self):
+        now = datetime(2026, 11, 2, 12, tzinfo=timezone.utc)
+        reservation = self.ledger.reserve(
+            "groq", "model-a", "research", 0.30, 1.0, 1.0, now,
+            task_id="task-a", per_task_budget_usd=0.50,
+        )
+        self.ledger.settle(reservation, 10, 5, 0.20, now)
+        totals = self.ledger.task_totals("task-a")
+        self.assertEqual(totals["actual_usd"], 0.20)
+        self.assertEqual(totals["reserved_usd"], 0.0)
+        self.assertEqual(totals["pending_reservations"], 0)
+
+    def test_per_task_budget_blocks_model_before_provider_call(self):
+        adapter = CostAdapter(cost_usd=0.0)
+        gateway = ModelGateway(
+            [ModelOption("mock", "paid-model", "paid", True, 1.0)],
+            {"mock": adapter}, self.ledger,
+            daily_budget_usd=1.0, monthly_budget_usd=1.0,
+            allow_paid_calls=True, network_calls_enabled=True,
+            per_task_budget_usd=0.01,
+        )
+        with self.assertRaisesRegex(BudgetExceeded, "per-task"):
+            gateway.generate(GenerationRequest(
+                "research", "short prompt", 10, task_id="task-a"
+            ))
+        self.assertEqual(adapter.calls, 0)
+        self.assertEqual(self.ledger.task_totals("task-a")["pending_reservations"], 0)
 
     def test_concurrent_reservations_cannot_exceed_remaining_budget(self):
         now = datetime(2026, 11, 2, 12, tzinfo=timezone.utc)
 
         def reserve():
             try:
-                self.ledger.reserve("mock", "model", "research", 0.20, 1.0, 1.0, now)
+                self.ledger.reserve("mock", "model", "research", 0.20, 1.0, 1.0, now, task_id="task-a", per_task_budget_usd=1.0)
                 return "reserved"
             except BudgetExceeded:
                 return "blocked"
@@ -200,6 +274,17 @@ class ModelGatewayTests(unittest.TestCase):
                 "VALUES(?,?,?,?,?,?,?)",
                 ("mock", "model", "research", 10, 5, 0.25, "2026-11-02T12:00:00+00:00"),
             )
+            db.execute("""CREATE TABLE model_usage_reservations (
+                id INTEGER PRIMARY KEY AUTOINCREMENT, provider TEXT NOT NULL, model TEXT NOT NULL,
+                task_kind TEXT NOT NULL, created_at TEXT NOT NULL,
+                estimated_cost_nanos INTEGER NOT NULL CHECK(estimated_cost_nanos >= 0),
+                settled_at TEXT, actual_cost_nanos INTEGER, input_tokens INTEGER, output_tokens INTEGER
+            )""")
+            db.execute(
+                "INSERT INTO model_usage_reservations(provider,model,task_kind,created_at,estimated_cost_nanos) "
+                "VALUES(?,?,?,?,?)",
+                ("mock", "model", "research", "2026-11-02T12:00:00+00:00", 100),
+            )
         migrated = UsageLedger(path)
         self.assertAlmostEqual(
             migrated.totals(datetime(2026, 11, 2, 13, tzinfo=timezone.utc))["daily_usd"], 0.25
@@ -207,6 +292,10 @@ class ModelGatewayTests(unittest.TestCase):
         with sqlite3.connect(path) as db:
             columns = {row[1] for row in db.execute("PRAGMA table_info(model_usage)")}
         self.assertIn("cost_nanos", columns)
+        self.assertIn("task_id", columns)
+        with sqlite3.connect(path) as db:
+            reservation_columns = {row[1] for row in db.execute("PRAGMA table_info(model_usage_reservations)")}
+        self.assertIn("task_id", reservation_columns)
 
 
 if __name__ == "__main__":

@@ -53,7 +53,7 @@ python -m engine.cli run-once
 
 ## Next engineering priorities
 
-1. Add per-task monetary/credit caps and verify provider credit settlement semantics; daily/monthly atomic reservations are integrated into the live gateway, but hard budgets remain zero and non-zero-cost routes remain ineligible.
+1. Verify provider-specific credit settlement semantics and add reconciliation for ambiguous billing outcomes; daily/monthly/per-task atomic spend caps are integrated, but all budgets remain zero and non-zero-cost routes remain ineligible.
 2. Complete provider-specific data-classification and retention review for each intended workload; keep confidential formulae, credentials, and customer/order data out of unsuitable provider tiers.
 3. Add operation-specific idempotency contracts and explicit approval gates before enabling side-effecting handlers or external writes.
 4. Extend durable D1 storage beyond the task lifecycle only where a measured need justifies migration; memory and model-usage ledgers are still local SQLite.

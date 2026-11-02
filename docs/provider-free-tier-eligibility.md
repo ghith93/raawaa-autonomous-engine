@@ -125,18 +125,39 @@ Sources:
 5. Endpoint is HTTPS and model ID is pinned (no uncontrolled paid fallback).
 6. Data retention and training/review terms are acceptable for the data class sent. Confidential formulae and customer records remain excluded from unpaid tiers that permit human review or product improvement.
 7. Verification URLs and a timezone-aware verification timestamp are stored. Re-check at least every 30 days and whenever the provider changes model IDs or plan terms.
-8. Engine-side task, daily, and monthly request/token quotas are configured. Monetary spend caps must be implemented and tested before any non-zero-cost route is allowed.
+8. Engine-side task, daily, and monthly request/token quotas and atomic per-task/daily/monthly monetary caps are implemented and tested. All monetary budgets remain configured at $0; provider credit reconciliation and explicit paid-use authorization remain required before any non-zero-cost route.
 9. Live inference remains disabled until the provider profile is verified and the operator explicitly enables the kill switch.
 
 ## Current state
 
-Current verified state (2026-11-01):
+Account-specific verification last performed (2026-11-01); engine monetary controls reconciled (2026-11-02):
 
 - `GROQ_API_KEY` is configured as a GitHub Actions secret. A read-only authenticated `/models` request succeeded; no inference request was sent.
 - The operator confirmed the Groq account is on the Free plan and supplied the account-visible model list and limits: 30 RPM, 8,000 TPM, 1,000 RPD, and 200,000 TPD for the listed chat-completion models. These are the account's observed limits, not the larger Developer-plan limits shown on public model pages.
 - `openai/gpt-oss-20b` is the preferred staged production-model candidate; `openai/gpt-oss-120b` is the higher-capacity staged fallback. Groq classifies both as Production Models. Their open weights are Apache-2.0 subject to the gpt-oss usage policy.
 - `qwen/qwen3.8-27b` remains staged as Preview/evaluation-only and is blocked from production routing.
 - All three routes have `enabled=false`; the registry itself is `staged_disabled`; the CLI audit and profile loader enforce that state. The quota gateway independently requires an enabled profile and the explicit live-inference kill switch.
-- Minute, daily, monthly, and per-task request/token controls are implemented and tested. The monthly/per-task values in the registry are conservative engine-side limits, not provider-published account limits.
+- Minute, daily, monthly, and per-task request/token controls are implemented and tested. Atomic per-task, daily, and monthly monetary reservations are also implemented and integrated into the live gateway. All monetary budgets remain zero. The monthly/per-task values in the registry are conservative engine-side limits, not provider-published account limits.
 - No inference request has been sent. No paid route, automatic upgrade, publishing, messaging, or other external write is enabled.
-- Remaining gates before any inference: operator's explicit live-inference opt-in, task/data-classification restrictions, confirmation that the chosen workload contains no secrets/confidential/customer-sensitive data, and review of applicable Groq data-handling terms. Paid routing additionally requires a monetary ledger and explicit approval.
+- Remaining gates before any inference: operator's explicit live-inference opt-in, task/data-classification restrictions, confirmation that the chosen workload contains no secrets/confidential/customer-sensitive data, and review of applicable Groq data-handling terms. Paid routing additionally requires verified provider billing/credit semantics, a provider-side spend limit where available, a non-zero engine budget explicitly authorized by the operator, and explicit approval.
+
+
+## Groq billing, credits, and provider-side spend limits (2026-11-02)
+
+The current Free account verification remains the source of truth for this project. Public documentation was rechecked to clarify what provider-side controls would and would not protect if the account were ever upgraded:
+
+- Groq's rate-limit documentation says the published table is a high-level summary and identifies the displayed base limits as Developer-plan limits. The exact limits for an organization must be read from that organization's console. The Free account's observed limits above must not be replaced with Developer-plan table values.
+- Groq's Billing FAQ says moving from Free to Developer requires a valid payment method. Developer-tier usage is billed monthly or at progressive thresholds; spend limits are a Developer-tier feature.
+- Groq Spend Limits are organization-wide monthly caps, require paid-tier/organization-owner access, update every 10–15 minutes, and may allow in-flight requests to complete. They are not a substitute for engine-side per-task or daily reservations and cannot guarantee a strict immediate ceiling.
+- Groq's billing documentation points operators to Dashboard → Usage for near-real-time usage and charges. Do not assume an undocumented public API for balance/credit reconciliation.
+- Groq Service Credit Terms describe prepaid and promotional credits, but do not prove that this specific account currently has any credit balance. Treat unverified credits as $0.
+- The engine now enforces atomic per-task, daily, and monthly nano-USD reservations and actual-cost settlement. All three caps remain $0. The live gateway still rejects non-zero/unknown-priced profiles and remains disabled unless both the programmatic and operator kill switches are enabled.
+
+**Decision:** do not upgrade the Groq account, add a payment method, purchase credits, enable provider-side spend limits, or change any engine budget as part of routine development. Before any future paid-use proposal, verify the account's exact billing tier, available credit balance and expiry, invoice/payment behaviour, spend-limit configuration, and actual model prices in the account console; then obtain explicit operator authorization. A provider monthly spend limit is an additional backstop, not the engine's primary budget control.
+
+Sources:
+- Groq rate limits: https://console.groq.com/docs/rate-limits
+- Groq Billing FAQs: https://console.groq.com/docs/billing-faqs
+- Groq Spend Limits: https://console.groq.com/docs/spend-limits
+- Groq Service Credit Terms: https://console.groq.com/docs/legal/service-credit-terms
+- Groq usage/data handling: https://console.groq.com/docs/your-data

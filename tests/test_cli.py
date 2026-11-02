@@ -168,6 +168,7 @@ class CliTests(unittest.TestCase):
             status = json.loads(output.getvalue())
             self.assertFalse(status["network_calls_enabled"])
             self.assertFalse(status["paid_calls_enabled"])
+            self.assertEqual(status["budgets"]["per_task_usd"], 0)
 
     def test_provider_discovery_command_is_explicit_and_mocked(self):
         output = io.StringIO()
