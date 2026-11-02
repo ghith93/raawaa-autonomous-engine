@@ -5,7 +5,7 @@ from decimal import Decimal, InvalidOperation, localcontext
 import math
 from typing import Any
 
-from .dexscreener import DexPairCandidate, DexScreenerClient
+from .dexscreener import DexPairCandidate, DexScreenerClient, MarketDataError
 from .rpc import (
     EvmBlockContext,
     EthereumV2PoolReader,
@@ -138,7 +138,13 @@ def scan_onchain_v2_candidates(
         rpc_url, expected_chain_id=1, max_rpc_requests=max_rpc_requests,
         min_request_interval=float(min_request_interval),
     )
-    discovered = dex_client.token_pair_candidates("ethereum", token)
+    discovery_error: str | None = None
+    try:
+        discovered = dex_client.token_pair_candidates("ethereum", token)
+    except MarketDataError as exc:
+        # Trusted factories remain authoritative; DEX Screener is optional metadata only.
+        discovered = []
+        discovery_error = str(exc)[:200]
     filtered: list[tuple[DexPairCandidate, Venue]] = []
     seen_pairs: set[str] = set()
     for candidate in discovered:
@@ -161,24 +167,6 @@ def scan_onchain_v2_candidates(
             f"Filtered candidate count {len(filtered)} exceeds the configured limit "
             f"of {max_candidate_pairs}; narrow the token/quote pair or explicitly raise the bound"
         )
-    if not filtered:
-        return {
-            "mode": "read_only_onchain_v2_candidate_scan",
-            "status": "no_registered_venue_candidates",
-            "chain_id": 1,
-            "token_address": token,
-            "quote_token_address": quote_token,
-            "capital_quote_human": str(capital_amount),
-            "candidate_pairs_discovered": len(discovered),
-            "candidate_pairs_matched": 0,
-            "candidate_pairs_factory_verified": 0,
-            "routes": [],
-            "candidate_verification": [],
-            "live_execution": False,
-            "transaction_submitted": False,
-            "warning": "No DEX Screener candidates matched the explicit token pair and trusted venue registry.",
-        }
-
     context: EvmBlockContext = reader.latest_block_context()
     if context.chain_id != 1:
         raise ValueError("On-chain candidate scan is restricted to Ethereum mainnet (chain ID 1)")
@@ -254,6 +242,8 @@ def scan_onchain_v2_candidates(
             "candidate_pairs_discovered": len(discovered),
             "candidate_pairs_matched": len(filtered),
             "candidate_pairs_factory_verified": len(verified_by_venue),
+            "dexscreener_discovery_status": "unavailable" if discovery_error else "available",
+            "dexscreener_discovery_error": discovery_error,
             "verified_venues": sorted(verified_by_venue),
             "routes": [],
             "rpc_requests_used": getattr(reader, "rpc_request_count", None),
@@ -356,6 +346,8 @@ def scan_onchain_v2_candidates(
         "candidate_pairs_discovered": len(discovered),
         "candidate_pairs_matched": len(filtered),
         "candidate_pairs_factory_verified": len(verified_by_venue),
+        "dexscreener_discovery_status": "unavailable" if discovery_error else "available",
+        "dexscreener_discovery_error": discovery_error,
         "venues": [
             {
                 "venue_id": venue.id,
