@@ -20,6 +20,8 @@ class V2FlashSwapEconomics:
     break_even_gas_price_wei: int
     profit_token: str
     native_token: str
+    native_token_decimals: int
+    profit_token_decimals: int
     price_source_pair: str | None
     price_block_number: int
     price_block_hash: str
@@ -32,21 +34,32 @@ class V2FlashSwapEconomics:
         return self.net_profit_raw > 0
 
 
+def _validate_decimals(value: int, name: str) -> None:
+    if not isinstance(value, int) or isinstance(value, bool) or not 0 <= value <= 255:
+        raise ValueError(f"{name} must be an integer in [0, 255]")
+
+
 def estimate_flash_swap_economics(
     simulation: V2FlashSwapSimulation,
     *,
     gas_used: int,
     gas_price_wei: int,
     native_token: str,
+    native_token_decimals: int,
+    profit_token_decimals: int,
     native_quote_pool: V2PoolState | None = None,
 ) -> V2FlashSwapEconomics:
-    """Estimate gas in the repayment token using explicit same-block reserve pricing.
+    """Estimate gas in repayment-token raw units using explicit same-block reserve pricing.
 
-    gas_used must include the caller's chosen transaction/calldata overhead.
-    gas_price_wei must be an explicit scenario (for example base fee + a chosen tip).
-    If the repayment token is not the wrapped native token, native_quote_pool must
-    contain exactly those two tokens and be pinned to the flash-swap block.
-    Gas conversion uses the pool's spot reserve ratio with ceiling rounding.
+    Decimal counts are mandatory because reserve ratios are raw-unit ratios. For example,
+    a WETH/USDC pool requires 18 native-token decimals and 6 repayment-token decimals.
+    gas_used must include the caller's chosen transaction/calldata overhead. gas_price_wei
+    must be an explicit scenario (for example base fee plus a chosen tip). If repayment is
+    not in the wrapped native token, native_quote_pool must contain exactly those two
+    tokens and be pinned to the flash-swap block.
+
+    Conversion uses the pool's spot reserve ratio and ceiling rounding. This is a
+    scenario estimate, not an executable quote or a profitability guarantee.
     """
     if not isinstance(simulation, V2FlashSwapSimulation):
         raise ValueError("simulation must be a V2FlashSwapSimulation")
@@ -64,6 +77,8 @@ def estimate_flash_swap_economics(
         raise ValueError("native_token must be a 20-byte EVM address")
     if int(native_token[2:], 16) == 0:
         raise ValueError("native_token cannot be the zero address")
+    _validate_decimals(native_token_decimals, "native_token_decimals")
+    _validate_decimals(profit_token_decimals, "profit_token_decimals")
 
     gross = simulation.gross_profit_raw
     if not isinstance(gross, int) or isinstance(gross, bool):
@@ -100,10 +115,24 @@ def estimate_flash_swap_economics(
             native_reserve = native_quote_pool.reserve1_raw
             profit_reserve = native_quote_pool.reserve0_raw
 
-        numerator = native_gas_cost * profit_reserve
-        gas_cost = (numerator + native_reserve - 1) // native_reserve
-        denominator = gas_used * profit_reserve
-        break_even = max(0, (gross * native_reserve) // denominator) if gross > 0 else 0
+        # raw quote = raw native * quote reserve/native reserve * 10**(native decimals - quote decimals)
+        decimal_scale_num = 10 ** native_token_decimals
+        decimal_scale_den = 10 ** profit_token_decimals
+        conversion_numerator = native_gas_cost * profit_reserve * decimal_scale_num
+        conversion_denominator = native_reserve * decimal_scale_den
+        gas_cost = (
+            conversion_numerator + conversion_denominator - 1
+        ) // conversion_denominator
+
+        # Largest integer gas price whose ceiling-rounded token cost does not exceed gross.
+        break_even_denominator = (
+            gas_used * profit_reserve * decimal_scale_num
+        )
+        break_even_numerator = gross * native_reserve * decimal_scale_den
+        break_even = (
+            max(0, break_even_numerator // break_even_denominator)
+            if gross > 0 else 0
+        )
         price_pair = native_quote_pool.pair_address
 
     return V2FlashSwapEconomics(
@@ -116,6 +145,8 @@ def estimate_flash_swap_economics(
         break_even_gas_price_wei=break_even,
         profit_token=profit_token,
         native_token=native_token,
+        native_token_decimals=native_token_decimals,
+        profit_token_decimals=profit_token_decimals,
         price_source_pair=price_pair,
         price_block_number=simulation.borrow.block_number,
         price_block_hash=simulation.borrow.block_hash,
