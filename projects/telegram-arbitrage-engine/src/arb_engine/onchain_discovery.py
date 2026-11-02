@@ -33,16 +33,20 @@ def _address(value: str, label: str) -> str:
 
 
 def _human(raw: int, decimals: int) -> str:
-    return format(Decimal(raw) / (Decimal(10) ** decimals), "f")
+    with localcontext() as ctx:
+        ctx.prec = 100
+        return format(Decimal(raw) / (Decimal(10) ** decimals), "f")
 
 
 def _raw_amount(value: Decimal, decimals: int) -> int:
     if not isinstance(value, Decimal) or not value.is_finite() or value <= 0:
         raise ValueError("capital_quote must be a finite positive Decimal")
-    raw = value * (Decimal(10) ** decimals)
-    if raw != raw.to_integral_value():
-        raise ValueError("capital_quote exceeds quote-token decimal precision")
-    result = int(raw)
+    with localcontext() as ctx:
+        ctx.prec = max(100, len(value.as_tuple().digits) + abs(value.as_tuple().exponent) + decimals + 5)
+        raw = value * (Decimal(10) ** decimals)
+        if raw != raw.to_integral_value():
+            raise ValueError("capital_quote exceeds quote-token decimal precision")
+        result = int(raw)
     if not 0 < result < 2**256:
         raise ValueError("capital_quote raw amount must fit uint256")
     return result
@@ -70,10 +74,19 @@ def discover_pool_candidates(
 
     groups: dict[tuple[str, str], dict[str, DiscoveredPool]] = {}
     for pair in pairs:
-        if not isinstance(pair, DexPair) or pair.chain.casefold() != "ethereum":
+        if (
+            not isinstance(pair, DexPair)
+            or not isinstance(pair.chain, str)
+            or not isinstance(pair.dex, str)
+            or pair.chain.casefold() != "ethereum"
+            or not isinstance(pair.liquidity_usd, Decimal)
+            or not pair.liquidity_usd.is_finite()
+            or pair.liquidity_usd <= 0
+            or pair.liquidity_usd < min_liquidity_usd
+        ):
             continue
         venue_id = DEX_VENUES.get(pair.dex.casefold())
-        if venue_id is None or pair.liquidity_usd < min_liquidity_usd:
+        if venue_id is None:
             continue
         try:
             pair_address = _address(pair.pair_address, "pair_address")
@@ -128,7 +141,7 @@ def _quote_route(
     final_raw = sell_amounts[-1]
     gross_raw = final_raw - capital_raw
     with localcontext() as ctx:
-        ctx.prec = 60
+        ctx.prec = 100
         gross_bps = Decimal(gross_raw) * Decimal(10000) / Decimal(capital_raw)
     return {
         "buy_venue": buy_venue.name,
