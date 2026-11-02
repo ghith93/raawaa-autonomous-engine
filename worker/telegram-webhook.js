@@ -97,8 +97,10 @@ export async function handleTelegramWebhook(request, env, url) {
 
   const message = update.message;
   const chat = message?.chat;
+  const sender = message?.from;
   if (!message || !chat || chat.type !== "private" ||
       !Number.isSafeInteger(chat.id) || !allowedChatIds(env).has(String(chat.id)) ||
+      !sender || !Number.isSafeInteger(sender.id) || sender.id !== chat.id || sender.is_bot === true ||
       typeof message.text !== "string") return json({ ok: true, ignored: true });
 
   const chatId = String(chat.id);
