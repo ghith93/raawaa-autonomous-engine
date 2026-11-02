@@ -122,3 +122,58 @@ def test_parser_rejects_untrusted_or_credentialed_pair_urls():
         raw = pair("dex-a", "1.0", "p1")
         raw["url"] = url
         assert DexScreenerClient._parse_pair(raw, now) is None
+
+
+
+def candidate_row(dex="uniswap", pair_address="0x" + "4" * 40):
+    return {
+        "chainId": "ethereum", "dexId": dex, "pairAddress": pair_address,
+        "baseToken": {"address": "0x" + "1" * 40, "symbol": "BASE"},
+        "quoteToken": {"address": "0x" + "2" * 40, "symbol": "QUOTE"},
+        "url": "https://dexscreener.com/ethereum/" + pair_address,
+        "labels": ["v2"],
+    }
+
+
+def test_token_pair_candidate_parser_needs_no_price_or_liquidity_metrics():
+    from arb_engine.dexscreener import DexPairCandidate
+
+    now = datetime.now(timezone.utc)
+    parsed = DexScreenerClient._parse_candidate(candidate_row(), now)
+    assert isinstance(parsed, DexPairCandidate)
+    assert parsed.chain == "ethereum"
+    assert parsed.dex == "uniswap"
+    assert parsed.pair_address == "0x" + "4" * 40
+    assert parsed.base_address == "0x" + "1" * 40
+    assert parsed.quote_address == "0x" + "2" * 40
+    assert parsed.labels == ("v2",)
+
+
+def test_token_pair_candidate_parser_rejects_malformed_addresses_and_untrusted_urls():
+    now = datetime.now(timezone.utc)
+    bad_address = candidate_row()
+    bad_address["pairAddress"] = "not-an-address"
+    assert DexScreenerClient._parse_candidate(bad_address, now) is None
+    bad_url = candidate_row()
+    bad_url["url"] = "https://evil.example/pair"
+    parsed = DexScreenerClient._parse_candidate(bad_url, now)
+    assert parsed is not None
+    assert parsed.source_url is None
+
+
+def test_token_pair_candidates_use_chain_scoped_endpoint_and_bound_results(monkeypatch):
+    import pytest
+    from arb_engine.dexscreener import MarketDataError
+
+    client = DexScreenerClient(min_request_interval=0)
+    token = "0x" + "1" * 40
+    calls = []
+    monkeypatch.setattr(client, "_get", lambda path, params: (
+        calls.append((path, params)) or [candidate_row()]
+    ))
+    result = client.token_pair_candidates("ethereum", token)
+    assert len(result) == 1
+    assert calls == [(f"/token-pairs/v1/ethereum/{token}", {})]
+    monkeypatch.setattr(client, "_get", lambda path, params: [candidate_row()] * 201)
+    with pytest.raises(MarketDataError, match="safety limit"):
+        client.token_pair_candidates("ethereum", token)
