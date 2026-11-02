@@ -29,6 +29,16 @@ Do not dispatch it merely to inspect status. Before a separate operator decision
 
 If any item is unknown, stop after inventory. A successful Worker deployment or `/health` response does not prove schema readiness.
 
-## Current known gate
+## Latest verified production checkpoint
 
-Migration `0005_telegram_webhook_receipts` adds a receipt table and index and records its version in `schema_migrations`. Its presence is only schema readiness; it does not activate Telegram webhook delivery. Do not apply it until the complete pending migration sequence and production recovery requirements have been reviewed.
+As of 2026-11-02 23:45 UTC, the manual production migration workflow completed successfully on reviewed `main` SHA `e5eb80c395155151417ad82b761e0b7d5829ce6a`:
+
+- [Apply D1 Migrations run #2](https://github.com/ghith93/raawaa-autonomous-engine/actions/runs/41547859981) completed with `success`.
+- Wrangler reported both `0004_paper_event_ledger.sql` and `0005_telegram_webhook_receipts.sql` as applied in its final remote migration status output.
+- The target was the remote D1 database `raawaa-autonomous-e`.
+
+The Control Worker deployment workflow [run #10](https://github.com/ghith93/raawaa-autonomous-engine/actions/runs/41546403591) also completed successfully on commit `43b4f0d7ad2e3e63c10dd6f92fbebc00739610e7`. A subsequent unauthenticated production route check returned HTTP 200 for `/health` and `/mobile`, and HTTP 401 for `/v1/mobile/status`; the latter confirms the protected route is present and enforcing authentication, but does not verify an authenticated D1 status read.
+
+These are historical verification results, not a permanent guarantee of current state. Before any future production migration, run the read-only inventory again and compare the complete pending list with the exact reviewed SHA. The apply workflow still applies **all** pending migrations in one run.
+
+Migration `0005_telegram_webhook_receipts` provides schema readiness only. It does not register or activate Telegram webhook delivery. Keep webhook activation separately gated by operator-managed secrets, private-chat allowlisting, and a deliberate configuration/deployment review.
