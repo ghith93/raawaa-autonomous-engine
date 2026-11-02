@@ -37,3 +37,12 @@ def test_summary_groups_repeated_observations_without_calling_them_profit(tmp_pa
     assert summary[0]["observation_count"] == 2
     assert summary[0]["mean_gross_spread_bps"] == "100"
     assert summary[0]["interpretation"] == "repeated_indicative_observations_not_backtested_profit"
+
+
+def test_engine_state_is_persisted_and_validated(tmp_path):
+    ledger = OpportunityLedger(tmp_path / "state.sqlite3")
+    assert ledger.get_state("telegram_update_offset") is None
+    ledger.set_state("telegram_update_offset", "42")
+    assert ledger.get_state("telegram_update_offset") == "42"
+    ledger.set_state("telegram_update_offset", "43")
+    assert ledger.get_state("telegram_update_offset") == "43"
