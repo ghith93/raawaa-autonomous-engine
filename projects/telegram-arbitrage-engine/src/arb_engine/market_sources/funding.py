@@ -200,6 +200,9 @@ class PublicPerpetualFundingClient:
             if not isinstance(payload, list):
                 raise FundingMarketDataError("Binance funding history must be a list")
             return payload
+        if isinstance(payload, dict) and payload.get("retCode") in (10006, 10429):
+            self._rate_limiter.defer(2.0)
+            raise FundingRateLimited(2.0)
         if (
             not isinstance(payload, dict) or type(payload.get("retCode")) is not int
             or payload.get("retCode") != 0 or not isinstance(payload.get("result"), dict)
