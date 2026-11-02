@@ -331,8 +331,16 @@ class PaperTradingLedger:
 
     def verify_chain(self, candidate_id: str) -> bool:
         """Verify sequence continuity, previous hashes, and each event digest."""
-        events = self.events(candidate_id, limit=5000)
+        candidate_id = self._text(candidate_id, "candidate_id")
         with self._connect() as db:
+            db.execute("BEGIN")
+            db.row_factory = sqlite3.Row
+            events = [
+                dict(row) for row in db.execute(
+                    "SELECT * FROM paper_events WHERE candidate_id = ? ORDER BY sequence LIMIT 5000",
+                    (candidate_id,),
+                ).fetchall()
+            ]
             checkpoints = db.execute(
                 "SELECT sequence, event_id, event_hash FROM paper_event_checkpoints "
                 "WHERE candidate_id = ? ORDER BY sequence",
