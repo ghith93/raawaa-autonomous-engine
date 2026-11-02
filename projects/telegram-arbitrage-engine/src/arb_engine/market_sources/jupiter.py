@@ -205,7 +205,10 @@ class JupiterQuoteOnlyClient:
         # if API behavior changes and a transaction or taker-dependent response appears.
         if "transaction" not in payload or payload["transaction"] is not None:
             raise JupiterQuoteError("Jupiter did not return a quote-only response with transaction=null")
-        if payload.get("inputMint") != input_mint or payload.get("outputMint") != output_mint:
+        if (
+            payload.get("inputMint", input_mint) != input_mint
+            or payload.get("outputMint", output_mint) != output_mint
+        ):
             raise JupiterQuoteError("Jupiter quote mint identity did not match request")
         input_amount = _raw_amount(payload.get("inAmount"), "inAmount")
         if input_amount != amount:
