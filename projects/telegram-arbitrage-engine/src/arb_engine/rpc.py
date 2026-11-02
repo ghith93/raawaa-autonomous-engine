@@ -438,6 +438,26 @@ class EthereumV2PoolReader:
         if actual_factory != factory:
             raise RpcReadError("Router factory does not match configured trusted factory")
 
+    def lookup_v2_pair_address(
+        self,
+        factory_address: str,
+        token_a: str,
+        token_b: str,
+        block_number: int,
+    ) -> str | None:
+        """Resolve the canonical pair directly from a trusted V2 factory at a pinned block."""
+        factory = self._pool_address(factory_address)
+        token0 = self._pool_address(token_a)
+        token1 = self._pool_address(token_b)
+        if token0 == token1:
+            raise ValueError("Factory lookup requires two different tokens")
+        if not isinstance(block_number, int) or isinstance(block_number, bool) or block_number < 0:
+            raise ValueError("Factory lookup block must be non-negative")
+        calldata = "0xe6a43905" + ("0" * 24 + token0[2:]) + ("0" * 24 + token1[2:])
+        result = self._rpc("eth_call", [{"to": factory, "data": calldata}, hex(block_number)])
+        pair = self._address(result, "factory getPair")
+        return None if pair == "0x" + "0" * 40 else pair
+
     def verify_v2_pool_factory(
         self,
         pair_address: str,
