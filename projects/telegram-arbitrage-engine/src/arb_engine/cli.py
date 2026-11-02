@@ -139,17 +139,24 @@ def main() -> None:
 
     onchain_parser = sub.add_parser(
         "onchain-v2-scan",
-        help="discover V2 pairs with DEX Screener and quote both verified Ethereum routes on-chain",
+        help="discover V2 pairs with DEX Screener and quote two verified V2 venues on an EVM chain",
     )
     onchain_parser.add_argument("--token-address", required=True, help="base-token contract address")
     onchain_parser.add_argument("--quote-token-address", required=True, help="explicit quote-token contract address; never inferred from symbols")
     onchain_parser.add_argument("--capital-quote", required=True, help="input amount in quote-token units, e.g. 1000")
-    onchain_parser.add_argument("--rpc-url", default=DEFAULT_ETHEREUM_RPC)
+    onchain_parser.add_argument("--chain-id", type=int, default=1)
+    onchain_parser.add_argument("--chain-slug", help="DEX Screener chain slug; must match the registered venues")
+    onchain_parser.add_argument(
+        "--venue-ids", nargs=2,
+        default=("uniswap_v2_ethereum", "sushiswap_v2_ethereum"),
+        help="exactly two registered V2 venue IDs for the selected chain",
+    )
+    onchain_parser.add_argument("--rpc-url", help="read-only RPC URL; required for non-Ethereum EVM chains")
     onchain_parser.add_argument("--max-candidate-pairs", type=int, default=4)
     onchain_parser.add_argument("--max-rpc-requests", type=int, default=32)
     onchain_parser.add_argument(
         "--min-request-interval", type=float, default=0.55,
-        help="minimum seconds between Ethereum RPC requests (default 0.55 for public eth_call limits)",
+        help="minimum seconds between EVM RPC requests (default 0.55)",
     )
 
     token_parser = sub.add_parser(
@@ -410,6 +417,9 @@ def main() -> None:
                 quote_token_address=args.quote_token_address,
                 capital_quote=args.capital_quote,
                 rpc_url=args.rpc_url,
+                chain_id=args.chain_id,
+                chain_slug=args.chain_slug,
+                venue_ids=tuple(args.venue_ids),
                 max_candidate_pairs=args.max_candidate_pairs,
                 max_rpc_requests=args.max_rpc_requests,
                 min_request_interval=args.min_request_interval,
