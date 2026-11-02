@@ -67,11 +67,14 @@ class UsageLedger:
                     "UPDATE model_usage SET cost_nanos=CAST(ROUND(cost_usd * 1000000000) AS INTEGER) "
                     "WHERE cost_usd > 0"
                 )
+            if "task_id" not in columns:
+                db.execute("ALTER TABLE model_usage ADD COLUMN task_id TEXT")
             db.execute("""CREATE TABLE IF NOT EXISTS model_usage_reservations (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 provider TEXT NOT NULL,
                 model TEXT NOT NULL,
                 task_kind TEXT NOT NULL,
+                task_id TEXT,
                 created_at TEXT NOT NULL,
                 estimated_cost_nanos INTEGER NOT NULL CHECK(estimated_cost_nanos >= 0),
                 settled_at TEXT,
@@ -79,9 +82,22 @@ class UsageLedger:
                 input_tokens INTEGER,
                 output_tokens INTEGER
             )""")
+            reservation_columns = {
+                row["name"] for row in db.execute("PRAGMA table_info(model_usage_reservations)")
+            }
+            if "task_id" not in reservation_columns:
+                db.execute("ALTER TABLE model_usage_reservations ADD COLUMN task_id TEXT")
             db.execute(
                 "CREATE INDEX IF NOT EXISTS idx_model_reservations_created "
                 "ON model_usage_reservations(created_at, settled_at)"
+            )
+            db.execute(
+                "CREATE INDEX IF NOT EXISTS idx_model_usage_task "
+                "ON model_usage(task_id, created_at)"
+            )
+            db.execute(
+                "CREATE INDEX IF NOT EXISTS idx_model_reservations_task "
+                "ON model_usage_reservations(task_id, settled_at)"
             )
 
     def _connect(self):
@@ -126,6 +142,31 @@ class UsageLedger:
             "pending_reservations": pending_count,
         }
 
+    def task_totals(self, task_id: str) -> dict[str, float | int]:
+        if not isinstance(task_id, str) or not task_id.strip():
+            raise ValueError("task_id is required for task spend totals")
+        with self._connect() as db:
+            actual = int(db.execute(
+                "SELECT COALESCE(SUM(cost_nanos),0) n FROM model_usage WHERE task_id=?",
+                (task_id,),
+            ).fetchone()["n"])
+            reserved = int(db.execute(
+                "SELECT COALESCE(SUM(estimated_cost_nanos),0) n "
+                "FROM model_usage_reservations WHERE task_id=? AND settled_at IS NULL",
+                (task_id,),
+            ).fetchone()["n"])
+            pending = int(db.execute(
+                "SELECT COUNT(*) n FROM model_usage_reservations "
+                "WHERE task_id=? AND settled_at IS NULL",
+                (task_id,),
+            ).fetchone()["n"])
+        return {
+            "actual_usd": actual / 1_000_000_000,
+            "reserved_usd": reserved / 1_000_000_000,
+            "total_nanos": actual + reserved,
+            "pending_reservations": pending,
+        }
+
     def budget_status(self, daily_budget_usd: float, monthly_budget_usd: float,
                       now: datetime | None = None) -> dict[str, bool]:
         """Compare actual plus outstanding spend to hard caps using integer nano-USD."""
@@ -158,11 +199,18 @@ class UsageLedger:
 
     def reserve(self, provider: str, model: str, task_kind: str,
                 estimated_cost_usd: float, daily_budget_usd: float,
-                monthly_budget_usd: float, now: datetime | None = None) -> int:
+                monthly_budget_usd: float, now: datetime | None = None,
+                task_id: str | None = None,
+                per_task_budget_usd: float = 0.0) -> int:
         """Atomically reserve estimated spend before a provider call."""
         if not all(isinstance(value, str) and value.strip()
                    for value in (provider, model, task_kind)):
             raise ValueError("provider, model and task_kind are required")
+        if task_id is not None and (not isinstance(task_id, str) or not task_id.strip()):
+            raise ValueError("task_id must be a non-empty string when supplied")
+        task_cap = _money_nanos(per_task_budget_usd, round_up=False)
+        if task_cap > 0 and task_id is None:
+            raise ValueError("task_id is required when a per-task monetary budget is configured")
         estimate = _money_nanos(estimated_cost_usd, round_up=True)
         daily_cap = _money_nanos(daily_budget_usd, round_up=False)
         monthly_cap = _money_nanos(monthly_budget_usd, round_up=False)
@@ -175,10 +223,23 @@ class UsageLedger:
                 raise BudgetExceeded("Estimated request cost exceeds the remaining daily budget.")
             if monthly + monthly_reserved + estimate > monthly_cap:
                 raise BudgetExceeded("Estimated request cost exceeds the remaining monthly budget.")
+            if task_id is not None:
+                task_actual = int(db.execute(
+                    "SELECT COALESCE(SUM(cost_nanos),0) n FROM model_usage WHERE task_id=?",
+                    (task_id,),
+                ).fetchone()["n"])
+                task_reserved = int(db.execute(
+                    "SELECT COALESCE(SUM(estimated_cost_nanos),0) n "
+                    "FROM model_usage_reservations WHERE task_id=? AND settled_at IS NULL",
+                    (task_id,),
+                ).fetchone()["n"])
+                if task_actual + task_reserved + estimate > task_cap:
+                    raise BudgetExceeded("Estimated request cost exceeds the remaining per-task budget.")
             cursor = db.execute(
                 "INSERT INTO model_usage_reservations("
-                "provider,model,task_kind,created_at,estimated_cost_nanos) VALUES(?,?,?,?,?)",
-                (provider, model, task_kind, stamp, estimate),
+                "provider,model,task_kind,task_id,created_at,estimated_cost_nanos) "
+                "VALUES(?,?,?,?,?,?)",
+                (provider, model, task_kind, task_id, stamp, estimate),
             )
             return int(cursor.lastrowid)
 
@@ -210,10 +271,11 @@ class UsageLedger:
             else:
                 db.execute(
                     "INSERT INTO model_usage(provider,model,task_kind,input_tokens,output_tokens,"
-                    "cost_usd,cost_nanos,created_at) VALUES(?,?,?,?,?,?,?,?)",
+                    "cost_usd,cost_nanos,created_at,task_id) VALUES(?,?,?,?,?,?,?,?,?)",
                     (
                         reservation["provider"], reservation["model"], reservation["task_kind"],
                         input_tokens, output_tokens, actual / 1_000_000_000, actual, stamp,
+                        reservation["task_id"],
                     ),
                 )
                 changed = db.execute(
@@ -234,7 +296,7 @@ class UsageLedger:
         }
 
     def record(self, provider: str, model: str, task_kind: str, input_tokens: int,
-               output_tokens: int, cost_usd: float):
+               output_tokens: int, cost_usd: float, task_id: str | None = None):
         """Record externally measured usage (e.g. a verified-free route anomaly)."""
         if type(input_tokens) is not int or type(output_tokens) is not int:
             raise ValueError("token counts must be integers")
@@ -244,9 +306,9 @@ class UsageLedger:
         with self._connect() as db:
             db.execute(
                 "INSERT INTO model_usage(provider,model,task_kind,input_tokens,output_tokens,"
-                "cost_usd,cost_nanos,created_at) VALUES(?,?,?,?,?,?,?,?)",
+                "cost_usd,cost_nanos,created_at,task_id) VALUES(?,?,?,?,?,?,?,?,?)",
                 (provider, model, task_kind, input_tokens, output_tokens,
-                 cost / 1_000_000_000, cost, datetime.now(timezone.utc).isoformat()),
+                 cost / 1_000_000_000, cost, datetime.now(timezone.utc).isoformat(), task_id),
             )
 
 
@@ -254,7 +316,7 @@ class ModelGateway:
     def __init__(self, options: list[ModelOption], adapters: dict[str, ProviderAdapter],
                  ledger: UsageLedger, daily_budget_usd: float = 0.0,
                  monthly_budget_usd: float = 0.0, allow_paid_calls: bool = False,
-                 network_calls_enabled: bool = False):
+                 network_calls_enabled: bool = False, per_task_budget_usd: float = 0.0):
         self.options = options
         self.adapters = adapters
         self.ledger = ledger
@@ -262,6 +324,8 @@ class ModelGateway:
         self.monthly_budget_usd = monthly_budget_usd
         _money_nanos(daily_budget_usd, round_up=False)
         _money_nanos(monthly_budget_usd, round_up=False)
+        _money_nanos(per_task_budget_usd, round_up=False)
+        self.per_task_budget_usd = per_task_budget_usd
         self.allow_paid_calls = allow_paid_calls
         self.network_calls_enabled = network_calls_enabled
         self.router = ModelRouter(options, paid_calls_enabled=allow_paid_calls)
@@ -272,7 +336,11 @@ class ModelGateway:
             "live_provider_adapters_enabled": False,
             "registered_adapters": sorted(self.adapters),
             "paid_calls_enabled": self.allow_paid_calls,
-            "budgets": {"daily_usd": self.daily_budget_usd, "monthly_usd": self.monthly_budget_usd},
+            "budgets": {
+                "daily_usd": self.daily_budget_usd,
+                "monthly_usd": self.monthly_budget_usd,
+                "per_task_usd": self.per_task_budget_usd,
+            },
             "usage": self.ledger.totals(),
             "note": "Only explicitly injected adapters can run; repository ships no live network adapter.",
         }
@@ -295,6 +363,7 @@ class ModelGateway:
         reservation_id = self.ledger.reserve(
             model.provider, model.model, request.task_kind, estimated_cost,
             self.daily_budget_usd, self.monthly_budget_usd,
+            task_id=request.task_id, per_task_budget_usd=self.per_task_budget_usd,
         )
         # If the adapter raises or times out, the reservation intentionally remains
         # outstanding because provider-side processing/billing may be ambiguous.
