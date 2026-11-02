@@ -110,7 +110,7 @@ class TelegramController:
 
         now = time.monotonic()
         previous = self._last_request_by_chat.get(chat_id, 0.0)
-        if now - previous < self.min_request_interval_seconds:
+        if previous > 0 and now - previous < self.min_request_interval_seconds:
             return chat_id, "Rate limit: wait a few seconds before the next command."
         self._last_request_by_chat[chat_id] = now
 
