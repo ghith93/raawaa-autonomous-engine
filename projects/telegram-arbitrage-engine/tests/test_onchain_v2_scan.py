@@ -290,3 +290,44 @@ def test_scan_rejects_unsafe_rpc_request_interval():
             capital_quote="1000", dex_client=FakeDexScreener([]),
             reader=FakeReader(), min_request_interval=0,
         )
+
+
+def test_scan_uses_trusted_factory_lookup_when_dexscreener_returns_no_pairs():
+    dex = FakeDexScreener([])
+    reader = FakeReader()
+    result = scan_onchain_v2_candidates(
+        token_address=BASE, quote_token_address=QUOTE,
+        capital_quote="1000", dex_client=dex, reader=reader,
+    )
+
+    assert result["status"] == "quoted"
+    assert result["dexscreener_discovery_status"] == "available"
+    assert result["candidate_pairs_discovered"] == 0
+    assert len(result["routes"]) == 2
+    assert {item["discovery_source"] for item in result["candidate_verification"]} == {
+        "trusted_factory_getPair",
+    }
+    assert {call[0] for call in reader.lookup_calls} == {UNISWAP.factory, SUSHI.factory}
+
+
+def test_scan_continues_with_trusted_factory_lookup_when_dexscreener_is_rate_limited():
+    from arb_engine.dexscreener import MarketDataError
+
+    class UnavailableDexScreener:
+        def token_pair_candidates(self, chain, token):
+            raise MarketDataError("DEX Screener rate limit reached; retry later")
+
+    reader = FakeReader()
+    result = scan_onchain_v2_candidates(
+        token_address=BASE, quote_token_address=QUOTE,
+        capital_quote="1000", dex_client=UnavailableDexScreener(), reader=reader,
+    )
+
+    assert result["status"] == "quoted"
+    assert result["dexscreener_discovery_status"] == "unavailable"
+    assert result["dexscreener_discovery_error"] == "DEX Screener rate limit reached; retry later"
+    assert len(result["routes"]) == 2
+    assert all(
+        item["discovery_source"] == "trusted_factory_getPair"
+        for item in result["candidate_verification"]
+    )
