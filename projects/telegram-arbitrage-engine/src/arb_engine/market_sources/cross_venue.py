@@ -372,3 +372,117 @@ def compare_cex_spot_orderbooks(
         _direction(book_b, spec_b, time_b, book_a, spec_a, time_a, quantity,
                    costs_for(spec_b, spec_a), now, max_quote_age_seconds),
     )
+
+
+@dataclass(frozen=True)
+class CrossVenueUniverseResult:
+    """Bounded pairwise comparison result across multiple independent CEX sources."""
+
+    venue_ids: tuple[str, ...]
+    opportunities: tuple[CrossVenueOpportunity, ...]
+    skipped_pairs: tuple[tuple[str, str, str], ...]
+    source_failures: tuple[tuple[str, str], ...]
+
+    @property
+    def status(self) -> str:
+        if len(self.venue_ids) < 2:
+            return "insufficient_sources"
+        if self.skipped_pairs or self.source_failures:
+            return "partial"
+        return "complete"
+
+    @property
+    def compared_pair_count(self) -> int:
+        return len(self.opportunities) // 2
+
+
+def compare_cex_spot_orderbook_universe(
+    *,
+    books: tuple[object, ...] | list[object],
+    registry: InstrumentRegistry,
+    base_quantity: Decimal | str,
+    costs_by_direction: Mapping[tuple[str, str], OpportunityCosts] | None = None,
+    source_failures: Mapping[str, str] | None = None,
+    now: datetime | None = None,
+    max_quote_age_seconds: int = 5,
+    max_venues: int = 8,
+) -> CrossVenueUniverseResult:
+    """Compare all bounded CEX spot venue pairs, preserving partial source failures.
+
+    Each available book must have an explicit venue/instrument mapping. A canonical
+    base/quote mismatch is recorded as a skipped pair; it is never joined by symbol.
+    The caller may pass sanitized source failure codes to preserve partial coverage.
+    """
+    if not isinstance(registry, InstrumentRegistry):
+        raise InstrumentMappingError("registry must be an InstrumentRegistry")
+    if not isinstance(books, (tuple, list)):
+        raise InstrumentMappingError("books must be a list or tuple")
+    if (
+        isinstance(max_venues, bool) or not isinstance(max_venues, int)
+        or not 2 <= max_venues <= 8
+    ):
+        raise InstrumentMappingError("max_venues must be between 2 and 8")
+    if len(books) > max_venues:
+        raise InstrumentMappingError(f"book count exceeds the {max_venues}-venue comparison bound")
+
+    if source_failures is None:
+        source_failures = {}
+    if not isinstance(source_failures, Mapping):
+        raise InstrumentMappingError("source_failures must be a mapping")
+    normalized_failures: list[tuple[str, str]] = []
+    for venue_id, reason in source_failures.items():
+        if (
+            not isinstance(venue_id, str) or not venue_id.strip()
+            or not isinstance(reason, str) or not reason.strip()
+            or len(reason) > 120 or "\n" in reason or "\r" in reason
+        ):
+            raise InstrumentMappingError("source failure entries must be bounded venue IDs and reason codes")
+        normalized_failures.append((venue_id, reason))
+    if len(normalized_failures) > max_venues:
+        raise InstrumentMappingError("source failure count exceeds the venue comparison bound")
+
+    venue_ids: list[str] = []
+    for book in books:
+        venue_id = getattr(book, "source", None)
+        instrument_id = getattr(book, "symbol", None)
+        if not isinstance(venue_id, str) or not venue_id:
+            raise InstrumentMappingError("each order book must identify its source venue")
+        if venue_id in venue_ids:
+            raise InstrumentMappingError(f"duplicate order-book source venue: {venue_id}")
+        if any(failed_id == venue_id for failed_id, _ in normalized_failures):
+            raise InstrumentMappingError(f"venue {venue_id} cannot be both available and failed")
+        spec = registry.resolve(venue_id, instrument_id)
+        _validate_book(book, spec)
+        venue_ids.append(venue_id)
+
+    if len(venue_ids) + len(normalized_failures) > max_venues:
+        raise InstrumentMappingError("total venue count exceeds the comparison bound")
+
+    opportunities: list[CrossVenueOpportunity] = []
+    skipped_pairs: list[tuple[str, str, str]] = []
+    for index, book_a in enumerate(books):
+        for book_b in books[index + 1:]:
+            pair_results = compare_cex_spot_orderbooks(
+                book_a=book_a,
+                book_b=book_b,
+                registry=registry,
+                base_quantity=base_quantity,
+                costs_by_direction=costs_by_direction,
+                now=now,
+                max_quote_age_seconds=max_quote_age_seconds,
+            )
+            if all(item.status == "asset_or_quote_identity_mismatch" for item in pair_results):
+                skipped_pairs.append((
+                    pair_results[0].buy_venue_id,
+                    pair_results[0].sell_venue_id,
+                    "canonical_base_or_quote_identity_mismatch",
+                ))
+            else:
+                opportunities.extend(pair_results)
+
+    return CrossVenueUniverseResult(
+        venue_ids=tuple(venue_ids),
+        opportunities=tuple(opportunities),
+        skipped_pairs=tuple(skipped_pairs),
+        source_failures=tuple(sorted(normalized_failures)),
+    )
