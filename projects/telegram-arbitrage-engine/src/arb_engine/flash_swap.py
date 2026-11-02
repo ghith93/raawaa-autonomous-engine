@@ -15,6 +15,7 @@ class V2FlashBorrow:
     amount_borrowed_raw: int
     repayment_amount_raw: int
     fee_bps: int
+    chain_id: int
     block_number: int
     block_hash: str
 
@@ -122,6 +123,7 @@ def simulate_cross_venue_flash_swap(
         amount_borrowed_raw=amount_borrowed_raw,
         repayment_amount_raw=repayment_amount,
         fee_bps=source_pool.fee_bps,
+        chain_id=source_pool.chain_id,
         block_number=source_pool.block_number,
         block_hash=source_pool.block_hash,
     )
