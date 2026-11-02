@@ -173,11 +173,22 @@ async function list(db, url) {
   const limit = Number(url.searchParams.get("limit") || 100);
   if (!validText(candidate, 128) || !Number.isInteger(limit) || limit < 1 || limit > 500) return json({ error: "invalid_query" }, 400);
   try {
-    const result = await db.prepare("SELECT * FROM paper_events WHERE candidate_id=? ORDER BY sequence LIMIT ?")
+    // One read statement gives events, checkpoints, and head sequence from one D1 snapshot.
+    const result = await db.prepare(`SELECT h.sequence AS head_sequence,e.*,
+      c.sequence AS checkpoint_sequence,c.event_id AS checkpoint_event_id,
+      c.event_hash AS checkpoint_event_hash
+      FROM paper_candidate_heads h
+      LEFT JOIN paper_events e ON e.candidate_id=h.candidate_id
+      LEFT JOIN paper_event_checkpoints c ON c.candidate_id=e.candidate_id AND c.sequence=e.sequence
+      WHERE h.candidate_id=? ORDER BY e.sequence LIMIT ?`)
       .bind(candidate, limit).all();
-    const checkpoints = await db.prepare("SELECT sequence,event_id,event_hash FROM paper_event_checkpoints WHERE candidate_id=? ORDER BY sequence LIMIT ?")
-      .bind(candidate, limit).all();
-    return json({ events: result.results || [], checkpoints: checkpoints.results || [] });
+    const rows = result.results || [];
+    const events = rows.filter(row => row.event_id !== null && row.event_id !== undefined)
+      .map(row => Object.fromEntries(RECORD_FIELDS.concat(["sequence","previous_hash","event_hash"]).map(key => [key, row[key]])));
+    const checkpoints = rows.filter(row => row.event_id !== null && row.event_id !== undefined)
+      .map(row => ({ sequence: row.checkpoint_sequence, event_id: row.checkpoint_event_id, event_hash: row.checkpoint_event_hash }));
+    const headSequence = rows.length ? rows[0].head_sequence : 0;
+    return json({ events, checkpoints, head_sequence: headSequence });
   } catch { return json({ error: "storage_unavailable" }, 503); }
 }
 export async function handlePaperLedger(request, env, url) {
