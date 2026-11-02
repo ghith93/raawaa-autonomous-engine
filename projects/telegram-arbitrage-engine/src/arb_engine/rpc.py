@@ -21,6 +21,19 @@ class RpcReadError(RuntimeError):
 
 
 @dataclass(frozen=True, slots=True)
+class EvmTokenPreflight:
+    chain_id: int
+    block_number: int
+    block_hash: str
+    token_address: str
+    runtime_bytecode_size: int
+    decimals: int | None
+    symbol: str | None
+    name: str | None
+    metadata_status: str
+
+
+@dataclass(frozen=True, slots=True)
 class EvmPoolSnapshot:
     state: V2PoolState
     token0_decimals: int
@@ -120,6 +133,99 @@ class EthereumV2PoolReader:
         if int(value[2:], 16) == 0:
             raise ValueError("Zero address is not a valid pool, token, router, or factory")
         return value.lower()
+
+
+    @staticmethod
+    def _decode_optional_string(raw: Any) -> str | None:
+        """Decode common ERC-20 ABI string and legacy bytes32 metadata forms."""
+        if not isinstance(raw, str) or not re.fullmatch(r"0x(?:[0-9a-fA-F]{2})+", raw):
+            return None
+        data = bytes.fromhex(raw[2:])
+        try:
+            if len(data) == 32:
+                value = data.rstrip(b"\\x00").decode("utf-8")
+            elif len(data) >= 64:
+                offset = int.from_bytes(data[:32], "big")
+                if offset != 32 or len(data) < 64:
+                    return None
+                length = int.from_bytes(data[32:64], "big")
+                if length > 64 or 64 + length > len(data):
+                    return None
+                value = data[64:64 + length].decode("utf-8")
+            else:
+                return None
+        except (UnicodeDecodeError, ValueError):
+            return None
+        value = value.strip().strip("\\x00")
+        return value[:64] if value else None
+
+    def read_token_preflight(self, token_address: str) -> EvmTokenPreflight:
+        """Read contract-code presence and optional ERC-20 metadata at one pinned block.
+
+        This is identity/ABI preflight only; it does not establish safe transfer
+        behavior, absence of taxes, blacklist logic, proxies, or honeypot risk.
+        """
+        token = self._pool_address(token_address)
+        chain_id = self._uint(self._rpc("eth_chainId", []), "chain ID")
+        if chain_id != self.expected_chain_id:
+            raise RpcReadError(
+                f"Unexpected chain ID: expected {self.expected_chain_id}, received {chain_id}"
+            )
+        block_number = self._uint(self._rpc("eth_blockNumber", []), "block number")
+        block_tag = hex(block_number)
+        block = self._rpc("eth_getBlockByNumber", [block_tag, False])
+        if not isinstance(block, dict) or not isinstance(block.get("hash"), str):
+            raise RpcReadError("Pinned block response is missing its hash")
+        block_hash = block["hash"].lower()
+        if not re.fullmatch(r"0x[0-9a-f]{64}", block_hash):
+            raise RpcReadError("Pinned block hash is invalid")
+        code = self._rpc("eth_getCode", [token, block_tag])
+        if not isinstance(code, str) or not re.fullmatch(r"0x(?:[0-9a-fA-F]{2})*", code):
+            raise RpcReadError("Token runtime bytecode response is malformed")
+        if len(code) <= 2:
+            raise RpcReadError("Address has no contract bytecode at the pinned block")
+        if len(code) > 250_002:
+            raise RpcReadError("Token runtime bytecode exceeds the 125 KB safety limit")
+
+        decimals = None
+        try:
+            raw_decimals = self._rpc(
+                "eth_call", [{"to": token, "data": "0x313ce567"}, block_tag],
+            )
+            decimals_value = self._uint(raw_decimals, "token decimals")
+            if decimals_value > 36:
+                raise RpcReadError("Token decimals exceed supported safety bound (36)")
+            decimals = decimals_value
+        except RpcReadError:
+            # ERC-20 metadata methods are optional under EIP-20; absence is
+            # reported explicitly and never replaced with a guessed default.
+            decimals = None
+
+        optional_metadata = {}
+        for label, selector in (("symbol", "0x95d89b41"), ("name", "0x06fdde03")):
+            try:
+                raw_value = self._rpc(
+                    "eth_call", [{"to": token, "data": selector}, block_tag],
+                )
+                optional_metadata[label] = self._decode_optional_string(raw_value)
+            except RpcReadError:
+                optional_metadata[label] = None
+
+        final_block = self._rpc("eth_getBlockByNumber", [block_tag, False])
+        if not isinstance(final_block, dict) or str(final_block.get("hash", "")).lower() != block_hash:
+            raise RpcReadError("Pinned block changed during token preflight (possible reorg)")
+        status = "metadata_available" if decimals is not None else "contract_code_only_metadata_incomplete"
+        return EvmTokenPreflight(
+            chain_id=chain_id,
+            block_number=block_number,
+            block_hash=block_hash,
+            token_address=token,
+            runtime_bytecode_size=(len(code) - 2) // 2,
+            decimals=decimals,
+            symbol=optional_metadata["symbol"],
+            name=optional_metadata["name"],
+            metadata_status=status,
+        )
 
     def read_gas_price_wei(self) -> int:
         """Read the node's current gas-price estimate in wei; not a gas-units estimate."""
