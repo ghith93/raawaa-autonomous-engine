@@ -106,7 +106,7 @@ Use `flash-swap-sim` separately for the V2 pair-invariant flash-swap repayment s
 
 ## Read-only Uniswap V3 pool snapshots and multi-tick simulation
 
-The `v3-sim` command reads a bounded Uniswap V3 pool snapshot at one pinned Ethereum block, verifies the pool against the configured factory and fee tier, fetches the tick bitmap words and initialized liquidityNet records along a requested price-limit path, and simulates exact-input or exact-output swaps across multiple ticks.
+The `v3-sim` command reads a bounded Uniswap V3 pool snapshot at one pinned Ethereum block, verifies the pool against the configured factory and fee tier, fetches the tick bitmap words and initialized liquidityNet records along a requested price-limit path, and simulates exact-input or exact-output swaps across multiple ticks. Ethereum defaults to the keyless Nodely endpoint and a 0.55-second minimum request interval to remain below its documented two-heavy-call-per-second limit; callers can explicitly supply another HTTPS RPC.
 
 Example (Ethereum defaults to the official Uniswap V3 factory and the configured public read-only RPC):
 
