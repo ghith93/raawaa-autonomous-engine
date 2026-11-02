@@ -26,7 +26,7 @@ AndroidHarness 3.1 remains an optional, manually invoked diagnostic/compatibilit
 
 Do not configure WorkManager, a foreground poller, recurring prompts, or device-side auto-continue as a prerequisite. Do not upgrade the installed app or grant additional device permissions for normal engine operation. The bounded issue bridge may be retained for occasional device-specific diagnostics, but its pending test task is no longer a release gate. All normal tests run in GitHub Actions; all cloud task state remains in D1.
 
-Cloud execution is still bounded and periodic, not guaranteed always-on: the deployed Worker owns authenticated D1 task operations and stale-lease recovery; GitHub Actions runs a small scheduled dry-run consumer. A future Durable Objects alarm evaluation may improve cloud wake-ups without creating another queue, but it must preserve D1 as the source of truth and pass isolated reliability and free-tier tests before adoption.
+Cloud execution is still bounded and periodic, not guaranteed always-on: the deployed Worker owns authenticated D1 task operations and stale-lease recovery; GitHub Actions runs a small scheduled dry-run consumer. Durable Objects Alarms were evaluated and deferred: they cannot execute the current Python handlers, and Worker Cron already performs stale-lease recovery. Reconsider only after a Worker-native executor exists; D1 remains the source of truth.
 ## Requirements and checks
 
 Python 3.11 or later is required. Runtime dependencies are kept minimal.
@@ -36,7 +36,7 @@ python -m engine.cli audit
 python -m unittest discover -s tests -v
 ```
 
-CI runs the policy/agent-roster audit and unit tests on pushes to `main`, `bootstrap/**`, `feature/**`, and `fix/**`, and on pull requests targeting `main`. A workflow file is not proof of a successful run; verify the Actions result for the exact commit SHA.
+CI runs the policy/agent-roster audit and unit tests on pushes to `main` and on pull requests targeting `main`. A workflow file is not proof of a successful run; verify the Actions result for the exact commit SHA.
 
 ## Task operations
 
