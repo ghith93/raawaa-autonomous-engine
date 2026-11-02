@@ -10,7 +10,6 @@ import re
 from typing import Any
 
 from .rpc import (
-    DEFAULT_ETHEREUM_RPC,
     EvmBlockContext,
     EthereumV2PoolReader,
     RpcReadError,
@@ -24,6 +23,7 @@ from .v3_math import (
 from .v3_simulator import V3PoolSnapshot, V3SnapshotError
 
 
+DEFAULT_V3_ETHEREUM_RPC = "https://eth.nodely.dev"
 UNISWAP_V3_FACTORY_ETHEREUM = "0x1f98431c8ad98523631ae4a59f267346ea31f984"
 
 
@@ -36,7 +36,7 @@ class EvmV3PoolReader(EthereumV2PoolReader):
 
     def __init__(
         self,
-        endpoint: str = DEFAULT_ETHEREUM_RPC,
+        endpoint: str = DEFAULT_V3_ETHEREUM_RPC,
         *,
         expected_chain_id: int = 1,
         timeout_seconds: float = 8.0,
