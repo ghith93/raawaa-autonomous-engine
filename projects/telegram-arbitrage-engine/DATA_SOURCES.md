@@ -86,3 +86,18 @@ No item in this list authorizes live trading.
 
 - Each V2 `getReserves()` response includes `blockTimestampLast` (a uint32 timestamp for the last pair reserve update). The reader now records this value and its modulo-2^32 elapsed age relative to the pinned block timestamp.
 - This is descriptive pool activity metadata, not a freshness failure by itself: an inactive pool can have unchanged but still-current reserves. The separately checked pinned block timestamp/hash remains the actual snapshot freshness and reorg control.
+
+
+## Local Anvil fork-call simulator
+
+- Foundry Anvil is an open-source in-memory EVM node that can fork an EVM network at a fixed block and expose execution traces. Official documentation: https://www.getfoundry.sh/anvil/index.html
+- The new `fork-call` command connects only to HTTP loopback addresses (`127.0.0.1`, `localhost`, or `::1`); it refuses remote RPC endpoints and verifies the Anvil client identity, chain ID, exact fork head, and pinned block hash.
+- It accepts exact caller-supplied calldata and performs only `eth_call`, `eth_estimateGas`, and optionally `debug_traceCall`. It rechecks the block hash and head after simulation.
+- The adapter's RPC allowlist excludes `eth_sendTransaction`, `eth_sendRawTransaction`, signing, impersonation, account unlock, and state mutation methods. It does not create calldata, approvals, wallets, or transactions.
+- Example setup (run Anvil separately and keep it bound to loopback):
+  `anvil --fork-url https://ethereum-rpc.publicnode.com --fork-block-number 20000000 --chain-id 1 --host 127.0.0.1 --port 8545`
+- Example call:
+  `arb-engine fork-call --chain-id 1 --fork-block 20000000 --to 0x... --data 0x... --from-address 0x... --trace`
+- The caller must supply correct calldata and a caller address whose fork-state balances/allowances are representative. A successful single call is not proof that a multi-DEX round trip is atomic, profitable, or executable in a future block. It does not submit a transaction or alter the fork.
+- Anvil's default development accounts are publicly known; this simulator never requests or uses them. Do not expose the Anvil RPC port to a network or use account impersonation for this workflow.
+- Anvil fork simulation depends on the upstream RPC serving state at the selected block. Keep the fork pinned and treat unavailable/pruned state as a hard failure.
