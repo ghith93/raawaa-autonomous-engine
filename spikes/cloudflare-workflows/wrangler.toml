@@ -1,0 +1,14 @@
+name = "raawaa-cloudflare-workflow-spike"
+main = "worker.js"
+compatibility_date = "2026-10-31"
+workers_dev = false
+preview_urls = false
+
+# Intentionally separate from the production Worker and its D1 binding.
+# No routes, secrets, D1, Queues, AI, or remote service bindings are configured.
+[[workflows]]
+name = "raawaa-task-spike"
+binding = "TASK_WORKFLOW"
+class_name = "TaskWorkflow"
+concurrency = { limit = 2 }
+default_retention = { success_retention = "1 day", error_retention = "1 day" }
