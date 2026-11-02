@@ -3,7 +3,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "test:worker": "node --test tests/worker.test.js",
+    "test:worker": "node --test tests/worker.test.js tests/quota_worker.test.js",
     "test:workflow-spike": "node --test tests/cloudflare_workflows_spike.test.js",
     "test:workflow-local": "node tests/cloudflare_workflow_local_smoke.mjs"
   }

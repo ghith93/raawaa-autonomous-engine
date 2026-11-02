@@ -6,7 +6,19 @@ venv/
 .env
 .env.*
 !.env.example
+.dev.vars
+.wrangler/
+node_modules/
+.gh-token
 .DS_Store
 coverage/
 dist/
 build/
+# Local runtime state (SQLite ledgers, task stores, checkpoints) must never be committed.
+data/
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+*.sqlite
+*.sqlite3
