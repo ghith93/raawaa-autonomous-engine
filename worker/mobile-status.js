@@ -42,7 +42,7 @@ h2{font-size:16px;margin:0 0 10px}.rows{display:grid;gap:8px}.item{display:flex;
 </div>
 <section class="panel"><h2>Paper research events</h2><div id="paper" class="rows"></div></section>
 <section class="panel"><h2>Provider usage · D1</h2><div id="usage" class="rows"></div></section>
-<section class="panel"><h2>Latest paper event</h2><div id="latest" class="muted">—</div></section>
+<section class="panel"><h2>Latest market snapshot</h2><div id="snapshot" class="muted">—</div></section><section class="panel"><h2>Latest paper event</h2><div id="latest" class="muted">—</div></section><section class="panel"><h2>GitHub CI health</h2><div id="ci" class="rows"></div></section>
 <section class="panel"><h2>Not yet connected to this status feed</h2><div id="gaps" class="rows"></div></section>
 <button id="refresh">Refresh</button><button class="secondary" id="disconnect">Disconnect</button>
 <p class="muted" id="updated"></p>
@@ -52,6 +52,15 @@ h2{font-size:16px;margin:0 0 10px}.rows{display:grid;gap:8px}.item{display:flex;
 let accessToken = "";
 const $ = id => document.getElementById(id);
 const escapeText = value => String(value ?? "—");
+async function loadCi() {
+  try {
+    const response=await fetch("https://api.github.com/repos/ghith93/raawaa-autonomous-engine/actions/runs?branch=main&per_page=10",{headers:{accept:"application/vnd.github+json"},cache:"no-store"});
+    if(!response.ok) throw new Error("GitHub API unavailable");
+    const data=await response.json();
+    const runs=(data.workflow_runs||[]).filter(run=>run.name==="Engine CI"||run.name==="Scheduled Open-Source Research Discovery").slice(0,4);
+    rows("ci",runs.map(run=>[run.name,run.status+(run.conclusion?" · "+run.conclusion:" · running")+" · "+run.updated_at]),"No recent CI runs");
+  } catch { rows("ci",[],"GitHub API unavailable or rate-limited"); }
+}
 function rows(target, values, empty) {
   $(target).replaceChildren();
   if (!values.length) { const p=document.createElement("div");p.className="muted";p.textContent=empty;$(target).append(p);return; }
@@ -68,7 +77,9 @@ async function load() {
   $("failed").textContent=(tasks.failed||0)+(tasks.blocked||0);
   rows("paper",(data.paper_events||[]).map(x=>[x.event_type,x.count]),"No paper events recorded");
   rows("usage",(data.provider_usage||[]).map(x=>[x.route_id,(x.requests||0)+" requests · "+(x.tokens||0)+" tokens"]),"No D1 provider usage recorded");
+  $("snapshot").textContent=data.latest_market_snapshot?data.latest_market_snapshot.candidate_id+" · chain "+(data.latest_market_snapshot.chain_id??"—")+" · block "+(data.latest_market_snapshot.block_number??"—")+" · "+data.latest_market_snapshot.occurred_at:"No market snapshot recorded";
   $("latest").textContent=data.latest_paper_event?data.latest_paper_event.event_type+" · "+data.latest_paper_event.candidate_id+" · "+data.latest_paper_event.occurred_at:"No paper event recorded";
+  await loadCi();
   rows("gaps",Object.entries(data.unavailable_metrics||{}),"No unavailable metrics");
   $("updated").textContent="Snapshot generated: "+data.generated_at;
   $("message").textContent="Connected · read-only";
@@ -87,7 +98,7 @@ export function handleMobilePage(request, url) {
     "cache-control": "no-store",
     "x-content-type-options": "nosniff",
     "referrer-policy": "no-referrer",
-    "content-security-policy": "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
+    "content-security-policy": "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'self' https://api.github.com; base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
   }});
 }
 
@@ -100,12 +111,15 @@ export async function handleMobileStatus(request, env, url) {
       env.DB.prepare("SELECT version FROM schema_migrations WHERE version IN ('0003_durable_quota_ledger','0004_paper_event_ledger')").all(),
     ]);
     const applied = new Set((migrations.results || []).map(row => row.version));
-    const [paper, latest, usage] = await Promise.all([
+    const [paper, latest, snapshot, usage] = await Promise.all([
       applied.has("0004_paper_event_ledger")
         ? env.DB.prepare("SELECT event_type,COUNT(*) AS count FROM paper_events GROUP BY event_type ORDER BY event_type").all()
         : Promise.resolve({ results: [] }),
       applied.has("0004_paper_event_ledger")
         ? env.DB.prepare("SELECT event_type,candidate_id,occurred_at FROM paper_events ORDER BY occurred_at DESC,event_id DESC LIMIT 1").first()
+        : Promise.resolve(null),
+      applied.has("0004_paper_event_ledger")
+        ? env.DB.prepare("SELECT candidate_id,occurred_at,chain_id,block_number FROM paper_events WHERE event_type='snapshot_captured' ORDER BY occurred_at DESC,event_id DESC LIMIT 1").first()
         : Promise.resolve(null),
       applied.has("0003_durable_quota_ledger")
         ? env.DB.prepare("SELECT route_id,COUNT(*) AS requests,COALESCE(SUM(tokens),0) AS tokens FROM quota_usage GROUP BY route_id ORDER BY route_id").all()
@@ -118,11 +132,15 @@ export async function handleMobileStatus(request, env, url) {
       latest_paper_event: latest ? {
         event_type: latest.event_type, candidate_id: latest.candidate_id, occurred_at: latest.occurred_at,
       } : null,
+      latest_market_snapshot: snapshot ? {
+        candidate_id: snapshot.candidate_id, occurred_at: snapshot.occurred_at,
+        chain_id: snapshot.chain_id, block_number: snapshot.block_number,
+      } : null,
       provider_usage: (usage.results || []).map(row => ({
         route_id: row.route_id, requests: Number(row.requests) || 0, tokens: Number(row.tokens) || 0,
       })),
       unavailable_metrics: {
-        last_scan: "Not recorded in the shared D1 control plane",
+        last_scan: "Scan-run heartbeat is not recorded; the latest captured market snapshot is shown separately",
         source_freshness: "Not yet aggregated from market-data adapters",
         ci_health: "Not yet ingested from GitHub Actions",
         monetary_costs: "Monetary ledger remains local SQLite; not exposed here",
