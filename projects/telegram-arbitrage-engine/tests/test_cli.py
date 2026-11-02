@@ -67,6 +67,11 @@ def test_v2_sim_cli_router_validation_is_read_only(monkeypatch, capsys):
                 snapshot(POOL_B, 1_000_000_000_000, 10**24, 25),
             ]
 
+        def verify_v2_router_factory(self, router, factory, block):
+            assert router in {"0x" + "5" * 40, "0x" + "6" * 40}
+            assert factory in {"0x" + "7" * 40, "0x" + "8" * 40}
+            assert block == 123
+
         def verify_canonical_block(self, block, expected_hash):
             assert block == 123
             assert expected_hash == HASH
@@ -88,6 +93,7 @@ def test_v2_sim_cli_router_validation_is_read_only(monkeypatch, capsys):
         "--quote-token", QUOTE, "--base-token", BASE,
         "--capital-quote", "50", "--rpc-url", "https://rpc.example",
         "--buy-router", "0x" + "5" * 40, "--sell-router", "0x" + "6" * 40,
+        "--buy-factory", "0x" + "7" * 40, "--sell-factory", "0x" + "8" * 40,
     ])
     cli.main()
     result = json.loads(capsys.readouterr().out)
