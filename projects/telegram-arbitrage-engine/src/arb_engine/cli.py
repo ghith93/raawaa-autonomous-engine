@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 from decimal import Decimal
 
 from .dexscreener import DexScreenerClient, MarketDataError
+from .fork_sim import AnvilForkSimulator, ForkSimulationError
 from .ledger import OpportunityLedger
 from .models import MarketQuote, Opportunity
 from .risk import validate_opportunity
@@ -92,6 +93,18 @@ def main() -> None:
     v2_parser.add_argument("--sell-router", help="optional V2 router contract for same-block getAmountsOut validation")
     v2_parser.add_argument("--buy-factory", help="expected V2 factory for the buy pair; verifies factory() and getPair()")
     v2_parser.add_argument("--sell-factory", help="expected V2 factory for the sell pair; verifies factory() and getPair()")
+    fork_parser = sub.add_parser(
+        "fork-call", help="simulate supplied contract calldata against an operator-managed local Anvil fork"
+    )
+    fork_parser.add_argument("--anvil-rpc", default="http://127.0.0.1:8545")
+    fork_parser.add_argument("--chain-id", required=True, type=int)
+    fork_parser.add_argument("--fork-block", required=True, type=int)
+    fork_parser.add_argument("--to", required=True)
+    fork_parser.add_argument("--data", required=True, help="exact contract calldata; no transaction is submitted")
+    fork_parser.add_argument("--from-address")
+    fork_parser.add_argument("--value-wei", type=int, default=0)
+    fork_parser.add_argument("--gas-limit", type=int)
+    fork_parser.add_argument("--trace", action="store_true", help="request optional callTracer execution trace")
     scan_parser = sub.add_parser("scan", help="read-only indicative DEX price-spread scan")
     scan_parser.add_argument("query", help="token symbol, pair, or address accepted by DEX Screener")
     scan_parser.add_argument("--min-liquidity", default="10000")
@@ -261,6 +274,34 @@ def main() -> None:
             print(json.dumps(output, indent=2))
         except (RpcReadError, ValueError, ArithmeticError) as exc:
             parser.exit(2, f"v2-sim failed: {exc}\\n")
+    elif args.command == "fork-call":
+        try:
+            result = AnvilForkSimulator(args.anvil_rpc).simulate_call(
+                expected_chain_id=args.chain_id,
+                fork_block=args.fork_block,
+                to=args.to,
+                data=args.data,
+                from_address=args.from_address,
+                value_wei=args.value_wei,
+                gas_limit=args.gas_limit,
+                include_trace=args.trace,
+            )
+            print(json.dumps({
+                "mode": "read_only_local_anvil_fork_call_simulation",
+                "chain_id": result.chain_id,
+                "fork_block": result.fork_block,
+                "block_hash": result.block_hash,
+                "anvil_client_version": result.client_version,
+                "call_output": result.call_output,
+                "estimated_gas": result.estimated_gas,
+                "trace": result.trace,
+                "classification": result.classification,
+                "transaction_submitted": False,
+                "wallet_or_signer_used": False,
+                "warning": "Exact calldata is simulated with eth_call and eth_estimateGas on a pinned local fork. This is a single-call simulation, not a multi-DEX atomic arbitrage proof or a guarantee of inclusion.",
+            }, indent=2))
+        except (ForkSimulationError, ValueError, ArithmeticError) as exc:
+            parser.exit(2, f"fork-call failed: {exc}\n")
     elif args.command == "scan":
         try:
             result = scan(args.query, Decimal(args.min_liquidity), Decimal(args.min_volume), args.ledger)
