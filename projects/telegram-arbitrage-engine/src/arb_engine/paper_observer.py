@@ -159,6 +159,9 @@ def observe_flash_swap_outcome(
             pool_requests.append((native_quote_pair, native_quote_fee))
 
     reader = reader or EthereumV2PoolReader(rpc_url, expected_chain_id=chain_id)
+    # Re-check the candidate's original block before reading forward state. A
+    # reorged candidate must never be compared with a later canonical snapshot.
+    reader.verify_canonical_block(candidate_block, candidate_hash)
     snapshots = reader.read_pools(pool_requests)
     if len(snapshots) != len(pool_requests):
         raise ValueError("RPC reader returned an incomplete forward-observation snapshot")
@@ -180,6 +183,8 @@ def observe_flash_swap_outcome(
         for item in snapshots
     ):
         raise ValueError("All forward-observation pools must share one canonical chain and block")
+    # Re-check both ends after the read to detect a reorg during observation.
+    reader.verify_canonical_block(candidate_block, candidate_hash)
     reader.verify_canonical_block(observed_state.block_number, observed_state.block_hash)
 
     initial_decimals = snapshot_payload.get("token_decimals")
