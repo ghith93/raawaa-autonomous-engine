@@ -70,6 +70,7 @@ class FundingRateObservation:
     funding_time_ms: int
     mark_price: Decimal | None
     funding_interval_hours: int | None
+    funding_interval_source: str | None
     rate_type: str | None
     fetched_at: datetime
 
@@ -308,6 +309,9 @@ class PublicPerpetualFundingClient:
                 funding_time_ms=funding_time,
                 mark_price=mark,
                 funding_interval_hours=interval,
+                funding_interval_source=(
+                    "current_instrument_metadata" if interval is not None else None
+                ),
                 rate_type=rate_type,
                 fetched_at=fetched_at,
             )
