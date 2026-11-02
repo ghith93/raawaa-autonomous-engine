@@ -1,0 +1,91 @@
+from arb_engine.rpc import EthereumV2PoolReader, RpcReadError
+
+
+TOKEN0 = "0x" + "1" * 40
+TOKEN1 = "0x" + "2" * 40
+POOL_A = "0x" + "3" * 40
+POOL_B = "0x" + "4" * 40
+BLOCK_HASH = "0x" + "a" * 64
+
+
+def word(value: int) -> str:
+    return f"{value:064x}"
+
+
+def address_word(address: str) -> str:
+    return "0x" + ("0" * 24) + address[2:].lower()
+
+
+def fake_rpc(method, params):
+    if method == "eth_chainId":
+        return "0x1"
+    if method == "eth_blockNumber":
+        return "0x64"
+    if method == "eth_getBlockByNumber":
+        assert params == ["0x64", False]
+        return {"hash": BLOCK_HASH, "timestamp": "0x6553f100"}
+    if method == "eth_call":
+        call, block_tag = params
+        assert block_tag == "0x64"
+        selector = call["data"]
+        target = call["to"].lower()
+        if selector == "0x0dfe1681":
+            return address_word(TOKEN0)
+        if selector == "0xd21220a7":
+            return address_word(TOKEN1)
+        if selector == "0x0902f1ac":
+            reserve0 = 1_000_000 if target == POOL_A else 2_000_000
+            reserve1 = 3_000_000 if target == POOL_A else 4_000_000
+            return "0x" + word(reserve0) + word(reserve1) + word(1234)
+        if selector == "0x313ce567":
+            return "0x" + word(6 if call["to"].lower() == TOKEN0 else 18)
+    raise AssertionError(f"Unexpected RPC request: {method} {params}")
+
+
+def test_reader_returns_two_pool_states_pinned_to_same_block(monkeypatch):
+    reader = EthereumV2PoolReader(min_request_interval=0)
+    calls = []
+    def fake(method, params):
+        calls.append((method, params))
+        return fake_rpc(method, params)
+    monkeypatch.setattr(reader, "_rpc", fake)
+
+    snapshots = reader.read_pools([(POOL_A, 30), (POOL_B, 25)])
+    assert len(snapshots) == 2
+    assert snapshots[0].state.block_number == snapshots[1].state.block_number == 100
+    assert snapshots[0].state.block_hash == snapshots[1].state.block_hash == BLOCK_HASH
+    assert snapshots[0].state.fee_bps == 30
+    assert snapshots[1].state.fee_bps == 25
+    assert snapshots[0].token0_decimals == 6
+    assert snapshots[0].token1_decimals == 18
+    assert all(params[1] == "0x64" for method, params in calls if method == "eth_call")
+
+
+def test_reader_rejects_wrong_chain(monkeypatch):
+    reader = EthereumV2PoolReader(min_request_interval=0)
+    monkeypatch.setattr(reader, "_rpc", lambda method, params: "0x89" if method == "eth_chainId" else None)
+    try:
+        reader.read_pool(POOL_A, 30)
+    except RpcReadError as exc:
+        assert "Unexpected chain ID" in str(exc)
+    else:
+        raise AssertionError("wrong chain must be rejected")
+
+
+def test_reader_requires_https_endpoint_without_credentials():
+    import pytest
+
+    with pytest.raises(ValueError, match="HTTPS"):
+        EthereumV2PoolReader("http://example.com")
+    with pytest.raises(ValueError, match="credentials"):
+        EthereumV2PoolReader("https://user:secret@example.com/rpc")
+    with pytest.raises(ValueError, match="query"):
+        EthereumV2PoolReader("https://example.com/rpc?key=secret")
+
+
+def test_reader_rejects_duplicate_pool_addresses():
+    import pytest
+
+    reader = EthereumV2PoolReader(min_request_interval=0)
+    with pytest.raises(ValueError, match="Duplicate"):
+        reader.read_pools([(POOL_A, 30), (POOL_A, 25)])
