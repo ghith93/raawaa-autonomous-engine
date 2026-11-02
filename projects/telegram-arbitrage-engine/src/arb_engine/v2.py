@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from decimal import Decimal, localcontext
+import re
 
 
 @dataclass(frozen=True, slots=True)
@@ -49,15 +50,22 @@ def _validate_pool(pool: V2PoolState) -> None:
         raise ValueError("Pool must be a V2PoolState")
     if not isinstance(pool.chain_id, int) or isinstance(pool.chain_id, bool) or pool.chain_id <= 0:
         raise ValueError("Invalid EVM chain ID")
-    if not all(isinstance(value, str) and value.strip() for value in (
+    if not all(isinstance(value, str) for value in (
         pool.pair_address, pool.token0, pool.token1, pool.block_hash,
     )):
         raise ValueError("Pool addresses and block hash are required")
+    address_pattern = r"0x[0-9a-fA-F]{40}"
+    if any(not re.fullmatch(address_pattern, value) for value in (
+        pool.pair_address, pool.token0, pool.token1,
+    )):
+        raise ValueError("Pool and token addresses must be 20-byte EVM addresses")
+    if not re.fullmatch(r"0x[0-9a-fA-F]{64}", pool.block_hash):
+        raise ValueError("Block hash must be a 32-byte hexadecimal value")
     if pool.token0.casefold() == pool.token1.casefold():
         raise ValueError("Pool tokens must be different")
-    if any(not isinstance(value, int) or isinstance(value, bool) or value <= 0
+    if any(not isinstance(value, int) or isinstance(value, bool) or value <= 0 or value >= 2**112
            for value in (pool.reserve0_raw, pool.reserve1_raw)):
-        raise ValueError("Pool reserves must be positive integer raw units")
+        raise ValueError("Pool reserves must be positive uint112 raw units")
     if not isinstance(pool.fee_bps, int) or isinstance(pool.fee_bps, bool) or not 0 <= pool.fee_bps < 10000:
         raise ValueError("Pool fee must be integer basis points in [0, 10000)")
     if not isinstance(pool.block_number, int) or isinstance(pool.block_number, bool) or pool.block_number < 0:
