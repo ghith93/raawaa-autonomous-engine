@@ -14,6 +14,27 @@ Simulation-first spot-arbitrage research module, isolated inside the autonomous-
 - An optional local Anvil fork-call adapter accepts exact caller-supplied calldata and performs read-only eth_call/eth_estimateGas with optional callTracer output; it refuses non-loopback endpoints and never submits transactions. It simulates one call only, not an atomic two-venue arbitrage route.
 - A read-only EVM JSON-RPC adapter retrieves two V2 pool states and token decimals at one pinned block. The V2 constant-product calculator uses integer raw units and requires two distinct pools at the same block; it is reserve math only and excludes gas, transfer taxes, dynamic fees, reverts, MEV, and execution. Pool fee basis points can be supplied manually or selected from the source-documented Ethereum V2 registry. Registry entries remain unverified until the CLI confirms pair.factory(), factory.getPair(), and router.factory() at the pinned block; the fee model is still a documented assumption.
 
+## Read-only Solana price observations
+
+A dependency-free Jupiter Price API V3 client is available at `arb_engine.market_sources.jupiter.JupiterPriceV3Client`. It batches up to 50 exact 32-byte base58 mint addresses per request, preserves USD price, token decimals, block ID, 24-hour change, liquidity, creation time and local receive time, and returns omitted/unreliable prices separately in `missing_mints`. Monetary fields are parsed as `Decimal`. Price observations are explicitly labelled `indicative_price`, not executable quotes or net-profit evidence.
+
+The existing Jupiter quote-only client and Price V3 client share a process-wide 0.5 requests/second keyless limiter. HTTP 429 responses defer the limiter using bounded Retry-After handling. No API key, symbol search, wallet, transaction, or swap execution is used.
+
+Example:
+
+```python
+from arb_engine.market_sources.jupiter import JupiterPriceV3Client
+
+client = JupiterPriceV3Client()
+batch = client.fetch_prices([
+    "So11111111111111111111111111111111111111112",
+    "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+])
+for observation in batch.observations:
+    print(observation.mint, observation.usd_price, observation.block_id)
+print("Missing/unpriced:", batch.missing_mints)
+```
+
 ## Read-only Solana quote data
 
 A fixture-tested Jupiter Swap API V2 quote-only client is available at `arb_engine.market_sources.jupiter.JupiterQuoteOnlyClient`. It calls only `GET /swap/v2/order` without `taker` or an API key. Jupiter documents that this returns a quote with `transaction: null`; the adapter rejects any response that contains a transaction. It enforces the keyless 0.5 requests/second limit (2-second minimum interval), validates raw uint64 amounts and mint identity, and preserves fee/route/price-impact metadata.
