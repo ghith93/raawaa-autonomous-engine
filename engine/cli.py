@@ -302,6 +302,7 @@ def main() -> int:
             },
             "budget_status": ledger.budget_status(daily_budget, monthly_budget),
             "usage": ledger.totals(),
+            "per_task_usage": ledger.task_summaries(per_task_budget),
             "pending_reservations": ledger.pending_reservations(),
             "reconciliation_note": (
                 "Ambiguous reservations are intentionally retained. Do not release one "
