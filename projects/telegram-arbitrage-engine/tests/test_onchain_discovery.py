@@ -67,7 +67,7 @@ class FakeReader:
 
     def verify_v2_pool_factory(self, pair_address, factory, token0, token1, block):
         expected_factory = UNI_FACTORY if pair_address == UNI_PAIR else SUSHI_FACTORY
-        assert factory == expected_factory
+        assert factory.casefold() == expected_factory.casefold()
         assert {token0, token1} == {QUOTE, BASE}
         assert block == 100
         self.verified_pairs.append((pair_address, factory, block))
