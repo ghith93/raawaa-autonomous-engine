@@ -93,8 +93,8 @@ def test_v2_sim_cli_router_validation_is_read_only(monkeypatch, capsys):
                 assert amount == 50_000_000
                 return [amount, 10**18]
             assert path == [BASE, QUOTE]
-            assert amount == 10**18
-            return [amount, 51_000_000]
+            assert amount == 995_000_000_000_000_000
+            return [amount, 50_745_000]
 
     monkeypatch.setattr(cli, "EthereumV2PoolReader", FakeReader)
     monkeypatch.setattr(sys, "argv", [
@@ -109,7 +109,10 @@ def test_v2_sim_cli_router_validation_is_read_only(monkeypatch, capsys):
     cli.main()
     result = json.loads(capsys.readouterr().out)
     assert result["router_validation"]["mode"] == "read_only_router_eth_call"
-    assert result["router_validation"]["sell_quote_out"] == "51"
+    assert result["router_validation"]["buy_min_base_out"] == "0.995"
+    assert result["router_validation"]["sell_quote_out_at_buy_min"] == "50.745"
+    assert result["router_validation"]["sell_min_quote_out"] == "50.491275"
+    assert result["router_validation"]["slippage_tolerance_bps_per_leg"] == 50
     assert result["live_execution"] is False
 
 
@@ -189,3 +192,18 @@ def test_v2_sim_cli_reports_native_gas_budget_separately(monkeypatch, capsys):
     assert gas["estimated_native_asset_cost_wei"] == "720000000000000"
     assert gas["valuation_in_quote_token"] is None
     assert "gas" in result["warning"].lower()
+
+
+def test_v2_sim_cli_rejects_excessive_slippage_tolerance(monkeypatch):
+    import pytest
+
+    monkeypatch.setattr(sys, "argv", [
+        "arb-engine", "v2-sim",
+        "--buy-pair", POOL_A, "--buy-fee-bps", "30",
+        "--sell-pair", POOL_B, "--sell-fee-bps", "25",
+        "--quote-token", QUOTE, "--base-token", BASE,
+        "--capital-quote", "50", "--slippage-bps", "5001",
+    ])
+    with pytest.raises(SystemExit) as exc:
+        cli.main()
+    assert exc.value.code == 2
