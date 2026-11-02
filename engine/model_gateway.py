@@ -168,14 +168,20 @@ class UsageLedger:
         }
 
     def budget_status(self, daily_budget_usd: float, monthly_budget_usd: float,
-                      now: datetime | None = None) -> dict[str, bool]:
-        """Compare actual plus outstanding spend to hard caps using integer nano-USD."""
+                      now: datetime | None = None, task_id: str | None = None,
+                      per_task_budget_usd: float = 0.0) -> dict[str, bool]:
+        """Compare actual plus outstanding spend to all hard caps using integer nano-USD."""
         daily_cap = _money_nanos(daily_budget_usd, round_up=False)
         monthly_cap = _money_nanos(monthly_budget_usd, round_up=False)
+        task_cap = _money_nanos(per_task_budget_usd, round_up=False)
+        if task_cap > 0 and task_id is None:
+            raise ValueError("task_id is required when a per-task monetary budget is configured")
         totals = self.totals(now)
+        task_total = self.task_totals(task_id)["total_nanos"] if task_id is not None else 0
         return {
             "daily_over_budget": totals["daily_total_nanos"] > daily_cap,
             "monthly_over_budget": totals["monthly_total_nanos"] > monthly_cap,
+            "per_task_over_budget": task_total > task_cap,
         }
 
     def release(self, reservation_id: int) -> None:
@@ -392,9 +398,14 @@ class ModelGateway:
             )
         daily_cap = _money_nanos(self.daily_budget_usd, round_up=False)
         monthly_cap = _money_nanos(self.monthly_budget_usd, round_up=False)
+        budget_status = self.ledger.budget_status(
+            self.daily_budget_usd, self.monthly_budget_usd,
+            task_id=request.task_id, per_task_budget_usd=self.per_task_budget_usd,
+        )
         if (settlement["daily_total_nanos"] > daily_cap
-                or settlement["monthly_total_nanos"] > monthly_cap):
+                or settlement["monthly_total_nanos"] > monthly_cap
+                or budget_status["per_task_over_budget"]):
             raise BudgetExceeded(
-                "Actual provider cost exceeded the remaining budget; actual usage was recorded."
+                "Actual provider cost exceeded a configured spend budget; actual usage was recorded."
             )
         return response
