@@ -41,13 +41,16 @@ export async function handleQuota(request, env, url) {
   if (request.method === "GET") {
     const routeId = url.searchParams.get("route_id");
     const taskId = url.searchParams.get("task_id") || "read-only";
-    if (!validText(routeId, 200) || !validText(taskId, 200)) return json({ error: "invalid_query" }, 400);
+    const limit = Number(url.searchParams.get("limit") || 100);
+    if ((routeId !== null && !validText(routeId, 200)) || !validText(taskId, 200) || !Number.isInteger(limit) || limit < 1 || limit > 500) return json({ error: "invalid_query" }, 400);
     const now = new Date().toISOString();
     try {
-      const snapshot = await usage(env.DB, routeId, taskId, now);
-      const cooldown = await env.DB.prepare("SELECT until_at,reason FROM quota_cooldowns WHERE route_id=?").bind(routeId).first();
-      const audit = await env.DB.prepare("SELECT id,event,route_id,task_kind,details_json,occurred_at FROM quota_audit_events WHERE route_id=? ORDER BY id DESC LIMIT 100").bind(routeId).all();
-      return json({ usage: snapshot, cooldown: cooldown || null, audit: audit.results || [] });
+      const snapshot = await usage(env.DB, routeId || "__no_route__", taskId, now);
+      const cooldown = routeId ? await env.DB.prepare("SELECT until_at,reason FROM quota_cooldowns WHERE route_id=?").bind(routeId).first() : null;
+      const audit = routeId
+        ? await env.DB.prepare("SELECT id,event,route_id,task_kind,details_json,occurred_at FROM quota_audit_events WHERE route_id=? ORDER BY id DESC LIMIT ?").bind(routeId, limit).all()
+        : await env.DB.prepare("SELECT id,event,route_id,task_kind,details_json,occurred_at FROM quota_audit_events ORDER BY id DESC LIMIT ?").bind(limit).all();
+      return json({ usage: snapshot, cooldown: cooldown || null, audit: (audit.results || []).map(row => ({...row, details: JSON.parse(row.details_json)})) });
     } catch { return json({ error: "storage_unavailable" }, 503); }
   }
   if (request.method !== "POST") return json({ error: "method_not_allowed" }, 405);
