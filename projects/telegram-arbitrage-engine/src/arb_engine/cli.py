@@ -12,6 +12,9 @@ from .onchain_v2_scan import scan_onchain_v2_candidates
 from .fork_sim import AnvilForkSimulator, ForkSimulationError
 from .ledger import OpportunityLedger
 from .models import MarketQuote, Opportunity
+from .market_sources.jupiter import (
+    JupiterPriceV3Client, JupiterQuoteOnlyClient, JupiterQuoteError,
+)
 from .risk import validate_opportunity
 from .rpc import DEFAULT_ETHEREUM_RPC, EthereumV2PoolReader, RpcReadError
 from .scanner import find_spreads
@@ -124,6 +127,21 @@ def main() -> None:
     v2_parser.add_argument("--sell-router", help="optional V2 router contract for same-block getAmountsOut validation")
     v2_parser.add_argument("--buy-factory", help="expected V2 factory for the buy pair; verifies factory() and getPair()")
     v2_parser.add_argument("--sell-factory", help="expected V2 factory for the sell pair; verifies factory() and getPair()")
+    solana_price_parser = sub.add_parser(
+        "solana-price",
+        help="read-only Jupiter Price API V3 indicative USD prices for up to 50 Solana mints",
+    )
+    solana_price_parser.add_argument("--mint", action="append", required=True)
+    solana_price_parser.add_argument("--timeout-seconds", type=float, default=8.0)
+    solana_quote_parser = sub.add_parser(
+        "solana-quote",
+        help="read-only Jupiter Swap API V2 quote-only request; never builds or submits a transaction",
+    )
+    solana_quote_parser.add_argument("--input-mint", required=True)
+    solana_quote_parser.add_argument("--output-mint", required=True)
+    solana_quote_parser.add_argument("--amount-raw", required=True)
+    solana_quote_parser.add_argument("--timeout-seconds", type=float, default=8.0)
+
     flash_parser = sub.add_parser(
         "flash-swap-sim",
         help="read-only V2 flash-swap reserve simulation with optional local paper-ledger capture",
@@ -406,6 +424,75 @@ def main() -> None:
             print(json.dumps(output, indent=2))
         except (RpcReadError, ValueError, ArithmeticError) as exc:
             parser.exit(2, f"v2-sim failed: {exc}\n")
+    elif args.command == "solana-price":
+        try:
+            batch = JupiterPriceV3Client(timeout_seconds=args.timeout_seconds).fetch_prices(args.mint)
+            print(json.dumps({
+                "mode": "read_only_solana_indicative_price",
+                "source": "Jupiter Price API V3",
+                "network": "solana",
+                "requested_mints": list(batch.requested_mints),
+                "missing_mints": list(batch.missing_mints),
+                "fetched_at": batch.fetched_at.isoformat(),
+                "observations": [{
+                    "mint": item.mint,
+                    "usd_price": str(item.usd_price),
+                    "decimals": item.decimals,
+                    "source_block_id": item.block_id,
+                    "price_change_24h_pct": str(item.price_change_24h) if item.price_change_24h is not None else None,
+                    "reported_liquidity_usd": str(item.liquidity_usd) if item.liquidity_usd is not None else None,
+                    "provider_created_at": item.created_at.isoformat() if item.created_at else None,
+                    "fetched_at": item.fetched_at.isoformat(),
+                    "data_classification": item.data_class,
+                } for item in batch.observations],
+                "data_classification": "indicative_heuristic_prices_not_executable_quotes",
+                "live_execution": False,
+                "warning": (
+                    "Jupiter Price API V3 is a heuristic USD mark derived from on-chain activity. "
+                    "Missing mints have no reliable returned price. source_block_id is provider provenance, "
+                    "not a synchronized current-block quote; fetched_at is local retrieval time only. "
+                    "This is not an executable price, order book, or evidence of profit."
+                ),
+            }, indent=2))
+        except (JupiterQuoteError, ValueError, ArithmeticError) as exc:
+            parser.exit(2, f"solana-price failed: {exc}\\n")
+    elif args.command == "solana-quote":
+        try:
+            quote = JupiterQuoteOnlyClient(timeout_seconds=args.timeout_seconds).quote(
+                input_mint=args.input_mint,
+                output_mint=args.output_mint,
+                amount_raw=args.amount_raw,
+            )
+            print(json.dumps({
+                "mode": "read_only_solana_router_quote",
+                "source": "Jupiter Swap API V2 /order",
+                "network": "solana",
+                "input_mint": quote.input_mint,
+                "output_mint": quote.output_mint,
+                "input_amount_raw": str(quote.input_amount_raw),
+                "output_amount_raw": str(quote.output_amount_raw),
+                "other_amount_threshold_raw": (
+                    str(quote.other_amount_threshold_raw)
+                    if quote.other_amount_threshold_raw is not None else None
+                ),
+                "fee_bps": quote.fee_bps,
+                "fee_mint": quote.fee_mint,
+                "price_impact_pct": str(quote.price_impact_pct) if quote.price_impact_pct is not None else None,
+                "router": quote.router,
+                "route_plan": list(quote.route_plan),
+                "request_id": quote.request_id,
+                "context_slot": quote.context_slot,
+                "fetched_at": quote.fetched_at.isoformat(),
+                "transaction_present": quote.transaction_present,
+                "live_execution": False,
+                "warning": (
+                    "Quote-only request without a taker; the API response must explicitly contain transaction=null. "
+                    "No transaction is built, signed, or submitted. A router quote is not a guarantee of execution, "
+                    "inclusion, realized PnL, or profit after fees and network costs."
+                ),
+            }, indent=2))
+        except (JupiterQuoteError, ValueError, ArithmeticError) as exc:
+            parser.exit(2, f"solana-quote failed: {exc}\\n")
     elif args.command == "flash-swap-sim":
         try:
             result = run_flash_swap_simulation(
