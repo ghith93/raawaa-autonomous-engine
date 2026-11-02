@@ -52,3 +52,54 @@ def test_v2_sim_cli_converts_human_amount_to_raw_units(monkeypatch, capsys):
     assert result["block_number"] == 123
     assert result["live_execution"] is False
     assert "Excludes gas" in result["warning"]
+
+
+def test_v2_sim_cli_router_validation_is_read_only(monkeypatch, capsys):
+    class FakeReader:
+        def __init__(self, endpoint):
+            self.endpoint = endpoint
+
+        def read_pools(self, pools):
+            return [
+                snapshot(POOL_A, 1_000_000_000_000, 10**24, 30),
+                snapshot(POOL_B, 1_000_000_000_000, 10**24, 25),
+            ]
+
+        def quote_v2_router_exact_input(self, router, amount, path, block):
+            assert block == 123
+            if path == [QUOTE, BASE]:
+                assert amount == 50_000_000
+                return [amount, 10**18]
+            assert path == [BASE, QUOTE]
+            assert amount == 10**18
+            return [amount, 51_000_000]
+
+    monkeypatch.setattr(cli, "EthereumV2PoolReader", FakeReader)
+    monkeypatch.setattr(sys, "argv", [
+        "arb-engine", "v2-sim",
+        "--buy-pair", POOL_A, "--buy-fee-bps", "30",
+        "--sell-pair", POOL_B, "--sell-fee-bps", "25",
+        "--quote-token", QUOTE, "--base-token", BASE,
+        "--capital-quote", "50", "--rpc-url", "https://rpc.example",
+        "--buy-router", "0x" + "5" * 40, "--sell-router", "0x" + "6" * 40,
+    ])
+    cli.main()
+    result = json.loads(capsys.readouterr().out)
+    assert result["router_validation"]["mode"] == "read_only_router_eth_call"
+    assert result["router_validation"]["sell_quote_out"] == "51"
+    assert result["live_execution"] is False
+
+
+def test_v2_sim_cli_requires_both_router_addresses(monkeypatch):
+    import pytest
+
+    monkeypatch.setattr(sys, "argv", [
+        "arb-engine", "v2-sim",
+        "--buy-pair", POOL_A, "--buy-fee-bps", "30",
+        "--sell-pair", POOL_B, "--sell-fee-bps", "25",
+        "--quote-token", QUOTE, "--base-token", BASE,
+        "--capital-quote", "50", "--buy-router", "0x" + "5" * 40,
+    ])
+    with pytest.raises(SystemExit) as exc:
+        cli.main()
+    assert exc.value.code == 2
