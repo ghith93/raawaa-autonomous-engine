@@ -13,7 +13,7 @@
 
 ## Public Ethereum JSON-RPC candidate
 
-- PublicNode endpoint: https://ethereum-rpc.publicnode.com
+- Default PublicNode endpoint: https://ethereum-rpc.publicnode.com (Ethereum mainnet, chain ID 1). The CLI accepts `--chain-id` and a custom HTTPS `--rpc-url` for other EVM networks.
 - The current `v2-sim` CLI uses this endpoint for read-only `eth_chainId`, `eth_blockNumber`, `eth_getBlockByNumber`, and `eth_call` requests. It reads V2 `token0`, `token1`, `getReserves`, and token `decimals`, pins both pools to one block, checks the block timestamp, and re-reads the block hash to detect a reorg during collection. When explicit router addresses are supplied, it also calls V2 `getAmountsOut(uint256,address[])` for each leg at that same block validates the ABI response, and re-checks the canonical block hash after the router calls.
 - Public/free availability is not an SLA, and rate limits or service terms may change.
 - No key, wallet, signer, transaction submission, or paid access is required by the current code.
