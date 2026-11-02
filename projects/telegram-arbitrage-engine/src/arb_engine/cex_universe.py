@@ -5,7 +5,6 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
-from typing import Mapping
 
 from .market_sources.binance import BinancePublicMarketData
 from .market_sources.bybit import BybitPublicMarketData
