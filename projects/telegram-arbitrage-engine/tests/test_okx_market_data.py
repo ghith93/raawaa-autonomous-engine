@@ -39,8 +39,8 @@ def instrument_payload(**overrides):
 
 
 def orderbook_payload(**overrides):
+    # The official REST response example omits instId from the snapshot payload.
     item = {
-        "instId": "BTC-USDT",
         "asks": [["101.20", "1.50000000", "0", "2"], ["101.30", "2", "0", "1"]],
         "bids": [["101.10", "1.25000000", "0", "3"], ["101.00", "2", "0", "1"]],
         "ts": "1793628000000",
