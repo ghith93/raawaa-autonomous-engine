@@ -18,6 +18,7 @@ cd projects/telegram-arbitrage-engine
 python -m pip install -e '.[dev]'
 pytest
 arb-engine demo
+arb-engine report --limit 500
 arb-engine scan WETH/USDC --min-liquidity 10000 --min-volume 1000
 ```
 
@@ -27,4 +28,4 @@ Scan snapshots are saved to `data/opportunities.sqlite3`. Avoid tight polling an
 The next mandatory layer is exact-size router quotes, pool-state/block freshness, route price impact, fee and gas estimation, token transfer-tax/blacklist checks, revert/failure simulation, and chain atomicity analysis. Cross-chain spreads remain informational only and require bridge cost, settlement delay, and custody/bridge risk modelling.
 
 ## Current milestone
-0.3: hardened fail-closed input parsing, explicit retrieval-vs-quote freshness provenance, public read-only DEX scanner, and local SQLite observation ledger. Live market connectivity must be verified in the deployment environment; local CI uses fixtures and does not prove live API availability.
+0.3: hardened fail-closed input parsing, explicit retrieval-vs-quote freshness provenance, public read-only DEX scanner, local SQLite observation ledger, and a repeated-observation summary (not a PnL backtest). Live market connectivity must be verified in the deployment environment; local CI uses fixtures and does not prove live API availability.
