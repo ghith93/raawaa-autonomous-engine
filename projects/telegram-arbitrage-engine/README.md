@@ -96,6 +96,12 @@ The pure `arb_engine.opportunity_costs.evaluate_two_leg_spread` component separa
 
 See [OPPORTUNITY_COST_MODEL.md](OPPORTUNITY_COST_MODEL.md). This evaluator is a deterministic guardrail component and is not yet connected to automated opportunity ranking or order execution. Even a positive result remains an estimate with `execution_verified=False`.
 
+## CEX cross-venue spot depth scanner
+
+The read-only compare_cex_spot_orderbooks component compares both directions between Bybit/Binance spot books using full depth sweeps at one base quantity. An explicit InstrumentRegistry must map each venue instrument to the same canonical base and quote IDs; symbol equality alone is never sufficient. The result is passed through the Decimal cost evaluator, so unknown fees/latency leave net profit unset and partial depth blocks profit labels.
+
+See CEX_CROSS_VENUE.md. This is a read-only comparison component, not an order executor or automated strategy loop.
+
 ## Read-only flash-swap simulation
 
 The `flash-swap-sim` command reads two V2 pools at one canonical block, models the opposite-token repayment invariant, and optionally applies a caller-supplied gas-used/gas-price scenario. It can optionally record local research events with `--record-paper`.
