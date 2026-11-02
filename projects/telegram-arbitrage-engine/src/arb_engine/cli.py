@@ -194,6 +194,7 @@ def main() -> None:
             }
             if args.gas_units_assumption is not None:
                 gas_price_wei = reader.read_gas_price_wei()
+                gas_price_retrieved_at = datetime.now(timezone.utc).isoformat()
                 buffered_gas_units = (
                     args.gas_units_assumption * (10000 + args.gas_safety_bps) + 9999
                 ) // 10000
@@ -201,6 +202,8 @@ def main() -> None:
                     "gas_units_assumption": args.gas_units_assumption,
                     "safety_buffer_bps": args.gas_safety_bps,
                     "buffered_gas_units": buffered_gas_units,
+                    "gas_price_source": "EVM JSON-RPC eth_gasPrice",
+                    "gas_price_retrieved_at": gas_price_retrieved_at,
                     "gas_price_wei": str(gas_price_wei),
                     "estimated_native_asset_cost_wei": str(buffered_gas_units * gas_price_wei),
                     "valuation_in_quote_token": None,
