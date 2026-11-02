@@ -1,7 +1,9 @@
 from datetime import datetime, timezone
+import sys
 
 import pytest
 
+from arb_engine.cli import main
 from arb_engine.flash_swap_cli import run_flash_swap_simulation
 from arb_engine.rpc import EvmPoolSnapshot
 from arb_engine.v2 import V2PoolState
@@ -183,3 +185,12 @@ def test_negative_gross_surplus_is_recorded_as_rejected_not_as_profit(tmp_path):
     assert int(result["gross_profit_raw"]) < 0
     assert result["paper_ledger"]["event_count"] == 4
     assert result["paper_ledger"]["chain_verified"] is True
+
+
+
+def test_flash_swap_cli_help_is_registered(monkeypatch, capsys):
+    monkeypatch.setattr(sys, "argv", ["arb-engine", "flash-swap-sim", "--help"])
+    with pytest.raises(SystemExit) as exit_info:
+        main()
+    assert exit_info.value.code == 0
+    assert "--record-paper" in capsys.readouterr().out
