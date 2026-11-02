@@ -164,6 +164,22 @@ test("scheduled handler runs bounded stale lease recovery and records a heartbea
 });
 
 
+test("scheduled handler fails visibly when the heartbeat audit write fails", async () => {
+  const DB = dbMock();
+  const prepare = DB.prepare.bind(DB);
+  DB.prepare = sql => {
+    const statement = prepare(sql);
+    if (sql.includes("worker_cron_tick")) {
+      statement.run = async () => { throw new Error("audit storage unavailable"); };
+    }
+    return statement;
+  };
+  await assert.rejects(
+    () => worker.scheduled({ cron: "*/15 * * * *" }, { DB }),
+    /audit storage unavailable/,
+  );
+});
+
 test("authenticated POST diagnostic probe confirms application auth without writes", async () => {
   const DB = dbMock();
   const response = await worker.fetch(request("/v1/diagnostics/auth", {
