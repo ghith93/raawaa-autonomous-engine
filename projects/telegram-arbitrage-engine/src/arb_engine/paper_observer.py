@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from datetime import datetime, timezone
 from typing import Any
 
@@ -108,8 +109,24 @@ def observe_flash_swap_outcome(
     chain_id = _integer(captured.get("chain_id"), "candidate chain_id", minimum=1)
     candidate_block = _integer(captured.get("block_number"), "candidate block_number")
     candidate_hash = captured.get("block_hash")
-    if not isinstance(candidate_hash, str) or not candidate_hash.startswith("0x"):
+    if not isinstance(candidate_hash, str) or not re.fullmatch(r"0x[0-9a-fA-F]{64}", candidate_hash):
         raise ValueError("Candidate snapshot is missing its canonical block hash")
+    if (
+        _integer(route_event.get("chain_id"), "route chain_id", minimum=1) != chain_id
+        or _integer(route_event.get("block_number"), "route block_number") != candidate_block
+        or str(route_event.get("block_hash", "")).casefold() != candidate_hash.casefold()
+    ):
+        raise ValueError("Candidate route and snapshot must share the same canonical block")
+    route_payload = _payload(route_event)
+    if route_payload.get("amount_borrowed_raw") != str(amount_borrowed):
+        raise ValueError("Candidate route amount does not match observer metadata")
+    snapshot_payload = _payload(captured)
+    pool_addresses = snapshot_payload.get("pool_addresses")
+    if not isinstance(pool_addresses, list) or any(
+        address.casefold() not in {str(value).casefold() for value in pool_addresses}
+        for address in (source_pool, destination_pool)
+    ):
+        raise ValueError("Candidate snapshot does not contain its route pools")
     candidate_time = datetime.fromisoformat(str(detected.get("occurred_at")).replace("Z", "+00:00"))
     if candidate_time.tzinfo is None or candidate_time.utcoffset() is None:
         raise ValueError("Candidate timestamp must be timezone-aware")
@@ -149,7 +166,7 @@ def observe_flash_swap_outcome(
         raise ValueError("All forward-observation pools must share one canonical chain and block")
     reader.verify_canonical_block(observed_state.block_number, observed_state.block_hash)
 
-    initial_decimals = _payload(captured).get("token_decimals")
+    initial_decimals = snapshot_payload.get("token_decimals")
     if not isinstance(initial_decimals, dict):
         raise ValueError("Candidate snapshot is missing token-decimal provenance")
     original = {str(key).casefold(): value for key, value in initial_decimals.items()}
