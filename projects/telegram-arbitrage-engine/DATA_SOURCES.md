@@ -18,6 +18,14 @@
 - Public/free availability is not an SLA, and rate limits or service terms may change.
 - No key, wallet, signer, transaction submission, or paid access is required by the current code.
 
+## Live read-only deployment verification
+
+- The `venue-check` command uses the public Ethereum JSON-RPC endpoint to verify the current chain ID, pins one block number/hash, checks factory/router/pair runtime bytecode, reads Router02 `factory()`, factory `getPair(WETH,USDC)`, pair `factory()`, and pair `token0()/token1()`, then rechecks the pinned block hash.
+- Canonical Ethereum WETH address is sourced from Uniswap's official deployments documentation; Ethereum USDC address is listed by Circle and in Uniswap's official pool examples.
+- The Telegram Arbitrage Engine CI runs this read-only smoke on pull requests and pushes to main. It uses no API key, wallet, signer, or transaction method; retry count and timeout are bounded.
+- A passing check proves those deployment relationships for the canonical WETH/USDC pair at the checked block only. It does not prove fee semantics for every pool, token safety, transfer behavior, gas, atomic two-venue route execution, profitability, or future-block availability.
+- If the public RPC is unavailable or rate-limited, the live smoke fails visibly; deterministic unit tests remain separate and use a fake RPC.
+
 ## Source-documented V2 venue registry
 
 The packaged registry currently contains Ethereum mainnet only:
