@@ -19,7 +19,7 @@ from arb_engine.v3_simulator import simulate_v3_swap
 POOL = "0x8ad599c3a0ff1de082011efddc58f1908eb6e6d8"
 USDC = "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48"
 WETH = "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2"
-RPC_ENDPOINTS = (DEFAULT_ETHEREUM_RPC, "https://eth.nodely.dev")
+RPC_ENDPOINTS = (\n    DEFAULT_ETHEREUM_RPC,\n    "https://eth.nodely.dev",\n    "https://rpcfree.com/ethereum-rpc",\n    "https://eth-mainnet.g.alchemy.com/public",\n)
 MAX_TOTAL_RPC_REQUESTS = 512
 
 
