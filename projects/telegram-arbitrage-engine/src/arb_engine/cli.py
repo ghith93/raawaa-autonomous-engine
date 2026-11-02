@@ -75,6 +75,7 @@ def main() -> None:
     v2_parser.add_argument("--base-token", required=True)
     v2_parser.add_argument("--capital-quote", required=True, help="human quote-token amount, e.g. 50")
     v2_parser.add_argument("--rpc-url", default=DEFAULT_ETHEREUM_RPC)
+    v2_parser.add_argument("--chain-id", type=int, default=1, help="expected EVM chain ID (default: Ethereum mainnet)")
     v2_parser.add_argument("--buy-router", help="optional V2 router contract for same-block getAmountsOut validation")
     v2_parser.add_argument("--sell-router", help="optional V2 router contract for same-block getAmountsOut validation")
     v2_parser.add_argument("--buy-factory", help="expected V2 factory for the buy pair; verifies factory() and getPair()")
@@ -105,7 +106,7 @@ def main() -> None:
                 raise ValueError("Supply both --buy-router and --sell-router, or neither")
             if bool(args.buy_factory) != bool(args.sell_factory):
                 raise ValueError("Supply both --buy-factory and --sell-factory, or neither")
-            reader = EthereumV2PoolReader(args.rpc_url)
+            reader = EthereumV2PoolReader(args.rpc_url, expected_chain_id=args.chain_id)
             snapshots = reader.read_pools([
                 (args.buy_pair, args.buy_fee_bps),
                 (args.sell_pair, args.sell_fee_bps),
