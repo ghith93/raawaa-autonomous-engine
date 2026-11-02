@@ -306,6 +306,8 @@ class EvmV3PoolReader(EthereumV2PoolReader):
                 block_hash=context.block_hash,
                 bitmap_words=bitmap_words,
                 initialized_ticks=initialized_ticks,
+                rpc_verified=True,
+                source="evm_rpc_same_block_factory_registered_block_hash_rechecked",
             )
         except V3SnapshotError as exc:
             raise RpcReadError(f"V3 snapshot validation failed: {exc}") from exc
