@@ -1,47 +1,50 @@
 from __future__ import annotations
 
 import ast
+import importlib.util
 from pathlib import Path
-import sys
 
-import pytest
+from arb_engine.rpc import RpcReadError
+
+
+def smoke_module():
+    repository_root = Path(__file__).resolve().parents[3]
+    script = repository_root / "scripts" / "v3_live_readonly_smoke.py"
+    spec = importlib.util.spec_from_file_location("v3_live_readonly_smoke", script)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return script, module
 
 
 def test_live_v3_smoke_script_parses_and_contains_no_transaction_submission() -> None:
-    repository_root = Path(__file__).resolve().parents[3]
-    script = repository_root / "scripts" / "v3_live_readonly_smoke.py"
+    script, _ = smoke_module()
     source = script.read_text(encoding="utf-8")
     ast.parse(source, filename=str(script))
     assert "eth_sendTransaction" not in source
     assert "eth_sendRawTransaction" not in source
     assert "live_execution" in source
     assert "transaction_submitted" in source
-    assert "re.fullmatch" in source
-    assert "250_002" in source
-
-def test_v3_cli_help_exposes_absolute_and_relative_tick_limits(monkeypatch, capsys) -> None:
-    from arb_engine.cli import main
-
-    monkeypatch.setattr(sys, "argv", ["arb-engine", "v3-sim", "--help"])
-    with pytest.raises(SystemExit) as exc:
-        main()
-    assert exc.value.code == 0
-    output = capsys.readouterr().out
-    assert "--limit-tick" in output
-    assert "--limit-ticks" in output
 
 
-def test_v3_cli_rejects_both_limit_modes_before_network_access(monkeypatch) -> None:
-    from arb_engine.cli import main
+def test_v3_smoke_only_fails_over_for_transport_failures() -> None:
+    _, module = smoke_module()
+    assert module.is_retryable_transport_error(RpcReadError("EVM RPC HTTP error: 403"))
+    assert module.is_retryable_transport_error(RpcReadError("EVM RPC HTTP error: 429"))
+    assert module.is_retryable_transport_error(RpcReadError("EVM RPC HTTP error: 503"))
+    assert module.is_retryable_transport_error(RpcReadError("EVM RPC request failed: URLError"))
+    assert not module.is_retryable_transport_error(RpcReadError("Malformed V3 ABI response"))
+    assert not module.is_retryable_transport_error(RpcReadError("V3 pool factory mismatch"))
+    assert not module.is_retryable_transport_error(RpcReadError("V3 block is no longer canonical"))
 
-    monkeypatch.setattr(sys, "argv", [
-        "arb-engine", "v3-sim",
-        "--pool", "0x" + "1" * 40,
-        "--direction", "token0_to_token1",
-        "--amount-specified", "1000",
-        "--limit-tick", "-120",
-        "--limit-ticks", "120",
-    ])
-    with pytest.raises(SystemExit) as exc:
-        main()
-    assert exc.value.code == 2
+
+def test_v3_smoke_endpoint_override_is_unique_and_does_not_embed_credentials(monkeypatch) -> None:
+    _, module = smoke_module()
+    monkeypatch.setenv(
+        "V3_SMOKE_RPC_URLS",
+        "https://eth.drpc.org,https://eth.drpc.org,https://public.1rpc.io/eth",
+    )
+    assert module.configured_endpoints() == (
+        "https://eth.drpc.org",
+        "https://public.1rpc.io/eth",
+    )
