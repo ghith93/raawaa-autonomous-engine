@@ -1,6 +1,6 @@
 {
   "schema_version": 2,
-  "description": "Source-documented Ethereum V2 deployments. Addresses and fee assumptions are not treated as live verified until v2-sim confirms pair.factory(), factory.getPair(), and router.factory() at the pinned block.",
+  "description": "Source-documented Ethereum V2 deployments. DEX Screener IDs are discovery labels only. Addresses and fee assumptions are not treated as live verified until on-chain checks confirm pair.factory(), factory.getPair(), and router.factory() at the pinned block.",
   "venues": [
     {
       "id": "uniswap_v2_ethereum",
