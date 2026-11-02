@@ -219,7 +219,7 @@ jobs:
           raise SystemExit(result.returncode)
       - name: Publish bounded Task Runner status
         if: always()
-        uses: actions/github-script@v7
+        uses: actions/github-script@v9
         env:
           HEALTH_STATUS: ${{ steps.health.outputs.status }}
           HEALTH_RAY: ${{ steps.health.outputs.ray }}
