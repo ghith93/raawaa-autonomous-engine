@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from decimal import Decimal, localcontext
 import re
 from typing import Any
@@ -313,6 +314,8 @@ def scan_onchain_v2(
             "best_direction": best,
             "classification": "verified_same_block_v2_router_quotes_not_net_profit_or_executable_trade",
         })
+    if int(datetime.now(timezone.utc).timestamp()) - pinned_block.block_timestamp > 60:
+        raise ValueError("On-chain discovery exceeded the 60-second pinned-block freshness window")
     return {
         "mode": "read_only_onchain_v2_discovery",
         "discovery_source": "DEX Screener candidate metadata only",
