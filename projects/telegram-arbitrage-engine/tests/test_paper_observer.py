@@ -17,7 +17,7 @@ DESTINATION = "0x" + "5" * 40
 NATIVE_QUOTE = "0x" + "6" * 40
 CANDIDATE_HASH = "0x" + "a" * 64
 OBSERVED_HASH = "0x" + "b" * 64
-CANDIDATE_TIME = 1_798_000_000
+CANDIDATE_TIME = int(datetime.now(timezone.utc).timestamp()) - 20
 
 
 def snapshot(pair, token0, token1, reserve0, reserve1, decimals0, decimals1, *, block, block_hash, timestamp):
@@ -25,7 +25,7 @@ def snapshot(pair, token0, token1, reserve0, reserve1, decimals0, decimals1, *, 
         chain_id=1, pair_address=pair, token0=token0, token1=token1,
         reserve0_raw=reserve0, reserve1_raw=reserve1, fee_bps=30,
         block_number=block, block_hash=block_hash,
-        observed_at=datetime.fromtimestamp(timestamp, timezone.utc),
+        observed_at=datetime.now(timezone.utc),
     )
     return EvmPoolSnapshot(
         state=state, token0_decimals=decimals0, token1_decimals=decimals1,
