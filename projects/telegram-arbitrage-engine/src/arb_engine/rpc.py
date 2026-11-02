@@ -455,7 +455,7 @@ class EthereumV2PoolReader:
             )
             actual_factory = self._address(factory_word, "pair factory")
         except RpcReadError as exc:
-            if "EVM RPC returned an error" in str(exc) or "Invalid ABI address word for pair factory" in str(exc):
+            if "EVM RPC returned an error" in str(exc) or "ABI address word" in str(exc):
                 raise PoolFactoryMismatch("Candidate does not expose a valid V2 pair factory()") from exc
             raise
         if actual_factory != factory:
@@ -468,7 +468,7 @@ class EthereumV2PoolReader:
             )
             registered_pair = self._address(pair_word, "factory getPair")
         except RpcReadError as exc:
-            if "EVM RPC returned an error" in str(exc) or "Invalid ABI address word for factory getPair" in str(exc):
+            if "EVM RPC returned an error" in str(exc) or "ABI address word" in str(exc):
                 raise PoolFactoryMismatch("Configured factory does not expose a valid V2 getPair() result") from exc
             raise
         if registered_pair != pair:
