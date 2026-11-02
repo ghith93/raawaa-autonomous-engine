@@ -73,7 +73,7 @@ class FakeReader:
         self.verified_pairs.append((pair_address, factory, block))
 
     def verify_v2_router_factory(self, router, factory, block):
-        expected_factory = UNI_FACTORY if router == UNI_ROUTER else SUSHI_FACTORY
+        expected_factory = UNI_FACTORY if router.casefold() == UNI_ROUTER.casefold() else SUSHI_FACTORY
         assert factory.casefold() == expected_factory.casefold()
         assert block == 100
         self.verified_routers.append((router, factory, block))
