@@ -318,3 +318,23 @@ The source-documented venue registry reduces manual address/fee entry for Ethere
 The read-only Solana path now exposes Jupiter Price API V3 indicative prices and Swap API V2 no-taker quote-only requests through `solana-price` and `solana-quote`. It uses documented keyless 0.5 RPS pacing, rejects transaction-bearing quote responses, and keeps Solana marks separate from the EVM/CEX evaluator until canonical asset mapping and timestamp/slot synchronization are established.
 
 Cross-venue CEX comparisons require both venue snapshots to be fresh and synchronized. The comparator defaults to a maximum 5-second quote age and a maximum 2-second inter-venue timestamp skew; a larger skew is reported as `unsynchronized_data` and cannot produce a net estimate. These are configurable research guards, not evidence of executable fills or profitability.
+
+## Read-only CEX spot depth scan
+
+A bounded CLI now orchestrates public spot instrument metadata and L2 order-book reads across Binance, Bybit, Coinbase Exchange and OKX. It fetches up to four venues concurrently, validates exact instrument/base/quote identity and trading status, then uses the existing explicit canonical InstrumentRegistry and full-depth cross-venue evaluator. It does not match symbols alone or infer BTC/XBT, USD/USDT, USDT/USDC, or wrapped-token equivalence.
+
+Example (the selected instrument IDs must exist and report exactly BTC/USDT on every selected venue):
+
+```bash
+python -m arb_engine.cli cex-scan \
+  --venue binance=BTCUSDT \
+  --venue bybit=BTCUSDT \
+  --venue okx=BTC-USDT \
+  --base-code BTC \
+  --quote-code USDT \
+  --base-asset-id asset:canonical:BTC \
+  --quote-currency-id currency:canonical:USDT \
+  --base-quantity 0.01
+```
+
+The command reports both directions, depth-swept VWAP, fill fractions, gross quote difference, freshness/synchronization status and partial source failures. Fee profiles are intentionally not guessed; unless independently verified fees and latency assumptions are supplied through a reviewed extension, net profit remains unknown (incomplete_costs). This is an operator-invoked read-only command, not a scheduled scanner or trading loop. No API keys, account endpoints, orders, withdrawals, wallets, or transaction methods are used. See CEX_CROSS_VENUE.md and DATA_SOURCES.md.
