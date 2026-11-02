@@ -49,9 +49,10 @@ class TelegramBotAPI:
                     raise TelegramApiError("Telegram response exceeded 500 KB safety limit")
                 result = json.loads(raw)
         except HTTPError as exc:
-            raise TelegramApiError(f"Telegram HTTP error: {exc.code}") from exc
-        except (URLError, TimeoutError, json.JSONDecodeError) as exc:
-            raise TelegramApiError(f"Telegram request failed: {type(exc).__name__}") from exc
+            # HTTPError carries the full request URL, which contains the bot token.
+            raise TelegramApiError(f"Telegram HTTP error: {exc.code}") from None
+        except (URLError, TimeoutError, json.JSONDecodeError, UnicodeDecodeError) as exc:
+            raise TelegramApiError(f"Telegram request failed: {type(exc).__name__}") from None
         if not isinstance(result, dict) or result.get("ok") is not True:
             code = result.get("error_code") if isinstance(result, dict) else None
             raise TelegramApiError(f"Telegram API rejected the request (code={code})")
@@ -109,8 +110,8 @@ class TelegramController:
             return None
 
         now = time.monotonic()
-        previous = self._last_request_by_chat.get(chat_id, 0.0)
-        if previous > 0 and now - previous < self.min_request_interval_seconds:
+        previous = self._last_request_by_chat.get(chat_id)
+        if previous is not None and now - previous < self.min_request_interval_seconds:
             return chat_id, "Rate limit: wait a few seconds before the next command."
         self._last_request_by_chat[chat_id] = now
 
