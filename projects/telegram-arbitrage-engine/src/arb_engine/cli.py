@@ -801,7 +801,7 @@ def main() -> None:
         try:
             print(json.dumps(run_cex_scan(args), indent=2))
         except (ValueError, RuntimeError, OSError, ArithmeticError) as exc:
-            parser.exit(2, f"cex-scan failed: {exc}\\n")
+            parser.exit(2, f"cex-scan failed: {exc}\n")
     elif args.command == "solana-quote":
         try:
             quote = JupiterQuoteOnlyClient(timeout_seconds=args.timeout_seconds).quote(
