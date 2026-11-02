@@ -64,3 +64,10 @@ def test_rate_limit_is_per_chat():
     second = controller.response_for_update(message_update(update_id=2, text="/status"))
     assert first is not None and "read-only research mode" in first[1]
     assert second is not None and "Rate limit" in second[1]
+
+
+def test_bot_rejects_boolean_sender_id():
+    controller = TelegramController(FakeAPI([]), frozenset({1}), min_request_interval_seconds=0)
+    update = message_update(chat_id=1)
+    update["message"]["from"]["id"] = True
+    assert controller.response_for_update(update) is None
