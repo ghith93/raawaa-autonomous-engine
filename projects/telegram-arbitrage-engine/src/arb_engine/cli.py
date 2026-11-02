@@ -16,6 +16,13 @@ from .models import MarketQuote, Opportunity
 from .market_sources.jupiter import (
     JupiterPriceV3Client, JupiterQuoteOnlyClient, JupiterQuoteError,
 )
+from .market_sources.bybit import BybitPublicMarketData
+from .market_sources.binance import BinancePublicMarketData
+from .market_sources.kraken import KrakenPublicMarketData
+from .market_sources.coinbase import CoinbaseExchangePublicMarketData
+from .market_sources.okx import OKXPublicSpotMarketData
+from .market_sources.cross_venue import InstrumentRegistry, compare_cex_spot_orderbooks
+from .opportunity_costs import OpportunityCosts
 from .risk import validate_opportunity
 from .rpc import DEFAULT_ETHEREUM_RPC, EthereumV2PoolReader, RpcReadError
 from .scanner import find_spreads
@@ -28,6 +35,168 @@ from .venue_smoke import (
 from .v3_math import get_sqrt_ratio_at_tick
 from .v3_rpc import DEFAULT_V3_ETHEREUM_RPC, EvmV3PoolReader
 from .v3_simulator import simulate_v3_swap
+
+
+def _fetch_cex_snapshot(venue: str, instrument_id: str):
+    """Fetch public instrument metadata and one bounded spot book; never use private APIs."""
+    if venue == "bybit":
+        client = BybitPublicMarketData()
+        metadata = client.fetch_instrument(symbol=instrument_id, category="spot")
+        book = client.fetch_orderbook(category="spot", symbol=metadata.instrument_id, limit=50)
+    elif venue == "binance":
+        client = BinancePublicMarketData()
+        metadata = client.fetch_instrument(symbol=instrument_id)
+        book = client.fetch_orderbook(symbol=metadata.instrument_id, limit=100)
+    elif venue == "kraken":
+        client = KrakenPublicMarketData()
+        metadata = client.fetch_instrument(pair=instrument_id)
+        book = client.fetch_orderbook(pair=metadata.instrument_id, count=100)
+    elif venue == "coinbase":
+        client = CoinbaseExchangePublicMarketData()
+        metadata = client.fetch_instrument(product_id=instrument_id)
+        book = client.fetch_orderbook(product_id=metadata.instrument_id, level=2)
+    elif venue == "okx":
+        client = OKXPublicSpotMarketData()
+        metadata = client.fetch_instrument(inst_id=instrument_id)
+        book = client.fetch_orderbook(inst_id=metadata.instrument_id, depth=20)
+    else:
+        raise ValueError("unsupported CEX venue")
+    if metadata.status.upper() != "TRADING":
+        raise ValueError(f"{venue}:{metadata.instrument_id} is not currently trading")
+    return metadata, book
+
+
+def run_cex_scan(args) -> dict:
+    """Compose two public CEX books with explicit identity, depth and cost gates."""
+    if args.venue_a == args.venue_b:
+        raise ValueError("venue-a and venue-b must be different exchanges")
+    metadata_a, book_a = _fetch_cex_snapshot(args.venue_a, args.instrument_a)
+    metadata_b, book_b = _fetch_cex_snapshot(args.venue_b, args.instrument_b)
+    canonical_ids = {
+        (args.venue_a, metadata_a.base_asset_code): args.a_base_asset_id,
+        (args.venue_a, metadata_a.quote_asset_code): args.a_quote_currency_id,
+        (args.venue_b, metadata_b.base_asset_code): args.b_base_asset_id,
+        (args.venue_b, metadata_b.quote_asset_code): args.b_quote_currency_id,
+    }
+    registry = InstrumentRegistry.from_metadata([metadata_a, metadata_b], canonical_ids)
+    costs_by_direction = {
+        (args.venue_a, args.venue_b): OpportunityCosts(
+            buy_fee_bps=args.fee_a_bps,
+            sell_fee_bps=args.fee_b_bps,
+            buy_slippage_bps="0",
+            sell_slippage_bps="0",
+            latency_cost_bps=args.latency_cost_bps,
+        ),
+        (args.venue_b, args.venue_a): OpportunityCosts(
+            buy_fee_bps=args.fee_b_bps,
+            sell_fee_bps=args.fee_a_bps,
+            buy_slippage_bps="0",
+            sell_slippage_bps="0",
+            latency_cost_bps=args.latency_cost_bps,
+        ),
+    }
+    opportunities = compare_cex_spot_orderbooks(
+        book_a=book_a,
+        book_b=book_b,
+        registry=registry,
+        base_quantity=args.base_quantity,
+        costs_by_direction=costs_by_direction,
+        now=datetime.now(timezone.utc),
+        max_quote_age_seconds=args.max_quote_age_seconds,
+        max_quote_skew_seconds=args.max_quote_skew_seconds,
+    )
+
+    def evaluation_dict(evaluation):
+        if evaluation is None:
+            return None
+        return {
+            "status": evaluation.status,
+            "gross_spread_bps": str(evaluation.gross_spread_bps) if evaluation.gross_spread_bps is not None else None,
+            "gross_profit_quote": str(evaluation.gross_profit_quote) if evaluation.gross_profit_quote is not None else None,
+            "known_cost_quote": str(evaluation.known_cost_quote),
+            "net_profit_quote_estimate": str(evaluation.net_profit_quote) if evaluation.net_profit_quote is not None else None,
+            "missing_required_costs": list(evaluation.missing_required_costs),
+            "max_quote_age_seconds": str(evaluation.max_quote_age_seconds) if evaluation.max_quote_age_seconds is not None else None,
+            "execution_verified": evaluation.execution_verified,
+        }
+
+    def opportunity_dict(item):
+        return {
+            "status": item.status,
+            "buy_venue": item.buy_venue_id,
+            "sell_venue": item.sell_venue_id,
+            "base_asset_id": item.base_asset_id,
+            "quote_currency_id": item.quote_currency_id,
+            "requested_base_quantity": str(item.requested_base_quantity),
+            "buy_filled_base_quantity": str(item.buy_filled_base_quantity),
+            "sell_filled_base_quantity": str(item.sell_filled_base_quantity),
+            "buy_fill_fraction": str(item.buy_fill_fraction),
+            "sell_fill_fraction": str(item.sell_fill_fraction),
+            "buy_vwap": str(item.buy_vwap) if item.buy_vwap is not None else None,
+            "sell_vwap": str(item.sell_vwap) if item.sell_vwap is not None else None,
+            "buy_quote_spent": str(item.buy_quote_spent),
+            "sell_quote_received": str(item.sell_quote_received),
+            "gross_profit_quote": str(item.gross_profit_quote) if item.gross_profit_quote is not None else None,
+            "evaluation": evaluation_dict(item.evaluation),
+        }
+
+    def instrument_dict(metadata, book):
+        return {
+            "venue": metadata.venue_id,
+            "instrument_id": metadata.instrument_id,
+            "base_asset_code": metadata.base_asset_code,
+            "quote_asset_code": metadata.quote_asset_code,
+            "status": metadata.status,
+            "base_step_size": str(metadata.base_step_size),
+            "price_tick_size": str(metadata.price_tick_size),
+            "min_base_quantity": str(metadata.min_base_quantity) if metadata.min_base_quantity is not None else None,
+            "min_quote_notional": str(metadata.min_quote_notional) if metadata.min_quote_notional is not None else None,
+            "metadata_fetched_at": metadata.fetched_at.isoformat(),
+            "book_fetched_at": book.fetched_at.isoformat(),
+            "bid_levels": len(book.bids),
+            "ask_levels": len(book.asks),
+        }
+
+    return {
+        "mode": "read_only_cex_spot_depth_comparison",
+        "source": "unauthenticated public exchange REST market-data endpoints",
+        "status": "complete",
+        "venues": [
+            instrument_dict(metadata_a, book_a),
+            instrument_dict(metadata_b, book_b),
+        ],
+        "canonical_mapping": {
+            args.venue_a: {
+                "base_asset_id": args.a_base_asset_id,
+                "quote_currency_id": args.a_quote_currency_id,
+            },
+            args.venue_b: {
+                "base_asset_id": args.b_base_asset_id,
+                "quote_currency_id": args.b_quote_currency_id,
+            },
+        },
+        "base_quantity": args.base_quantity,
+        "cost_assumptions": {
+            "venue_a_taker_fee_bps": args.fee_a_bps,
+            "venue_b_taker_fee_bps": args.fee_b_bps,
+            "latency_cost_bps": args.latency_cost_bps,
+            "separate_slippage_bps": "0 (depth-swept VWAP includes observed book-walk impact)",
+            "account_specific_fees_inferred": False,
+        },
+        "freshness_limits": {
+            "max_quote_age_seconds": args.max_quote_age_seconds,
+            "max_quote_skew_seconds": args.max_quote_skew_seconds,
+        },
+        "opportunities": [opportunity_dict(item) for item in opportunities],
+        "live_execution": False,
+        "orders_submitted": False,
+        "net_profit_claim": False,
+        "warning": (
+            "A positive net value is only a research estimate from public depth snapshots and operator-supplied costs. "
+            "It does not verify account fee tiers, inventory availability, custody/rebalancing, coordinated fills, "
+            "settlement, latency under execution, or realized PnL. Missing required costs leave the net estimate unset."
+        ),
+    }
 
 
 def demo() -> dict:
@@ -177,6 +346,25 @@ def main() -> None:
     solana_quote_parser.add_argument("--output-mint", required=True)
     solana_quote_parser.add_argument("--amount-raw", required=True)
     solana_quote_parser.add_argument("--timeout-seconds", type=float, default=8.0)
+
+    cex_parser = sub.add_parser(
+        "cex-scan",
+        help="read-only two-exchange Spot depth comparison; requires explicit canonical asset IDs",
+    )
+    cex_parser.add_argument("--venue-a", choices=("bybit", "binance", "kraken", "coinbase", "okx"), required=True)
+    cex_parser.add_argument("--instrument-a", required=True, help="exact public Spot instrument ID or Kraken pair alias")
+    cex_parser.add_argument("--a-base-asset-id", required=True, help="operator-approved canonical base asset ID for venue A")
+    cex_parser.add_argument("--a-quote-currency-id", required=True, help="operator-approved canonical quote currency ID for venue A")
+    cex_parser.add_argument("--fee-a-bps", help="operator-supplied venue A taker fee in basis points; omit to keep net unset")
+    cex_parser.add_argument("--venue-b", choices=("bybit", "binance", "kraken", "coinbase", "okx"), required=True)
+    cex_parser.add_argument("--instrument-b", required=True, help="exact public Spot instrument ID or Kraken pair alias")
+    cex_parser.add_argument("--b-base-asset-id", required=True, help="operator-approved canonical base asset ID for venue B")
+    cex_parser.add_argument("--b-quote-currency-id", required=True, help="operator-approved canonical quote currency ID for venue B")
+    cex_parser.add_argument("--fee-b-bps", help="operator-supplied venue B taker fee in basis points; omit to keep net unset")
+    cex_parser.add_argument("--base-quantity", required=True, help="exact base quantity swept through both books")
+    cex_parser.add_argument("--latency-cost-bps", help="operator-supplied combined latency-risk cost; omit to keep net unset")
+    cex_parser.add_argument("--max-quote-age-seconds", type=int, default=5)
+    cex_parser.add_argument("--max-quote-skew-seconds", type=int, default=2)
 
     flash_parser = sub.add_parser(
         "flash-swap-sim",
@@ -609,6 +797,11 @@ def main() -> None:
             }, indent=2))
         except (JupiterQuoteError, ValueError, ArithmeticError) as exc:
             parser.exit(2, f"solana-price failed: {exc}\n")
+    elif args.command == "cex-scan":
+        try:
+            print(json.dumps(run_cex_scan(args), indent=2))
+        except (ValueError, RuntimeError, OSError, ArithmeticError) as exc:
+            parser.exit(2, f"cex-scan failed: {exc}\\n")
     elif args.command == "solana-quote":
         try:
             quote = JupiterQuoteOnlyClient(timeout_seconds=args.timeout_seconds).quote(
