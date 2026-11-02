@@ -4,6 +4,10 @@ from urllib.parse import parse_qs, urlsplit
 
 import pytest
 
+from arb_engine.market_sources.binance import BinanceOrderBookSnapshot
+from arb_engine.market_sources.cross_venue import (
+    InstrumentRegistry, InstrumentSpec, compare_cex_spot_orderbooks,
+)
 from arb_engine.market_sources.okx import (
     OKXMarketDataError,
     OKXPublicSpotMarketData,
@@ -229,3 +233,34 @@ def test_okx_rejects_malformed_json_and_oversized_response():
     client, _ = make_client([b"x" * 1_000_001])
     with pytest.raises(OKXMarketDataError, match="oversized"):
         client.fetch_instrument(inst_id="BTC-USDT")
+
+
+
+def test_okx_orderbook_snapshot_plugs_into_shared_cex_comparator():
+    client, _ = make_client([orderbook_payload()])
+    okx_book = client.fetch_orderbook(inst_id="BTC-USDT")
+    registry = InstrumentRegistry([
+        InstrumentSpec("okx", "BTC-USDT", "asset:canonical:BTC", "currency:canonical:USDT", "0.0001"),
+        InstrumentSpec("binance", "BTCUSDT", "asset:canonical:BTC", "currency:canonical:USDT", "0.001"),
+    ])
+    binance_book = BinanceOrderBookSnapshot(
+        source="binance",
+        symbol="BTCUSDT",
+        bids=((Decimal("101.15"), Decimal("1")),),
+        asks=((Decimal("101.25"), Decimal("1")),),
+        last_update_id=100,
+        fetched_at=okx_book.fetched_at,
+    )
+    result = compare_cex_spot_orderbooks(
+        book_a=okx_book,
+        book_b=binance_book,
+        registry=registry,
+        base_quantity="0.5",
+        now=okx_book.fetched_at,
+    )
+    assert len(result) == 2
+    assert {
+        (item.buy_venue_id, item.sell_venue_id)
+        for item in result
+    } == {("okx", "binance"), ("binance", "okx")}
+    assert all(item.status != "asset_or_quote_identity_mismatch" for item in result)
