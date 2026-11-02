@@ -116,7 +116,12 @@ export async function handleQuota(request, env, url) {
       return json({ ok: true, until_at: until });
     }
     if (input.action === "audit_event") {
-      if (!validText(input.event,80)) return json({ error: "invalid_event" }, 400);
+      if (!validText(input.event,80) ||
+          (input.route_id !== undefined && input.route_id !== null && !validText(input.route_id,200)) ||
+          (input.task_kind !== undefined && input.task_kind !== null && !validText(input.task_kind,100)) ||
+          (input.details !== undefined && (!input.details || typeof input.details !== "object" || Array.isArray(input.details)))) {
+        return json({ error: "invalid_audit_event" }, 400);
+      }
       const allowed = ["reason","error_type","http_status","estimated_tokens","actual_tokens","cooldown_seconds","cost_usd"];
       const safe = {};
       if (input.details && typeof input.details === "object" && !Array.isArray(input.details)) {
