@@ -84,7 +84,14 @@ Before adoption, require all of the following:
 
 ## AndroidHarness and zero-touch boundary
 
-AndroidHarness' native WorkManager schedule and the GitHub issue bridge are device-side capabilities. Repository changes cannot create the initial Android app schedule, pair a remote-control channel, approve a device permission dialog, or start the local issue-bridge poller. The bridge remains inactive until a local AndroidHarness process is started; no authenticated live AndroidHarness session is exposed to this GitHub integration.
+AndroidHarness 3.2 provides two relevant device-side options:
+
+- **WorkManager scheduled messages:** recurring prompt runs are managed by Android WorkManager. They can continue while the app is backgrounded, but remain subject to the device being powered, online, not force-stopped, and allowed to run under Android/OEM battery policy. They are not cloud-hosted execution.
+- **Telegram remote control:** the upstream README and 3.2 changelog document a private Telegram bot gateway for Code conversations. Setup requires a bot token, a prepared bot link, a short-lived one-time pairing code, and confirmation of the Telegram account inside the AndroidHarness app. After pairing, the confirmed account can submit work and answer approval prompts while the app is minimized, but the phone must remain online and the foreground Telegram service must be enabled. The app's security guidance explicitly treats the paired account as authorized to submit work and interact with approvals; the bot token and paired account therefore require protection.
+
+The relevant upstream instructions are [AndroidHarness README](https://github.com/Sanuu7/AndroidHarness/blob/main/README.md), [3.2 changelog](https://github.com/Sanuu7/AndroidHarness/blob/main/CHANGELOG.md), [Telegram setup guide](https://github.com/Sanuu7/AndroidHarness/blob/main/app/src/main/assets/learn/guide.json), and [security guidance](https://github.com/Sanuu7/AndroidHarness/blob/main/SECURITY.md). The Telegram setup guide says the bot and phone both need network access and Telegram does not host the AndroidHarness task on the user's behalf.
+
+Repository changes cannot perform the first-time pairing confirmation, approve a device permission dialog, or start the local issue-bridge poller. The bridge remains inactive until a local AndroidHarness process is started; no authenticated live AndroidHarness session is exposed to this GitHub integration. Thus Telegram is a remote-control channel after one-time device setup, not a way to remove the tablet from the execution path.
 
 A deployed Cloudflare Workflow can execute and resume independently of the tablet after an authorized deployment and authenticated trigger are in place. This prototype is not deployed and does not yet execute AI agents. It therefore improves the path toward device-independent orchestration but does not yet deliver autonomous AI execution or guaranteed 24/7 service.
 
