@@ -27,8 +27,9 @@ def snapshot(address, reserve0, reserve1, fee):
 
 def test_v2_sim_cli_converts_human_amount_to_raw_units(monkeypatch, capsys):
     class FakeReader:
-        def __init__(self, endpoint):
+        def __init__(self, endpoint, expected_chain_id=1):
             assert endpoint == "https://rpc.example"
+            assert expected_chain_id == 1
 
         def read_pools(self, pools):
             assert pools == [(POOL_A, 30), (POOL_B, 25)]
@@ -56,8 +57,9 @@ def test_v2_sim_cli_converts_human_amount_to_raw_units(monkeypatch, capsys):
 
 def test_v2_sim_cli_router_validation_is_read_only(monkeypatch, capsys):
     class FakeReader:
-        def __init__(self, endpoint):
+        def __init__(self, endpoint, expected_chain_id=1):
             self.endpoint = endpoint
+            assert expected_chain_id == 1
 
         def read_pools(self, pools):
             return [
