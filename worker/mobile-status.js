@@ -77,7 +77,9 @@ async function load() {
   $("failed").textContent=(tasks.failed||0)+(tasks.blocked||0);
   rows("paper",(data.paper_events||[]).map(x=>[x.event_type,x.count]),"No paper events recorded");
   rows("usage",(data.provider_usage||[]).map(x=>[x.route_id,(x.requests||0)+" requests · "+(x.tokens||0)+" tokens"]),"No D1 provider usage recorded");
-  $("snapshot").textContent=data.latest_market_snapshot?data.latest_market_snapshot.candidate_id+" · chain "+(data.latest_market_snapshot.chain_id??"—")+" · block "+(data.latest_market_snapshot.block_number??"—")+" · "+data.latest_market_snapshot.occurred_at:"No market snapshot recorded";\n  $("latest").textContent=data.latest_paper_event?data.latest_paper_event.event_type+" · "+data.latest_paper_event.candidate_id+" · "+data.latest_paper_event.occurred_at:"No paper event recorded";\n  await loadCi();
+  $("snapshot").textContent=data.latest_market_snapshot?data.latest_market_snapshot.candidate_id+" · chain "+(data.latest_market_snapshot.chain_id??"—")+" · block "+(data.latest_market_snapshot.block_number??"—")+" · "+data.latest_market_snapshot.occurred_at:"No market snapshot recorded";
+  $("latest").textContent=data.latest_paper_event?data.latest_paper_event.event_type+" · "+data.latest_paper_event.candidate_id+" · "+data.latest_paper_event.occurred_at:"No paper event recorded";
+  await loadCi();
   rows("gaps",Object.entries(data.unavailable_metrics||{}),"No unavailable metrics");
   $("updated").textContent="Snapshot generated: "+data.generated_at;
   $("message").textContent="Connected · read-only";
