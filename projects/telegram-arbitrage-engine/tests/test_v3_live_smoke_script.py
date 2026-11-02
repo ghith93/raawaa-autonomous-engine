@@ -13,3 +13,5 @@ def test_live_v3_smoke_script_parses_and_contains_no_transaction_submission() ->
     assert "eth_sendRawTransaction" not in source
     assert "live_execution" in source
     assert "transaction_submitted" in source
+    assert "re.fullmatch" in source
+    assert "250_002" in source
