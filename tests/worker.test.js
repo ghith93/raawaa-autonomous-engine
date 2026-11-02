@@ -338,3 +338,107 @@ test("quota settlement retries identical usage and rejects conflicting usage", a
   assert.equal(conflict.status, 409);
   assert.deepEqual(await conflict.json(), { error: "settlement_conflict" });
 });
+
+
+function paperLedgerDbMock() {
+  const calls = [];
+  let head = { sequence: 0, event_hash: "0".repeat(64) };
+  let event = null;
+  return {
+    calls,
+    prepare(sql) {
+      return {
+        sql, values: [],
+        bind(...values) { this.values = values; return this; },
+        async first() {
+          calls.push({ kind: "first", sql, values: this.values });
+          if (sql.includes("SELECT * FROM paper_events WHERE event_id")) return event;
+          if (sql.includes("SELECT sequence,event_hash FROM paper_candidate_heads")) return head;
+          return null;
+        },
+        async run() {
+          calls.push({ kind: "run", sql, values: this.values });
+          return { meta: { changes: 1 } };
+        },
+        async all() {
+          calls.push({ kind: "all", sql, values: this.values });
+          return { results: [] };
+        },
+      };
+    },
+    async batch(statements) {
+      calls.push({ kind: "batch", statements: statements.map(x => ({ sql: x.sql, values: x.values })) });
+      const [update, insert] = statements;
+      if (update.values[3] === "candidate-1" && head.sequence === update.values[4] && head.event_hash === update.values[5]) {
+        head = { sequence: update.values[0], event_hash: update.values[1] };
+        event = Object.fromEntries([
+          "candidate_id","event_id","event_type","occurred_at","chain_id","block_number","block_hash",
+          "strategy_id","source_pool","destination_pool","token_in","token_out","gross_profit_raw",
+          "gas_used","gas_price_wei","gas_cost_profit_raw","net_profit_raw","payload_json",
+        ].map((key, i) => [key, insert.values[i] ?? null]));
+        event.sequence = update.values[0];
+        event.previous_hash = update.values[5];
+        event.event_hash = update.values[1];
+        return [{ meta: { changes: 1 } }, { meta: { changes: 1 } }, { meta: { changes: 1 } }];
+      }
+      return [{ meta: { changes: 0 } }, { meta: { changes: 0 } }, { meta: { changes: 0 } }];
+    },
+  };
+}
+
+test("paper ledger append is authenticated and writes CAS head, event, and checkpoint", async () => {
+  const DB = paperLedgerDbMock();
+  const response = await worker.fetch(request("/v1/paper-ledger", {
+    method: "POST",
+    body: { action: "append", event: {
+      candidate_id: "candidate-1", event_id: "event-1", event_type: "candidate_detected",
+      occurred_at: "2026-11-02T11:00:00Z", payload: { source: "test" },
+    } },
+  }), { DB, ENGINE_API_TOKEN: TOKEN });
+  assert.equal(response.status, 201);
+  const result = await response.json();
+  assert.equal(result.sequence, 1);
+  assert.equal(result.event_hash.length, 64);
+  const batch = DB.calls.find(x => x.kind === "batch");
+  assert.equal(batch.statements.length, 3);
+  assert.match(batch.statements[0].sql, /WHERE candidate_id=\? AND sequence=\? AND event_hash=\?/);
+  assert.match(batch.statements[1].sql, /INSERT INTO paper_events/);
+  assert.match(batch.statements[2].sql, /INSERT INTO paper_event_checkpoints/);
+});
+
+test("paper ledger rejects missing block provenance for outcome events before writes", async () => {
+  const DB = paperLedgerDbMock();
+  const response = await worker.fetch(request("/v1/paper-ledger", {
+    method: "POST",
+    body: { action: "append", event: {
+      candidate_id: "candidate-1", event_id: "event-2", event_type: "outcome_observed",
+      occurred_at: "2026-11-02T11:00:00Z", payload: {},
+    } },
+  }), { DB, ENGINE_API_TOKEN: TOKEN });
+  assert.equal(response.status, 400);
+  assert.equal(DB.calls.length, 0);
+});
+
+test("paper ledger rejects unauthenticated append requests", async () => {
+  const DB = paperLedgerDbMock();
+  const response = await worker.fetch(request("/v1/paper-ledger", {
+    method: "POST", token: null,
+    body: { action: "append", event: {} },
+  }), { DB, ENGINE_API_TOKEN: TOKEN });
+  assert.equal(response.status, 401);
+  assert.equal(DB.calls.length, 0);
+});
+
+test("paper ledger rejects arbitrary event types and malformed raw integer strings", async () => {
+  for (const event of [
+    { candidate_id: "candidate-1", event_id: "event-3", event_type: "execute_trade", occurred_at: "2026-11-02T11:00:00Z", payload: {} },
+    { candidate_id: "candidate-1", event_id: "event-4", event_type: "candidate_detected", occurred_at: "2026-11-02T11:00:00Z", gas_used: 12, payload: {} },
+  ]) {
+    const DB = paperLedgerDbMock();
+    const response = await worker.fetch(request("/v1/paper-ledger", {
+      method: "POST", body: { action: "append", event },
+    }), { DB, ENGINE_API_TOKEN: TOKEN });
+    assert.equal(response.status, 400);
+    assert.equal(DB.calls.length, 0);
+  }
+});
