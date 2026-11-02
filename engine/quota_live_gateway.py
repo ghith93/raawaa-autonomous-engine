@@ -121,6 +121,10 @@ class QuotaAwareLiveGateway:
                 # No provider request was sent, so releasing the monetary reservation is safe.
                 self.usage_ledger.release(monetary_reservation_id)
                 continue
+            except Exception:
+                # The token reservation did not return, so no provider request was sent.
+                self.usage_ledger.release(monetary_reservation_id)
+                raise
 
             self._audit(
                 "quota_reserved", request, profile,
@@ -188,13 +192,15 @@ class QuotaAwareLiveGateway:
                 ) from exc
 
             actual_tokens = response.input_tokens + response.output_tokens
-            self.quota_manager.ledger.settle(reservation_id, actual_tokens)
-            monetary_settlement = self.usage_ledger.settle(
+            # Persist monetary usage first so a later token-ledger failure cannot
+            # lose the provider's actual charge.
+            self.usage_ledger.settle(
                 monetary_reservation_id,
                 response.input_tokens,
                 response.output_tokens,
                 response.cost_usd,
             )
+            self.quota_manager.ledger.settle(reservation_id, actual_tokens)
             self._audit(
                 "completion_received", request, profile,
                 actual_tokens=actual_tokens, cost_usd=response.cost_usd,
