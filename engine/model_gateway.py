@@ -311,6 +311,10 @@ class UsageLedger:
         if input_tokens < 0 or output_tokens < 0:
             raise ValueError("token counts cannot be negative")
         cost = _money_nanos(cost_usd, round_up=True)
+        if task_id is not None and (not isinstance(task_id, str) or not task_id.strip()):
+            raise ValueError("task_id must be a non-empty string when supplied")
+        if cost > 0 and task_id is None:
+            raise ValueError("task_id is required to record non-zero provider cost")
         with self._connect() as db:
             db.execute(
                 "INSERT INTO model_usage(provider,model,task_kind,input_tokens,output_tokens,"
