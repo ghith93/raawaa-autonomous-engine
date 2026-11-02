@@ -4,6 +4,9 @@ from types import SimpleNamespace
 
 import pytest
 
+import sys
+
+from arb_engine import cli
 from arb_engine.cex_universe import (
     CexUniverseScanError,
     VenueRequest,
@@ -214,3 +217,43 @@ def test_invalid_venue_count_duplicates_and_cost_values_are_rejected():
 
     with pytest.raises(CexUniverseScanError, match="canonical_asset_ids_must_be_distinct"):
         request("binance", "BTCUSDT", quote_id=BTC)
+
+def test_cli_builds_explicit_venue_requests_and_fee_profiles(monkeypatch, capsys):
+    captured = {}
+
+    def fake_scan(**kwargs):
+        captured.update(kwargs)
+        return {"mode": "test", "status": "complete"}
+
+    monkeypatch.setattr(cli, "scan_cex_universe", fake_scan)
+    monkeypatch.setattr(sys, "argv", [
+        "arb-engine", "cex-universe-scan",
+        "--venue", "binance", "--instrument", "BTCUSDT",
+        "--base-asset-id", BTC, "--quote-currency-id", USDT,
+        "--venue", "kraken", "--instrument", "XBT/USDT",
+        "--base-asset-id", BTC, "--quote-currency-id", USDT,
+        "--fee-bps", "binance=10", "--fee-bps", "kraken=12",
+        "--base-quantity", "0.1", "--latency-cost-bps", "2",
+    ])
+
+    cli.main()
+    output = capsys.readouterr().out
+
+    assert '"status": "complete"' in output
+    assert [item.venue_id for item in captured["venues"]] == ["binance", "kraken"]
+    assert [str(item.fee_bps) for item in captured["venues"]] == ["10", "12"]
+    assert captured["latency_cost_bps"] == "2"
+
+
+def test_cli_rejects_misaligned_repeated_venue_arguments(monkeypatch):
+    monkeypatch.setattr(sys, "argv", [
+        "arb-engine", "cex-universe-scan",
+        "--venue", "binance", "--venue", "bybit",
+        "--instrument", "BTCUSDT",
+        "--base-asset-id", BTC, "--quote-currency-id", USDT,
+        "--base-quantity", "0.1",
+    ])
+
+    with pytest.raises(SystemExit) as exc:
+        cli.main()
+    assert exc.value.code == 2
