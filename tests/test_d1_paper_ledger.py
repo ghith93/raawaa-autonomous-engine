@@ -72,7 +72,7 @@ class D1PaperLedgerTests(unittest.TestCase):
         ).encode()).hexdigest()
         event = {**record, "sequence": 1, "previous_hash": "0" * 64, "event_hash": digest}
         checkpoint = {"sequence": 1, "event_id": "event-1", "event_hash": digest}
-        open_url.return_value = Response({"events": [event], "checkpoints": [checkpoint]})
+        open_url.return_value = Response({"events": [event], "checkpoints": [checkpoint], "head_sequence": 1, "head_hash": digest, "event_count": 1, "checkpoint_count": 1})
         self.assertTrue(self.ledger.verify_chain("candidate-1"))
         event["event_hash"] = "f" * 64
         open_url.return_value = Response({"events": [event], "checkpoints": [checkpoint]})
