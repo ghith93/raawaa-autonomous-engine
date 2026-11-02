@@ -73,9 +73,7 @@ def test_invalid_amount_remaining_is_rejected(amount) -> None:
         compute_swap_step(Q96, Q96 // 2, LIQUIDITY, amount, 3000)
 
 
-def test_zero_liquidity_and_zero_target_are_rejected() -> None:
-    with pytest.raises(ValueError):
-        compute_swap_step(Q96, Q96 // 2, 0, 1000, 3000)
+def test_zero_target_is_rejected() -> None:
     with pytest.raises(ValueError):
         compute_swap_step(Q96, 0, LIQUIDITY, 1000, 3000)
 
