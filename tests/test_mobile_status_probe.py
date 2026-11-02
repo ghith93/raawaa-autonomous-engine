@@ -106,6 +106,27 @@ class MobileStatusProbeTests(unittest.TestCase):
         self.assertEqual(seen["headers"]["cf-access-client-id"], "synthetic-access-id")
         self.assertEqual(seen["headers"]["cf-access-client-secret"], "synthetic-access-secret")
 
+    def test_404_reports_route_not_deployed_without_treating_it_as_a_probe_crash(self):
+        from urllib.error import HTTPError
+
+        def missing_route(_request, timeout):
+            raise HTTPError(API_URL + "/v1/mobile/status", 404, "Not Found", {}, None)
+
+        result = probe.probe_mobile_status(API_URL, TOKEN, opener=missing_route)
+        self.assertEqual(result["http"], "404")
+        self.assertEqual(result["paper_ledger"], "route_not_deployed")
+        self.assertEqual(result["last_scan"], "route_not_deployed")
+        self.assertEqual(result["tasks_pending"], "unknown")
+
+    def test_non_404_http_errors_still_fail_closed(self):
+        from urllib.error import HTTPError
+
+        def forbidden(_request, timeout):
+            raise HTTPError(API_URL + "/v1/mobile/status", 403, "Forbidden", {}, None)
+
+        with self.assertRaises(HTTPError):
+            probe.probe_mobile_status(API_URL, TOKEN, opener=forbidden)
+
     def test_rejects_non_https_or_unapproved_worker_origins(self):
         for url in (
             "http://" + probe._ALLOWED_HOST,
