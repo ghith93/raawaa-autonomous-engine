@@ -20,6 +20,14 @@ The default posture remains conservative:
 - Live inference adapters are opt-in code paths; do not enable them until provider eligibility, quota limits, and credentials are explicitly configured and verified.
 - Safe task types are now assigned to a named specialist role and required capability through a deterministic contract. This remains a dry-run assignment: it does not mean a persistent multi-agent team or model inference is running.
 
+## Durable cloud monetary usage ledger
+
+Local development uses the SQLite `UsageLedger`. When `RAAWAA_ENGINE_API_URL` is configured, the opt-in cloud runtime uses the authenticated Worker-backed `D1UsageLedger` as well as `D1QuotaLedger`; it never falls back to ephemeral runner SQLite.
+
+The D1 ledger reserves integer nano-USD **before** provider I/O, counts unsettled reservations against daily/monthly/per-task caps, settles actual cost and token counts idempotently, and retains ambiguous reservations until reconciled. A unique `reservation_id` on `model_usage` prevents duplicate usage rows. The Worker endpoint is authenticated at `/v1/usage`.
+
+**Migration 0005 is staged, not applied.** Before enabling cloud live inference, review and explicitly apply `migrations/0005_durable_monetary_usage_ledger.sql`, deploy the Worker containing `/v1/usage`, and verify D1 persistence across worker restarts and concurrent reservations. Until both migration and endpoint are available, cloud live gateway construction fails closed. Do not apply migrations or deploy the Worker automatically.
+
 ## AndroidHarness runtime (optional)
 
 AndroidHarness 3.1 remains an optional, manually invoked diagnostic/compatibility environment. It is not part of the production control plane, task queue, scheduler, CI, quota enforcement, or recovery path. The engine must continue operating when the tablet is offline, the app is closed, or its free model quota is exhausted.
