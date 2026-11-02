@@ -210,6 +210,24 @@ class PublicPerpetualFundingClient:
             raise FundingMarketDataError("Bybit returned an unsuccessful funding response")
         return payload["result"]
 
+    def _bybit_funding_interval_hours(self, *, symbol: str, contract_type: str) -> int | None:
+        result = self._get("/v5/market/instruments-info", {
+            "category": contract_type, "symbol": symbol,
+        })
+        if result.get("category") != contract_type or not isinstance(result.get("list"), list):
+            raise FundingMarketDataError("Bybit instrument category/list did not match request")
+        rows = result["list"]
+        if len(rows) != 1 or not isinstance(rows[0], dict) or rows[0].get("symbol") != symbol:
+            raise FundingMarketDataError("Bybit instrument symbol did not match request")
+        item = rows[0]
+        expected_type = "LinearPerpetual" if contract_type == "linear" else "InversePerpetual"
+        if item.get("contractType") != expected_type or item.get("status") != "Trading":
+            raise FundingMarketDataError("Bybit instrument is not an active perpetual contract")
+        raw_minutes = item.get("fundingInterval")
+        if type(raw_minutes) is not int or not 1 <= raw_minutes <= 1440 or raw_minutes % 60:
+            return None
+        return raw_minutes // 60
+
     def fetch_funding_history(
         self, *, symbol: str, contract_type: str = "linear", limit: int = 100
     ) -> tuple[FundingRateObservation, ...]:
@@ -238,7 +256,14 @@ class PublicPerpetualFundingClient:
             })
             if result.get("category") != contract_type or not isinstance(result.get("list"), list):
                 raise FundingMarketDataError("Bybit funding category/list did not match request")
-            rows, intervals = result["list"], {}
+            rows = result["list"]
+            try:
+                bybit_interval = self._bybit_funding_interval_hours(
+                    symbol=symbol, contract_type=contract_type,
+                )
+            except FundingMarketDataError:
+                bybit_interval = None
+            intervals = {symbol: bybit_interval} if bybit_interval is not None else {}
         if not isinstance(rows, list) or len(rows) > limit:
             raise FundingMarketDataError("funding response exceeded requested row count")
         fetched_at = datetime.now(timezone.utc)
