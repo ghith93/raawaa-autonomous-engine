@@ -455,7 +455,7 @@ def main() -> None:
                 ),
             }, indent=2))
         except (JupiterQuoteError, ValueError, ArithmeticError) as exc:
-            parser.exit(2, f"solana-price failed: {exc}\\n")
+            parser.exit(2, f"solana-price failed: {exc}\n")
     elif args.command == "solana-quote":
         try:
             quote = JupiterQuoteOnlyClient(timeout_seconds=args.timeout_seconds).quote(
@@ -492,7 +492,7 @@ def main() -> None:
                 ),
             }, indent=2))
         except (JupiterQuoteError, ValueError, ArithmeticError) as exc:
-            parser.exit(2, f"solana-quote failed: {exc}\\n")
+            parser.exit(2, f"solana-quote failed: {exc}\n")
     elif args.command == "flash-swap-sim":
         try:
             result = run_flash_swap_simulation(
