@@ -182,6 +182,22 @@ class ModelGatewayTests(unittest.TestCase):
             gateway.generate(GenerationRequest("research", "short prompt", 10, task_id="task-a"))
         self.assertEqual(self.ledger.totals()["daily_usd"], 0.02)
 
+    def test_actual_cost_over_per_task_cap_is_recorded_then_blocked(self):
+        adapter = CostAdapter(cost_usd=0.02)
+        gateway = ModelGateway(
+            [ModelOption("mock", "paid-model", "paid", True, 0.001)],
+            {"mock": adapter}, self.ledger,
+            daily_budget_usd=1.0, monthly_budget_usd=1.0,
+            allow_paid_calls=True, network_calls_enabled=True,
+            per_task_budget_usd=0.001,
+        )
+        with self.assertRaisesRegex(BudgetExceeded, "configured spend budget"):
+            gateway.generate(GenerationRequest(
+                "research", "short prompt", 10, task_id="task-a"
+            ))
+        self.assertEqual(adapter.calls, 1)
+        self.assertEqual(self.ledger.task_totals("task-a")["actual_usd"], 0.02)
+
     def test_per_task_budget_is_aggregated_across_provider_routes(self):
         now = datetime(2026, 11, 2, 12, tzinfo=timezone.utc)
         first = self.ledger.reserve(
