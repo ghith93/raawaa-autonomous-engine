@@ -150,6 +150,7 @@ def main() -> None:
     observer_parser = sub.add_parser(
         "paper-observe",
         help="record a read-only forward observation at a later canonical block",
+        description="Record a read-only forward observation at a later canonical block.",
     )
     observer_parser.add_argument("--candidate-id", required=True)
     observer_parser.add_argument("--rpc-url", default=DEFAULT_ETHEREUM_RPC)
