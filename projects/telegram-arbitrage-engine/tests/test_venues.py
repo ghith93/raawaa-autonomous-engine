@@ -4,7 +4,10 @@ import sys
 import pytest
 
 from arb_engine import cli
-from arb_engine.venues import get_venue, get_venue_by_dexscreener_id, list_venues, resolve_venue_config
+from arb_engine.venues import (
+    default_scan_venue_ids, get_venue, get_venue_by_dexscreener_id,
+    list_venues, resolve_venue_config,
+)
 
 
 def test_registry_contains_only_source_documented_ethereum_v2_venues():
@@ -141,3 +144,17 @@ def test_bsc_pancakeswap_and_apeswap_v2_registry_entries_are_source_documented()
     assert ape.dexscreener_id == "apeswap"
     assert ape.swap_fee_bps == 20
     assert all(v.source_status == "source_documented_not_live_verified" for v in venues.values())
+
+
+
+def test_default_scan_venue_ids_are_selected_per_chain_without_cross_chain_fallback():
+    assert default_scan_venue_ids(1) == (
+        "uniswap_v2_ethereum", "sushiswap_v2_ethereum",
+    )
+    assert default_scan_venue_ids(56) == (
+        "pancakeswap_v2_bsc", "apeswap_v2_bsc",
+    )
+    with pytest.raises(ValueError, match="has 0 registered V2 venues"):
+        default_scan_venue_ids(8453)
+    with pytest.raises(ValueError, match="positive integer"):
+        default_scan_venue_ids(True)
