@@ -293,6 +293,7 @@ class EthereumV2PoolReader:
                 raise ValueError("Pool fee must be integer basis points in [0, 10000)")
             normalized.append((address, fee_bps))
 
+        resolved_here = pinned_block is None
         pinned = pinned_block or self.read_latest_block_snapshot()
         if (
             not isinstance(pinned, EvmBlockSnapshot)
@@ -311,12 +312,13 @@ class EthereumV2PoolReader:
         block_tag = hex(block_number)
         block_hash = pinned.block_hash.lower()
         block_timestamp = pinned.block_timestamp
-        pinned_header = self._rpc("eth_getBlockByNumber", [block_tag, False])
-        if (
-            not isinstance(pinned_header, dict)
-            or str(pinned_header.get("hash", "")).lower() != block_hash
-        ):
-            raise RpcReadError("Requested pinned block is no longer canonical")
+        if not resolved_here:
+            pinned_header = self._rpc("eth_getBlockByNumber", [block_tag, False])
+            if (
+                not isinstance(pinned_header, dict)
+                or str(pinned_header.get("hash", "")).lower() != block_hash
+            ):
+                raise RpcReadError("Requested pinned block is no longer canonical")
 
         raw_pools = []
         unique_tokens = set()
