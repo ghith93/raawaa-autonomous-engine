@@ -54,6 +54,23 @@ The result reports raw and human-readable router outputs and gross quote-token s
 
 Use `flash-swap-sim` separately for the V2 pair-invariant flash-swap repayment simulation; neither command enables live execution.
 
+## Read-only Binance Spot market data
+
+A fixture-tested Binance public market-data adapter is available at `arb_engine.market_sources.binance.BinancePublicMarketData`. It uses the official market-data-only HTTPS host, requires no API key, and exposes only depth snapshots and best bid/ask. Decimal precision and the REST `lastUpdateId` are preserved; local retrieval time is recorded separately because the REST depth response has no exchange timestamp.
+
+Example:
+
+```python
+from arb_engine.market_sources.binance import BinancePublicMarketData
+
+market = BinancePublicMarketData()  # public market-data-only host; no API key
+book = market.fetch_orderbook(symbol="BTCUSDT", limit=100)
+ticker = market.fetch_book_ticker(symbol="BTCUSDT")
+print(book.last_update_id, book.bids[0], ticker.ask_price, book.fetched_at)
+```
+
+The adapter enforces one request per second and does not synchronize REST snapshots with WebSocket depth updates. It is a timestamped indicative source, not a guaranteed executable book or net-profit engine. See [data sources and trust boundaries](DATA_SOURCES.md).
+
 ## Read-only flash-swap simulation
 
 The `flash-swap-sim` command reads two V2 pools at one canonical block, models the opposite-token repayment invariant, and optionally applies a caller-supplied gas-used/gas-price scenario. It can optionally record local research events with `--record-paper`.
