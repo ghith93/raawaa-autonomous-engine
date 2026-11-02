@@ -67,6 +67,12 @@ def test_v2_sim_cli_router_validation_is_read_only(monkeypatch, capsys):
                 snapshot(POOL_B, 1_000_000_000_000, 10**24, 25),
             ]
 
+        def verify_v2_pool_factory(self, pair, factory, token0, token1, block):
+            assert pair in {POOL_A, POOL_B}
+            assert factory in {"0x" + "7" * 40, "0x" + "8" * 40}
+            assert token0 == QUOTE and token1 == BASE
+            assert block == 123
+
         def verify_v2_router_factory(self, router, factory, block):
             assert router in {"0x" + "5" * 40, "0x" + "6" * 40}
             assert factory in {"0x" + "7" * 40, "0x" + "8" * 40}
