@@ -1,0 +1,91 @@
+name: CEX public market read-only smoke
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "17 7 * * *"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: cex-public-market-read-only-smoke
+  cancel-in-progress: false
+
+jobs:
+  public-market-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v7
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      - name: Install isolated package
+        working-directory: projects/telegram-arbitrage-engine
+        run: |
+          python -m pip install --no-deps -e .
+
+      - name: Fetch public Spot books across five CEX venues
+        working-directory: projects/telegram-arbitrage-engine
+        run: |
+          set -euo pipefail
+          arb-engine cex-universe-scan \
+            --venue binance --instrument BTCUSDT \
+            --base-asset-id asset:canonical:BTC --quote-currency-id currency:canonical:USDT \
+            --venue bybit --instrument BTCUSDT \
+            --base-asset-id asset:canonical:BTC --quote-currency-id currency:canonical:USDT \
+            --venue kraken --instrument XBT/USDT \
+            --base-asset-id asset:canonical:BTC --quote-currency-id currency:canonical:USDT \
+            --venue coinbase --instrument BTC-USDT \
+            --base-asset-id asset:canonical:BTC --quote-currency-id currency:canonical:USDT \
+            --venue okx --instrument BTC-USDT \
+            --base-asset-id asset:canonical:BTC --quote-currency-id currency:canonical:USDT \
+            --base-quantity 0.001 \
+            --max-quote-age-seconds 10 \
+            --max-quote-skew-seconds 5 \
+            > cex-universe-scan.json
+          cat cex-universe-scan.json
+
+      - name: Validate coverage and read-only guarantees
+        working-directory: projects/telegram-arbitrage-engine
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          result = json.loads(Path("cex-universe-scan.json").read_text())
+          assert result.get("mode") == "read_only_cex_spot_universe_scan"
+          assert result.get("status") in {"complete", "partial"}, result.get("status")
+          assert len(result.get("venues", [])) >= 2, result.get("source_failures")
+          assert result.get("compared_pair_count", 0) >= 1
+          assert result.get("live_execution") is False
+          assert result.get("orders_submitted") is False
+          assert result.get("net_profit_claim") is False
+          for opportunity in result.get("opportunities", []):
+              evaluation = opportunity.get("evaluation")
+              if evaluation is not None:
+                  assert evaluation.get("net_profit_quote_estimate") is None
+                  assert evaluation.get("execution_verified") is False
+          print(json.dumps({
+              "status": result["status"],
+              "venues": [venue["venue"] for venue in result["venues"]],
+              "compared_pair_count": result["compared_pair_count"],
+              "source_failures": result.get("source_failures", {}),
+              "read_only": True,
+              "net_profit_claim": False,
+          }, indent=2))
+          PY
+
+      - name: Upload sanitized public-market snapshot
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: cex-public-market-smoke
+          path: projects/telegram-arbitrage-engine/cex-universe-scan.json
+          if-no-files-found: ignore
+          retention-days: 7
