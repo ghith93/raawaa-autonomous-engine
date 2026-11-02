@@ -15,6 +15,7 @@ function dbMock() {
         async all(){
           calls.push({kind:"all",sql,values:this.values});
           if(sql.includes("FROM tasks")) return {results:[{status:"pending",count:2}]};
+          if(sql.includes("schema_migrations")) return {results:[{version:"0003_durable_quota_ledger"},{version:"0004_paper_event_ledger"}]};
           if(sql.includes("FROM paper_events")) return {results:[{event_type:"candidate_detected",count:4}]};
           return {results:[{route_id:"groq:gpt-oss-20b",requests:3,tokens:1200}]};
         },
@@ -60,4 +61,11 @@ test("mobile status endpoint returns read-only D1 metrics and explicit unknowns"
 test("mobile status endpoint rejects writes",async()=>{
  const response=await worker.fetch(request("/v1/mobile/status",TOKEN,"POST"),{DB:dbMock(),ENGINE_API_TOKEN:TOKEN});
  assert.equal(response.status,405);
+});
+
+test("unauthenticated status requests do not query D1",async()=>{
+ const DB=dbMock();
+ const response=await worker.fetch(request("/v1/mobile/status",null),{DB,ENGINE_API_TOKEN:TOKEN});
+ assert.equal(response.status,401);
+ assert.equal(DB.calls.length,0);
 });
