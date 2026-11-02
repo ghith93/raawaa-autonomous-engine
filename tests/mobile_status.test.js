@@ -36,6 +36,9 @@ test("mobile status page is public static HTML and never embeds an API token",as
  assert.match(response.headers.get("content-type"),/text\/html/);
  const body=await response.text();
  assert.match(body,/Read-only operational snapshot/);
+ assert.match(body,/Recorded model inference costs/);
+ assert.match(body,/model_costs_usd/);
+ assert.match(body,/toFixed\(6\)/);
  assert.match(body,/sessionToken|accessToken/);
  assert.doesNotMatch(body,/mobile-status-test-token/);
  assert.equal(response.headers.get("cache-control"),"no-store");

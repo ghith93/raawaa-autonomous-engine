@@ -42,6 +42,7 @@ h2{font-size:16px;margin:0 0 10px}.rows{display:grid;gap:8px}.item{display:flex;
 </div>
 <section class="panel"><h2>Paper research events</h2><div id="paper" class="rows"></div></section>
 <section class="panel"><h2>Provider usage · D1</h2><div id="usage" class="rows"></div></section>
+<section class="panel"><h2>Recorded model inference costs · USD</h2><div id="modelCosts" class="rows"></div><p class="muted">Recorded provider costs only; external or unreported spend is not inferred.</p></section>
 <section class="panel"><h2>Latest market snapshot</h2><div id="snapshot" class="muted">—</div></section><section class="panel"><h2>Latest paper event</h2><div id="latest" class="muted">—</div></section><section class="panel"><h2>GitHub CI health</h2><div id="ci" class="rows"></div></section>
 <section class="panel"><h2>Not yet connected to this status feed</h2><div id="gaps" class="rows"></div></section>
 <button id="refresh">Refresh</button><button class="secondary" id="disconnect">Disconnect</button>
@@ -77,6 +78,15 @@ async function load() {
   $("failed").textContent=(tasks.failed||0)+(tasks.blocked||0);
   rows("paper",(data.paper_events||[]).map(x=>[x.event_type,x.count]),"No paper events recorded");
   rows("usage",(data.provider_usage||[]).map(x=>[x.route_id,(x.requests||0)+" requests · "+(x.tokens||0)+" tokens"]),"No D1 provider usage recorded");
+  const costs=data.model_costs_usd||{};
+  const byProvider=(costs.by_provider||[]).map(x=>[
+    x.provider,
+    "$"+(Number(x.cost_usd)||0).toFixed(6)+" · "+(x.requests||0)+" requests · "+((x.input_tokens||0)+(x.output_tokens||0))+" tokens"
+  ]);
+  rows("modelCosts",[
+    ["Total recorded", "$"+(Number(costs.total)||0).toFixed(6)],
+    ...byProvider
+  ],"No recorded model inference costs");
   $("snapshot").textContent=data.latest_market_snapshot?data.latest_market_snapshot.candidate_id+" · chain "+(data.latest_market_snapshot.chain_id??"—")+" · block "+(data.latest_market_snapshot.block_number??"—")+" · "+data.latest_market_snapshot.occurred_at:"No market snapshot recorded";
   $("latest").textContent=data.latest_paper_event?data.latest_paper_event.event_type+" · "+data.latest_paper_event.candidate_id+" · "+data.latest_paper_event.occurred_at:"No paper event recorded";
   await loadCi();
