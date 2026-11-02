@@ -10,6 +10,7 @@ from arb_engine.market_sources.jupiter import (
     JupiterPriceRateLimited,
     JupiterPriceV3Client,
     JupiterQuoteOnlyClient,
+    JupiterQuoteRateLimited,
     _KeylessRateLimiter,
 )
 
@@ -295,3 +296,32 @@ def test_price_v3_default_transport_defers_shared_limiter_from_http_429(monkeypa
     with pytest.raises(JupiterPriceRateLimited):
         client.fetch_prices([SOL])
     assert sleeps == [9.0]
+
+
+def test_quote_api_429_also_defers_the_shared_jupiter_limiter():
+    current = [0.0]
+    sleeps = []
+
+    def sleep(seconds):
+        sleeps.append(seconds)
+        current[0] += seconds
+
+    limiter = _KeylessRateLimiter(clock=lambda: current[0], sleeper=sleep)
+    responses = [JupiterQuoteRateLimited(11), encoded({
+        "router": "metis",
+        "inAmount": "100000000",
+        "outAmount": "11680143",
+        "transaction": None,
+    })]
+
+    def transport(_url, _timeout):
+        item = responses.pop(0)
+        if isinstance(item, Exception):
+            raise item
+        return item
+
+    quote = JupiterQuoteOnlyClient(transport=transport, rate_limiter=limiter)
+    with pytest.raises(JupiterQuoteRateLimited):
+        quote.quote(input_mint=SOL, output_mint=USDC, amount_raw="100000000")
+    quote.quote(input_mint=SOL, output_mint=USDC, amount_raw="100000000")
+    assert sleeps == [11.0]
