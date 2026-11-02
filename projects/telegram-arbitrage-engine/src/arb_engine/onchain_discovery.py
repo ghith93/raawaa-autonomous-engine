@@ -201,11 +201,54 @@ def scan_onchain_v2(
     rpc = reader or EthereumV2PoolReader(rpc_url, expected_chain_id=1)
     results = []
     rejected_candidates = []
+    if not candidates:
+        return {
+            "mode": "read_only_onchain_v2_discovery",
+            "discovery_source": "DEX Screener candidate metadata only",
+            "quote_source": "Ethereum JSON-RPC eth_call to verified V2 routers",
+            "query": query,
+            "quote_token": quote,
+            "capital_quote": str(capital_quote),
+            "candidate_pairs_discovered": 0,
+            "candidate_pairs_verified": 0,
+            "candidate_pairs_rejected": 0,
+            "rejected_candidates": [],
+            "opportunities": [],
+            "live_execution": False,
+            "wallet_or_signer_used": False,
+            "transaction_submitted": False,
+            "warning": (
+                "No matching registered-venue pair candidates were discovered. "
+                "DEX Screener metadata is not treated as executable price data."
+            ),
+        }
+    pinned_block = rpc.read_latest_block_snapshot()
+    if pinned_block.chain_id != 1:
+        raise ValueError("Only Ethereum mainnet chain ID 1 is supported by this discovery path")
     for first, second in candidates:
+        try:
+            for discovered_pool in (first, second):
+                rpc.verify_v2_pool_factory(
+                    discovered_pool.pair.pair_address, discovered_pool.venue.factory,
+                    discovered_pool.pair.base_address, discovered_pool.pair.quote_address,
+                    pinned_block.block_number,
+                )
+                rpc.verify_v2_router_factory(
+                    discovered_pool.venue.router02, discovered_pool.venue.factory,
+                    pinned_block.block_number,
+                )
+        except RpcVerificationError as exc:
+            rejected_candidates.append({
+                "source_pair": first.pair.pair_address,
+                "destination_pair": second.pair.pair_address,
+                "reason": str(exc),
+                "classification": "candidate_rejected_protocol_identity_mismatch",
+            })
+            continue
         snapshots = rpc.read_pools([
             (first.pair.pair_address, first.venue.swap_fee_bps),
             (second.pair.pair_address, second.venue.swap_fee_bps),
-        ])
+        ], pinned_block=pinned_block)
         if len(snapshots) != 2:
             raise ValueError("RPC reader returned an incomplete pool snapshot set")
         a, b = snapshots
@@ -241,25 +284,6 @@ def scan_onchain_v2(
         quote_decimals = decimals[quote]
         capital_raw = _raw_amount(capital_quote, quote_decimals)
 
-        try:
-            for pool, venue in ((a, first.venue), (b, second.venue)):
-                rpc.verify_v2_pool_factory(
-                    pool.state.pair_address, venue.factory,
-                    pool.state.token0, pool.state.token1, pool.state.block_number,
-                )
-                rpc.verify_v2_router_factory(
-                    venue.router02, venue.factory, pool.state.block_number,
-                )
-        except RpcVerificationError as exc:
-            # A DEX label may point at another AMM version; skip only identity mismatches.
-            # Transport/provider failures remain fatal and are never hidden as candidate rejection.
-            rejected_candidates.append({
-                "source_pair": first.pair.pair_address,
-                "destination_pair": second.pair.pair_address,
-                "reason": str(exc),
-                "classification": "candidate_rejected_protocol_identity_mismatch",
-            })
-            continue
         directions = [
             _quote_route(rpc, a, b, first.venue, second.venue,
                          quote_token=quote, base_token=base, capital_raw=capital_raw),
