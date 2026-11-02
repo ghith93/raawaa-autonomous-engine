@@ -39,8 +39,18 @@ class JsonRpcClient:
     """Small bounded JSON-RPC client for public, read-only verification calls."""
 
     def __init__(self, endpoint: str, timeout_seconds: float = 8.0) -> None:
-        if not endpoint.startswith("https://"):
-            raise ValueError("Venue verification requires an HTTPS RPC endpoint")
+        parsed = urlsplit(endpoint)
+        if (
+            parsed.scheme != "https" or not parsed.netloc or not parsed.hostname
+            or parsed.username or parsed.password or parsed.query or parsed.fragment
+        ):
+            raise ValueError(
+                "Venue verification requires an HTTPS RPC URL without credentials or query parameters"
+            )
+        try:
+            parsed.port
+        except ValueError as exc:
+            raise ValueError("Venue verification RPC URL has an invalid port") from exc
         if not 1 <= timeout_seconds <= 20:
             raise ValueError("RPC timeout must be between 1 and 20 seconds")
         self.endpoint = endpoint
@@ -69,7 +79,10 @@ class JsonRpcClient:
             self._last_request_at = time.monotonic()
             try:
                 with urlopen(request, timeout=self.timeout_seconds) as response:
-                    body = json.loads(response.read().decode("utf-8"))
+                    raw = response.read(500_001)
+                if len(raw) > 500_000:
+                    raise VenueVerificationError("JSON-RPC response exceeded 500 KB safety limit")
+                body = json.loads(raw.decode("utf-8"))
                 if body.get("id") != payload["id"]:
                     raise VenueVerificationError("JSON-RPC response ID mismatch")
                 if body.get("error"):
