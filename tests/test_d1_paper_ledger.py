@@ -144,6 +144,26 @@ class D1PaperLedgerTests(unittest.TestCase):
             with self.subTest(url=url, token=bool(token)), self.assertRaises(D1PaperLedgerError):
                 D1PaperTradingLedger(url, token)
 
+    def test_configuration_rejects_embedded_credentials_and_query_strings(self):
+        for url in (
+            "https://user:pass@engine.example",
+            "https://engine.example?token=secret",
+            "https://engine.example#fragment",
+        ):
+            with self.subTest(url=url), self.assertRaises(D1PaperLedgerError):
+                D1PaperTradingLedger(url, "token")
+        with self.assertRaises(D1PaperLedgerError):
+            D1PaperTradingLedger("https://engine.example", "token", timeout=0)
+
+    @patch("urllib.request.urlopen")
+    def test_payload_size_is_checked_before_network(self, open_url):
+        with self.assertRaisesRegex(ValueError, "24 KiB"):
+            self.ledger.append_event(
+                candidate_id="c", event_id="large", event_type="candidate_detected",
+                occurred_at="2026-11-02T00:00:00Z", payload={"large": "x" * 25_000},
+            )
+        open_url.assert_not_called()
+
     def test_naive_datetime_is_rejected_before_network(self):
         with self.assertRaises(ValueError):
             self.ledger.append_event(
