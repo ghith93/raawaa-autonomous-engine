@@ -23,6 +23,7 @@ from scripts.androidharness_issue_bridge import (
     summarize_unittest_output,
     verify_policy_files,
     verify_repository_root,
+    fetch_origin_main,
 )
 
 
@@ -97,6 +98,33 @@ class AndroidHarnessBridgeTests(unittest.TestCase):
             (root / "docs/operations.md").write_text("", encoding="utf-8")
             with self.assertRaisesRegex(BridgeError, "empty"):
                 verify_policy_files(root)
+
+    def test_fetch_origin_main_retries_transient_failures_with_bounded_backoff(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            outputs = [
+                SimpleNamespace(returncode=1, stdout="", stderr="temporary network failure"),
+                SimpleNamespace(returncode=1, stdout="", stderr="temporary network failure"),
+                SimpleNamespace(returncode=0, stdout="", stderr=""),
+                SimpleNamespace(returncode=0, stdout=COMMIT + "\\n", stderr=""),
+            ]
+            with patch("scripts.androidharness_issue_bridge.subprocess.run", side_effect=outputs) as run, \\
+                 patch("scripts.androidharness_issue_bridge.time.sleep") as sleep:
+                fetched = fetch_origin_main(Path(temporary))
+            self.assertEqual(fetched, COMMIT)
+            self.assertEqual(run.call_count, 4)
+            self.assertEqual([call.args[0][0:2] for call in run.call_args_list[:3]],
+                             [["git", "-C"], ["git", "-C"], ["git", "-C"]])
+            self.assertEqual([call.args[0] for call in sleep.call_args_list], [2, 4])
+
+    def test_fetch_origin_main_stops_after_bounded_retries(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            failure = SimpleNamespace(returncode=1, stdout="", stderr="network unavailable")
+            with patch("scripts.androidharness_issue_bridge.subprocess.run", return_value=failure) as run, \\
+                 patch("scripts.androidharness_issue_bridge.time.sleep") as sleep:
+                with self.assertRaisesRegex(BridgeError, "after 3 attempts"):
+                    fetch_origin_main(Path(temporary))
+            self.assertEqual(run.call_count, 3)
+            self.assertEqual([call.args[0] for call in sleep.call_args_list], [2, 4])
 
     def test_bridge_requires_the_approved_repository_origin(self):
         with tempfile.TemporaryDirectory() as temporary:
