@@ -25,6 +25,9 @@ from .venue_smoke import (
     JsonRpcClient, VenueVerificationError,
     verify_registry_venue_deployments, verify_registry_venues,
 )
+from .v3_math import get_sqrt_ratio_at_tick
+from .v3_rpc import EvmV3PoolReader
+from .v3_simulator import simulate_v3_swap
 
 
 def demo() -> dict:
@@ -128,6 +131,33 @@ def main() -> None:
     v2_parser.add_argument("--sell-router", help="optional V2 router contract for same-block getAmountsOut validation")
     v2_parser.add_argument("--buy-factory", help="expected V2 factory for the buy pair; verifies factory() and getPair()")
     v2_parser.add_argument("--sell-factory", help="expected V2 factory for the sell pair; verifies factory() and getPair()")
+
+    v3_parser = sub.add_parser(
+        "v3-sim",
+        help="read-only same-block Uniswap V3 snapshot and bounded multi-tick simulation",
+    )
+    v3_parser.add_argument("--pool", required=True, help="V3 pool contract address")
+    v3_parser.add_argument(
+        "--direction", required=True, choices=("token0_to_token1", "token1_to_token0"),
+        help="swap direction based on on-chain token0/token1 order",
+    )
+    v3_parser.add_argument(
+        "--amount-specified", required=True, type=int,
+        help="raw token units: positive for exact input, negative for exact output",
+    )
+    v3_parser.add_argument(
+        "--limit-tick", required=True, type=int,
+        help="hard price boundary tick; must be on the requested side of the current price",
+    )
+    v3_parser.add_argument("--chain-id", type=int, default=1)
+    v3_parser.add_argument("--rpc-url", help="HTTPS read-only RPC; defaults to PublicNode for Ethereum only")
+    v3_parser.add_argument("--factory", help="expected trusted V3 factory; required outside Ethereum")
+    v3_parser.add_argument("--max-rpc-requests", type=int, default=256)
+    v3_parser.add_argument("--max-bitmap-words", type=int, default=16)
+    v3_parser.add_argument("--max-initialized-ticks", type=int, default=128)
+    v3_parser.add_argument("--max-steps", type=int, default=512)
+    v3_parser.add_argument("--min-request-interval", type=float, default=0.1)
+    v3_parser.add_argument("--timeout-seconds", type=float, default=8.0)
     solana_price_parser = sub.add_parser(
         "solana-price",
         help="read-only Jupiter Price API V3 indicative USD prices for up to 50 Solana mints",
@@ -433,6 +463,74 @@ def main() -> None:
             print(json.dumps(output, indent=2))
         except (RpcReadError, ValueError, ArithmeticError) as exc:
             parser.exit(2, f"v2-sim failed: {exc}\n")
+    elif args.command == "v3-sim":
+        try:
+            if args.chain_id != 1 and not args.rpc_url:
+                raise ValueError("--rpc-url is required for non-Ethereum networks")
+            rpc_url = args.rpc_url or DEFAULT_ETHEREUM_RPC
+            zero_for_one = args.direction == "token0_to_token1"
+            sqrt_price_limit_x96 = get_sqrt_ratio_at_tick(args.limit_tick)
+            reader = EvmV3PoolReader(
+                rpc_url,
+                expected_chain_id=args.chain_id,
+                timeout_seconds=args.timeout_seconds,
+                min_request_interval=args.min_request_interval,
+                max_rpc_requests=args.max_rpc_requests,
+            )
+            snapshot = reader.read_snapshot(
+                args.pool,
+                zero_for_one=zero_for_one,
+                sqrt_price_limit_x96=sqrt_price_limit_x96,
+                expected_factory=args.factory,
+                max_bitmap_words=args.max_bitmap_words,
+                max_initialized_ticks=args.max_initialized_ticks,
+            )
+            result = simulate_v3_swap(
+                snapshot,
+                amount_specified=args.amount_specified,
+                zero_for_one=zero_for_one,
+                sqrt_price_limit_x96=sqrt_price_limit_x96,
+                max_steps=args.max_steps,
+            )
+            print(json.dumps({
+                "mode": "read_only_v3_pinned_snapshot_simulation",
+                "status": "complete" if result.complete else "incomplete",
+                "classification": result.classification,
+                "chain_id": result.chain_id,
+                "pool_address": result.pool_address,
+                "token0": snapshot.token0,
+                "token1": snapshot.token1,
+                "fee_pips": snapshot.fee_pips,
+                "tick_spacing": snapshot.tick_spacing,
+                "block_number": result.block_number,
+                "block_hash": result.block_hash,
+                "direction": args.direction,
+                "exact_input": result.exact_input,
+                "amount_specified_raw": str(result.amount_specified),
+                "amount_in_excluding_fee_raw": str(result.amount_in),
+                "fee_amount_raw": str(result.fee_amount),
+                "gross_amount_in_raw": str(result.amount_in + result.fee_amount),
+                "amount_out_raw": str(result.amount_out),
+                "amount_remaining_raw": str(result.amount_remaining),
+                "final_sqrt_price_x96": str(result.sqrt_price_x96),
+                "final_tick": result.tick,
+                "final_liquidity": str(result.liquidity),
+                "crossed_ticks": list(result.crossed_ticks),
+                "steps": result.steps,
+                "complete": result.complete,
+                "stop_reason": result.stop_reason,
+                "rpc_requests_used": reader.rpc_request_count,
+                "rpc_requests_budget": args.max_rpc_requests,
+                "live_execution": False,
+                "transaction_submitted": False,
+                "warning": (
+                    "Read-only raw-unit simulation over a block-pinned snapshot. "
+                    "Not a net-profit estimate: token decimals, transfer taxes, gas, router behavior, "
+                    "MEV, inclusion and execution risk are not priced. No transaction is built or sent."
+                ),
+            }, indent=2))
+        except (RpcReadError, ValueError, ArithmeticError, RuntimeError) as exc:
+            parser.exit(2, f"v3-sim failed: {exc}\\n")
     elif args.command == "flash-swap-sim":
         try:
             result = run_flash_swap_simulation(
