@@ -54,6 +54,25 @@ The result reports raw and human-readable router outputs and gross quote-token s
 
 Use `flash-swap-sim` separately for the V2 pair-invariant flash-swap repayment simulation; neither command enables live execution.
 
+## Read-only centralized-exchange market data
+
+A fixture-tested Bybit public market-data adapter is available at `arb_engine.market_sources.bybit.BybitPublicMarketData`. It retrieves spot/perpetual/option tickers and order-book snapshots using public GET endpoints only, preserves numeric precision with `Decimal`, records venue timestamps/update IDs, rejects malformed or crossed books, blocks redirects, and applies a conservative one-request-per-second per-instance budget. It does not require API credentials and does not expose account/order/withdrawal methods.
+
+Example:
+
+```python
+from arb_engine.market_sources.bybit import BybitPublicMarketData
+
+market = BybitPublicMarketData()  # public Bybit REST API; no API key
+book = market.fetch_orderbook(category="spot", symbol="BTCUSDT", limit=50)
+for price, size in book.bids[:5]:
+    print(price, size)
+perpetual = market.fetch_tickers(category="linear", symbol="BTCUSDT")[0]
+print(perpetual.mark_price, perpetual.index_price, perpetual.funding_rate)
+```
+
+This is a source adapter, not yet a cross-venue strategy or profitability engine. Depth is only a timestamped snapshot; fees, fill probability, latency and account eligibility must be modelled before ranking any opportunity. See [data sources and trust boundaries](DATA_SOURCES.md).
+
 ## Read-only flash-swap simulation
 
 The `flash-swap-sim` command reads two V2 pools at one canonical block, models the opposite-token repayment invariant, and optionally applies a caller-supplied gas-used/gas-price scenario. It can optionally record local research events with `--record-paper`.
