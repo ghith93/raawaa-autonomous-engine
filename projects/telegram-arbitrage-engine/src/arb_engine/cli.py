@@ -77,6 +77,8 @@ def main() -> None:
     v2_parser.add_argument("--rpc-url", default=DEFAULT_ETHEREUM_RPC)
     v2_parser.add_argument("--buy-router", help="optional V2 router contract for same-block getAmountsOut validation")
     v2_parser.add_argument("--sell-router", help="optional V2 router contract for same-block getAmountsOut validation")
+    v2_parser.add_argument("--buy-factory", help="expected V2 factory for the buy pair; verifies factory() and getPair()")
+    v2_parser.add_argument("--sell-factory", help="expected V2 factory for the sell pair; verifies factory() and getPair()")
     scan_parser = sub.add_parser("scan", help="read-only indicative DEX price-spread scan")
     scan_parser.add_argument("query", help="token symbol, pair, or address accepted by DEX Screener")
     scan_parser.add_argument("--min-liquidity", default="10000")
@@ -101,12 +103,25 @@ def main() -> None:
         try:
             if bool(args.buy_router) != bool(args.sell_router):
                 raise ValueError("Supply both --buy-router and --sell-router, or neither")
+            if bool(args.buy_factory) != bool(args.sell_factory):
+                raise ValueError("Supply both --buy-factory and --sell-factory, or neither")
             reader = EthereumV2PoolReader(args.rpc_url)
             snapshots = reader.read_pools([
                 (args.buy_pair, args.buy_fee_bps),
                 (args.sell_pair, args.sell_fee_bps),
             ])
             buy_snapshot, sell_snapshot = snapshots
+            if args.buy_factory and args.sell_factory:
+                reader.verify_v2_pool_factory(
+                    buy_snapshot.state.pair_address, args.buy_factory,
+                    buy_snapshot.state.token0, buy_snapshot.state.token1,
+                    buy_snapshot.state.block_number,
+                )
+                reader.verify_v2_pool_factory(
+                    sell_snapshot.state.pair_address, args.sell_factory,
+                    sell_snapshot.state.token0, sell_snapshot.state.token1,
+                    sell_snapshot.state.block_number,
+                )
             quote_address = args.quote_token.lower()
             base_address = args.base_token.lower()
 
@@ -149,6 +164,7 @@ def main() -> None:
                 "gross_return_bps": str(result.gross_return_bps),
                 "classification": result.classification,
                 "live_execution": False,
+                "factory_verification": "passed" if args.buy_factory and args.sell_factory else "not_requested",
                 "warning": "Excludes gas, transfer taxes, dynamic fees, reverts, MEV, and execution. Not paper PnL or a trade recommendation.",
             }
             if args.buy_router and args.sell_router:
