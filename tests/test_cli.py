@@ -21,6 +21,7 @@ class CliTests(unittest.TestCase):
             ["enqueue", "--type", "research_brief", "--title", "Test"],
             ["list"],
             ["run-once"],
+            ["run-batch", "--max-parallel", "2"],
             ["audit-log"],
             ["memory-add", "--category", "decision", "--content", "x", "--source", "test"],
             ["memory-search", "--query", "x"],
