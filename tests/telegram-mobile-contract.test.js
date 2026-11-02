@@ -38,7 +38,7 @@ test("Telegram HTTP 429 is recorded as ambiguous delivery, not a retryable dupli
       headers: { "x-telegram-bot-api-secret-token": SECRET, "content-type": "application/json" },
       body: JSON.stringify({
         update_id: 201,
-        message: { chat: { id: 12345, type: "private" }, text: "/help" },
+        message: { chat: { id: 12345, type: "private" }, from: { id: 12345, is_bot: false }, text: "/help" },
       }),
     });
     const env = {
