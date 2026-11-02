@@ -179,3 +179,27 @@ No item in this list authorizes live trading.
 - [flashbots/mev-share](https://github.com/flashbots/mev-share) documents a later-stage private order-flow/MEV research path. It is not a dependency for the read-only scanner and should only be evaluated after route economics and execution simulation are proven.
 - No external bot, RPC provider, wallet, or paid aggregator is required by this read-only discovery path.
 
+
+
+## Open-source project review for the next research milestones
+
+### degenbot (BowTiedDevil/degenbot)
+- Repository: https://github.com/BowTiedDevil/degenbot ; MIT license stated by the project.
+- Strong candidate for a later protocol-math and state-engine reference: its Rust core/Python driver covers Uniswap V2/V3/V4, Curve, Solidly, Balancer V2, and Aave V3; it includes pool state, event decoding, swap math, cyclic arbitrage solving, and an in-process revm simulation engine.
+- Do not import its live runner or signing/submission path into this project. The current engine intentionally remains Python/stdlib-first and read-only. First compare its exact V2 integer math and fork-test fixtures against our existing implementation; only consider a pinned optional dependency after a reproducible parity suite and supply-chain review.
+- Repository activity and API surface are substantial, but this is a complex Rust/PyO3 stack with a higher operational/build burden than the present lightweight scanner.
+### arb-rewind (gardennn/arb-rewind)
+- Repository: https://github.com/gardennn/arb-rewind ; MIT license stated by the project.
+- Useful reference for historical fork replay across Uniswap V2/V3, Curve, and Balancer V2, log-space triangular-cycle detection, and end-to-end simulated Balancer flash-loan settlement inside Foundry tests.
+- Its README explicitly lists important limitations: triangular cycles only, greedy per-hop venue choice, fixed probe size, no mempool awareness, and not a production searcher. Treat historical positive results as block-specific backtest evidence, not forward returns.
+- Recommended next use: port the concept of replaying captured candidate snapshots at pinned historical blocks and testing multiple input sizes; do not adopt its executor as live trading code.
+### Envio HyperIndex Uniswap V2 indexer
+- Repository: https://github.com/enviodev/uniswap-v2-indexer ; a multichain migration of the Uniswap V2 subgraph with PairCreated, Sync, Swap, Mint/Burn, and LP Transfer indexing.
+- It advertises support for Ethereum, Optimism, Arbitrum, Base, Polygon, BSC, Avalanche, and additional networks. Its README requires Node.js 22+, pnpm, Docker, an Envio API token, and RPC URLs for its historical E2E replay; this is not a zero-configuration/free-tier assumption.
+- Defer integration until the scanner needs continuous multi-chain pair discovery. A self-operated indexer introduces infrastructure and maintenance cost; compare with direct bounded RPC logs and The Graph before choosing.
+### The Graph / Uniswap subgraphs
+- Official Uniswap guidance says public endpoints are examples that may not be actively maintained, hosted subgraphs have been deprecated, and production users should verify deployment/schema/chain versions or operate their own subgraph. Gateway access uses an API key associated with billing.
+- This makes a public subgraph a poor hard dependency for the current zero-cost baseline. It remains an optional discovery/backfill source only after endpoint health, freshness, schema, cost, and rate limits are independently checked.
+### MEV-Share
+- Specification repository: https://github.com/flashbots/mev-share . It describes an open-source order-flow auction protocol with privacy/validity conditions and searcher/builder interactions; it is not a simple free quote API or a profitability guarantee.
+- Consider only after historical backtesting, complete atomic-route simulation, risk controls, and a separately reviewed execution architecture. Private orderflow, builder competition, and inclusion economics are advanced operational concerns, not prerequisites for proving the scanner's correctness.
