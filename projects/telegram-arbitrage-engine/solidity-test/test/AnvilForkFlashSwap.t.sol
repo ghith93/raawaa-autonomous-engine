@@ -163,7 +163,7 @@ contract PinnedEthereumV2FlashSwapForkTest {
                 "SOURCE_PAIR_PARTIAL_STATE"
             );
             require(
-                destination0After == destination1Before && destination1After == destination1Before,
+                destination0After == destination0Before && destination1After == destination1Before,
                 "DESTINATION_PAIR_PARTIAL_STATE"
             );
         }
