@@ -236,3 +236,81 @@ def verify_registry_venues(
             "execution, paper PnL, or profitability."
         ),
     }
+
+
+def verify_registry_venue_deployments(
+    rpc: RpcCaller,
+    venues: tuple[Venue, ...] | list[Venue],
+    expected_chain_id: int,
+) -> dict[str, Any]:
+    """Verify source-documented V2 factory/router deployments on any EVM chain.
+
+    This deliberately verifies deployment code and router.factory() only; unlike
+    verify_registry_venues(), it does not assume a canonical token pair exists.
+    All calls are pinned to one block and the block hash is rechecked afterwards.
+    """
+    if not isinstance(expected_chain_id, int) or isinstance(expected_chain_id, bool) or expected_chain_id <= 0:
+        raise VenueVerificationError("Expected EVM chain ID must be a positive integer")
+    if not venues:
+        raise VenueVerificationError("No source-documented venues are registered for this chain")
+    for venue in venues:
+        if venue.chain_id != expected_chain_id:
+            raise VenueVerificationError(
+                f"Venue {venue.id} is not registered for chain {expected_chain_id}"
+            )
+
+    chain_id = int(rpc.call("eth_chainId", []), 16)
+    if chain_id != expected_chain_id:
+        raise VenueVerificationError(
+            f"RPC chain ID {chain_id} does not match expected {expected_chain_id}"
+        )
+    block_number = int(rpc.call("eth_blockNumber", []), 16)
+    if block_number <= 0:
+        raise VenueVerificationError("RPC returned an invalid latest block number")
+    block_tag = hex(block_number)
+    block = rpc.call("eth_getBlockByNumber", [block_tag, False])
+    block_hash = block.get("hash") if isinstance(block, dict) else None
+    if not isinstance(block_hash, str) or len(block_hash) != 66 or not block_hash.startswith("0x"):
+        raise VenueVerificationError("RPC returned a malformed pinned block hash")
+
+    verified = []
+    for venue in venues:
+        _require_code(rpc, venue.factory, block_tag, f"{venue.id} factory")
+        _require_code(rpc, venue.router02, block_tag, f"{venue.id} Router02")
+        router_factory = _call_address(
+            rpc, venue.router02, FACTORY_SELECTOR, block_tag, f"{venue.id} router.factory()",
+        )
+        if router_factory != venue.factory.lower():
+            raise VenueVerificationError(
+                f"{venue.id} Router02 factory does not match registry"
+            )
+        verified.append({
+            "venue_id": venue.id,
+            "name": venue.name,
+            "factory": venue.factory,
+            "router02": venue.router02,
+            "router_factory": router_factory,
+            "swap_fee_bps_assumption": venue.swap_fee_bps,
+            "source_status": venue.source_status,
+            "onchain_relationship_checks": "factory_and_router_code_present_router_factory_matches",
+        })
+
+    final_block = rpc.call("eth_getBlockByNumber", [block_tag, False])
+    final_hash = final_block.get("hash") if isinstance(final_block, dict) else None
+    if final_hash != block_hash:
+        raise VenueVerificationError("Pinned block hash changed during deployment verification")
+
+    return {
+        "mode": "read_only_live_evm_venue_deployment_verification",
+        "chain_id": chain_id,
+        "block_number": block_number,
+        "block_hash": block_hash,
+        "rpc_endpoint": _safe_endpoint_label(rpc.endpoint) if getattr(rpc, "endpoint", None) else "injected_rpc_test_double",
+        "verification_status": "live_read_only_deployment_checks_passed",
+        "venues": verified,
+        "warning": (
+            "This verifies factory/router runtime code and router.factory() at one pinned block. "
+            "It does not verify pair existence, token safety, pool fee behavior, liquidity, gas, "
+            "route execution, or profitability."
+        ),
+    }
