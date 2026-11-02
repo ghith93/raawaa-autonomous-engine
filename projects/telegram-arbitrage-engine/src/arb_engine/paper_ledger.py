@@ -22,6 +22,34 @@ EVENT_TYPES = frozenset({
 ADDRESS_RE = re.compile(r"0x[0-9a-fA-F]{40}")
 HASH_RE = re.compile(r"0x[0-9a-fA-F]{64}")
 MAX_PAYLOAD_BYTES = 65_536
+MAX_SAFE_JSON_INTEGER = (2**53) - 1
+
+
+def _validate_payload_value(value: Any, *, depth: int = 0) -> None:
+    """Restrict payloads to JSON values with identical Python/JavaScript canonical forms."""
+    if depth > 32:
+        raise ValueError("payload nesting exceeds 32 levels")
+    if value is None or isinstance(value, (str, bool)):
+        return
+    if isinstance(value, int) and not isinstance(value, bool):
+        if abs(value) > MAX_SAFE_JSON_INTEGER:
+            raise ValueError("payload integers must be JavaScript-safe; store large raw values as strings")
+        return
+    if isinstance(value, float):
+        raise ValueError("floating-point payload values are not supported; use decimal strings")
+    if isinstance(value, list):
+        for item in value:
+            _validate_payload_value(item, depth=depth + 1)
+        return
+    if isinstance(value, dict):
+        for key, item in value.items():
+            if not isinstance(key, str):
+                raise ValueError("payload object keys must be strings")
+            _validate_payload_value(item, depth=depth + 1)
+        return
+    raise ValueError("payload contains a value that is not JSON-compatible")
+
+
 RAW_INTEGER_FIELDS = (
     "gross_profit_raw",
     "gas_used",
@@ -195,6 +223,7 @@ class PaperTradingLedger:
         timestamp = occurred_at.astimezone(timezone.utc).isoformat()
         if not isinstance(payload, dict):
             raise ValueError("payload must be a JSON object")
+        _validate_payload_value(payload)
         try:
             payload_json = json.dumps(
                 payload, sort_keys=True, separators=(",", ":"), ensure_ascii=True,
