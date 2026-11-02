@@ -32,12 +32,10 @@ function compareCodePoints(left, right) {
   }
   return a.length - b.length;
 }
-function stable(value) {
-  if (Array.isArray(value)) return value.map(stable);
-  if (isPlainObject(value)) {
-    return Object.fromEntries(Object.keys(value).sort(compareCodePoints).map(key => [key, stable(value[key])]));
-  }
-  return value;
+function asciiString(value) {
+  return JSON.stringify(value).replace(/[\u007f-\uffff]/g, char =>
+    "\\u" + char.charCodeAt(0).toString(16).padStart(4, "0")
+  );
 }
 function validatePayload(value, depth = 0) {
   if (depth > 32) throw new Error("invalid_payload_depth");
@@ -57,10 +55,13 @@ function validatePayload(value, depth = 0) {
   throw new Error("invalid_payload_value");
 }
 function canonical(value) {
-  // Match Python json.dumps(..., ensure_ascii=True) so both clients hash identical bytes.
-  return JSON.stringify(stable(value)).replace(/[\u007f-\uffff]/g, char =>
-    "\\u" + char.charCodeAt(0).toString(16).padStart(4, "0")
-  );
+  // Match Python json.dumps(sort_keys=True, ensure_ascii=True), including integer-like keys.
+  if (Array.isArray(value)) return "[" + value.map(canonical).join(",") + "]";
+  if (isPlainObject(value)) {
+    const keys = Object.keys(value).sort(compareCodePoints);
+    return "{" + keys.map(key => asciiString(key) + ":" + canonical(value[key])).join(",") + "}";
+  }
+  return typeof value === "string" ? asciiString(value) : JSON.stringify(value);
 }
 function address(value, name) {
   if (value === null || value === undefined) return null;
