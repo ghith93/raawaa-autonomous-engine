@@ -50,7 +50,10 @@ def _capital_decimal(value: str | Decimal) -> Decimal:
         raise ValueError("Capital amount must be a valid decimal value") from exc
     if not amount.is_finite() or amount <= 0:
         raise ValueError("Capital amount must be finite and positive")
-    if amount.adjusted() > 77 or amount.as_tuple().exponent < -100:
+    if (
+        amount.adjusted() > 77 or amount.as_tuple().exponent < -100
+        or len(amount.as_tuple().digits) > 128
+    ):
         raise ValueError("Capital amount magnitude or precision exceeds the supported bound")
     return amount
 
