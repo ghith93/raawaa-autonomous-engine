@@ -27,6 +27,22 @@ contract FlashSwapHarness is IUniswapV2CalleeFlashTest {
     uint256 private constant BPS = 10_000;
     uint256 private constant FEE_BPS = 30;
 
+    struct CallbackData {
+        address destinationPair;
+        address borrowedToken;
+        uint256 amountBorrowed;
+        uint256 deadline;
+    }
+
+    struct PoolData {
+        uint256 reserveBorrowed;
+        uint256 reserveRepayment;
+        uint256 destinationReserveIn;
+        uint256 destinationReserveOut;
+        bool repaymentIsToken0;
+        bool borrowedIsToken0;
+    }
+
     address public immutable owner;
     address public immutable sourceFactory;
     address public immutable destinationFactory;
@@ -87,12 +103,13 @@ contract FlashSwapHarness is IUniswapV2CalleeFlashTest {
 
         uint256 amount0Out = borrowedToken == token0 ? amountBorrowed : 0;
         uint256 amount1Out = borrowedToken == token1 ? amountBorrowed : 0;
-        sourcePair.swap(
-            amount0Out,
-            amount1Out,
-            address(this),
-            abi.encode(destinationPairAddress, borrowedToken, amountBorrowed, deadline)
-        );
+        CallbackData memory callbackData = CallbackData({
+            destinationPair: destinationPairAddress,
+            borrowedToken: borrowedToken,
+            amountBorrowed: amountBorrowed,
+            deadline: deadline
+        });
+        sourcePair.swap(amount0Out, amount1Out, address(this), abi.encode(callbackData));
 
         active = false;
         activeSourcePair = address(0);
@@ -120,17 +137,12 @@ contract FlashSwapHarness is IUniswapV2CalleeFlashTest {
         require(sender == address(this), "UNEXPECTED_SENDER");
         require(block.timestamp <= activeDeadline, "CALLBACK_EXPIRED");
 
-        (
-            address destinationPairAddress,
-            address borrowedToken,
-            uint256 amountBorrowed,
-            uint256 deadline
-        ) = abi.decode(data, (address, address, uint256, uint256));
+        CallbackData memory callbackData = abi.decode(data, (CallbackData));
         require(
-            destinationPairAddress == activeDestinationPair
-                && borrowedToken == activeBorrowedToken
-                && amountBorrowed == activeBorrowAmount
-                && deadline == activeDeadline,
+            callbackData.destinationPair == activeDestinationPair
+                && callbackData.borrowedToken == activeBorrowedToken
+                && callbackData.amountBorrowed == activeBorrowAmount
+                && callbackData.deadline == activeDeadline,
             "CALLBACK_DATA_MISMATCH"
         );
 
@@ -139,57 +151,75 @@ contract FlashSwapHarness is IUniswapV2CalleeFlashTest {
         _validatePair(sourcePair, sourceFactory);
         _validatePair(destinationPair, destinationFactory);
 
-        address sourceToken0 = sourcePair.token0();
-        address sourceToken1 = sourcePair.token1();
+        PoolData memory pool = _loadPoolData(
+            sourcePair, destinationPair, callbackData.borrowedToken
+        );
         require(
-            (borrowedToken == sourceToken0 && amount0 == amountBorrowed && amount1 == 0)
-                || (borrowedToken == sourceToken1 && amount1 == amountBorrowed && amount0 == 0),
+            (pool.borrowedIsToken0 && amount0 == callbackData.amountBorrowed && amount1 == 0)
+                || (!pool.borrowedIsToken0 && amount1 == callbackData.amountBorrowed && amount0 == 0),
             "FLASH_AMOUNT_MISMATCH"
         );
-        require(destinationPair.token0() == sourceToken0, "DESTINATION_TOKEN0_MISMATCH");
-        require(destinationPair.token1() == sourceToken1, "DESTINATION_TOKEN1_MISMATCH");
-
-        (uint112 sourceReserve0, uint112 sourceReserve1,) = sourcePair.getReserves();
-        (uint112 destinationReserve0, uint112 destinationReserve1,) = destinationPair.getReserves();
-
-        uint256 reserveBorrowed;
-        uint256 reserveRepayment;
-        uint256 destinationReserveIn;
-        uint256 destinationReserveOut;
-        bool repaymentIsToken0;
-
-        if (borrowedToken == sourceToken0) {
-            reserveBorrowed = sourceReserve0;
-            reserveRepayment = sourceReserve1;
-            destinationReserveIn = destinationReserve0;
-            destinationReserveOut = destinationReserve1;
-            repaymentIsToken0 = false;
-        } else {
-            reserveBorrowed = sourceReserve1;
-            reserveRepayment = sourceReserve0;
-            destinationReserveIn = destinationReserve1;
-            destinationReserveOut = destinationReserve0;
-            repaymentIsToken0 = true;
-        }
-
-        require(amountBorrowed < reserveBorrowed, "INSUFFICIENT_SOURCE_RESERVE");
-        uint256 amountOut = _getAmountOut(
-            amountBorrowed, destinationReserveIn, destinationReserveOut
+        require(
+            callbackData.amountBorrowed < pool.reserveBorrowed,
+            "INSUFFICIENT_SOURCE_RESERVE"
         );
-        require(amountOut > 0 && amountOut < destinationReserveOut, "INSUFFICIENT_DESTINATION_LIQUIDITY");
 
-        _safeTransfer(borrowedToken, activeDestinationPair, amountBorrowed);
+        uint256 amountOut = _getAmountOut(
+            callbackData.amountBorrowed,
+            pool.destinationReserveIn,
+            pool.destinationReserveOut
+        );
+        require(
+            amountOut > 0 && amountOut < pool.destinationReserveOut,
+            "INSUFFICIENT_DESTINATION_LIQUIDITY"
+        );
+
+        _safeTransfer(callbackData.borrowedToken, activeDestinationPair, callbackData.amountBorrowed);
         destinationPair.swap(
-            repaymentIsToken0 ? amountOut : 0,
-            repaymentIsToken0 ? 0 : amountOut,
+            pool.repaymentIsToken0 ? amountOut : 0,
+            pool.repaymentIsToken0 ? 0 : amountOut,
             address(this),
             bytes("")
         );
 
         uint256 repayment = _getAmountIn(
-            amountBorrowed, reserveRepayment, reserveBorrowed
+            callbackData.amountBorrowed,
+            pool.reserveRepayment,
+            pool.reserveBorrowed
         );
         _safeTransfer(activeRepaymentToken, activeSourcePair, repayment);
+    }
+
+    function _loadPoolData(
+        IV2PairFlashTest sourcePair,
+        IV2PairFlashTest destinationPair,
+        address borrowedToken
+    ) private view returns (PoolData memory pool) {
+        address token0 = sourcePair.token0();
+        address token1 = sourcePair.token1();
+        require(
+            destinationPair.token0() == token0 && destinationPair.token1() == token1,
+            "CALLBACK_TOKEN_MISMATCH"
+        );
+        (uint112 source0, uint112 source1,) = sourcePair.getReserves();
+        (uint112 destination0, uint112 destination1,) = destinationPair.getReserves();
+
+        if (borrowedToken == token0) {
+            pool.reserveBorrowed = source0;
+            pool.reserveRepayment = source1;
+            pool.destinationReserveIn = destination0;
+            pool.destinationReserveOut = destination1;
+            pool.repaymentIsToken0 = false;
+            pool.borrowedIsToken0 = true;
+        } else {
+            require(borrowedToken == token1, "BORROW_TOKEN_MISMATCH");
+            pool.reserveBorrowed = source1;
+            pool.reserveRepayment = source0;
+            pool.destinationReserveIn = destination1;
+            pool.destinationReserveOut = destination0;
+            pool.repaymentIsToken0 = true;
+            pool.borrowedIsToken0 = false;
+        }
     }
 
     function _validatePair(IV2PairFlashTest pair, address expectedFactory) private view {
@@ -197,7 +227,10 @@ contract FlashSwapHarness is IUniswapV2CalleeFlashTest {
         address token1 = pair.token1();
         require(token0 != address(0) && token1 != address(0) && token0 < token1, "INVALID_PAIR_TOKENS");
         require(pair.factory() == expectedFactory, "FACTORY_MISMATCH");
-        require(IV2FactoryFlashTest(expectedFactory).getPair(token0, token1) == address(pair), "PAIR_NOT_REGISTERED");
+        require(
+            IV2FactoryFlashTest(expectedFactory).getPair(token0, token1) == address(pair),
+            "PAIR_NOT_REGISTERED"
+        );
     }
 
     function _getAmountOut(
@@ -215,7 +248,10 @@ contract FlashSwapHarness is IUniswapV2CalleeFlashTest {
         uint256 reserveIn,
         uint256 reserveOut
     ) private pure returns (uint256) {
-        require(amountOut > 0 && reserveIn > 0 && reserveOut > amountOut, "INSUFFICIENT_REPAYMENT_LIQUIDITY");
+        require(
+            amountOut > 0 && reserveIn > 0 && reserveOut > amountOut,
+            "INSUFFICIENT_REPAYMENT_LIQUIDITY"
+        );
         uint256 numerator = reserveIn * amountOut * BPS;
         uint256 denominator = (reserveOut - amountOut) * (BPS - FEE_BPS);
         return numerator / denominator + 1;
