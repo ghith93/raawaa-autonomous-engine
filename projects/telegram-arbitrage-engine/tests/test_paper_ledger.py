@@ -202,7 +202,7 @@ def test_payload_is_bounded_and_rejects_non_canonical_numbers(tmp_path):
         candidate_event(ledger, payload={"fraction": 1.25})
     with pytest.raises(ValueError, match="JavaScript-safe"):
         candidate_event(ledger, payload={"unsafe_integer": 2**53})
-    with pytest.raises(ValueError, match="finite JSON"):
+    with pytest.raises(ValueError, match="floating-point"):
         candidate_event(ledger, payload={"not_finite": float("nan")})
     with pytest.raises(ValueError, match="keys must be strings"):
         candidate_event(ledger, payload={1: "numeric-key"})
