@@ -110,9 +110,8 @@ contract FlashSwapHarnessTest {
 
     function testRejectsMismatchedDestinationTokens() public {
         MockERC20 tokenC = new MockERC20("Token C");
-        MockV2Factory otherFactory = new MockV2Factory();
         MockV2Pair wrongPair = MockV2Pair(
-            otherFactory.createPair(address(tokenA), address(tokenC))
+            destinationFactory.createPair(address(tokenA), address(tokenC))
         );
         _seed(wrongPair, 1_000_000, 1_000_000);
 
@@ -138,8 +137,8 @@ contract FlashSwapHarnessTest {
             block.timestamp - 1
         );
 
-        vm.prank(address(0xBEEF));
         vm.expectRevert();
+        vm.prank(address(0xBEEF));
         harness.execute(
             address(sourcePair),
             address(destinationPair),
