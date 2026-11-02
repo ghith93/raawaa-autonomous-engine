@@ -14,7 +14,7 @@
 ## Public Ethereum JSON-RPC candidate
 
 - PublicNode endpoint: https://ethereum-rpc.publicnode.com
-- This is a candidate for a future read-only Ethereum pool-state adapter. The current release does not yet call this endpoint.
+- The current `v2-sim` CLI uses this endpoint for read-only `eth_chainId`, `eth_blockNumber`, `eth_getBlockByNumber`, and `eth_call` requests. It reads V2 `token0`, `token1`, `getReserves`, and token `decimals`.
 - Public/free availability is not an SLA, and rate limits or service terms may change.
 - No key, wallet, signer, transaction submission, or paid access is required by the current code.
 
@@ -28,12 +28,12 @@
 
 ## Release gates before paper-trade mode
 
-1. Add read-only RPC state retrieval pinned to one block for both pools.
-2. Verify pool ABI/type and fee model; reject unknown pool families.
-3. Resolve token decimals and reject fee-on-transfer/rebasing/blacklisted assets where they cannot be safely simulated.
-4. Estimate gas and convert it to the quote asset using a fresh, independent price source.
-5. Include route-level slippage and minimum-output constraints.
+1. Verify each pool's factory/protocol and fee model; reject unknown pool families and unverified fee settings.
+2. Reject fee-on-transfer/rebasing/blacklisted assets where their behavior cannot be safely simulated.
+3. Estimate gas and convert it to the quote asset using a fresh, independent price source.
+4. Compare reserve math against router `eth_call` exact-input quotes at the same block.
+5. Include route-level slippage, minimum-output constraints, and revert simulation.
 6. Record block hash, retrieval time, data source, and every assumption in each simulation.
-7. Replay captured snapshots and compare calculated outputs against router `eth_call` quotes before enabling paper-trade accounting.
+7. Replay captured snapshots and test quote stability across blocks before enabling paper-trade accounting.
 
 No item in this list authorizes live trading.
