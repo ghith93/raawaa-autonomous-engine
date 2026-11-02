@@ -93,6 +93,12 @@ def main() -> None:
     v2_parser.add_argument("--sell-router", help="optional V2 router contract for same-block getAmountsOut validation")
     v2_parser.add_argument("--buy-factory", help="expected V2 factory for the buy pair; verifies factory() and getPair()")
     v2_parser.add_argument("--sell-factory", help="expected V2 factory for the sell pair; verifies factory() and getPair()")
+    token_parser = sub.add_parser(
+        "token-check", help="read-only contract-code and ERC-20 metadata preflight at one pinned block"
+    )
+    token_parser.add_argument("--token-address", required=True)
+    token_parser.add_argument("--rpc-url", default=DEFAULT_ETHEREUM_RPC)
+    token_parser.add_argument("--chain-id", type=int, default=1)
     fork_parser = sub.add_parser(
         "fork-call", help="simulate supplied contract calldata against an operator-managed local Anvil fork"
     )
@@ -274,6 +280,29 @@ def main() -> None:
             print(json.dumps(output, indent=2))
         except (RpcReadError, ValueError, ArithmeticError) as exc:
             parser.exit(2, f"v2-sim failed: {exc}\n")
+    elif args.command == "token-check":
+        try:
+            reader = EthereumV2PoolReader(args.rpc_url, expected_chain_id=args.chain_id)
+            result = reader.read_token_preflight(args.token_address)
+            print(json.dumps({
+                "mode": "read_only_token_contract_preflight",
+                "chain_id": result.chain_id,
+                "block_number": result.block_number,
+                "block_hash": result.block_hash,
+                "token_address": result.token_address,
+                "contract_code_present": True,
+                "runtime_bytecode_size": result.runtime_bytecode_size,
+                "decimals": result.decimals,
+                "symbol": result.symbol,
+                "name": result.name,
+                "metadata_status": result.metadata_status,
+                "classification": "metadata_preflight_only_not_token_safety_verification",
+                "transfer_tax_or_blacklist_checks": "not_performed",
+                "live_execution": False,
+                "warning": "ERC-20 metadata methods are optional. Code and metadata do not prove transfer semantics, proxy implementation safety, absence of taxes, blacklist behavior, or honeypot resistance.",
+            }, indent=2))
+        except (RpcReadError, ValueError, ArithmeticError) as exc:
+            parser.exit(2, f"token-check failed: {exc}\\n")
     elif args.command == "fork-call":
         try:
             result = AnvilForkSimulator(args.anvil_rpc).simulate_call(
