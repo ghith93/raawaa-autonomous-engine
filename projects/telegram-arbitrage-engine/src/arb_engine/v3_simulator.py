@@ -54,6 +54,8 @@ class V3PoolSnapshot:
     block_hash: str
     bitmap_words: Mapping[int, int]
     initialized_ticks: Mapping[int, int]
+    rpc_verified: bool = False
+    source: str = "caller_supplied"
 
     def __post_init__(self) -> None:
         if type(self.chain_id) is not int or self.chain_id <= 0:
@@ -91,6 +93,10 @@ class V3PoolSnapshot:
             raise V3SnapshotError("block_hash must be a 32-byte hexadecimal hash")
         if not isinstance(self.bitmap_words, Mapping) or not isinstance(self.initialized_ticks, Mapping):
             raise V3SnapshotError("bitmap_words and initialized_ticks must be mappings")
+        if type(self.rpc_verified) is not bool:
+            raise V3SnapshotError("rpc_verified must be bool")
+        if not isinstance(self.source, str) or not self.source.strip():
+            raise V3SnapshotError("snapshot source label is required")
 
         words = dict(self.bitmap_words)
         ticks = dict(self.initialized_ticks)
@@ -134,7 +140,7 @@ class V3SwapResult:
     steps: int
     complete: bool
     stop_reason: str
-    classification: str = "caller_supplied_snapshot_math_only_not_rpc_verified"
+    classification: str
 
 
 def simulate_v3_swap(
@@ -179,6 +185,10 @@ def simulate_v3_swap(
             snapshot.chain_id, snapshot.pool_address, snapshot.block_number, snapshot.block_hash,
             zero_for_one, True, amount_specified, 0, 0, 0, 0, current_price,
             current_tick, liquidity, (), 0, True, "amount_filled",
+            (
+                "rpc_snapshot_factory_registered_block_hash_rechecked"
+                if snapshot.rpc_verified else "caller_supplied_snapshot_not_rpc_verified"
+            ),
         )
 
     stop_reason = "step_limit"
@@ -270,4 +280,8 @@ def simulate_v3_swap(
         steps=steps,
         complete=complete,
         stop_reason=stop_reason,
+        classification=(
+            "rpc_snapshot_factory_registered_block_hash_rechecked"
+            if snapshot.rpc_verified else "caller_supplied_snapshot_not_rpc_verified"
+        ),
     )
