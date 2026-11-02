@@ -1,4 +1,6 @@
-# AndroidHarness 3.2 — Technical Research and Operating Recommendation
+# AndroidHarness 3.2 — Historical Technical Research
+
+> **Superseded on 2026-11-02:** This report records an upstream 3.2 research snapshot only. The installed device is 3.1, and the operator chose to remove AndroidHarness from the engine's runtime path. It is optional for explicitly requested diagnostics only. Do not follow model-download, SDK-install, worker, WorkManager, or recurring-automation recommendations here as active tasks.
 
 **Research date:** 2026-11-02  
 **Upstream project:** [Sanuu7/AndroidHarness](https://github.com/Sanuu7/AndroidHarness)  

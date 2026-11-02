@@ -19,6 +19,10 @@ class AndroidHarnessInfrastructureTests(unittest.TestCase):
         self.assertIn("raawaa-engine-androidharness", config["skills"]["auto_load"])
         skill = ROOT / ".harness/skills/raawaa-engine-androidharness/SKILL.md"
         self.assertTrue(skill.is_file())
+        skill_text = skill.read_text(encoding="utf-8")
+        self.assertIn("diagnostics only", skill_text)
+        self.assertIn("Do not start or maintain a foreground poller", skill_text)
+        self.assertNotIn("optional local Android/Linux worker", skill_text)
         for reference in config["references"]:
             self.assertTrue((ROOT / reference["path"]).is_file(), reference["path"])
         self.assertTrue((ROOT / config["memory"]["file"]).is_file())
