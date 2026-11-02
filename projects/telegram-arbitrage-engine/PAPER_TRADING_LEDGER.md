@@ -81,25 +81,6 @@ The observer:
 
 This is a forward-only reserve-math observation, not a historical backtest, executable quote, order simulation, realized PnL, or execution guarantee. It does not place, sign, or submit an order. The RPC reader is read-only. The default ledger is local SQLite; D1 is used only when `RAAWAA_PAPER_LEDGER_BACKEND=d1` is explicitly set and its authenticated Worker endpoint is configured. There is no fallback between backends.
 
-## Forward-only outcome observation
-
-New flash-swap captures use observer schema 1 and persist the route fees, borrowed token/amount, optional gas scenario, and original block-pinned token-decimal metadata. The candidate identity is versioned so previously captured append-only events are not rewritten. Legacy candidates without this metadata are intentionally not auto-interpreted; recapture them with the current simulator.
-
-Run a later observation with:
-
-```bash
-arb-engine paper-observe --candidate-id <candidate-id>
-```
-
-The observer:
-- verifies the candidate's existing event hash chain and original route/snapshot block agreement;
-- fetches all route pools (and the optional gas-valuation pool) at one later canonical block using read-only RPC calls;
-- rejects the same/earlier block, a non-later block timestamp, a reorged block, mismatched chain/pools, or changed token decimals;
-- replays the exact recorded borrow amount, fees, and optional gas scenario against the later reserves;
-- appends one `outcome_observed` event per observed block hash, making retries idempotent while allowing later observations to form a time series.
-
-This is a forward-only reserve-math observation, not a historical backtest, executable quote, order simulation, realized PnL, or execution guarantee. It does not place, sign, or submit an order. The RPC reader is read-only. The default ledger is local SQLite; D1 is used only when `RAAWAA_PAPER_LEDGER_BACKEND=d1` is explicitly set and its authenticated Worker endpoint is configured. There is no fallback between backends.
-
 ## Remote D1 persistence adapter (staged)
 
 The repository also contains an authenticated Worker endpoint at `POST /v1/paper-ledger` and a Python HTTP client, backed by additive migration `0004_paper_event_ledger.sql`. The flash-swap CLI has an explicit opt-in D1 backend, but it is **not** deployed or migrated against any production D1 database. It requires a separately deployed Worker and an explicitly migrated non-production database before use.
