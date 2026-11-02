@@ -118,7 +118,7 @@ def test_cex_cli_never_assumes_missing_fees_or_latency_are_zero(monkeypatch, cap
     monkeypatch.setattr("sys.argv", command_args())
 
     cli.main()
-    output = __import__("json").loads(capsys.readouterr().out)
+    output = json.loads(capsys.readouterr().out)
     forward = output["opportunities"][0]
 
     assert forward["status"] == "incomplete_costs"
@@ -143,7 +143,7 @@ def test_cex_cli_blocks_symbol_match_when_canonical_asset_ids_differ(monkeypatch
     )
 
     cli.main()
-    output = __import__("json").loads(capsys.readouterr().out)
+    output = json.loads(capsys.readouterr().out)
 
     assert all(item["status"] == "asset_or_quote_identity_mismatch" for item in output["opportunities"])
     assert all(item["evaluation"] is None for item in output["opportunities"])
@@ -156,6 +156,7 @@ def test_cex_cli_command_is_visible_in_help(monkeypatch, capsys):
         cli.main()
     assert exit_info.value.code == 0
     assert "cex-scan" in capsys.readouterr().out
+
 
 def test_cex_snapshot_factory_uses_kraken_coinbase_and_okx_public_adapters(monkeypatch):
     class FakeKraken:
