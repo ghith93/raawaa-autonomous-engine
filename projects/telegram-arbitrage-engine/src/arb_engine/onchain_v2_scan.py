@@ -252,8 +252,8 @@ def scan_onchain_v2_candidates(
         )
         quote_received_raw = sell_amounts[-1]
         gross_surplus_raw = quote_received_raw - capital_raw
-        with localcontext() as context:
-            context.prec = 100
+        with localcontext() as decimal_context:
+            decimal_context.prec = 100
             gross_return_bps = Decimal(gross_surplus_raw) * Decimal(10_000) / Decimal(capital_raw)
         routes.append({
             "buy_venue_id": buy_venue.id,
