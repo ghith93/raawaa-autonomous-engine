@@ -93,3 +93,9 @@ def test_stale_pool_state_is_rejected():
     stale = replace(current, observed_at=datetime.now(timezone.utc) - timedelta(seconds=31))
     with pytest.raises(ValueError, match="stale"):
         quote_exact_input(stale, QUOTE, 100)
+
+
+def test_reserves_must_fit_v2_uint112():
+    p = pool("0x" + "3" * 40, QUOTE, BASE, 2**112, 10000)
+    with pytest.raises(ValueError, match="uint112"):
+        quote_exact_input(p, QUOTE, 100)
