@@ -136,7 +136,8 @@ async function reserve(env, input) {
       !safeInt(input.monthly_budget_nanos) || !safeInt(input.per_task_budget_nanos)) {
     return json({ error: "invalid_reservation" }, 400);
   }
-  if (input.estimated_cost_nanos > 0 && !validText(input.task_id, 200)) {
+  if ((input.estimated_cost_nanos > 0 || input.per_task_budget_nanos > 0) &&
+      !validText(input.task_id, 200)) {
     return json({ error: "task_id_required" }, 400);
   }
   const { now, day, month } = windowKeys(new Date().toISOString());
