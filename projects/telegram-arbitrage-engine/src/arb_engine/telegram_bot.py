@@ -98,6 +98,7 @@ class TelegramController:
             chat.get("type") != "private"
             or not isinstance(chat_id, int) or isinstance(chat_id, bool)
             or chat_id not in self.allowed_chat_ids
+            or not isinstance(sender.get("id"), int) or isinstance(sender.get("id"), bool)
             or sender.get("id") != chat_id
             or sender.get("is_bot") is True
         ):
@@ -130,7 +131,10 @@ class TelegramController:
                 "AI trade authority: none"
             )
         if command == "/report":
-            rows = OpportunityLedger(self.ledger_path).summarize(100)
+            try:
+                rows = OpportunityLedger(self.ledger_path).summarize(100)
+            except (OSError, ValueError):
+                return chat_id, "Local observation ledger is unavailable."
             if not rows:
                 return chat_id, "No recorded observations yet."
             lines = ["Repeated indicative observations (not PnL):"]
@@ -148,7 +152,7 @@ class TelegramController:
                 return chat_id, "Search query is too long (maximum 120 characters)."
             try:
                 result = scan(query, Decimal("10000"), Decimal("1000"), self.ledger_path)
-            except (MarketDataError, ValueError):
+            except (MarketDataError, ValueError, OSError):
                 return chat_id, "Market scan failed safely. Retry later; no trade was placed."
             opportunities = result["opportunities"][:5]
             if not opportunities:
@@ -178,11 +182,16 @@ class TelegramController:
         return next_offset
 
     def run_forever(self) -> None:
-        offset = 0
+        ledger = OpportunityLedger(self.ledger_path)
+        stored_offset = ledger.get_state("telegram_update_offset")
+        offset = int(stored_offset) if stored_offset and stored_offset.isdigit() else 0
         while True:
             try:
-                offset = self.poll_once(offset)
-            except TelegramApiError:
+                next_offset = self.poll_once(offset)
+                if next_offset != offset:
+                    ledger.set_state("telegram_update_offset", str(next_offset))
+                offset = next_offset
+            except (TelegramApiError, OSError, ValueError):
                 time.sleep(3)
 
 
