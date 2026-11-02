@@ -14,6 +14,11 @@ RECORD_FIELDS = (*METADATA_FIELDS, "payload_json")
 MAX_EVENTS = 500
 
 
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, request, file_pointer, code, message, headers, new_url):
+        return None
+
+
 class D1PaperTradingLedger:
     """Narrow HTTPS client for the append-only D1 paper-event API.
 
@@ -51,7 +56,8 @@ class D1PaperTradingLedger:
     def _urlopen(self, method: str, url: str, headers: dict[str, str], body: bytes | None) -> tuple[int, bytes]:
         request = urllib.request.Request(url, data=body, headers=headers, method=method)
         try:
-            with urllib.request.urlopen(request, timeout=self.timeout_seconds) as response:
+            opener = urllib.request.build_opener(_NoRedirect())
+            with opener.open(request, timeout=self.timeout_seconds) as response:
                 return response.status, response.read(32_768 + 1)
         except urllib.error.HTTPError as exc:
             return exc.code, exc.read(32_768 + 1)
