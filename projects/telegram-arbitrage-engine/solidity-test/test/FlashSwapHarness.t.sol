@@ -6,7 +6,6 @@ import "./mocks/MockV2.sol";
 
 interface VmFlashSwap {
     function expectRevert() external;
-    function prank(address sender) external;
 }
 
 contract FlashSwapHarnessTest {
@@ -68,12 +67,13 @@ contract FlashSwapHarnessTest {
     function testMinimumProfitFailureRollsBackBothPairs() public {
         (uint112 source0Before, uint112 source1Before,) = sourcePair.getReserves();
         (uint112 destination0Before, uint112 destination1Before,) = destinationPair.getReserves();
+        address borrowedToken = sourcePair.token1();
 
         vm.expectRevert();
         harness.execute(
             address(sourcePair),
             address(destinationPair),
-            sourcePair.token1(),
+            borrowedToken,
             10_000,
             type(uint256).max,
             block.timestamp + 60
@@ -94,14 +94,15 @@ contract FlashSwapHarnessTest {
     }
 
     function testRejectsUnregisteredSourcePair() public {
+        address borrowedToken = sourcePair.token1();
         MockV2Pair rogue = new MockV2Pair(
-            address(sourceFactory), sourcePair.token0(), sourcePair.token1()
+            address(sourceFactory), sourcePair.token0(), borrowedToken
         );
         vm.expectRevert();
         harness.execute(
             address(rogue),
             address(destinationPair),
-            sourcePair.token1(),
+            borrowedToken,
             10_000,
             0,
             block.timestamp + 60
@@ -114,12 +115,13 @@ contract FlashSwapHarnessTest {
             destinationFactory.createPair(address(tokenA), address(tokenC))
         );
         _seed(wrongPair, 1_000_000, 1_000_000);
+        address borrowedToken = sourcePair.token1();
 
         vm.expectRevert();
         harness.execute(
             address(sourcePair),
             address(wrongPair),
-            sourcePair.token1(),
+            borrowedToken,
             10_000,
             0,
             block.timestamp + 60
@@ -127,22 +129,24 @@ contract FlashSwapHarnessTest {
     }
 
     function testRejectsExpiredDeadlineAndNonOwner() public {
+        address borrowedToken = sourcePair.token1();
         vm.expectRevert();
         harness.execute(
             address(sourcePair),
             address(destinationPair),
-            sourcePair.token1(),
+            borrowedToken,
             10_000,
             0,
             block.timestamp - 1
         );
 
+        NonOwnerFlashSwapCaller caller = new NonOwnerFlashSwapCaller();
         vm.expectRevert();
-        vm.prank(address(0xBEEF));
-        harness.execute(
+        caller.execute(
+            harness,
             address(sourcePair),
             address(destinationPair),
-            sourcePair.token1(),
+            borrowedToken,
             10_000,
             0,
             block.timestamp + 60
@@ -150,11 +154,12 @@ contract FlashSwapHarnessTest {
     }
 
     function testRejectsSamePairAndOversizedBorrow() public {
+        address borrowedToken = sourcePair.token1();
         vm.expectRevert();
         harness.execute(
             address(sourcePair),
             address(sourcePair),
-            sourcePair.token1(),
+            borrowedToken,
             10_000,
             0,
             block.timestamp + 60
@@ -164,7 +169,7 @@ contract FlashSwapHarnessTest {
         harness.execute(
             address(sourcePair),
             address(destinationPair),
-            sourcePair.token1(),
+            borrowedToken,
             1_000_000,
             0,
             block.timestamp + 60
@@ -175,5 +180,27 @@ contract FlashSwapHarnessTest {
         MockERC20(pair.token0()).mint(address(pair), amount0);
         MockERC20(pair.token1()).mint(address(pair), amount1);
         pair.sync();
+    }
+}
+
+
+contract NonOwnerFlashSwapCaller {
+    function execute(
+        FlashSwapHarness harness,
+        address sourcePair,
+        address destinationPair,
+        address borrowedToken,
+        uint256 amountBorrowed,
+        uint256 minProfit,
+        uint256 deadline
+    ) external {
+        harness.execute(
+            sourcePair,
+            destinationPair,
+            borrowedToken,
+            amountBorrowed,
+            minProfit,
+            deadline
+        );
     }
 }
