@@ -36,13 +36,13 @@ def test_exact_input_quote_uses_integer_constant_product_math():
 
 def test_exact_input_quote_supports_reverse_token_order():
     p = pool("0x" + "5" * 40, QUOTE, BASE, 1_000_000_000_000, 10**24)
-    result = quote_exact_input(p, BASE, 1_000_000_000)
+    result = quote_exact_input(p, BASE, 10**21)
     assert result.token_out == QUOTE
 
 
 def test_same_block_two_pool_round_trip_is_calculated_in_raw_units():
     buy = pool("0x" + "3" * 40, QUOTE, BASE, 1_000_000_000_000, 10**24)
-    sell = pool("0x" + "4" * 40, BASE, QUOTE, 10**24, 1_010_000_000_000)
+    sell = pool("0x" + "4" * 40, QUOTE, BASE, 1_010_000_000_000, 10**24)
     result = simulate_round_trip(
         buy, sell, quote_token=QUOTE, base_token=BASE, capital_quote_raw=1_000_000_000
     )
