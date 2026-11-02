@@ -80,13 +80,13 @@ class FakeReader:
 
     def quote_v2_router_exact_input(self, router, amount, path, block):
         self.quotes.append((router, amount, path, block))
-        if router == UNI_ROUTER and path == [QUOTE, BASE]:
+        if router.casefold() == UNI_ROUTER.casefold() and path == [QUOTE, BASE]:
             out = 26 * 10**15
-        elif router == SUSHI_ROUTER and path == [QUOTE, BASE]:
+        elif router.casefold() == SUSHI_ROUTER.casefold() and path == [QUOTE, BASE]:
             out = 25 * 10**15
-        elif router == UNI_ROUTER and path == [BASE, QUOTE]:
+        elif router.casefold() == UNI_ROUTER.casefold() and path == [BASE, QUOTE]:
             out = 49 * 10**6
-        elif router == SUSHI_ROUTER and path == [BASE, QUOTE]:
+        elif router.casefold() == SUSHI_ROUTER.casefold() and path == [BASE, QUOTE]:
             out = 51 * 10**6
         else:
             raise AssertionError("Unexpected router/path")
