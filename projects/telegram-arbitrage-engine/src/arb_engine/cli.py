@@ -28,15 +28,17 @@ def demo() -> dict:
     }
 
 
-def scan(query: str, min_liquidity: Decimal, min_volume: Decimal, ledger_path: str) -> dict:
+def scan_with_spreads(
+    query: str, min_liquidity: Decimal, min_volume: Decimal,
+) -> tuple[dict, list]:
+    """Collect indicative DEX data without persisting it."""
     pairs = DexScreenerClient().search_pairs(query)
     spreads = find_spreads(pairs, min_liquidity_usd=min_liquidity,
                            min_volume_24h_usd=min_volume)
-    recorded = OpportunityLedger(ledger_path).record(spreads)
-    return {
+    return ({
         "mode": "read_only_indicative_scan", "source": "DEX Screener public API",
         "query": query, "pairs_received": len(pairs),
-        "cross_dex_comparisons": len(spreads), "observations_recorded": recorded,
+        "cross_dex_comparisons": len(spreads),
         "live_execution": False,
         "warning": (
             "Indicative USD pool marks only; not router quotes or executable prices. "
@@ -57,7 +59,13 @@ def scan(query: str, min_liquidity: Decimal, min_volume: Decimal, ledger_path: s
                 "classification": x.classification,
             } for x in spreads[:25]
         ],
-    }
+    }, spreads)
+
+
+def scan(query: str, min_liquidity: Decimal, min_volume: Decimal, ledger_path: str) -> dict:
+    result, spreads = scan_with_spreads(query, min_liquidity, min_volume)
+    result["observations_recorded"] = OpportunityLedger(ledger_path).record(spreads)
+    return result
 
 
 def main() -> None:
