@@ -53,7 +53,11 @@ class JsonRpcClient:
         request = Request(
             self.endpoint,
             data=json.dumps(payload).encode("utf-8"),
-            headers={"Content-Type": "application/json", "Accept": "application/json"},
+            headers={
+                "Content-Type": "application/json",
+                "Accept": "application/json",
+                "User-Agent": "RaawaaAutonomousEngine/0.16 (read-only venue verification; github.com/ghith93/raawaa-autonomous-engine)",
+            },
             method="POST",
         )
         for attempt in range(3):
