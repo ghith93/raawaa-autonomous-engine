@@ -333,3 +333,23 @@ The source-documented venue registry reduces manual address/fee entry for Ethere
 The read-only Solana path now exposes Jupiter Price API V3 indicative prices and Swap API V2 no-taker quote-only requests through `solana-price` and `solana-quote`. It uses documented keyless 0.5 RPS pacing, rejects transaction-bearing quote responses, and keeps Solana marks separate from the EVM/CEX evaluator until canonical asset mapping and timestamp/slot synchronization are established.
 
 Cross-venue CEX comparisons require both venue snapshots to be fresh and synchronized. The comparator defaults to a maximum 5-second quote age and a maximum 2-second inter-venue timestamp skew; a larger skew is reported as `unsynchronized_data` and cannot produce a net estimate. These are configurable research guards, not evidence of executable fills or profitability.
+
+### Multi-venue universe scan
+
+The separate `cex-universe-scan` command fetches two to five public Spot books concurrently and compares every compatible venue pair in both directions. Repeat the venue/instrument/canonical-ID flags in the same order. The base asset ID can explicitly map venue-specific aliases (for example Kraken XBT to BTC); quote-currency codes must match across the selected venues because no FX or stablecoin conversion is performed. Fee profiles are optional per venue; missing fees or latency remain unknown.
+
+```bash
+arb-engine cex-universe-scan \
+  --venue binance --instrument BTCUSDT \
+  --base-asset-id asset:canonical:BTC --quote-currency-id currency:canonical:USDT \
+  --fee-bps binance=10 \
+  --venue bybit --instrument BTCUSDT \
+  --base-asset-id asset:canonical:BTC --quote-currency-id currency:canonical:USDT \
+  --fee-bps bybit=10 \
+  --venue okx --instrument BTC-USDT \
+  --base-asset-id asset:canonical:BTC --quote-currency-id currency:canonical:USDT \
+  --fee-bps okx=10 \
+  --base-quantity 0.001 --latency-cost-bps 2
+```
+
+A failed venue is retained as a sanitized source failure while healthy venues continue; fewer than two compatible books produce `insufficient_sources`. This remains a manual read-only research command, not a scheduler or order executor.
