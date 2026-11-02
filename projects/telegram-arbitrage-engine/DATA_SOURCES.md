@@ -75,6 +75,16 @@ No item in this list authorizes live trading.
 - The adapter never requests an unsigned transaction, signs, builds, submits, or lands a swap. It does not calculate cross-venue profit, Solana priority fees, account-specific costs, or final fill probability.
 - CI uses deterministic response fixtures only; no live Jupiter calls or API keys are used.
 
+## Binance Spot public market data (read-only)
+
+- Official REST documentation: https://developers.binance.com/en/docs/products/spot/rest-api
+- Binance explicitly designates `https://data-api.binance.vision` for public market-data-only endpoints with security type `NONE`; the adapter calls only `GET /api/v3/depth` and `GET /api/v3/ticker/bookTicker`.
+- The adapter does not send `X-MBX-APIKEY`, signatures, account identifiers, or private requests. It exposes no order, balance, transfer, withdrawal, or trade endpoint.
+- Order-book levels and best bid/ask are preserved as `Decimal`. The REST depth snapshot carries `lastUpdateId`, but no exchange timestamp in this response; the adapter records local `fetched_at` separately and leaves `exchange_timestamp_ms=None`. It is not synchronized with WebSocket diff-depth updates and is not an executable live book guarantee.
+- Depth requests are limited to 5, 10, 20, 50 or 100 levels. The adapter enforces a conservative one request/second per instance and blocks redirects. It does not attempt to use the venue's full IP request-weight allowance.
+- Binance documents HTTP 429 for rate-limit violations and HTTP 418 for an IP ban after continued violations; it requires clients to back off and provides `Retry-After`. This adapter fails visibly and does not retry in a tight loop.
+- CI uses deterministic fixtures only; no live Binance calls or API keys are used. Taker fees, depth-based fill probability, WebSocket synchronization, withdrawal costs, account/regional eligibility and net cross-venue profitability remain unimplemented.
+
 ## Telegram Bot API
 
 - Official reference: https://core.telegram.org/bots/api
