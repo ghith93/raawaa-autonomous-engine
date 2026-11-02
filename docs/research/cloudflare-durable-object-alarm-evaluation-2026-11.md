@@ -2,9 +2,9 @@
 
 ## Decision
 
-**Candidate for an isolated wake-up prototype; not adopted or deployed.** The current Cloudflare Worker + D1 task lifecycle remains the production control plane and durable task ledger. GitHub Actions remains the bounded scheduled consumer. AndroidHarness is optional and must not be a runtime dependency.
+**Deferred; do not implement now.** The current Cloudflare Worker + D1 task lifecycle remains the remote control plane and durable task ledger. GitHub Actions remains the bounded scheduled Python consumer. AndroidHarness is optional and must not be a runtime dependency.
 
-A Durable Object alarm could remove the need for GitHub Actions to provide every periodic wake-up. It must not replace D1, add a parallel task queue, or bypass the current authenticated task lifecycle.
+A Durable Object alarm cannot execute the current Python task handlers. The existing Worker Cron already performs stale-lease recovery, so adding a Durable Object today would duplicate scheduling without replacing the Python consumer. Reconsider only after a measured decision to port the deterministic dry-run handlers into the Worker or provide an existing safe remote Python runtime.
 
 ## Evidence reviewed
 
@@ -21,20 +21,18 @@ A Durable Object alarm could remove the need for GitHub Actions to provide every
 | Canonical task state | D1 tasks table | None; do not duplicate |
 | Atomic claim and lease token | Authenticated Worker API | Call existing API / shared handler |
 | Heartbeat, finish, retry | Existing D1 lifecycle | Preserve unchanged |
-| Stale lease recovery | Worker Cron Trigger | Could request bounded recovery |
-| Periodic wake-up | GitHub Actions every 15 minutes | Potential durable alarm |
+| Stale lease recovery | Worker Cron Trigger | Duplicates existing capability |
+| Periodic Python execution | GitHub Actions every 15 minutes | Cannot run current Python handlers |
 | AI/provider spend control | Existing quota ledger and disabled routes | No authority; never bypass |
 | External writes | Disabled / approval-gated | No authority |
 
 ## Proposed isolated experiment
 
-1. Add one singleton SQLite-backed Durable Object class with an alarm; its storage contains only scheduler metadata (next wake-up, last outcome, bounded retry state), never tasks or provider quota data.
-2. The alarm handler calls the existing Worker task-batch entry point or an internal shared function, with a strict maximum batch size and wall-clock/CPU budget.
-3. Schedule the next alarm only after recording the current invocation outcome. Rely on alarm retry semantics for thrown/transient failures, but make every operation idempotent because delivery is at least once.
-4. Keep D1 lease tokens and fencing authoritative. Duplicate alarm delivery must not create duplicate claims or accept stale task results.
-5. Add tests for cold start/restart, duplicate alarms, concurrent invocation, alarm failure/retry, D1 outage, quota exhaustion, and no pending work.
-6. Run a non-production soak and compare latency, failure rate, request/compute use, and operational complexity against the current 15-minute Actions consumer.
-7. Only then propose a migration. Keep GitHub Actions as an emergency/manual fallback until the new path has demonstrated recovery.
+1. First decide whether moving the deterministic dry-run handlers from Python to Worker JavaScript is worth the maintenance and parity cost; do not maintain two independent handler implementations.
+2. If a single canonical Worker-side executor is established, prototype one singleton SQLite-backed Durable Object alarm with scheduler metadata only (no task or quota ledger).
+3. Preserve D1 claim/heartbeat/finish/retry and lease-token fencing as the only task lifecycle.
+4. Test cold-start/restart, duplicate alarms, concurrency, alarm failure/retry, D1 outage, quota exhaustion, and no pending work.
+5. Compare operational complexity and free-tier use against the existing Worker Cron + Actions consumer before proposing adoption.
 
 ## Rejection criteria
 
@@ -46,4 +44,4 @@ Cloudflare's platform documentation is CC-BY-4.0; the Loams design page is a pub
 
 ## Outcome
 
-Research only. No Durable Object namespace/class, migration, binding, deployment, account setting, or provider call was created or changed.
+Deferred / not adopted. The present design has no Worker-side Python task execution entry point, and the Worker Cron already handles stale leases. No Durable Object namespace/class, migration, binding, deployment, account setting, or provider call was created or changed.
