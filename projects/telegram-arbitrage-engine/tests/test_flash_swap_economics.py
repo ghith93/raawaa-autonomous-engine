@@ -82,7 +82,7 @@ def test_break_even_is_maximum_integer_price_and_respects_ceiling_rounding():
 
 
 def test_conversion_rounds_cost_up_for_fractional_raw_quote_unit():
-    # 1 wei of native gas is 1.5e-12 USDC; conservative ceiling is one USDC raw unit.
+    # 1 wei of native gas is 1.5e-12 USDC raw units; ceiling rounds to one raw unit.
     quote_pool = native_quote_pool(quote_reserve=3 * 10**6, native_reserve=2 * 10**18)
     sim = replace(simulation(), gross_profit_raw=100)
     result = scenario(
