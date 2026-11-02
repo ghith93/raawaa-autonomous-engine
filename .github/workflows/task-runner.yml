@@ -141,6 +141,14 @@ jobs:
                   output.write(f"status=request_failed\nray=not_supplied\n")
               raise SystemExit(1)
           PY
+      - name: Read D1-backed mobile status (read-only)
+        id: mobile
+        env:
+          ENGINE_API_URL: https://raawaa-autonomous-engine-control.ghith-shikhkhaled.workers.dev
+          ENGINE_API_TOKEN: ${{ secrets.ENGINE_API_TOKEN }}
+          CF_ACCESS_CLIENT_ID: ${{ secrets.CF_ACCESS_CLIENT_ID }}
+          CF_ACCESS_CLIENT_SECRET: ${{ secrets.CF_ACCESS_CLIENT_SECRET }}
+        run: python -m engine.mobile_status_probe
       - name: Enqueue one-time D1 dry-run smoke task
         if: github.event_name == 'push'
         env:
@@ -228,6 +236,16 @@ jobs:
           BATCH_OUTCOME: ${{ steps.batch.outcome }}
           TASKS_PROCESSED: ${{ steps.batch.outputs.tasks_processed }}
           STOP_REASON: ${{ steps.batch.outputs.stop_reason }}
+          MOBILE_STATUS_HTTP: ${{ steps.mobile.outputs.http }}
+          MOBILE_PAPER_LEDGER: ${{ steps.mobile.outputs.paper_ledger }}
+          MOBILE_PROVIDER_USAGE: ${{ steps.mobile.outputs.provider_usage }}
+          MOBILE_LAST_SCAN: ${{ steps.mobile.outputs.last_scan }}
+          MOBILE_SOURCE_FRESHNESS: ${{ steps.mobile.outputs.source_freshness }}
+          MOBILE_CI_HEALTH: ${{ steps.mobile.outputs.ci_health }}
+          MOBILE_KILL_SWITCH: ${{ steps.mobile.outputs.kill_switch }}
+          MOBILE_TASKS_PENDING: ${{ steps.mobile.outputs.tasks_pending }}
+          MOBILE_TASKS_RUNNING: ${{ steps.mobile.outputs.tasks_running }}
+          MOBILE_PAPER_EVENTS: ${{ steps.mobile.outputs.paper_events }}
           JOB_STATUS: ${{ job.status }}
         with:
           script: |
@@ -243,6 +261,14 @@ jobs:
               "Batch step: " + (process.env.BATCH_OUTCOME || "not run"),
               "Tasks processed: " + (process.env.TASKS_PROCESSED || "unknown"),
               "Stop reason: " + (process.env.STOP_REASON || "unknown"),
+              "D1 mobile status GET: " + (process.env.MOBILE_STATUS_HTTP || "not run"),
+              "D1 paper ledger / quota ledger: " + (process.env.MOBILE_PAPER_LEDGER || "unknown") + " / " + (process.env.MOBILE_PROVIDER_USAGE || "unknown"),
+              "D1 pending / running tasks: " + (process.env.MOBILE_TASKS_PENDING || "unknown") + " / " + (process.env.MOBILE_TASKS_RUNNING || "unknown"),
+              "D1 paper events: " + (process.env.MOBILE_PAPER_EVENTS || "unknown"),
+              "Telemetry gaps — scan: " + (process.env.MOBILE_LAST_SCAN || "unknown") +
+                "; source freshness: " + (process.env.MOBILE_SOURCE_FRESHNESS || "unknown") +
+                "; CI: " + (process.env.MOBILE_CI_HEALTH || "unknown") +
+                "; kill switch: " + (process.env.MOBILE_KILL_SWITCH || "unknown"),
               "",
               "The batch remains bounded; live inference and external writes remain governed by repository policy."
             ].join("\n");
