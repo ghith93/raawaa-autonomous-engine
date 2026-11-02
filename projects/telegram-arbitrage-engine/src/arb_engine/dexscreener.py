@@ -155,7 +155,7 @@ class DexScreenerClient:
         base_symbol = base.get("symbol") if isinstance(base.get("symbol"), str) else None
         quote_symbol = quote.get("symbol") if isinstance(quote.get("symbol"), str) else None
         return DexPairCandidate(
-            chain=chain.lower(), dex=dex.lower(), pair_address=pair.lower(),
+            chain=chain.strip().lower(), dex=dex.strip().lower(), pair_address=pair.lower(),
             base_address=base_address.lower(), base_symbol=base_symbol,
             quote_address=quote_address.lower(), quote_symbol=quote_symbol,
             fetched_at=fetched_at, pair_created_at_ms=created_ms,
