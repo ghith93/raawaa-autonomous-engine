@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -14,7 +15,7 @@ BASE_URL = "https://api.dexscreener.com"
 USER_AGENT = "telegram-arbitrage-engine/0.14 (+read-only research)"
 MAX_RESPONSE_BYTES = 2_000_000
 MAX_TOKEN_PAIR_CANDIDATES = 200
-_ADDRESS = __import__("re").compile(r"^0x[0-9a-fA-F]{40}$")
+_ADDRESS = re.compile(r"^0x[0-9a-fA-F]{40}$")
 
 
 class MarketDataError(RuntimeError):
@@ -77,13 +78,14 @@ class DexScreenerClient:
 
     def token_pair_candidates(self, chain: str, token_address: str) -> list[DexPairCandidate]:
         """Discover pair addresses for a token; all price/reserve decisions remain on-chain."""
-        if not isinstance(chain, str) or not chain or len(chain) > 32:
-            raise ValueError("Chain slug must contain 1..32 characters")
+        if not isinstance(chain, str) or not re.fullmatch(r"[a-z0-9-]{1,32}", chain.strip().lower()):
+            raise ValueError("Chain slug must contain 1..32 lowercase alphanumeric/hyphen characters")
         chain = chain.strip().lower()
-        if not chain.replace("-", "").isalnum():
-            raise ValueError("Invalid chain slug")
-        if not isinstance(token_address, str) or not _ADDRESS.fullmatch(token_address):
-            raise ValueError("Token address must be a 20-byte EVM address")
+        if (
+            not isinstance(token_address, str) or not _ADDRESS.fullmatch(token_address)
+            or token_address.lower() == "0x" + "0" * 40
+        ):
+            raise ValueError("Token address must be a non-zero 20-byte EVM address")
         payload = self._get(f"/token-pairs/v1/{chain}/{token_address}", {})
         if not isinstance(payload, list):
             raise MarketDataError("Unexpected DEX Screener token-pairs response")
@@ -118,6 +120,9 @@ class DexScreenerClient:
             not _ADDRESS.fullmatch(pair)
             or not _ADDRESS.fullmatch(base_address)
             or not _ADDRESS.fullmatch(quote_address)
+            or pair.lower() == "0x" + "0" * 40
+            or base_address.lower() == "0x" + "0" * 40
+            or quote_address.lower() == "0x" + "0" * 40
             or base_address.lower() == quote_address.lower()
         ):
             return None
