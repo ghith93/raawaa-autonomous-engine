@@ -81,7 +81,7 @@ test("webhook ignores group and non-allowlisted chats", async () => {
 
 test("webhook ignores private-chat updates whose sender is not the allowlisted human chat owner", async () => {
   const DB = dbMock();
-  for (const from of [{ id: 99999, is_bot: false }, { id: 12345, is_bot: true }, null]) {
+  for (const from of [{ id: 99999, is_bot: false }, { id: 12345, is_bot: true }, { id: 12345 }, null]) {
     const response = await handleTelegramWebhook(
       request({ update_id: 70, message: { chat: { id: 12345, type: "private" }, from, text: "/help" } }),
       { ...ENV, DB },
