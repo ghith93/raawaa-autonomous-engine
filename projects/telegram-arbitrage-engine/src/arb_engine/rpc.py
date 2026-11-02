@@ -315,6 +315,14 @@ class EthereumV2PoolReader:
         else:
             if not isinstance(block_context, EvmBlockContext):
                 raise ValueError("block_context must be an EvmBlockContext")
+            if (
+                not isinstance(block_context.block_number, int)
+                or isinstance(block_context.block_number, bool)
+                or block_context.block_number < 0
+                or not isinstance(block_context.block_hash, str)
+                or not re.fullmatch(r"0x[0-9a-fA-F]{64}", block_context.block_hash)
+            ):
+                raise ValueError("block_context contains an invalid block number or hash")
             chain_id = self._uint(self._rpc("eth_chainId", []), "chain ID")
             if chain_id != self.expected_chain_id or chain_id != block_context.chain_id:
                 raise RpcReadError("Pinned block context belongs to a different chain")
