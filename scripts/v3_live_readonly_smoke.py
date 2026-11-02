@@ -1,33 +1,58 @@
 """Live read-only smoke test for the Ethereum Uniswap V3 USDC/WETH 0.3% pool.
 
-This performs bounded eth_call reads only. It never builds, signs or submits a
-transaction and does not estimate profit.
+Uses keyless public RPC endpoints with bounded failover. It performs eth_call
+and eth_getCode reads only; it never builds, signs or submits a transaction.
 """
 from __future__ import annotations
 
 from decimal import Decimal
 import json
+import os
 import re
+from urllib.parse import urlsplit
 
-from arb_engine.rpc import DEFAULT_ETHEREUM_RPC
+from arb_engine.rpc import RpcReadError
 from arb_engine.v3_math import MIN_TICK, get_sqrt_ratio_at_tick
-from arb_engine.v3_rpc import EvmV3PoolReader
+from arb_engine.v3_rpc import DEFAULT_V3_ETHEREUM_RPC, EvmV3PoolReader
 from arb_engine.v3_simulator import simulate_v3_swap
 
 
 POOL = "0x8ad599c3a0ff1de082011efddc58f1908eb6e6d8"
 USDC = "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48"
 WETH = "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2"
+MAX_TOTAL_RPC_REQUESTS = 512
 
 
-def main() -> None:
-    reader = EvmV3PoolReader(
-        DEFAULT_ETHEREUM_RPC,
-        expected_chain_id=1,
-        timeout_seconds=10,
-        min_request_interval=0.05,
-        max_rpc_requests=512,
-    )
+def safe_endpoint_label(endpoint: str) -> str:
+    parts = urlsplit(endpoint)
+    if not parts.scheme or not parts.hostname:
+        return "custom_rpc_endpoint"
+    port = f":{parts.port}" if parts.port else ""
+    return f"{parts.scheme}://{parts.hostname}{port}"
+
+
+def endpoint_candidates() -> list[str]:
+    override = os.environ.get("RAAWAA_V3_RPC_URL")
+    if override:
+        return [override]
+    return [
+        DEFAULT_V3_ETHEREUM_RPC,
+        "https://rpcfree.com/ethereum-rpc",
+        "https://cloudflare-eth.com",
+        "https://ethereum-rpc.publicnode.com",
+    ]
+
+
+def is_endpoint_transport_failure(exc: RpcReadError) -> bool:
+    message = str(exc)
+    return message.startswith((
+        "EVM RPC HTTP error:",
+        "EVM RPC request failed:",
+        "EVM RPC returned an error (",
+    ))
+
+
+def run_smoke(reader: EvmV3PoolReader) -> dict:
     context, _, current_tick = reader.read_slot0(POOL)
     limit_tick = max(MIN_TICK + 1, current_tick - 120)
     if limit_tick >= current_tick:
@@ -83,7 +108,7 @@ def main() -> None:
     if result.classification != "rpc_snapshot_factory_registered_block_hash_rechecked":
         raise RuntimeError("Simulation provenance did not preserve the verified RPC snapshot classification")
 
-    print(json.dumps({
+    return ({
         "mode": "live_read_only_v3_pool_smoke",
         "status": "success",
         "chain_id": snapshot.chain_id,
@@ -103,13 +128,50 @@ def main() -> None:
         "weth_output": str(Decimal(result.amount_out) / (10 ** weth_decimals)),
         "crossed_ticks": list(result.crossed_ticks),
         "steps": result.steps,
+        "rpc_endpoint": safe_endpoint_label(reader.endpoint),
         "rpc_requests_used": reader.rpc_request_count,
-        "rpc_requests_budget": 512,
         "classification": result.classification,
         "live_execution": False,
         "transaction_submitted": False,
         "profit_claim": False,
-    }, indent=2))
+    }
+
+
+def main() -> None:
+    failures = []
+    total_requests = 0
+    for endpoint in endpoint_candidates():
+        remaining_budget = MAX_TOTAL_RPC_REQUESTS - total_requests
+        if remaining_budget <= 0:
+            break
+        reader = EvmV3PoolReader(
+            endpoint,
+            expected_chain_id=1,
+            timeout_seconds=10,
+            # Nodely limits heavy eth_call requests to 2/sec; this interval is below that ceiling.
+            min_request_interval=0.55,
+            max_rpc_requests=remaining_budget,
+        )
+        try:
+            result = run_smoke(reader)
+            total_requests += reader.rpc_request_count
+            result["rpc_requests_used_across_all_endpoints"] = total_requests
+            result["rpc_requests_budget"] = MAX_TOTAL_RPC_REQUESTS
+            result["rpc_fallback_failures"] = failures
+            print(json.dumps(result, indent=2))
+            return
+        except RpcReadError as exc:
+            if not is_endpoint_transport_failure(exc):
+                raise
+            total_requests += reader.rpc_request_count
+            failures.append({
+                "endpoint": safe_endpoint_label(endpoint),
+                "error": str(exc),
+            })
+    raise RuntimeError(
+        "All configured keyless Ethereum RPC endpoints failed: "
+        + json.dumps({"failures": failures, "rpc_requests_used": total_requests})
+    )
 
 
 if __name__ == "__main__":
