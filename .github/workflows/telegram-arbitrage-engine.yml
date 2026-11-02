@@ -44,6 +44,7 @@ jobs:
         run: python -m compileall -q src tests
 
   live-venue-smoke:
+    if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     defaults:
@@ -82,6 +83,7 @@ jobs:
           python -c 'import json,sys; d=json.loads(sys.stdin.read()); assert d["status"] == "quoted", d; assert d["chain_id"] == 1; assert len(d["routes"]) == 2; assert d["gas_included"] is False and d["net_profit_claim"] is False; assert d["transaction_submitted"] is False; assert len(d["block_hash"]) == 66' <<< "$result"
 
   anvil-fork-smoke:
+    if: github.event_name != 'pull_request'
     needs: live-venue-smoke
     runs-on: ubuntu-latest
     timeout-minutes: 10
