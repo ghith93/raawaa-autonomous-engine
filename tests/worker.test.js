@@ -482,3 +482,109 @@ test("paper ledger rejects raw-unit integers outside uint256 bounds", async () =
   assert.deepEqual(await response.json(), { error: "invalid_gross_profit_raw" });
   assert.equal(DB.calls.length, 0);
 });
+
+
+function concurrentPaperLedgerDbMock() {
+  const state = { head: null, events: new Map(), checkpoints: [] };
+  let headReads = 0;
+  let releaseHeadReads;
+  const bothHeadReads = new Promise(resolve => { releaseHeadReads = resolve; });
+  let batchTail = Promise.resolve();
+  return {
+    state,
+    prepare(sql) {
+      return {
+        sql, values: [],
+        bind(...values) { this.values = values; return this; },
+        async first() {
+          if (sql.includes("SELECT * FROM paper_events WHERE event_id")) {
+            return state.events.get(this.values[0]) || null;
+          }
+          if (sql.includes("SELECT sequence,event_hash FROM paper_candidate_heads")) {
+            const snapshot = { ...state.head };
+            headReads += 1;
+            if (headReads === 2) releaseHeadReads();
+            await bothHeadReads;
+            return snapshot;
+          }
+          return null;
+        },
+        async run() {
+          if (sql.includes("INSERT OR IGNORE INTO paper_candidate_heads") && !state.head) {
+            state.head = { candidate_id: this.values[0], sequence: 0, event_hash: this.values[1] };
+          }
+          return { meta: { changes: 1 } };
+        },
+      };
+    },
+    async batch(statements) {
+      const previous = batchTail;
+      let release;
+      batchTail = new Promise(resolve => { release = resolve; });
+      await previous;
+      try {
+        const [update, insert, checkpoint] = statements;
+        const [nextSequence, nextHash, _now, candidateId, oldSequence, oldHash] = update.values;
+        let updateChanges = 0;
+        if (state.head.candidate_id === candidateId &&
+            state.head.sequence === oldSequence && state.head.event_hash === oldHash) {
+          state.head = { candidate_id: candidateId, sequence: nextSequence, event_hash: nextHash };
+          updateChanges = 1;
+        }
+        const insertValues = insert.values;
+        const recordFields = [
+          "candidate_id", "event_id", "event_type", "occurred_at", "chain_id", "block_number",
+          "block_hash", "strategy_id", "source_pool", "destination_pool", "token_in", "token_out",
+          "gross_profit_raw", "gas_used", "gas_price_wei", "gas_cost_profit_raw", "net_profit_raw",
+          "payload_json",
+        ];
+        const expectedHead = [insertValues[21], insertValues[22], insertValues[23]];
+        let insertChanges = 0;
+        if (state.head.candidate_id === expectedHead[0] &&
+            state.head.sequence === expectedHead[1] && state.head.event_hash === expectedHead[2] &&
+            !state.events.has(insertValues[1])) {
+          const event = Object.fromEntries(recordFields.map((key, index) => [key, insertValues[index] ?? null]));
+          event.sequence = insertValues[18];
+          event.previous_hash = insertValues[19];
+          event.event_hash = insertValues[20];
+          state.events.set(event.event_id, event);
+          insertChanges = 1;
+        }
+        let checkpointChanges = 0;
+        const checkpointValues = checkpoint.values;
+        if (state.events.has(checkpointValues[2])) {
+          state.checkpoints.push({
+            sequence: checkpointValues[1], event_id: checkpointValues[2], event_hash: checkpointValues[3],
+          });
+          checkpointChanges = 1;
+        }
+        return [
+          { meta: { changes: updateChanges } },
+          { meta: { changes: insertChanges } },
+          { meta: { changes: checkpointChanges } },
+        ];
+      } finally {
+        release();
+      }
+    },
+  };
+}
+
+test("concurrent appends for one candidate cannot fork its sequence or hash chain", async () => {
+  const DB = concurrentPaperLedgerDbMock();
+  const makeRequest = eventId => request("/v1/paper-ledger", {
+    method: "POST",
+    body: { action: "append", event: {
+      candidate_id: "candidate-race", event_id: eventId, event_type: "candidate_detected",
+      occurred_at: "2026-11-02T11:00:00Z", payload: { event: eventId },
+    } },
+  });
+  const responses = await Promise.all([
+    worker.fetch(makeRequest("race-a"), { DB, ENGINE_API_TOKEN: TOKEN }),
+    worker.fetch(makeRequest("race-b"), { DB, ENGINE_API_TOKEN: TOKEN }),
+  ]);
+  assert.deepEqual(responses.map(response => response.status).sort(), [201, 409]);
+  assert.equal(DB.state.head.sequence, 1);
+  assert.equal(DB.state.events.size, 1);
+  assert.equal(DB.state.checkpoints.length, 1);
+});
