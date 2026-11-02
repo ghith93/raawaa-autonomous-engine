@@ -25,6 +25,8 @@ arb-engine scan WETH/USDC --min-liquidity 10000 --min-volume 1000
 
 Scan snapshots are saved to `data/opportunities.sqlite3`. Avoid tight polling and respect upstream rate limits.
 
+See [data sources and trust boundaries](DATA_SOURCES.md) for source rate limits, freshness limitations, and the release gates for future pool-state simulation.
+
 ## Before any paper-profit claim
 The next mandatory layer is exact-size router quotes, pool-state/block freshness, route price impact, fee and gas estimation, token transfer-tax/blacklist checks, revert/failure simulation, and chain atomicity analysis. Cross-chain spreads remain informational only and require bridge cost, settlement delay, and custody/bridge risk modelling.
 
