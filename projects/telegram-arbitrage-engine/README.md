@@ -90,6 +90,12 @@ print(book.last_update_id, book.bids[0], ticker.ask_price, book.fetched_at)
 
 The adapter enforces one request per second and does not synchronize REST snapshots with WebSocket depth updates. It is a timestamped indicative source, not a guaranteed executable book or net-profit engine. See [data sources and trust boundaries](DATA_SOURCES.md).
 
+## Multi-chain EVM V2 scanning
+
+The V2 candidate scanner now accepts an explicit EVM chain ID, DEX Screener slug and two registered venue IDs. BNB Chain (chain ID 56) has source-documented PancakeSwap V2 and ApeSwap V2 registry entries. Non-Ethereum runs require an explicit RPC URL and verify the chain ID, factory/pair identity and router binding at one pinned block.
+
+See [BSC_V2_SUPPORT.md](BSC_V2_SUPPORT.md). BSC deployments are source-documented but not yet live-verified by CI; no BSC profitability or execution claim is made.
+
 ## Conservative opportunity cost evaluator
 
 The pure `arb_engine.opportunity_costs.evaluate_two_leg_spread` component separates gross spread from estimated net profit. It refuses to compare different canonical asset IDs or quote currencies, rejects stale/partial-depth observations, and requires venue fees, slippage, latency, gas/priority fees, Solana network fees, funding, bridge/settlement and borrow costs when applicable. Missing required costs produce `net_profit_quote=None`; they are never treated as zero.
