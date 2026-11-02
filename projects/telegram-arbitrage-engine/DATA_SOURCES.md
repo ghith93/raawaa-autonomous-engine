@@ -125,6 +125,18 @@ No item in this list authorizes live trading.
 - HTTP 429 and Kraken rate-limit error payloads defer the shared limiter; requests are not retried in a tight loop. CI uses deterministic fixtures only; no live Kraken calls, account methods or API keys are used.
 - Fee tiers and order-book depth are not proof of executable fills. Cross-venue net estimates still require current account-specific fee selection, latency, transfer/settlement, liquidity and risk costs.
 
+## Coinbase Exchange Spot public market data (read-only)
+
+- Official single-product metadata reference: https://docs.cdp.coinbase.com/api-reference/exchange-api/rest-api/products/get-single-product
+- Official aggregated order-book reference: https://docs.cdp.coinbase.com/api-reference/exchange-api/rest-api/products/get-product-book
+- Official REST rate limits: https://docs.cdp.coinbase.com/exchange/rest-api/rate-limits
+- Coinbase documents public market-data APIs as unauthenticated; the adapter calls only `GET /products/{product_id}` and `GET /products/{product_id}/book?level=2` on `https://api.exchange.coinbase.com`.
+- Public endpoints are limited to 10 requests/second per IP with bursts up to 15. The adapter deliberately paces at one request/second with a shared process-wide limiter, bounded timeout/response size, HTTPS host allowlist, redirect rejection and 429 cooldown.
+- Product metadata preserves base/quote currency, base increment, quote increment, optional minimum base size, minimum market funds, product status and market restrictions. Products in auction mode, post-only, limit-only, cancel-only, disabled or offline are excluded from the `TRADING` registry.
+- Level-2 books are aggregated. The adapter preserves Decimal price/size levels, order counts, sequence number, exchange time and local `fetched_at`. The sequence is useful for update tracking but a REST snapshot alone is not a continuous synchronized feed.
+- Coinbase public product metadata does not provide the account's actual trading fee tier. Fees remain unknown unless separately supplied from the account's current fee schedule; no net-positive estimate is allowed to infer them.
+- Coinbase's market-data terms of use apply. Public market data availability does not establish account eligibility or regional trading access. CI uses deterministic fixtures only; no live Coinbase requests, API keys, orders or account endpoints are used.
+
 ## Telegram Bot API
 
 - Official reference: https://core.telegram.org/bots/api
