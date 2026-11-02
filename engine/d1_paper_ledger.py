@@ -89,7 +89,16 @@ class D1PaperTradingLedger:
         result = self._request("GET", "/v1/paper-ledger?" + query)
         events = result.get("events", [])
         checkpoints = result.get("checkpoints", [])
-        if not isinstance(events, list) or not isinstance(checkpoints, list) or len(events) != len(checkpoints):
+        head_sequence = result.get("head_sequence")
+        if (
+            not isinstance(events, list) or not isinstance(checkpoints, list)
+            or len(events) != len(checkpoints)
+            or type(head_sequence) is not int
+            or result.get("event_count") != head_sequence
+            or result.get("checkpoint_count") != head_sequence
+            or len(events) != head_sequence
+            or len(events) >= limit
+        ):
             return False
         fields = (
             "candidate_id", "event_id", "event_type", "occurred_at", "chain_id",
@@ -121,4 +130,4 @@ class D1PaperTradingLedger:
             if event.get("event_hash") != expected:
                 return False
             previous_hash = expected
-        return len(events) < limit
+        return previous_hash == result.get("head_hash")
