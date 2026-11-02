@@ -114,7 +114,7 @@ def quote_exact_input(pool: V2PoolState, token_in: str, amount_in_raw: int) -> V
             Decimal(amount_in_raw) * Decimal(10000 - pool.fee_bps)
             * Decimal(reserve_out) / (Decimal(10000) * Decimal(reserve_in))
         )
-        impact_bps = ((ideal_after_fee - Decimal(amount_out_raw := amount_out))
+        impact_bps = ((ideal_after_fee - Decimal(amount_out))
                       / ideal_after_fee) * Decimal(10000)
         if impact_bps < 0:
             impact_bps = Decimal(0)
