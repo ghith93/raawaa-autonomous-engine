@@ -199,12 +199,12 @@ def test_flash_swap_cli_help_is_registered(monkeypatch, capsys):
 
 
 def test_paper_observe_cli_help_is_registered(monkeypatch, capsys):
-    monkeypatch.setattr(sys, "argv", ["arb-engine", "--help"])
+    monkeypatch.setattr(sys, "argv", ["arb-engine", "paper-observe", "--help"])
     with pytest.raises(SystemExit) as exit_info:
         main()
     assert exit_info.value.code == 0
     output = capsys.readouterr().out
-    assert "paper-observe" in output
+    assert "--candidate-id" in output
     assert "later canonical block" in output
 
 
