@@ -1,6 +1,7 @@
 import json
 import sys
 from datetime import datetime, timezone
+from decimal import Decimal
 
 from arb_engine import cli
 from arb_engine.rpc import EvmPoolSnapshot
