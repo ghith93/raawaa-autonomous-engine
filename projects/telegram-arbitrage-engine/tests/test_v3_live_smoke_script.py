@@ -88,6 +88,6 @@ def test_live_smoke_retries_next_provider_with_one_shared_request_budget(monkeyp
     assert attempts[0].max_rpc_requests == module.MAX_TOTAL_RPC_REQUESTS
     assert attempts[1].max_rpc_requests == module.MAX_TOTAL_RPC_REQUESTS - 3
     output = __import__("json").loads(capsys.readouterr().out)
-    assert output["rpc_endpoint"] == module.RPC_ENDPOINTS[1]
+    assert output["rpc_endpoint"] == "https://rpcfree.com"
     assert output["rpc_requests_used"] == 10
     assert output["rpc_requests_budget"] == module.MAX_TOTAL_RPC_REQUESTS
