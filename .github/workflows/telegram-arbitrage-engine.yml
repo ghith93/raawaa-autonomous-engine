@@ -12,7 +12,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: telegram-arbitrage-engine-v2-${{ github.ref }}
+  group: telegram-arbitrage-engine-v3-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
