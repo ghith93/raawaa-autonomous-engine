@@ -392,7 +392,7 @@ test("paper ledger append is authenticated and writes CAS head, event, and check
     method: "POST",
     body: { action: "append", event: {
       candidate_id: "candidate-1", event_id: "event-1", event_type: "candidate_detected",
-      occurred_at: "2026-11-02T11:00:00Z", payload: { source: "test" },
+      occurred_at: "2026-11-02T11:00:00Z", payload: { source: "café" },
     } },
   }), { DB, ENGINE_API_TOKEN: TOKEN });
   assert.equal(response.status, 201);
@@ -403,6 +403,7 @@ test("paper ledger append is authenticated and writes CAS head, event, and check
   assert.equal(batch.statements.length, 3);
   assert.match(batch.statements[0].sql, /WHERE candidate_id=\? AND sequence=\? AND event_hash=\?/);
   assert.match(batch.statements[1].sql, /INSERT INTO paper_events/);
+  assert.equal(batch.statements[1].values[17], String.raw`{"source":"caf\u00e9"}`);
   assert.match(batch.statements[2].sql, /INSERT INTO paper_event_checkpoints/);
 });
 
