@@ -43,7 +43,7 @@ class D1PaperLedgerTests(unittest.TestCase):
         self.assertEqual(request.get_header("User-agent"), "RaawaaAutonomousEngine/1.0")
         payload = json.loads(request.data)
         self.assertEqual(payload["action"], "append")
-        self.assertEqual(payload["event"]["occurred_at"], "2026-11-02T00:00:00+00:00")
+        self.assertEqual(payload["event"]["occurred_at"], "2026-11-02T00:00:00.000+00:00")
 
     @patch("urllib.request.urlopen")
     def test_append_normalizes_raw_integer_fields_to_decimal_strings(self, open_url):
