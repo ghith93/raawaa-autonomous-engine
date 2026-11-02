@@ -588,3 +588,19 @@ test("concurrent appends for one candidate cannot fork its sequence or hash chai
   assert.equal(DB.state.events.size, 1);
   assert.equal(DB.state.checkpoints.length, 1);
 });
+
+
+test("paper ledger canonicalizes supplementary Unicode keys in Python code-point order", async () => {
+  const DB = paperLedgerDbMock();
+  const payload = { "\u{10000}": 2, "\uE000": 1, a: 3 };
+  const response = await worker.fetch(request("/v1/paper-ledger", {
+    method: "POST",
+    body: { action: "append", event: {
+      candidate_id: "candidate-unicode", event_id: "unicode-1",
+      event_type: "candidate_detected", occurred_at: "2026-11-02T11:00:00Z", payload,
+    } },
+  }), { DB, ENGINE_API_TOKEN: TOKEN });
+  assert.equal(response.status, 201);
+  const batch = DB.calls.find(call => call.kind === "batch");
+  assert.equal(batch.statements[1].values[17], String.raw`{"a":3,"\\ue000":1,"\\ud800\\udc00":2}`);
+});
