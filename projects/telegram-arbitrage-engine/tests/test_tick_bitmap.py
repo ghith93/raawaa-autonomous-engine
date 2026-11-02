@@ -45,8 +45,8 @@ def test_search_starts_in_next_word_when_moving_right_from_word_end() -> None:
 
 
 def test_tick_spacing_scales_raw_tick_distance() -> None:
-    bitmap = 1 << 4
-    assert next_initialized_tick_within_one_word(20, 5, bitmap, False) == (20, True)
+    bitmap = 1 << 5
+    assert next_initialized_tick_within_one_word(20, 5, bitmap, False) == (25, True)
 
 
 @pytest.mark.parametrize("tick", [True, 1.0, "1", -887273, 887273])
