@@ -88,3 +88,32 @@ def test_telegram_api_errors_never_expose_bot_token_or_request_url(monkeypatch):
         api.call("getMe", {})
     assert token not in str(captured.value)
     assert captured.value.__cause__ is None
+
+
+
+def test_failed_reply_consumes_update_without_repeating_scan(monkeypatch):
+    from arb_engine import telegram_bot
+
+    updates = [message_update(update_id=11, text="/scan WETH/USDC")]
+
+    class FailingSendAPI(FakeAPI):
+        def get_updates(self, offset, timeout):
+            return [item for item in self.updates if item["update_id"] >= offset]
+
+        def send_message(self, chat_id, text):
+            raise TelegramApiError("Telegram request failed: URLError")
+
+    calls = []
+    monkeypatch.setattr(
+        telegram_bot,
+        "scan",
+        lambda *args: calls.append(args) or {"opportunities": []},
+    )
+    controller = TelegramController(
+        FailingSendAPI(updates), frozenset({123}), min_request_interval_seconds=0,
+    )
+
+    next_offset = controller.poll_once(offset=0)
+    assert next_offset == 12
+    assert controller.poll_once(offset=next_offset) == 12
+    assert len(calls) == 1
