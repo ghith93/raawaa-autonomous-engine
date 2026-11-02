@@ -1,5 +1,6 @@
 import { handleQuota } from "./quota.js";
 import { handlePaperLedger } from "./paper-ledger.js";
+import { handleTelegramWebhook } from "./telegram-webhook.js";
 const JSON_HEADERS = { "content-type": "application/json; charset=utf-8", "cache-control": "no-store" };
 const MAX_BODY_BYTES = 32 * 1024;
 
@@ -171,6 +172,9 @@ export default {
         return json({ ok: false }, 503);
       }
     }
+
+    const telegramResponse = await handleTelegramWebhook(request, env, url);
+    if (telegramResponse) return telegramResponse;
 
     if (url.pathname !== "/v1/tasks" && url.pathname !== "/v1/tasks/enqueue" &&
         url.pathname !== "/v1/tasks/claim" && url.pathname !== "/v1/tasks/recover" &&
