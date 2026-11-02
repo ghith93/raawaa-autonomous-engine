@@ -101,17 +101,25 @@ class LiveRuntimeFactoryTests(unittest.TestCase):
         )
         self.assertIsNone(gateway)
 
-    def test_per_task_budget_is_passed_as_a_cap_without_enabling_paid_calls(self):
+    def test_nonzero_per_task_budget_blocks_gateway_even_with_zero_daily_and_monthly(self):
         self.policy["per_task_budget_usd"] = 0.05
         self.write_files()
         gateway = build_live_gateway(
             self.db_path, self.policy_path, self.registry_path,
             environ={"RAAWAA_ENGINE_LIVE_INFERENCE": "enabled", "GROQ_API_KEY": "test-key"},
         )
-        self.assertIsNotNone(gateway)
-        self.assertEqual(gateway.per_task_budget_usd, 0.05)
-        self.assertEqual(gateway.daily_budget_usd, 0)
-        self.assertEqual(gateway.monthly_budget_usd, 0)
+        self.assertIsNone(gateway)
+
+    def test_boolean_or_missing_budget_values_fail_closed(self):
+        for value in (True, None, "0"):
+            with self.subTest(value=value):
+                self.policy["per_task_budget_usd"] = value
+                self.write_files()
+                gateway = build_live_gateway(
+                    self.db_path, self.policy_path, self.registry_path,
+                    environ={"RAAWAA_ENGINE_LIVE_INFERENCE": "enabled", "GROQ_API_KEY": "test-key"},
+                )
+                self.assertIsNone(gateway)
 
     def test_nonzero_budget_is_rejected_by_current_free_only_runtime(self):
         self.policy["daily_budget_usd"] = 0.01

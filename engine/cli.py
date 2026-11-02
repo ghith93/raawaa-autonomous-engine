@@ -1,6 +1,7 @@
 """CLI for policy audit, local task runtime, memory, and explicit read-only discovery."""
 import argparse
 import json
+import math
 import os
 from pathlib import Path
 
@@ -58,8 +59,16 @@ def audit() -> int:
             errors.append("live_inference_opt_in requires at least one explicitly enabled provider profile.")
         if any(not entry.ready_for_routing for entry in enabled_profiles):
             errors.append("Every enabled provider profile must pass static eligibility checks.")
-    if policy.get("daily_budget_usd", 0) != 0 or policy.get("monthly_budget_usd", 0) != 0:
-        errors.append("Initial release must have zero configured spend budgets.")
+    budget_values = (
+        policy.get("daily_budget_usd"),
+        policy.get("monthly_budget_usd"),
+        policy.get("per_task_budget_usd"),
+    )
+    if any(
+        type(value) not in (int, float) or not math.isfinite(value) or value != 0
+        for value in budget_values
+    ):
+        errors.append("Initial release requires daily, monthly, and per-task spend budgets to be numeric zero.")
     if policy.get("allow_paid_model_calls") is not False:
         errors.append("Paid model calls must remain disabled.")
     if policy.get("allow_external_writes") is not False:

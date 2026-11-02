@@ -64,6 +64,38 @@ class CliTests(unittest.TestCase):
         self.assertIn("safe dry-run", output.getvalue())
 
 
+    def test_audit_rejects_nonzero_or_malformed_per_task_budget(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "config").mkdir()
+            for name in ("policy.json", "agents.json", "provider_profiles.json"):
+                source = Path(cli.ROOT) / "config" / name
+                (root / "config" / name).write_text(source.read_text(encoding="utf-8"), encoding="utf-8")
+            policy_path = root / "config" / "policy.json"
+            policy = json.loads(policy_path.read_text(encoding="utf-8"))
+            policy["per_task_budget_usd"] = 0.01
+            policy_path.write_text(json.dumps(policy), encoding="utf-8")
+            output = io.StringIO()
+            with patch.object(cli, "ROOT", root), contextlib.redirect_stdout(output):
+                self.assertEqual(cli.audit(), 1)
+            self.assertIn("daily, monthly, and per-task", output.getvalue())
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "config").mkdir()
+            for name in ("policy.json", "agents.json", "provider_profiles.json"):
+                source = Path(cli.ROOT) / "config" / name
+                (root / "config" / name).write_text(source.read_text(encoding="utf-8"), encoding="utf-8")
+            policy_path = root / "config" / "policy.json"
+            policy = json.loads(policy_path.read_text(encoding="utf-8"))
+            policy["per_task_budget_usd"] = True
+            policy_path.write_text(json.dumps(policy), encoding="utf-8")
+            output = io.StringIO()
+            with patch.object(cli, "ROOT", root), contextlib.redirect_stdout(output):
+                self.assertEqual(cli.audit(), 1)
+            self.assertIn("daily, monthly, and per-task", output.getvalue())
+
+
     def test_run_once_uses_live_runtime_factory_but_default_remains_dry_run(self):
         with tempfile.TemporaryDirectory() as tmp:
             db_path = os.path.join(tmp, "engine.db")
