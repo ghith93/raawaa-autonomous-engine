@@ -46,19 +46,16 @@ Cloud/scheduled execution selects this ledger whenever `RAAWAA_ENGINE_API_URL` i
 
 The D1 schema is additive in `migrations/0003_durable_quota_ledger.sql`; it does not copy or migrate historical rows from runner-local SQLite. Therefore prior local usage cannot be reconstructed centrally and must not be treated as available capacity. The live inference kill switch remains off until CI verifies the Worker routes and Python client and a real D1 concurrency/restart test has been run against a non-production test database. The monetary ledger remains a separate SQLite subsystem; current routing permits only verified zero-cost profiles and paid calls remain disabled.
 
-## Optional AndroidHarness execution backend
+## Optional AndroidHarness diagnostics only
 
-AndroidHarness is registered as an external Android/Linux runtime in `config/runtime_backends.json`. Its intended role is a bounded compatibility lab and optional execution target for Python/Node tools, local-model experiments, agent-framework evaluation, and device-specific validation. It is complementary to GitHub Actions (reproducible CI) and Cloudflare (deployed control plane), not a replacement for either.
+AndroidHarness 3.1 is retained only as an optional operator-side diagnostic and compatibility environment. It is not an execution backend, task consumer, scheduler, recovery worker, or release gate. The GitHub issue bridge may be used for occasional device-specific diagnostics when an operator explicitly starts it, but normal project work, CI, cloud task execution, and recovery must not depend on a device session, foreground poller, WorkManager, or harness model quota.
 
-The integration now includes an AndroidHarness 3.2 project configuration (`harness.json`), scoped nested-agent profiles, a project operating skill, a read-only environment doctor, and a GitHub issue polling bridge for four fixed read-only operations. The issue bridge is implemented but inactive until a local AndroidHarness poller is started; it is not a direct MCP server or general remote tool adapter. The engine must not claim device execution until a task result is posted by the authenticated local poller. Other device operations still require a real authenticated harness session and a separately tested adapter. The profile records an operator-reported readiness snapshot; all device capabilities must be re-probed before use. The v3.2 SDK installer can prepare Android build tooling behind one explicit approval, but that tooling is optional for this Python-first engine. LiteLLM, llama.cpp/GGUF and local LLM inference remain candidates requiring individual compatibility and resource tests. See [AndroidHarness runtime profile](android-harness.md) and [3.2 evaluation](research/androidharness-3.2-evaluation.md).
+Do not configure recurring device prompts, WorkManager automation, or a foreground poller as part of the engine. Do not upgrade the installed app or request additional device permissions for normal operation. Keep the issue bridge allowlisted and inactive by default. See [AndroidHarness runtime profile](android-harness.md) for the historical integration details and current restrictions.
 
-## Safety boundaries
+## Device independence and scheduler boundaries
 
-Human approval is mandatory for publishing, sending messages, spending money, price changes, production deployment, deleting data, changing access, and modifying a storefront. Read-only research and local tests can be automated within configured limits.
-
-
-## Recurring Android worker and durability boundary
-
-The preferred tablet-side recurring execution mode is AndroidHarness native scheduled-message automation through Android WorkManager, with a dedicated Code conversation and bounded hourly cycles. See docs/androidharness-workmanager-automation.md for setup, recurring prompt, limits, and recovery. This avoids requiring a manually maintained infinite terminal poller.
-
-WorkManager is an opportunistic device scheduler, not an always-on service or real-time SLA. Cloudflare D1 remains the durable task ledger; GitHub Actions remains CI and the bounded cloud scheduler. AndroidHarness may execute one bounded unit of work per occurrence when the device, app, network, and model quota permit. A missed device run must leave tasks queued, not lose them. Activation requires an actual successful scheduled run and a verified next occurrence in Automation history; repository-side configuration is not device-side proof.
+- Cloudflare Worker + D1 remain the remote control plane and durable task ledger.
+- GitHub Actions is the bounded Python consumer, scheduled every five minutes (five tasks / 60 seconds per batch). Scheduled execution can be delayed or dropped; this is not a 24/7 guarantee.
+- Cloudflare Worker Cron independently performs stale-lease recovery every fifteen minutes. This maintenance trigger does not execute Python task handlers.
+- Durable Objects Alarms are deferred: they cannot run the current Python handlers, and Worker Cron already performs stale-lease recovery. Do not add a second scheduler or queue until a Worker-native executor is deliberately implemented and measured.
+- D1 remains the canonical task ledger. No paid hosting, inference, or account upgrade is authorized by this architecture.
