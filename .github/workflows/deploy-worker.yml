@@ -1,13 +1,12 @@
 name: Deploy Control Worker
 
 on:
-  push:
-    branches: [main]
-    paths:
-      - "worker/**"
-      - "wrangler.toml"
-      - ".github/workflows/deploy-worker.yml"
   workflow_dispatch:
+    inputs:
+      confirm_deployment:
+        description: 'Type DEPLOY_CONTROL_WORKER to authorize a production Worker deployment'
+        required: true
+        type: string
 
 permissions:
   contents: read
@@ -23,6 +22,14 @@ jobs:
     steps:
       - name: Check out reviewed main
         uses: actions/checkout@v4
+      - name: Require explicit deployment confirmation
+        env:
+          CONFIRM_DEPLOYMENT: ${{ inputs.confirm_deployment }}
+        run: |
+          test "$CONFIRM_DEPLOYMENT" = "DEPLOY_CONTROL_WORKER" || {
+            echo "Deployment confirmation did not match; refusing to deploy."
+            exit 1
+          }
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
