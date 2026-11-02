@@ -90,6 +90,12 @@ def test_conversion_rounds_cost_up_for_fractional_raw_quote_unit():
     )
     assert result.gas_cost_profit_token_raw == 1
 
+    # 1e12 wei maps to 1.5 repayment-token raw units; ceiling must produce 2.
+    rounded_up = scenario(
+        sim, gas_used=1, gas_price_wei=10**12, native_quote_pool=quote_pool,
+    )
+    assert rounded_up.gas_cost_profit_token_raw == 2
+
 
 def test_native_token_profit_needs_no_conversion_pool():
     sim = replace(simulation(), repayment_token=NATIVE, gross_profit_raw=10**16)
