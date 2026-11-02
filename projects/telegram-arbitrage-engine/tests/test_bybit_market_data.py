@@ -54,6 +54,8 @@ def test_orderbook_normalizes_exact_decimal_levels_and_preserves_provenance():
     assert book.matching_engine_timestamp_ms == 1793627999990
     assert book.update_id == 12345
     assert book.cross_sequence == 98765
+    assert book.fetched_at.tzinfo is not None
+    assert book.fetched_at.utcoffset().total_seconds() == 0
     assert len(calls) == 1
     assert "/v5/market/orderbook?category=spot&symbol=BTCUSDT&limit=2" in calls[0][0]
 
@@ -119,6 +121,8 @@ def test_tickers_normalize_spot_and_perpetual_market_fields():
     assert ticker.index_price == Decimal("64999.90")
     assert ticker.open_interest == Decimal("2345")
     assert ticker.exchange_timestamp_ms == 1793628000000
+    assert ticker.fetched_at.tzinfo is not None
+    assert ticker.fetched_at.utcoffset().total_seconds() == 0
     assert "category=linear&symbol=BTCUSDT" in calls[0][0]
 
 
