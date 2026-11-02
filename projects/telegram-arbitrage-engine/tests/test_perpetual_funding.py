@@ -169,10 +169,6 @@ def test_http_429_defers_shared_limiter_and_does_not_retry_automatically():
     api, _ = client("bybit", [
         FundingRateLimited(9),
         {"retCode": 0, "result": {"category": "linear", "list": []}},
-        {"retCode": 0, "result": {"category": "linear", "list": [{
-            "symbol": "BTCUSDT", "contractType": "LinearPerpetual",
-            "status": "Trading", "fundingInterval": 480,
-        }]}},
     ], rate_limiter=limiter)
     with pytest.raises(FundingRateLimited):
         api.fetch_funding_history(symbol="BTCUSDT")
