@@ -363,5 +363,5 @@ def test_v3_reader_fetches_only_initialized_ticks_inside_requested_price_path(mo
         for call, _ in [params]
         if call["data"].startswith("0xf30dba93")
     ]
-    assert tick_calls == [-60, 0]
-    assert dict(snapshot.initialized_ticks) == {-60: 500, 0: -500}
+    assert tick_calls == [0, -60]
+    assert dict(snapshot.initialized_ticks) == {0: -500, -60: 500}
