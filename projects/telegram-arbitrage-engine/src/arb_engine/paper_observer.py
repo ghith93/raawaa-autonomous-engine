@@ -164,11 +164,9 @@ def observe_flash_swap_outcome(
         raise ValueError("RPC reader returned an incomplete forward-observation snapshot")
     observed = snapshots[0]
     observed_state = observed.state
-    if (
-        observed_state.pair_address.casefold() != source_pool.casefold()
-        or snapshots[1].state.pair_address.casefold() != destination_pool.casefold()
-    ):
-        raise ValueError("RPC reader returned a different pool than the candidate route")
+    for item, (expected_pool, _fee_bps) in zip(snapshots, pool_requests, strict=True):
+        if item.state.pair_address.casefold() != expected_pool.casefold():
+            raise ValueError("RPC reader returned a different pool than the requested snapshot")
     if observed_state.chain_id != chain_id:
         raise ValueError("Forward observation belongs to a different chain")
     if observed_state.block_number <= candidate_block:
@@ -193,7 +191,10 @@ def observe_flash_swap_outcome(
             (item.state.token0, item.token0_decimals),
             (item.state.token1, item.token1_decimals),
         ):
-            if token.casefold() in original and original[token.casefold()] != decimals:
+            token_key = token.casefold()
+            if token_key not in original:
+                raise ValueError("Forward snapshot contains a token absent from candidate decimal provenance")
+            if original[token_key] != decimals:
                 raise ValueError("Token decimals changed since candidate capture; refusing incomparable outcome")
 
     simulation = simulate_cross_venue_flash_swap(
