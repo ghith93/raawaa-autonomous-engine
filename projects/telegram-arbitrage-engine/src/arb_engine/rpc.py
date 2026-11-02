@@ -217,5 +217,45 @@ class EthereumV2PoolReader:
             ))
         return snapshots
 
+
+    def quote_v2_router_exact_input(
+        self,
+        router_address: str,
+        amount_in_raw: int,
+        token_path: list[str],
+        block_number: int,
+    ) -> list[int]:
+        """Read a V2 router getAmountsOut quote at a pinned block; never builds a transaction."""
+        router = self._pool_address(router_address)
+        if not isinstance(amount_in_raw, int) or isinstance(amount_in_raw, bool) or not 0 < amount_in_raw < 2**256:
+            raise ValueError("Router input amount must be a positive uint256")
+        if not isinstance(block_number, int) or isinstance(block_number, bool) or block_number < 0:
+            raise ValueError("Router quote block number must be non-negative")
+        if not isinstance(token_path, list) or not 2 <= len(token_path) <= 4:
+            raise ValueError("Router path must contain between two and four token addresses")
+        path = [self._pool_address(token) for token in token_path]
+        if len(set(path)) != len(path):
+            raise ValueError("Router path cannot repeat a token")
+        # getAmountsOut(uint256,address[]) selector; ABI offset is two 32-byte words.
+        calldata = (
+            "0xd06ca61f"
+            + amount_in_raw.to_bytes(32, "big").hex()
+            + (64).to_bytes(32, "big").hex()
+            + len(path).to_bytes(32, "big").hex()
+            + "".join(("0" * 24 + token[2:]) for token in path)
+        )
+        raw = self._rpc(
+            "eth_call",
+            [{"to": router, "data": calldata}, hex(block_number)],
+        )
+        if not isinstance(raw, str) or not re.fullmatch(r"0x(?:[0-9a-fA-F]{64})+", raw):
+            raise RpcReadError("Router getAmountsOut returned malformed ABI data")
+        words = [int(raw[i:i + 64], 16) for i in range(2, len(raw), 64)]
+        if len(words) != len(path) or words[0] != amount_in_raw:
+            raise RpcReadError("Router quote returned an unexpected amounts array")
+        if any(amount <= 0 for amount in words):
+            raise RpcReadError("Router quote contains a zero or invalid hop amount")
+        return words
+
     def read_pool(self, pair_address: str, fee_bps: int) -> EvmPoolSnapshot:
         return self.read_pools([(pair_address, fee_bps)])[0]
