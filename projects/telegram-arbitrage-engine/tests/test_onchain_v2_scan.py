@@ -237,3 +237,15 @@ def test_onchain_v2_scan_cli_requires_explicit_quote_and_capital(monkeypatch, ca
     help_text = capsys.readouterr().out
     assert "--quote-token-address" in help_text
     assert "--capital-quote" in help_text
+
+
+
+def test_scan_rejects_unbounded_capital_decimal_before_dex_discovery():
+    for value in ("1e78", "1e-101", "9" * 129):
+        dex = FakeDexScreener([])
+        with pytest.raises(ValueError, match="safety limit|magnitude or precision"):
+            scan_onchain_v2_candidates(
+                token_address=BASE, quote_token_address=QUOTE,
+                capital_quote=value, dex_client=dex, reader=FakeReader(),
+            )
+        assert dex.calls == []
