@@ -104,7 +104,7 @@ def test_venue_check_cli_error_message_ends_with_real_newline(monkeypatch, capsy
     with pytest.raises(SystemExit) as exc:
         cli.main()
     assert exc.value.code == 2
-    assert capsys.readouterr().err == "venue-check failed: simulated failure\\n"
+    assert capsys.readouterr().err == "venue-check failed: simulated failure\n"
 
 
 def test_live_rpc_client_rejects_credentials_and_query_parameters():
