@@ -398,7 +398,10 @@ def test_latest_block_context_returns_one_canonical_chain_snapshot(monkeypatch):
 
     monkeypatch.setattr(reader, "_rpc", fake)
     context = reader.latest_block_context()
-    assert context == EvmBlockContext(1, 100, BLOCK_HASH, int(time.time()))
+    assert context.chain_id == 1
+    assert context.block_number == 100
+    assert context.block_hash == BLOCK_HASH
+    assert 0 <= int(time.time()) - context.timestamp <= 2
     assert calls == ["eth_chainId", "eth_blockNumber", "eth_getBlockByNumber"]
 
 
