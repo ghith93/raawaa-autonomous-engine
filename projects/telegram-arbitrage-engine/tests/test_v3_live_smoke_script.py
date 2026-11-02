@@ -19,7 +19,7 @@ def test_live_v3_smoke_script_parses_and_contains_no_transaction_submission() ->
     assert "re.fullmatch" in source
     assert "250_002" in source
     assert "RpcTransportError" in source
-    assert '"https://eth.nodely.dev"' in source
+    assert "DEFAULT_V3_ETHEREUM_RPC" in source
     assert '"https://eth.drpc.org"' in source
     assert '"https://public.1rpc.io/eth"' in source
     assert "MAX_TOTAL_RPC_REQUESTS = 512" in source
