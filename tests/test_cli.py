@@ -21,6 +21,7 @@ class CliTests(unittest.TestCase):
             ["enqueue", "--type", "research_brief", "--title", "Test"],
             ["list"],
             ["run-once"],
+            ["run-batch", "--max-parallel", "2"],
             ["audit-log"],
             ["memory-add", "--category", "decision", "--content", "x", "--source", "test"],
             ["memory-search", "--query", "x"],
@@ -95,6 +96,29 @@ class CliTests(unittest.TestCase):
                 self.assertEqual(cli.audit(), 1)
             self.assertIn("daily, monthly, and per-task", output.getvalue())
 
+
+    def test_audit_rejects_invalid_parallel_agent_policy(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "config").mkdir()
+            for name in ("policy.json", "agents.json", "provider_profiles.json"):
+                source = Path(cli.ROOT) / "config" / name
+                (root / "config" / name).write_text(source.read_text(encoding="utf-8"), encoding="utf-8")
+            policy_path = root / "config" / "policy.json"
+            policy = json.loads(policy_path.read_text(encoding="utf-8"))
+            policy["max_parallel_agents"] = 6
+            policy_path.write_text(json.dumps(policy), encoding="utf-8")
+            output = io.StringIO()
+            with patch.object(cli, "ROOT", root), contextlib.redirect_stdout(output):
+                self.assertEqual(cli.audit(), 1)
+            self.assertIn("max_parallel_agents", output.getvalue())
+
+    def test_run_batch_cannot_exceed_configured_parallel_agent_policy(self):
+        with patch("sys.argv", ["engine", "run-batch", "--max-parallel", "3"]):
+            with patch("engine.cli.build_live_gateway", return_value=None):
+                with patch("engine.cli.store", return_value=object()):
+                    with self.assertRaisesRegex(ValueError, "configured max_parallel_agents"):
+                        cli.main()
 
     def test_run_once_uses_live_runtime_factory_but_default_remains_dry_run(self):
         with tempfile.TemporaryDirectory() as tmp:
