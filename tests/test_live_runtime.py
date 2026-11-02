@@ -18,6 +18,7 @@ class LiveRuntimeFactoryTests(unittest.TestCase):
             "mode": "live_inference_opt_in",
             "daily_budget_usd": 0,
             "monthly_budget_usd": 0,
+            "per_task_budget_usd": 0,
             "allow_paid_model_calls": False,
             "allow_external_writes": False,
         }
@@ -88,6 +89,18 @@ class LiveRuntimeFactoryTests(unittest.TestCase):
             environ={"RAAWAA_ENGINE_LIVE_INFERENCE": "enabled", "GROQ_API_KEY": "test-key"},
         )
         self.assertIsNone(gateway)
+
+    def test_per_task_budget_is_passed_as_a_cap_without_enabling_paid_calls(self):
+        self.policy["per_task_budget_usd"] = 0.05
+        self.write_files()
+        gateway = build_live_gateway(
+            self.db_path, self.policy_path, self.registry_path,
+            environ={"RAAWAA_ENGINE_LIVE_INFERENCE": "enabled", "GROQ_API_KEY": "test-key"},
+        )
+        self.assertIsNotNone(gateway)
+        self.assertEqual(gateway.per_task_budget_usd, 0.05)
+        self.assertEqual(gateway.daily_budget_usd, 0)
+        self.assertEqual(gateway.monthly_budget_usd, 0)
 
     def test_nonzero_budget_is_rejected_by_current_free_only_runtime(self):
         self.policy["daily_budget_usd"] = 0.01
