@@ -1,7 +1,9 @@
 from datetime import datetime, timezone
+import sys
 
 import pytest
 
+from arb_engine.cli import main
 from arb_engine.dexscreener import DexPairCandidate
 from arb_engine.onchain_v2_scan import scan_onchain_v2_candidates
 from arb_engine.rpc import EvmBlockContext, EvmPoolSnapshot, PoolFactoryMismatch
@@ -220,3 +222,14 @@ def test_scan_requires_explicit_nonzero_addresses_and_rejects_float_capital():
             token_address=BASE, quote_token_address=QUOTE,
             capital_quote=1000.0, dex_client=dex, reader=reader,
         )
+
+
+
+def test_onchain_v2_scan_cli_requires_explicit_quote_and_capital(monkeypatch, capsys):
+    monkeypatch.setattr(sys, "argv", ["arb-engine", "onchain-v2-scan", "--help"])
+    with pytest.raises(SystemExit) as exit_info:
+        main()
+    assert exit_info.value.code == 0
+    help_text = capsys.readouterr().out
+    assert "--quote-token-address" in help_text
+    assert "--capital-quote" in help_text
