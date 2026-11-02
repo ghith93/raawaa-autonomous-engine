@@ -142,6 +142,23 @@ class UsageLedger:
             "pending_reservations": pending_count,
         }
 
+    def pending_reservations(self) -> list[dict[str, Any]]:
+        """Return safe metadata for unresolved monetary reservations; never releases them."""
+        with self._connect() as db:
+            rows = db.execute(
+                "SELECT id,provider,model,task_kind,task_id,created_at,estimated_cost_nanos "
+                "FROM model_usage_reservations WHERE settled_at IS NULL ORDER BY id"
+            ).fetchall()
+        return [{
+            "id": int(row["id"]),
+            "provider": row["provider"],
+            "model": row["model"],
+            "task_kind": row["task_kind"],
+            "task_id": row["task_id"],
+            "created_at": row["created_at"],
+            "estimated_cost_usd": int(row["estimated_cost_nanos"]) / 1_000_000_000,
+        } for row in rows]
+
     def task_totals(self, task_id: str) -> dict[str, float | int]:
         if not isinstance(task_id, str) or not task_id.strip():
             raise ValueError("task_id is required for task spend totals")
