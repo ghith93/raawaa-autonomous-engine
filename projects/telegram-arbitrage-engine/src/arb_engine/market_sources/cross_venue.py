@@ -182,6 +182,7 @@ def _direction(
         buy_price_quote_per_base=buy_vwap,
         sell_price_quote_per_base=sell_vwap,
         notional_quote=buy_spent,
+        gross_profit_quote_override=sell_received - buy_spent,
         base_asset_id_buy=buy_spec.base_asset_id,
         base_asset_id_sell=sell_spec.base_asset_id,
         quote_currency_id_buy=buy_spec.quote_currency_id,
