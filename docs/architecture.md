@@ -40,6 +40,9 @@ Provider profiles are now staged in `config/provider_profiles.json` but all rema
 
 ## Durable provider quota ledger
 
+Cloud live inference also requires the authenticated D1 monetary usage ledger. It reserves and settles integer nano-USD in D1; local SQLite remains for local development only. Migration 0005 and the `/v1/usage` Worker route must be reviewed, deployed, and restart/concurrency-tested before cloud live inference can be enabled. Missing D1 support fails closed without local fallback.
+
+
 Provider request/token usage, reservations, cooldowns, and metadata-only audit events are stored in D1 through the authenticated Worker route `/v1/quota`. The Python `D1QuotaLedger` uses only this narrow action API; it does not expose arbitrary SQL. A reservation is a single conditional `INSERT ... SELECT ... WHERE ... RETURNING` statement, so the quota predicates and reservation insert share one database write statement. Identical settlement retries are accepted; conflicting settlements return a conflict. A transport failure is treated as ambiguous and raises without local-ledger fallback.
 
 Cloud/scheduled execution selects this ledger whenever `RAAWAA_ENGINE_API_URL` is configured. It requires `RAAWAA_ENGINE_API_TOKEN` and, when Cloudflare Access protects the Worker, the paired `RAAWAA_ENGINE_CF_ACCESS_CLIENT_ID` and `RAAWAA_ENGINE_CF_ACCESS_CLIENT_SECRET` secrets. Missing credentials or Worker errors fail closed. Local development and unit tests may continue to use SQLite when no Worker URL is configured.
