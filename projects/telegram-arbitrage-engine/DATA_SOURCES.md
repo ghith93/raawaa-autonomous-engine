@@ -64,6 +64,17 @@ The packaged registry currently contains Ethereum mainnet only:
 No item in this list authorizes live trading.
 
 
+## Jupiter Solana Swap API V2 (quote-only)
+
+- Official API overview and quote-only quick start: https://developers.jup.ag/docs/swap
+- Official rate-limit policy: https://developers.jup.ag/docs/rate-limits
+- The adapter calls only `GET https://api.jup.ag/swap/v2/order` with `inputMint`, `outputMint`, and raw `amount`. It deliberately omits `taker`, API keys, wallet identifiers, and all build/execute/submit parameters.
+- Jupiter documents that calling `/order` without `taker` returns the quote only with `transaction: null`; adding `taker` returns a transaction. The adapter fails closed unless the response explicitly contains `transaction: null`.
+- Keyless access is documented at 0.5 requests/second. The adapter enforces at least 2 seconds between requests per client instance, uses bounded timeouts/response sizes, allowlists the official HTTPS host, and rejects redirects.
+- The returned amount is a Jupiter aggregator quote, not a guaranteed fill. The Meta-Aggregator can combine on-chain routing and off-chain RFQ sources (Metis, JupiterZ, Dflow, OKX). Quotes can change; JupiterZ market makers retain last-look rights. The response's `feeBps`, `feeMint`, route and price-impact fields must be retained and costed separately.
+- The adapter never requests an unsigned transaction, signs, builds, submits, or lands a swap. It does not calculate cross-venue profit, Solana priority fees, account-specific costs, or final fill probability.
+- CI uses deterministic response fixtures only; no live Jupiter calls or API keys are used.
+
 ## Telegram Bot API
 
 - Official reference: https://core.telegram.org/bots/api
