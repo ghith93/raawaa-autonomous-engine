@@ -79,8 +79,8 @@ class OKXOrderBookSnapshot:
     exchange_timestamp_ms: int
     bid_order_counts: tuple[int, ...]
     ask_order_counts: tuple[int, ...]
-    bid_liquidation_order_counts: tuple[int, ...]
-    ask_liquidation_order_counts: tuple[int, ...]
+    bid_deprecated_field_values: tuple[int, ...]
+    ask_deprecated_field_values: tuple[int, ...]
 
 
 def _instrument_id(value: str) -> str:
@@ -257,22 +257,22 @@ class OKXPublicSpotMarketData:
             raise OKXMarketDataError(f"invalid {field} depth")
         levels = []
         order_counts = []
-        liquidation_counts = []
+        deprecated_values = []
         previous = None
         for row in rows:
             if not isinstance(row, list) or len(row) < 4:
                 raise OKXMarketDataError(f"invalid {field} level")
             price = _decimal(row[0], f"{field} price")
             size = _decimal(row[1], f"{field} size")
-            liquidation_count = _integer(row[2], f"{field} liquidation count")
+            deprecated_value = _integer(row[2], f"{field} deprecated field value")
             order_count = _integer(row[3], f"{field} order count", allow_zero=False)
             if previous is not None and (price >= previous if descending else price <= previous):
                 raise OKXMarketDataError(f"{field} levels are not strictly sorted")
             previous = price
             levels.append((price, size))
             order_counts.append(order_count)
-            liquidation_counts.append(liquidation_count)
-        return tuple(levels), tuple(order_counts), tuple(liquidation_counts)
+            deprecated_values.append(deprecated_value)
+        return tuple(levels), tuple(order_counts), tuple(deprecated_values)
 
     def fetch_orderbook(self, *, inst_id: str, depth: int = 20) -> OKXOrderBookSnapshot:
         inst_id = _instrument_id(inst_id)
@@ -285,10 +285,10 @@ class OKXPublicSpotMarketData:
         returned_inst_id = item.get("instId")
         if returned_inst_id is not None and returned_inst_id != inst_id:
             raise OKXMarketDataError("OKX order-book instrument did not match request")
-        bids, bid_counts, bid_liquidations = self._parse_levels(
+        bids, bid_counts, bid_deprecated_values = self._parse_levels(
             item.get("bids"), "bids", descending=True,
         )
-        asks, ask_counts, ask_liquidations = self._parse_levels(
+        asks, ask_counts, ask_deprecated_values = self._parse_levels(
             item.get("asks"), "asks", descending=False,
         )
         if bids[0][0] >= asks[0][0]:
@@ -306,6 +306,6 @@ class OKXPublicSpotMarketData:
             exchange_timestamp_ms=timestamp,
             bid_order_counts=bid_counts,
             ask_order_counts=ask_counts,
-            bid_liquidation_order_counts=bid_liquidations,
-            ask_liquidation_order_counts=ask_liquidations,
+            bid_deprecated_field_values=bid_deprecated_values,
+            ask_deprecated_field_values=ask_deprecated_values,
         )
