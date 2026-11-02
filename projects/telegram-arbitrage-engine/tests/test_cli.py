@@ -337,3 +337,31 @@ def test_v2_sim_cli_registry_auto_fills_and_verifies_both_venues(monkeypatch, ca
     assert result["factory_verification"] == "passed"
     assert result["router_validation"]["mode"] == "read_only_router_eth_call"
     assert result["live_execution"] is False
+
+
+def test_v3_cli_help_exposes_absolute_and_relative_tick_limits(monkeypatch, capsys):
+    import pytest
+
+    monkeypatch.setattr(sys, "argv", ["arb-engine", "v3-sim", "--help"])
+    with pytest.raises(SystemExit) as exc:
+        cli.main()
+    assert exc.value.code == 0
+    output = capsys.readouterr().out
+    assert "--limit-tick" in output
+    assert "--limit-ticks" in output
+
+
+def test_v3_cli_rejects_both_limit_modes_before_network_access(monkeypatch):
+    import pytest
+
+    monkeypatch.setattr(sys, "argv", [
+        "arb-engine", "v3-sim",
+        "--pool", "0x" + "1" * 40,
+        "--direction", "token0_to_token1",
+        "--amount-specified", "1000",
+        "--limit-tick", "-120",
+        "--limit-ticks", "120",
+    ])
+    with pytest.raises(SystemExit) as exc:
+        cli.main()
+    assert exc.value.code == 2
