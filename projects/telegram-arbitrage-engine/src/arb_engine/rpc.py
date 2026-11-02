@@ -207,7 +207,7 @@ class EthereumV2PoolReader:
 
         observed_at = datetime.now(timezone.utc)
         snapshots = []
-        for address, token0, token1, reserve0, reserve1, fee_bps, _timestamp_last in raw_pools:
+        for address, token0, token1, reserve0, reserve1, fee_bps, timestamp_last in raw_pools:
             state = V2PoolState(
                 chain_id=chain_id,
                 pair_address=address,
