@@ -130,6 +130,25 @@ print(book.bids[:5], book.asks[:5], book.fetched_at)
 
 Kraken's internal asset codes (such as `XXBT` and `ZUSD`) must be explicitly mapped to canonical IDs; the adapter never infers equivalence from symbols. Public REST pacing is limited to one request per second per IP by Kraken; the adapter uses a shared process-wide limiter. Taker/maker schedules are preserved but no current account tier is assumed. Missing fee, depth or settlement inputs keep net estimates incomplete. See [data sources and trust boundaries](DATA_SOURCES.md).
 
+## Read-only Coinbase Exchange Spot market data
+
+A fixture-tested public adapter is available at `arb_engine.market_sources.coinbase.CoinbaseExchangePublicMarketData`. It calls only the unauthenticated public product and aggregated order-book GET endpoints. It preserves product increments, minimum market funds, status restrictions, Decimal book levels, order counts, sequence number and exchange/local timestamps.
+
+Example:
+
+```python
+from arb_engine.market_sources.coinbase import CoinbaseExchangePublicMarketData
+
+market = CoinbaseExchangePublicMarketData()  # public market data only; no API key
+instrument = market.fetch_instrument(product_id="BTC-USD")
+book = market.fetch_orderbook(product_id=instrument.instrument_id, level=2)
+print(instrument.base_asset_code, instrument.quote_asset_code)
+print(instrument.base_step_size, instrument.price_tick_size)
+print(book.bids[:5], book.asks[:5], book.sequence)
+```
+
+The adapter uses conservative one-request-per-second pacing despite Coinbase's higher published public limit. Product status flags and auction mode are enforced; account-specific fee tiers are not inferred. Coinbase market-data terms apply and regional account eligibility remains unverified. See [data sources and trust boundaries](DATA_SOURCES.md).
+
 ## Multi-chain EVM V2 scanning
 
 The V2 candidate scanner now accepts an explicit EVM chain ID, DEX Screener slug and two registered venue IDs. BNB Chain (chain ID 56) has source-documented PancakeSwap V2 and ApeSwap V2 registry entries. Non-Ethereum runs require an explicit RPC URL and verify the chain ID, factory/pair identity and router binding at one pinned block.
