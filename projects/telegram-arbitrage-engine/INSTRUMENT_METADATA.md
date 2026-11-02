@@ -18,6 +18,6 @@ Canonical mapping
 
 InstrumentRegistry.from_metadata(metadata, canonical_asset_ids) builds registry entries only for instruments whose status is Trading/TRADING. The caller must explicitly map each (venue_id, asset_code) to a canonical ID, for example ('bybit','BTC') -> 'asset:canonical:BTC' and ('binance','BTC') -> the same canonical ID. Quote assets such as USDT and USDC must be mapped separately; they are never treated as equivalent automatically.
 
-The registry key remains (venue_id, instrument_id). It does not join instruments merely because their symbols look alike. Missing base or quote aliases fail closed. Metadata supplies precision and minimum order constraints, not account fee tiers, custody equivalence, transfer costs, deposit/withdrawal availability, or execution guarantees.
+The registry key remains (venue_id, instrument_id). It does not join instruments merely because their symbols look alike. Missing base or quote aliases fail closed. Metadata supplies precision and minimum order constraints. The common CEX comparator enforces the minimum base quantity and quote notional before evaluating a spread. Metadata does not establish account fee tiers, custody equivalence, transfer costs, deposit/withdrawal availability, or execution guarantees.
 
 CI uses deterministic fixtures only. The methods make public GET requests only; no API keys, account endpoints, orders, balances, transfers or withdrawals are used.
