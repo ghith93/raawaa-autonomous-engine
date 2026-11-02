@@ -30,7 +30,7 @@ python -m arb_engine.cli onchain-v2-scan \
   --min-request-interval 0.55
 ```
 
-The result reports raw and human-readable router outputs and gross quote-token surplus for each direction. It is **not net profit** and does not model flash-swap repayment, gas, MEV, inclusion/revert risk, transfer taxes, or execution overhead. Candidate discovery is bounded to four pairs and the Ethereum reader enforces the RPC request budget. No transaction, calldata, wallet, signer, approval, or order is created or submitted.
+The result reports raw and human-readable router outputs and gross quote-token surplus for each direction. It is **not net profit** and does not model flash-swap repayment, gas, MEV, inclusion/revert risk, transfer taxes, or execution overhead. Candidate discovery is bounded to four pairs; the Ethereum reader enforces a 32-request default budget and 0.55-second request pacing to respect public RPC `eth_call` limits. No transaction, calldata, wallet, signer, approval, or order is created or submitted.
 
 Use `flash-swap-sim` separately for the V2 pair-invariant flash-swap repayment simulation; neither command enables live execution.
 
