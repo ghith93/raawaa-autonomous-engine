@@ -15,9 +15,44 @@ from typing import Callable
 
 
 DEFAULT_BASE_URL = "https://api.jup.ag"
+_BASE58_ALPHABET = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"
 _BASE58 = re.compile(r"^[1-9A-HJ-NP-Za-km-z]{32,44}$")
 _MAX_RESPONSE_BYTES = 1_000_000
 _MAX_UINT64 = 2**64 - 1
+_MAX_PRICE_MINTS = 50
+_MAX_PRICE_DECIMALS = 18
+
+
+class _KeylessRateLimiter:
+    """Thread-safe host-wide pacing and Retry-After deferral for Jupiter keyless calls."""
+
+    def __init__(self, *, clock=time.monotonic, sleeper=time.sleep):
+        self._rate_limiter = rate_limiter or (
+            _KeylessRateLimiter(clock=clock, sleeper=sleeper)
+            if clock is not time.monotonic or sleeper is not time.sleep
+            else _SHARED_KEYLESS_RATE_LIMITER
+        )
+
+    def acquire(self, interval_seconds: float) -> None:
+        with self._lock:
+            now = self._clock()
+            delay = self._next_request_at - now
+            if delay > 0:
+                self._sleeper(delay)
+                now = self._clock()
+            self._next_request_at = max(now, self._next_request_at) + interval_seconds
+
+    def defer(self, seconds: float) -> None:
+        if not math.isfinite(seconds) or seconds <= 0:
+            return
+        with self._lock:
+            self._next_request_at = max(
+                self._next_request_at,
+                self._clock() + min(seconds, 300.0),
+            )
+
+
+_SHARED_KEYLESS_RATE_LIMITER = _KeylessRateLimiter()
 
 
 class JupiterQuoteError(RuntimeError):
@@ -51,7 +86,16 @@ class JupiterQuote:
 
 def _mint(value: str, label: str) -> str:
     if not isinstance(value, str) or not _BASE58.fullmatch(value):
-        raise ValueError(f"{label} must be a valid-looking Solana base58 mint address")
+        raise ValueError(f"{label} must be a valid 32-byte Solana base58 public key")
+    number = 0
+    for character in value:
+        number = number * 58 + _BASE58_ALPHABET.index(character)
+    leading_zeroes = len(value) - len(value.lstrip("1"))
+    decoded = (b"\\x00" * leading_zeroes) + (
+        number.to_bytes((number.bit_length() + 7) // 8, "big") if number else b""
+    )
+    if len(decoded) != 32:
+        raise ValueError(f"{label} must decode to exactly 32 bytes")
     return value
 
 
@@ -96,6 +140,7 @@ class JupiterQuoteOnlyClient:
         transport: Callable[[str, float], bytes] | None = None,
         clock: Callable[[], float] = time.monotonic,
         sleeper: Callable[[float], None] = time.sleep,
+        rate_limiter: _KeylessRateLimiter | None = None,
     ) -> None:
         parsed = urllib.parse.urlsplit(base_url)
         if (
@@ -151,13 +196,7 @@ class JupiterQuoteOnlyClient:
             raise JupiterQuoteError(f"Jupiter public API transport failed: {type(exc).__name__}") from None
 
     def _throttle(self) -> None:
-        with self._lock:
-            now = self._clock()
-            delay = self._next_request_at - now
-            if delay > 0:
-                self._sleeper(delay)
-                now = self._clock()
-            self._next_request_at = max(now, self._next_request_at) + self.min_interval_seconds
+        self._rate_limiter.acquire(self.min_interval_seconds)
 
     def quote(
         self,
@@ -255,4 +294,218 @@ class JupiterQuoteOnlyClient:
             context_slot=context_slot,
             fetched_at=datetime.now(timezone.utc),
             transaction_present=False,
+        )
+
+
+class JupiterPriceError(JupiterQuoteError):
+    """A safe, read-only Jupiter Price API V3 request failed."""
+
+
+class JupiterPriceRateLimited(JupiterPriceError):
+    """Jupiter returned HTTP 429; the shared keyless limiter has been deferred."""
+
+    def __init__(self, retry_after_seconds: float):
+        self.retry_after_seconds = retry_after_seconds
+        super().__init__(f"Jupiter Price API rate limited; deferred for {retry_after_seconds:g}s")
+
+
+@dataclass(frozen=True)
+class JupiterPriceObservation:
+    source: str
+    network: str
+    mint: str
+    usd_price: Decimal
+    decimals: int
+    block_id: int
+    price_change_24h: Decimal | None
+    liquidity_usd: Decimal | None
+    created_at: datetime | None
+    fetched_at: datetime
+    data_class: str = "indicative_price"
+    source_url: str = "https://api.jup.ag/price/v3"
+
+
+@dataclass(frozen=True)
+class JupiterPriceBatch:
+    requested_mints: tuple[str, ...]
+    observations: tuple[JupiterPriceObservation, ...]
+    missing_mints: tuple[str, ...]
+    fetched_at: datetime
+    source: str = "jupiter"
+    network: str = "solana"
+    data_class: str = "indicative_price"
+
+
+def _price_decimal(value: object, field: str, *, allow_zero: bool = False) -> Decimal:
+    if isinstance(value, bool) or not isinstance(value, (int, Decimal, str)):
+        raise JupiterPriceError(f"invalid {field}")
+    try:
+        parsed = value if isinstance(value, Decimal) else Decimal(str(value))
+    except InvalidOperation as exc:
+        raise JupiterPriceError(f"invalid {field}") from exc
+    if not parsed.is_finite() or (parsed < 0 if allow_zero else parsed <= 0):
+        raise JupiterPriceError(f"invalid {field}")
+    return parsed
+
+
+def _price_created_at(value: object) -> datetime | None:
+    if value is None or value == "":
+        return None
+    if not isinstance(value, str) or len(value) > 64:
+        raise JupiterPriceError("invalid createdAt")
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError as exc:
+        raise JupiterPriceError("invalid createdAt") from exc
+    if parsed.tzinfo is None or parsed.utcoffset() is None:
+        raise JupiterPriceError("createdAt must include a timezone")
+    return parsed.astimezone(timezone.utc)
+
+
+def _retry_after_seconds(headers: object) -> float:
+    value = None
+    if headers is not None:
+        try:
+            value = headers.get("Retry-After")
+        except AttributeError:
+            value = None
+    try:
+        parsed = float(value) if value is not None else 2.0
+    except (TypeError, ValueError):
+        parsed = 2.0
+    return min(max(parsed, 2.0), 300.0)
+
+
+class JupiterPriceV3Client:
+    """Keyless, read-only Jupiter Price API V3 client for exact Solana mint addresses."""
+
+    def __init__(
+        self,
+        *,
+        base_url: str = DEFAULT_BASE_URL,
+        timeout_seconds: float = 8.0,
+        min_interval_seconds: float = 2.0,
+        transport: Callable[[str, float], bytes] | None = None,
+        rate_limiter: _KeylessRateLimiter | None = None,
+    ) -> None:
+        parsed = urllib.parse.urlsplit(base_url)
+        if (
+            parsed.scheme != "https"
+            or parsed.hostname != "api.jup.ag"
+            or parsed.username is not None
+            or parsed.password is not None
+            or parsed.path not in ("", "/")
+            or parsed.query
+            or parsed.fragment
+        ):
+            raise ValueError("base_url must be the official Jupiter HTTPS API host")
+        if (
+            not isinstance(timeout_seconds, (int, float))
+            or isinstance(timeout_seconds, bool)
+            or not math.isfinite(timeout_seconds)
+            or not 1 <= timeout_seconds <= 30
+        ):
+            raise ValueError("timeout_seconds must be between 1 and 30")
+        if (
+            not isinstance(min_interval_seconds, (int, float))
+            or isinstance(min_interval_seconds, bool)
+            or not math.isfinite(min_interval_seconds)
+            or not 2 <= min_interval_seconds <= 60
+        ):
+            raise ValueError("min_interval_seconds must be between 2 and 60 for keyless 0.5 RPS access")
+        self.base_url = base_url.rstrip("/")
+        self.timeout_seconds = float(timeout_seconds)
+        self.min_interval_seconds = float(min_interval_seconds)
+        self._transport = transport or self._fetch
+        self._rate_limiter = rate_limiter or _SHARED_KEYLESS_RATE_LIMITER
+
+    @staticmethod
+    def _fetch(url: str, timeout: float) -> bytes:
+        request = urllib.request.Request(
+            url,
+            headers={"Accept": "application/json", "User-Agent": "RaawaaResearchEngine/1.0"},
+            method="GET",
+        )
+        opener = urllib.request.build_opener(_RejectRedirects())
+        try:
+            with opener.open(request, timeout=timeout) as response:
+                raw = response.read(_MAX_RESPONSE_BYTES + 1)
+                if len(raw) > _MAX_RESPONSE_BYTES:
+                    raise JupiterPriceError("Jupiter Price API response exceeded the size limit")
+                return raw
+        except urllib.error.HTTPError as exc:
+            if exc.code == 429:
+                delay = _retry_after_seconds(exc.headers)
+                _SHARED_KEYLESS_RATE_LIMITER.defer(delay)
+                raise JupiterPriceRateLimited(delay) from None
+            raise JupiterPriceError(f"Jupiter Price API returned HTTP {exc.code}") from None
+        except (urllib.error.URLError, TimeoutError, OSError) as exc:
+            raise JupiterPriceError(
+                f"Jupiter Price API transport failed: {type(exc).__name__}"
+            ) from None
+
+    def fetch_prices(self, mints: list[str] | tuple[str, ...]) -> JupiterPriceBatch:
+        if not isinstance(mints, (list, tuple)) or not 1 <= len(mints) <= _MAX_PRICE_MINTS:
+            raise ValueError("mints must contain between 1 and 50 Solana mint addresses")
+        requested = tuple(_mint(mint, "mint") for mint in mints)
+        if len(set(requested)) != len(requested):
+            raise ValueError("mints must not contain duplicates")
+        params = urllib.parse.urlencode({"ids": ",".join(requested)})
+        self._rate_limiter.acquire(self.min_interval_seconds)
+        raw = self._transport(f"{self.base_url}/price/v3?{params}", self.timeout_seconds)
+        if not isinstance(raw, bytes) or len(raw) > _MAX_RESPONSE_BYTES:
+            raise JupiterPriceError("invalid or oversized Jupiter Price API response")
+        try:
+            payload = json.loads(raw.decode("utf-8"), parse_float=Decimal)
+        except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+            raise JupiterPriceError("Jupiter Price API returned malformed JSON") from exc
+        if not isinstance(payload, dict):
+            raise JupiterPriceError("Jupiter Price API returned an invalid object")
+        unexpected = set(payload) - set(requested)
+        if unexpected:
+            raise JupiterPriceError("Jupiter Price API returned an unrequested mint key")
+        fetched_at = datetime.now(timezone.utc)
+        observations: list[JupiterPriceObservation] = []
+        missing: list[str] = []
+        for mint in requested:
+            item = payload.get(mint)
+            if item is None:
+                missing.append(mint)
+                continue
+            if not isinstance(item, dict):
+                raise JupiterPriceError("Jupiter Price API returned an invalid mint observation")
+            # Jupiter omits unreliable prices; a present-but-unpriced record is also missing.
+            if "usdPrice" not in item or item.get("usdPrice") is None:
+                missing.append(mint)
+                continue
+            usd_price = _price_decimal(item.get("usdPrice"), "usdPrice")
+            decimals = item.get("decimals")
+            if type(decimals) is not int or not 0 <= decimals <= _MAX_PRICE_DECIMALS:
+                raise JupiterPriceError("invalid decimals")
+            block_id = item.get("blockId")
+            if type(block_id) is not int or not 0 < block_id <= _MAX_UINT64:
+                raise JupiterPriceError("invalid blockId")
+            change = item.get("priceChange24h")
+            if change is not None:
+                change = _price_decimal(change, "priceChange24h", allow_zero=True)
+            liquidity = item.get("liquidity")
+            if liquidity is not None:
+                liquidity = _price_decimal(liquidity, "liquidity", allow_zero=True)
+            observations.append(JupiterPriceObservation(
+                source="jupiter",
+                network="solana",
+                mint=mint,
+                usd_price=usd_price,
+                decimals=decimals,
+                block_id=block_id,
+                price_change_24h=change,
+                liquidity_usd=liquidity,
+                created_at=_price_created_at(item.get("createdAt")),
+                fetched_at=fetched_at,
+            ))
+        return JupiterPriceBatch(
+            requested_mints=requested,
+            observations=tuple(observations),
+            missing_mints=tuple(missing),
+            fetched_at=fetched_at,
         )
