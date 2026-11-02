@@ -265,7 +265,37 @@ class EthereumV2PoolReader:
             raise RpcReadError("Gas price is zero or exceeds the safety ceiling")
         return value
 
-    def read_pools(self, pools: list[tuple[str, int]]) -> list[EvmPoolSnapshot]:
+    def _block_context_at(
+        self, block_number: int, chain_id: int, *, expected_hash: str | None = None,
+    ) -> EvmBlockContext:
+        block = self._rpc("eth_getBlockByNumber", [hex(block_number), False])
+        if not isinstance(block, dict) or not isinstance(block.get("hash"), str):
+            raise RpcReadError("Pinned block response is missing its hash")
+        block_hash = block["hash"].lower()
+        if not re.fullmatch(r"0x[0-9a-f]{64}", block_hash):
+            raise RpcReadError("Pinned block hash is invalid")
+        if expected_hash is not None and block_hash != expected_hash.lower():
+            raise RpcReadError("Pinned block hash changed before snapshot collection")
+        timestamp = self._uint(block.get("timestamp"), "block timestamp")
+        now_timestamp = int(datetime.now(timezone.utc).timestamp())
+        if timestamp > now_timestamp + 30 or now_timestamp - timestamp > 60:
+            raise RpcReadError("Pinned block timestamp is future-dated or stale")
+        return EvmBlockContext(chain_id, block_number, block_hash, timestamp)
+
+    def latest_block_context(self) -> EvmBlockContext:
+        """Capture a fresh block context for factory verification and same-block pool reads."""
+        chain_id = self._uint(self._rpc("eth_chainId", []), "chain ID")
+        if chain_id != self.expected_chain_id:
+            raise RpcReadError(
+                f"Unexpected chain ID: expected {self.expected_chain_id}, received {chain_id}"
+            )
+        block_number = self._uint(self._rpc("eth_blockNumber", []), "block number")
+        return self._block_context_at(block_number, chain_id)
+
+    def read_pools(
+        self, pools: list[tuple[str, int]], *,
+        block_context: EvmBlockContext | None = None,
+    ) -> list[EvmPoolSnapshot]:
         """Read up to four pools against one pinned Ethereum block."""
         if not isinstance(pools, list) or not 1 <= len(pools) <= 4:
             raise ValueError("Provide between one and four pools")
@@ -280,21 +310,22 @@ class EthereumV2PoolReader:
                 raise ValueError("Pool fee must be integer basis points in [0, 10000)")
             normalized.append((address, fee_bps))
 
-        chain_id = self._uint(self._rpc("eth_chainId", []), "chain ID")
-        if chain_id != self.expected_chain_id:
-            raise RpcReadError(f"Unexpected chain ID: expected {self.expected_chain_id}, received {chain_id}")
-        block_number = self._uint(self._rpc("eth_blockNumber", []), "block number")
+        if block_context is None:
+            context = self.latest_block_context()
+        else:
+            if not isinstance(block_context, EvmBlockContext):
+                raise ValueError("block_context must be an EvmBlockContext")
+            chain_id = self._uint(self._rpc("eth_chainId", []), "chain ID")
+            if chain_id != self.expected_chain_id or chain_id != block_context.chain_id:
+                raise RpcReadError("Pinned block context belongs to a different chain")
+            context = self._block_context_at(
+                block_context.block_number, chain_id, expected_hash=block_context.block_hash,
+            )
+        chain_id = context.chain_id
+        block_number = context.block_number
+        block_hash = context.block_hash
+        block_timestamp = context.timestamp
         block_tag = hex(block_number)
-        block = self._rpc("eth_getBlockByNumber", [block_tag, False])
-        if not isinstance(block, dict) or not isinstance(block.get("hash"), str):
-            raise RpcReadError("Pinned block response is missing its hash")
-        block_hash = block["hash"].lower()
-        if not re.fullmatch(r"0x[0-9a-fA-F]{64}", block_hash):
-            raise RpcReadError("Pinned block hash is not a 32-byte hexadecimal value")
-        block_timestamp = self._uint(block.get("timestamp"), "block timestamp")
-        now_timestamp = int(datetime.now(timezone.utc).timestamp())
-        if block_timestamp > now_timestamp + 30 or now_timestamp - block_timestamp > 60:
-            raise RpcReadError("Latest block timestamp is future-dated or stale")
 
         raw_pools = []
         unique_tokens = set()
