@@ -262,3 +262,77 @@ test("research keys-only listing returns only stable candidate keys", async () =
   assert.match(query.sql, /SELECT source_key FROM research_candidates/);
   assert.doesNotMatch(query.sql, /metadata_json|review_note|title/);
 });
+
+
+test("quota endpoints require the Worker bearer token", async () => {
+  const response = await worker.fetch(request("/v1/quota?route_id=groq:main:model", { token: "wrong" }), {
+    DB: dbMock(), ENGINE_API_TOKEN: TOKEN,
+  });
+  assert.equal(response.status, 401);
+});
+
+test("quota reservation validates all hard limits before touching D1", async () => {
+  const DB = dbMock();
+  const response = await worker.fetch(request("/v1/quota", {
+    method: "POST",
+    body: { action: "reserve", route_id: "groq:main:model", task_id: "task-1",
+      estimated_tokens: 10, daily_request_limit: 1 },
+  }), { DB, ENGINE_API_TOKEN: TOKEN });
+  assert.equal(response.status, 400);
+  assert.equal(DB.calls.length, 0);
+});
+
+test("quota reservation is one conditional parameterized insert", async () => {
+  const calls = [];
+  const DB = {
+    prepare(sql) {
+      return {
+        values: [],
+        bind(...values) { this.values = values; return this; },
+        async first() {
+          calls.push({ sql, values: this.values });
+          return { id: 77 };
+        },
+      };
+    },
+  };
+  const response = await worker.fetch(request("/v1/quota", {
+    method: "POST",
+    body: { action: "reserve", route_id: "groq:main:model", task_id: "task-1",
+      estimated_tokens: 10, daily_request_limit: 10, daily_token_limit: 1000,
+      monthly_request_limit: 100, monthly_token_limit: 10000,
+      minute_request_limit: 5, minute_token_limit: 1000,
+      per_task_request_limit: 3, per_task_token_limit: 300 },
+  }), { DB, ENGINE_API_TOKEN: TOKEN });
+  assert.equal(response.status, 201);
+  assert.deepEqual(await response.json(), { reservation_id: 77, occurred_at: (await response.clone().json()).occurred_at });
+  assert.equal(calls.length, 1);
+  assert.match(calls[0].sql, /^\s*INSERT INTO quota_usage/);
+  assert.match(calls[0].sql, /NOT EXISTS \(SELECT 1 FROM quota_cooldowns/);
+  assert.match(calls[0].sql, /RETURNING id/);
+  assert.equal(calls[0].values.length, 28);
+});
+
+test("quota settlement retries identical usage and rejects conflicting usage", async () => {
+  let existing = { tokens: 42, settled_at: "2026-11-02T00:00:00.000Z" };
+  const DB = {
+    prepare(sql) {
+      return {
+        values: [],
+        bind(...values) { this.values = values; return this; },
+        async run() { return { meta: { changes: 0 } }; },
+        async first() { return existing; },
+      };
+    },
+  };
+  const replay = await worker.fetch(request("/v1/quota", {
+    method: "POST", body: { action: "settle", reservation_id: 5, actual_tokens: 42 },
+  }), { DB, ENGINE_API_TOKEN: TOKEN });
+  assert.equal(replay.status, 200);
+  assert.equal((await replay.json()).replay, true);
+  const conflict = await worker.fetch(request("/v1/quota", {
+    method: "POST", body: { action: "settle", reservation_id: 5, actual_tokens: 43 },
+  }), { DB, ENGINE_API_TOKEN: TOKEN });
+  assert.equal(conflict.status, 409);
+  assert.deepEqual(await conflict.json(), { error: "settlement_conflict" });
+});
