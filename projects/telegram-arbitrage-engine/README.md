@@ -23,7 +23,7 @@ arb-engine demo
 arb-engine report --limit 500
 arb-engine scan WETH/USDC --min-liquidity 10000 --min-volume 1000
 arb-telegram  # optional read-only polling bot; requires TELEGRAM_BOT_TOKEN + TELEGRAM_ALLOWED_CHAT_IDS
-arb-engine v2-sim --buy-pair 0x... --buy-fee-bps 30 --sell-pair 0x... --sell-fee-bps 30 --quote-token 0x... --base-token 0x... --capital-quote 50 --buy-router 0x... --sell-router 0x... --buy-factory 0x... --sell-factory 0x...
+arb-engine v2-sim --buy-pair 0x... --buy-fee-bps 30 --sell-pair 0x... --sell-fee-bps 30 --quote-token 0x... --base-token 0x... --capital-quote 50 --chain-id 1 --buy-router 0x... --sell-router 0x... --buy-factory 0x... --sell-factory 0x...
 ```
 
 Scan snapshots are saved to `data/opportunities.sqlite3`. Avoid tight polling and respect upstream rate limits.
