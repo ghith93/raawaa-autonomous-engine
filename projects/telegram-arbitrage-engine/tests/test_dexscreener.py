@@ -13,7 +13,7 @@ def pair(dex: str, price: str, address: str):
         "quoteToken": {"address": "0xbbb", "symbol": "USDC"},
         "priceUsd": price, "liquidity": {"usd": 50000},
         "volume": {"h24": 10000}, "pairCreatedAt": int(now.timestamp() * 1000),
-        "url": f"https://dex.example/{address}",
+        "url": f"https://dexscreener.com/ethereum/{address}",
     }
 
 
@@ -108,3 +108,15 @@ def test_scanner_ignores_duplicate_pair_address_across_venues():
     a = DexScreenerClient._parse_pair(pair("dex-a", "1.00", "same-pair"), now)
     b = DexScreenerClient._parse_pair(pair("dex-b", "1.01", "same-pair"), now)
     assert find_spreads([a, b]) == []
+
+def test_parser_rejects_untrusted_or_credentialed_pair_urls():
+    now = datetime.now(timezone.utc)
+    for url in (
+        "https://evil.example/pair",
+        "https://dexscreener.com@evil.example/pair",
+        "https://user:pass@dexscreener.com/pair",
+        "https://dexscreener.com/pair?token=secret",
+    ):
+        raw = pair("dex-a", "1.0", "p1")
+        raw["url"] = url
+        assert DexScreenerClient._parse_pair(raw, now) is None
