@@ -117,3 +117,43 @@ def test_failed_reply_consumes_update_without_repeating_scan(monkeypatch):
     assert next_offset == 12
     assert controller.poll_once(offset=next_offset) == 12
     assert len(calls) == 1
+
+
+def test_poll_persists_each_update_offset_before_processing_the_next(monkeypatch):
+    from arb_engine.telegram_bot import TelegramController
+
+    updates = [
+        message_update(update_id=21, text="/status"),
+        message_update(update_id=22, text="/help"),
+    ]
+    api = FakeAPI(updates)
+    controller = TelegramController(api, frozenset({123}), min_request_interval_seconds=0)
+    checkpoints = []
+
+    result = controller.poll_once(offset=20, on_offset=checkpoints.append)
+
+    assert result == 23
+    assert checkpoints == [22, 23]
+    assert len(api.sent) == 2
+
+
+def test_poll_offset_callback_failure_stops_batch_without_claiming_later_updates():
+    updates = [
+        message_update(update_id=31, text="/status"),
+        message_update(update_id=32, text="/help"),
+    ]
+    api = FakeAPI(updates)
+    controller = TelegramController(api, frozenset({123}), min_request_interval_seconds=0)
+    checkpoints = []
+
+    def fail_after_first(value):
+        checkpoints.append(value)
+        if value == 32:
+            raise OSError("simulated durable checkpoint failure")
+
+    import pytest
+    with pytest.raises(OSError, match="durable checkpoint"):
+        controller.poll_once(offset=31, on_offset=fail_after_first)
+
+    assert checkpoints == [32]
+    assert len(api.sent) == 1
