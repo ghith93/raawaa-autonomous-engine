@@ -13,13 +13,13 @@ BTC = "asset:canonical:BTC"
 USDT = "currency:canonical:USDT"
 
 
-def metadata(venue: str) -> InstrumentMetadata:
+def metadata(venue: str, instrument_id: str = "BTCUSDT", base_code: str = "BTC", quote_code: str = "USDT") -> InstrumentMetadata:
     return InstrumentMetadata(
         venue_id=venue,
-        instrument_id="BTCUSDT",
+        instrument_id=instrument_id,
         market_family="cex_spot",
-        base_asset_code="BTC",
-        quote_asset_code="USDT",
+        base_asset_code=base_code,
+        quote_asset_code=quote_code,
         base_step_size="0.001",
         price_tick_size="0.1",
         status="TRADING",
@@ -29,11 +29,11 @@ def metadata(venue: str) -> InstrumentMetadata:
     )
 
 
-def book(venue: str, *, bids: tuple, asks: tuple):
+def book(venue: str, *, bids: tuple, asks: tuple, symbol: str = "BTCUSDT"):
     return SimpleNamespace(
         source=venue,
         category="spot",
-        symbol="BTCUSDT",
+        symbol=symbol,
         bids=bids,
         asks=asks,
         fetched_at=datetime.now(timezone.utc),
@@ -71,7 +71,7 @@ def install_fake_clients(monkeypatch):
     monkeypatch.setattr(cli, "BinancePublicMarketData", FakeBinance)
 
 
-def command_args(*extra):
+def command_args(*extra, b_base_id=BTC):
     return [
         "arb-engine", "cex-scan",
         "--venue-a", "bybit",
@@ -80,7 +80,7 @@ def command_args(*extra):
         "--a-quote-currency-id", USDT,
         "--venue-b", "binance",
         "--instrument-b", "BTCUSDT",
-        "--b-base-asset-id", BTC,
+        "--b-base-asset-id", b_base_id,
         "--b-quote-currency-id", USDT,
         "--base-quantity", "0.5",
         *extra,
@@ -135,10 +135,10 @@ def test_cex_cli_blocks_symbol_match_when_canonical_asset_ids_differ(monkeypatch
     monkeypatch.setattr(
         "sys.argv",
         command_args(
-            "--b-base-asset-id", "asset:canonical:wrapped-BTC",
             "--fee-a-bps", "10",
             "--fee-b-bps", "10",
             "--latency-cost-bps", "1",
+            b_base_id="asset:canonical:wrapped-BTC",
         ),
     )
 
@@ -156,3 +156,45 @@ def test_cex_cli_command_is_visible_in_help(monkeypatch, capsys):
         cli.main()
     assert exit_info.value.code == 0
     assert "cex-scan" in capsys.readouterr().out
+
+def test_cex_snapshot_factory_uses_kraken_coinbase_and_okx_public_adapters(monkeypatch):
+    class FakeKraken:
+        def fetch_instrument(self, *, pair):
+            assert pair == "XBT/USDT"
+            return metadata("kraken", "XBTUSDT", "XBT", "USDT")
+
+        def fetch_orderbook(self, *, pair, count):
+            assert (pair, count) == ("XBTUSDT", 100)
+            return book("kraken", symbol="XBTUSDT", bids=((Decimal("99"), Decimal("1")),), asks=((Decimal("100"), Decimal("1")),))
+
+    class FakeCoinbase:
+        def fetch_instrument(self, *, product_id):
+            assert product_id == "BTC-USD"
+            return metadata("coinbase", "BTC-USD", "BTC", "USD")
+
+        def fetch_orderbook(self, *, product_id, level):
+            assert (product_id, level) == ("BTC-USD", 2)
+            return book("coinbase", symbol="BTC-USD", bids=((Decimal("99"), Decimal("1")),), asks=((Decimal("100"), Decimal("1")),))
+
+    class FakeOKX:
+        def fetch_instrument(self, *, inst_id):
+            assert inst_id == "BTC-USDT"
+            return metadata("okx", "BTC-USDT", "BTC", "USDT")
+
+        def fetch_orderbook(self, *, inst_id, depth):
+            assert (inst_id, depth) == ("BTC-USDT", 20)
+            return book("okx", symbol="BTC-USDT", bids=((Decimal("99"), Decimal("1")),), asks=((Decimal("100"), Decimal("1")),))
+
+    monkeypatch.setattr(cli, "KrakenPublicMarketData", FakeKraken)
+    monkeypatch.setattr(cli, "CoinbaseExchangePublicMarketData", FakeCoinbase)
+    monkeypatch.setattr(cli, "OKXPublicSpotMarketData", FakeOKX)
+
+    for venue, instrument in (
+        ("kraken", "XBT/USDT"),
+        ("coinbase", "BTC-USD"),
+        ("okx", "BTC-USDT"),
+    ):
+        instrument_metadata, snapshot = cli._fetch_cex_snapshot(venue, instrument)
+        assert instrument_metadata.venue_id == venue
+        assert snapshot.source == venue
+        assert snapshot.symbol == instrument_metadata.instrument_id
