@@ -36,10 +36,10 @@ python -m arb_engine v3-sim \
   --pool 0xPOOL_ADDRESS \
   --direction token1_to_token0 \
   --amount-specified -1000000 \
-  --limit-tick 120
+  --limit-ticks 120
 ```
 
-Positive `--amount-specified` means exact input; negative means exact output. The direction is always relative to the on-chain token0/token1 order. Ethereum uses the official factory default; other chains require both `--rpc-url` and `--factory`. The CLI reports the block hash, raw-unit amounts, fees, crossed ticks, RPC budget usage and whether the simulation completed. Treat the result as a read-only, block-pinned simulation, not an executable trade.
+Positive `--amount-specified` means exact input; negative means exact output. The direction is always relative to the on-chain token0/token1 order. Use `--limit-ticks 120` to derive a limit 120 ticks below or above the current slot0 tick, or `--limit-tick` to supply an absolute boundary. Ethereum uses the official factory default; other chains require both `--rpc-url` and `--factory`. The CLI reports the block hash, raw-unit amounts, fees, crossed ticks, RPC budget usage and whether the simulation completed. Treat the result as a read-only, block-pinned simulation, not an executable trade.
 
 ## Sources
 
