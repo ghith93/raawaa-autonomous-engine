@@ -133,6 +133,30 @@ def test_gas_scenario_is_replayed_at_the_forward_block_and_is_idempotent(tmp_pat
     assert len([event for event in ledger.events(candidate_id) if event["event_type"] == "outcome_observed"]) == 1
 
 
+def test_observer_rejects_unrecorded_token_decimal_provenance(tmp_path):
+    ledger, candidate_id = capture_candidate(tmp_path / "paper.sqlite3")
+    reader = make_reader(block=101, block_hash=OBSERVED_HASH, timestamp=CANDIDATE_TIME + 12)
+    reader.states[SOURCE] = snapshot(
+        SOURCE, "0x" + "7" * 40, BASE, 2_000_000 * 10**6, 1_000 * 10**18, 6, 18,
+        block=101, block_hash=OBSERVED_HASH, timestamp=CANDIDATE_TIME + 12,
+    )
+    with pytest.raises(ValueError, match="absent from candidate decimal provenance"):
+        observe_flash_swap_outcome(candidate_id, ledger=ledger, reader=reader)
+    assert not [event for event in ledger.events(candidate_id) if event["event_type"] == "outcome_observed"]
+
+
+def test_observer_rejects_mismatched_native_quote_pool_identity(tmp_path):
+    ledger, candidate_id = capture_candidate(tmp_path / "paper-gas.sqlite3", with_gas=True)
+    reader = make_reader(block=101, block_hash=OBSERVED_HASH, timestamp=CANDIDATE_TIME + 12)
+    reader.states[NATIVE_QUOTE] = snapshot(
+        "0x" + "7" * 40, QUOTE, NATIVE, 2_000_000 * 10**6, 1_000 * 10**18, 6, 18,
+        block=101, block_hash=OBSERVED_HASH, timestamp=CANDIDATE_TIME + 12,
+    )
+    with pytest.raises(ValueError, match="different pool than the requested snapshot"):
+        observe_flash_swap_outcome(candidate_id, ledger=ledger, reader=reader)
+    assert not [event for event in ledger.events(candidate_id) if event["event_type"] == "outcome_observed"]
+
+
 def test_observer_rejects_legacy_candidate_without_forward_parameters(tmp_path):
     ledger = PaperTradingLedger(tmp_path / "legacy.sqlite3")
     occurred_at = datetime.fromtimestamp(CANDIDATE_TIME, timezone.utc)
