@@ -224,6 +224,7 @@ class BybitPublicMarketData:
             raise BybitMarketDataError("Bybit instrument omitted asset codes or status")
         if not isinstance(lot_filter, dict) or not isinstance(price_filter, dict):
             raise BybitMarketDataError("Bybit instrument omitted precision filters")
+        min_base = lot_filter.get("minOrderQty")
         min_quote = lot_filter.get("minOrderAmt")
         return InstrumentMetadata(
             venue_id="bybit",
@@ -235,6 +236,7 @@ class BybitPublicMarketData:
             price_tick_size=price_filter.get("tickSize"),
             status=status,
             fetched_at=datetime.now(timezone.utc),
+            min_base_quantity=min_base if min_base not in (None, "") else None,
             min_quote_notional=min_quote if min_quote not in (None, "") else None,
         )
 
