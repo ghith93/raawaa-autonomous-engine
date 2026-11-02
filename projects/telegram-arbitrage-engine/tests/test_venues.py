@@ -54,7 +54,7 @@ def test_manual_venue_requires_explicit_fee():
     assert resolve_venue_config(None, 1, 25, None, None) == (
         25, None, None, None,
     )
-    with pytest.raises(ValueError, match="explicit --\*-fee-bps"):
+    with pytest.raises(ValueError, match=r"explicit --\*-fee-bps"):
         resolve_venue_config(None, 1, None, None, None)
 
 
