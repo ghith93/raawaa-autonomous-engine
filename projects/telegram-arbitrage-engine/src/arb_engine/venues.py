@@ -15,6 +15,7 @@ _ADDRESS = re.compile(r"^0x[0-9a-fA-F]{40}$")
 class Venue:
     id: str
     name: str
+    dexscreener_id: str
     network: str
     chain_id: int
     factory: str
@@ -43,6 +44,8 @@ def load_venues() -> tuple[Venue, ...]:
         venue = Venue(**item)
         if not venue.id or venue.id in seen:
             raise ValueError("Venue IDs must be non-empty and unique")
+        if not venue.dexscreener_id or venue.dexscreener_id != venue.dexscreener_id.lower():
+            raise ValueError(f"Invalid DEX Screener ID for venue {venue.id}")
         if not isinstance(venue.chain_id, int) or venue.chain_id <= 0:
             raise ValueError(f"Invalid chain ID for venue {venue.id}")
         if not _ADDRESS.fullmatch(venue.factory) or not _ADDRESS.fullmatch(venue.router02):
@@ -63,6 +66,16 @@ def list_venues(chain_id: int | None = None) -> tuple[Venue, ...]:
     if chain_id is None:
         return venues
     return tuple(venue for venue in venues if venue.chain_id == chain_id)
+
+
+def get_venue_by_dexscreener_id(dex_id: str, chain_id: int) -> Venue:
+    matches = [
+        venue for venue in load_venues()
+        if venue.chain_id == chain_id and venue.dexscreener_id == dex_id.lower()
+    ]
+    if len(matches) != 1:
+        raise ValueError(f"No unique registered V2 venue for DEX Screener ID: {dex_id}")
+    return matches[0]
 
 
 def get_venue(venue_id: str, chain_id: int) -> Venue:
