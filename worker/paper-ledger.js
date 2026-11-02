@@ -33,7 +33,7 @@ function stable(value) {
 }
 function canonical(value) {
   // Match Python json.dumps(..., ensure_ascii=True) so both clients hash identical bytes.
-  return JSON.stringify(stable(value)).replace(/[\\u007f-\\uffff]/g, char =>
+  return JSON.stringify(stable(value)).replace(/[\u007f-\uffff]/g, char =>
     "\\u" + char.charCodeAt(0).toString(16).padStart(4, "0")
   );
 }
