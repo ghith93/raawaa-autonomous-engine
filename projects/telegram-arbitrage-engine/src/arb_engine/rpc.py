@@ -20,6 +20,10 @@ class RpcReadError(RuntimeError):
     """Raised when a read-only JSON-RPC request cannot be trusted."""
 
 
+class RpcTransportError(RpcReadError):
+    """A transport/provider-access failure that may be retried on another trusted endpoint."""
+
+
 class RpcExecutionReverted(RpcReadError):
     """Raised when a read-only EVM call explicitly reports execution reverted."""
 
@@ -124,9 +128,9 @@ class EthereumV2PoolReader:
                     raise RpcReadError("RPC response exceeded 500 KB safety limit")
                 payload = json.loads(raw)
         except HTTPError as exc:
-            raise RpcReadError(f"EVM RPC HTTP error: {exc.code}") from exc
+            raise RpcTransportError(f"EVM RPC HTTP error: {exc.code}") from exc
         except (URLError, TimeoutError, json.JSONDecodeError, UnicodeDecodeError) as exc:
-            raise RpcReadError(f"EVM RPC request failed: {type(exc).__name__}") from exc
+            raise RpcTransportError(f"EVM RPC request failed: {type(exc).__name__}") from exc
         finally:
             self._last_request = time.monotonic()
         if not isinstance(payload, dict) or payload.get("id") != request_id:
