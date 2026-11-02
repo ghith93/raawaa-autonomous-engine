@@ -71,3 +71,8 @@ The separate `arb-engine cex-universe-scan` command composes the existing five p
 The operator must map each venue's base/quote asset codes to canonical IDs. This permits an explicit base alias such as Kraken XBT -> canonical BTC. Quote asset codes must match exactly across selected sources: USD, USDT and USDC are not converted or treated as interchangeable. If a source uses a different quote code, it is reported as `quote_asset_code_mismatch` and excluded rather than silently joined.
 
 The command fetches at most five sources concurrently, applies each adapter's own process-local pacing, and preserves sanitized source failures. Two compatible books are required; otherwise the result is `insufficient_sources`. Partial coverage remains usable for the healthy pairwise comparisons. Missing fee or latency values leave net estimates unset. No account-specific fee tier, inventory, transfer/settlement, custody, or coordinated-fill capability is inferred. The command is manually invoked and read-only; it is not a scheduled strategy loop.
+
+
+Live public market smoke
+
+The GitHub Actions workflow `.github/workflows/cex-public-market-smoke.yml` provides a manual dispatch and daily best-effort read-only check across the five supported public Spot adapters. It requires at least two compatible books, validates the output contract and read-only flags, and retains a seven-day JSON artifact. It does not supply fees/latency, infer net profit, access private APIs, or place orders. This is connectivity coverage, not an autonomous market scan cadence.

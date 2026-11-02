@@ -347,3 +347,10 @@ No item in this list authorizes live trading.
 - Nodely documents a no-account/no-key Ethereum mainnet HTTPS JSON-RPC endpoint at https://eth.nodely.dev, served by two European nodes with automatic failover. Its nodes are pruned and retain state for roughly 100,800 blocks (about 14 days); historical calls older than that window are not supported. Nodely documents a 2 requests/second per-IP limit for heavy methods such as `eth_call` (burst 5), so the scanner defaults to a 0.55-second interval. Reference: https://nodely.io/docs/ethereum
 - This endpoint is used by the live cross-venue scanner smoke as an independent read-only provider, while the existing venue-deployment smoke continues to use PublicNode. This reduces dependence on a single RPC operator; it is not an SLA or a guarantee against shared public-endpoint throttling.
 - The scanner's --rpc-url option permits an operator-selected HTTPS endpoint. Do not assume a public endpoint supports archive history, trace/debug namespaces, WebSockets, or high request volume unless its operator documents those capabilities.
+
+
+## Live CEX connectivity smoke
+
+The workflow `.github/workflows/cex-public-market-smoke.yml` is manually dispatchable and scheduled daily at 07:17 UTC. It calls the same public read-only adapters for BTC/USDT on Binance, Bybit, Kraken, Coinbase Exchange and OKX, preserves partial source failures, and uploads a seven-day JSON artifact when a snapshot is produced. It uses no API keys or account endpoints. It requires at least two compatible sources to pass the coverage check; quote-code mismatches and provider outages remain visible in the result. It deliberately supplies no fee or latency assumptions, so net estimates must remain unset.
+
+This workflow validates live public endpoint connectivity and response compatibility only. It does not prove account access, regional trading eligibility, fillability, net profitability, or a durable five-minute execution cadence. GitHub scheduled events are best-effort; use workflow_dispatch for an on-demand check.
