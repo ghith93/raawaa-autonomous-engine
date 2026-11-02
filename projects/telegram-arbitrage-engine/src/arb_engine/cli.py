@@ -106,6 +106,8 @@ def main() -> None:
                 raise ValueError("Supply both --buy-router and --sell-router, or neither")
             if bool(args.buy_factory) != bool(args.sell_factory):
                 raise ValueError("Supply both --buy-factory and --sell-factory, or neither")
+            if args.buy_router and not args.buy_factory:
+                raise ValueError("Router validation requires both matching --buy-factory and --sell-factory values")
             reader = EthereumV2PoolReader(args.rpc_url, expected_chain_id=args.chain_id)
             snapshots = reader.read_pools([
                 (args.buy_pair, args.buy_fee_bps),
@@ -169,6 +171,12 @@ def main() -> None:
                 "warning": "Excludes gas, transfer taxes, dynamic fees, reverts, MEV, and execution. Not paper PnL or a trade recommendation.",
             }
             if args.buy_router and args.sell_router:
+                reader.verify_v2_router_factory(
+                    args.buy_router, args.buy_factory, result.buy.block_number,
+                )
+                reader.verify_v2_router_factory(
+                    args.sell_router, args.sell_factory, result.sell.block_number,
+                )
                 buy_amounts = reader.quote_v2_router_exact_input(
                     args.buy_router, result.capital_quote_raw,
                     [quote_address, base_address], result.buy.block_number,
@@ -189,7 +197,9 @@ def main() -> None:
                     "gross_profit_quote": human(sell_amounts[-1] - result.capital_quote_raw, quote_decimals),
                     "buy_router_vs_reserve_math_raw": buy_amounts[-1] - result.buy.amount_out_raw,
                     "sell_router_vs_reserve_math_raw": sell_amounts[-1] - result.sell.amount_out_raw,
+                    "chain_id": result.buy.block_number and buy_snapshot.state.chain_id,
                     "block_number": result.buy.block_number,
+                    "block_hash": result.buy.block_hash,
                     "warning": "Router getAmountsOut is still a read-only quote, not a full transaction simulation; it does not prove balance, allowance, gas, transfer-tax, or inclusion success.",
                 }
             print(json.dumps(output, indent=2))
