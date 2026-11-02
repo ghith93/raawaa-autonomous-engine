@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from decimal import Decimal
 import json
+import re
 
 from arb_engine.rpc import DEFAULT_ETHEREUM_RPC
 from arb_engine.v3_math import MIN_TICK, get_sqrt_ratio_at_tick
@@ -55,8 +56,12 @@ def main() -> None:
     block_tag = hex(snapshot.block_number)
     for token, label in ((USDC, "USDC"), (WETH, "WETH")):
         code = reader._rpc("eth_getCode", [token, block_tag])
-        if not isinstance(code, str) or not code.startswith("0x") or len(code) <= 2:
-            raise RuntimeError(f"{label} token contract has no runtime bytecode at the pinned block")
+        if (
+            not isinstance(code, str)
+            or not re.fullmatch(r"0x(?:[0-9a-fA-F]{2})+", code)
+            or len(code) > 250_002
+        ):
+            raise RuntimeError(f"{label} token contract has invalid or oversized runtime bytecode at the pinned block")
     usdc_decimals = reader._eth_call_uint(USDC, "0x313ce567", block_tag, "USDC decimals")
     weth_decimals = reader._eth_call_uint(WETH, "0x313ce567", block_tag, "WETH decimals")
     if (usdc_decimals, weth_decimals) != (6, 18):
