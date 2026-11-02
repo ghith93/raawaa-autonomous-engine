@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -13,6 +14,8 @@ from urllib.request import Request, urlopen
 BASE_URL = "https://api.dexscreener.com"
 USER_AGENT = "telegram-arbitrage-engine/0.14 (+read-only research)"
 MAX_RESPONSE_BYTES = 2_000_000
+MAX_TOKEN_PAIR_CANDIDATES = 200
+_ADDRESS = re.compile(r"^0x[0-9a-fA-F]{40}$")
 
 
 class MarketDataError(RuntimeError):
@@ -27,6 +30,23 @@ def _decimal(value: Any) -> Decimal | None:
     except (InvalidOperation, ValueError, TypeError):
         return None
     return result if result.is_finite() else None
+
+
+@dataclass(frozen=True, slots=True)
+class DexPairCandidate:
+    """DEX Screener discovery metadata only; no market metrics are trusted for execution."""
+
+    chain: str
+    dex: str
+    pair_address: str
+    base_address: str
+    base_symbol: str | None
+    quote_address: str
+    quote_symbol: str | None
+    fetched_at: datetime
+    pair_created_at_ms: int | None
+    source_url: str | None
+    labels: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -55,6 +75,92 @@ class DexScreenerClient:
         self.timeout_seconds = timeout_seconds
         self.min_request_interval = min_request_interval
         self._last_request = 0.0
+
+    def token_pair_candidates(self, chain: str, token_address: str) -> list[DexPairCandidate]:
+        """Discover pair addresses for a token; all price/reserve decisions remain on-chain."""
+        if not isinstance(chain, str) or not re.fullmatch(r"[a-z0-9-]{1,32}", chain.strip().lower()):
+            raise ValueError("Chain slug must contain 1..32 lowercase alphanumeric/hyphen characters")
+        chain = chain.strip().lower()
+        if (
+            not isinstance(token_address, str) or not _ADDRESS.fullmatch(token_address)
+            or token_address.lower() == "0x" + "0" * 40
+        ):
+            raise ValueError("Token address must be a non-zero 20-byte EVM address")
+        payload = self._get(f"/token-pairs/v1/{chain}/{token_address}", {})
+        if not isinstance(payload, list):
+            raise MarketDataError("Unexpected DEX Screener token-pairs response")
+        if len(payload) > MAX_TOKEN_PAIR_CANDIDATES:
+            raise MarketDataError(
+                f"Token-pairs response exceeded {MAX_TOKEN_PAIR_CANDIDATES} candidate safety limit"
+            )
+        fetched_at = datetime.now(timezone.utc)
+        return [
+            candidate for row in payload
+            if (candidate := self._parse_candidate(row, fetched_at)) is not None
+        ]
+
+    @staticmethod
+    def _parse_candidate(row: Any, fetched_at: datetime) -> DexPairCandidate | None:
+        if not isinstance(row, dict):
+            return None
+        base = row.get("baseToken")
+        quote = row.get("quoteToken")
+        if not isinstance(base, dict) or not isinstance(quote, dict):
+            return None
+        chain = row.get("chainId")
+        dex = row.get("dexId")
+        pair = row.get("pairAddress")
+        base_address = base.get("address")
+        quote_address = quote.get("address")
+        if not all(isinstance(value, str) and value.strip() for value in (
+            chain, dex, pair, base_address, quote_address,
+        )):
+            return None
+        if (
+            not _ADDRESS.fullmatch(pair)
+            or not _ADDRESS.fullmatch(base_address)
+            or not _ADDRESS.fullmatch(quote_address)
+            or pair.lower() == "0x" + "0" * 40
+            or base_address.lower() == "0x" + "0" * 40
+            or quote_address.lower() == "0x" + "0" * 40
+            or base_address.lower() == quote_address.lower()
+        ):
+            return None
+        source_url = row.get("url")
+        if isinstance(source_url, str):
+            try:
+                parsed_url = urlsplit(source_url)
+                port = parsed_url.port
+            except ValueError:
+                source_url = None
+            else:
+                if (
+                    parsed_url.scheme != "https"
+                    or parsed_url.hostname not in {"dexscreener.com", "www.dexscreener.com"}
+                    or parsed_url.username or parsed_url.password
+                    or port not in (None, 443)
+                    or parsed_url.query or parsed_url.fragment
+                    or len(source_url) > 2048
+                ):
+                    source_url = None
+        else:
+            source_url = None
+        labels = row.get("labels")
+        normalized_labels = tuple(
+            label.strip().lower() for label in labels
+            if isinstance(label, str) and label.strip()
+        ) if isinstance(labels, list) else ()
+        created = row.get("pairCreatedAt")
+        created_ms = created if isinstance(created, int) and not isinstance(created, bool) and created > 0 else None
+        base_symbol = base.get("symbol") if isinstance(base.get("symbol"), str) else None
+        quote_symbol = quote.get("symbol") if isinstance(quote.get("symbol"), str) else None
+        return DexPairCandidate(
+            chain=chain.strip().lower(), dex=dex.strip().lower(), pair_address=pair.lower(),
+            base_address=base_address.lower(), base_symbol=base_symbol,
+            quote_address=quote_address.lower(), quote_symbol=quote_symbol,
+            fetched_at=fetched_at, pair_created_at_ms=created_ms,
+            source_url=source_url, labels=normalized_labels,
+        )
 
     def search_pairs(self, query: str) -> list[DexPair]:
         if not isinstance(query, str):
@@ -85,7 +191,8 @@ class DexScreenerClient:
         wait = self.min_request_interval - (time.monotonic() - self._last_request)
         if wait > 0:
             time.sleep(wait)
-        url = f"{BASE_URL}{path}?{urlencode(params)}"
+        query = urlencode(params)
+        url = f"{BASE_URL}{path}" + (f"?{query}" if query else "")
         request = Request(url, headers={"Accept": "application/json", "User-Agent": USER_AGENT})
         try:
             with urlopen(request, timeout=self.timeout_seconds) as response:
