@@ -20,6 +20,10 @@ class RpcReadError(RuntimeError):
     """Raised when a read-only JSON-RPC request cannot be trusted."""
 
 
+class RpcVerificationError(RpcReadError):
+    """Raised when a discovered contract fails a configured protocol identity check."""
+
+
 @dataclass(frozen=True, slots=True)
 class EvmTokenPreflight:
     chain_id: int
@@ -360,7 +364,7 @@ class EthereumV2PoolReader:
         )
         actual_factory = self._address(factory_word, "router factory")
         if actual_factory != factory:
-            raise RpcReadError("Router factory does not match configured trusted factory")
+            raise RpcVerificationError("Router factory does not match configured trusted factory")
 
     def verify_v2_pool_factory(
         self,
@@ -385,7 +389,7 @@ class EthereumV2PoolReader:
         )
         actual_factory = self._address(factory_word, "pair factory")
         if actual_factory != factory:
-            raise RpcReadError("Pair factory does not match configured trusted factory")
+            raise RpcVerificationError("Pair factory does not match configured trusted factory")
         # getPair(address,address) selector; addresses are ABI-padded to 32 bytes.
         calldata = "0xe6a43905" + ("0" * 24 + token_a[2:]) + ("0" * 24 + token_b[2:])
         pair_word = self._rpc(
@@ -393,7 +397,7 @@ class EthereumV2PoolReader:
         )
         registered_pair = self._address(pair_word, "factory getPair")
         if registered_pair != pair:
-            raise RpcReadError("Configured factory does not register this pair for the supplied tokens")
+            raise RpcVerificationError("Configured factory does not register this pair for the supplied tokens")
 
     def verify_canonical_block(self, block_number: int, expected_hash: str) -> None:
         if not isinstance(block_number, int) or isinstance(block_number, bool) or block_number < 0:
