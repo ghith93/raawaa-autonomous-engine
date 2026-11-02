@@ -42,16 +42,22 @@ def _human(raw: int, decimals: int) -> str:
 def _capital_decimal(value: str | Decimal) -> Decimal:
     if isinstance(value, bool) or isinstance(value, float):
         raise ValueError("Capital amount must be a decimal string or Decimal, not a float")
+    if isinstance(value, str) and len(value) > 128:
+        raise ValueError("Capital amount text exceeds the 128-character safety limit")
     try:
         amount = value if isinstance(value, Decimal) else Decimal(value)
     except (InvalidOperation, TypeError, ValueError) as exc:
         raise ValueError("Capital amount must be a valid decimal value") from exc
     if not amount.is_finite() or amount <= 0:
         raise ValueError("Capital amount must be finite and positive")
+    if amount.adjusted() > 77 or amount.as_tuple().exponent < -100:
+        raise ValueError("Capital amount magnitude or precision exceeds the supported bound")
     return amount
 
 
 def _capital_to_raw(amount: Decimal, decimals: int) -> int:
+    if not isinstance(decimals, int) or isinstance(decimals, bool) or not 0 <= decimals <= 36:
+        raise ValueError("Quote-token decimals must be between 0 and 36")
     with localcontext() as decimal_context:
         decimal_context.prec = max(
             100, len(amount.as_tuple().digits) + abs(amount.as_tuple().exponent) + decimals + 5,
@@ -225,6 +231,8 @@ def scan_onchain_v2_candidates(
 
     base_decimals = _token_decimals(snapshots[0], token)
     quote_decimals = _token_decimals(snapshots[0], quote_token)
+    if not 0 <= base_decimals <= 36 or not 0 <= quote_decimals <= 36:
+        raise ValueError("Token decimals outside the supported 0..36 range")
     for snapshot in snapshots[1:]:
         if _token_decimals(snapshot, token) != base_decimals:
             raise ValueError("Base-token decimals disagree between verified venues")
