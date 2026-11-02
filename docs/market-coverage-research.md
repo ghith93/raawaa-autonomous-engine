@@ -17,7 +17,7 @@ Do not install a large framework or add a paid data dependency as the first step
 | CEX spot | Binance public market-data REST | Official docs designate `data-api.binance.vision` for public market-data-only requests; endpoint weights and IP usage are exposed in response headers. | Weight varies by endpoint; 429 requires backoff; repeated violations can lead to 418 IP bans. | First CEX adapter candidate; public endpoints only, bounded polling, no keys. |
 | CEX spot + derivatives | Bybit V5 market API | Public ticker includes bid/ask, last, volume, mark/index, open interest, funding and basis fields where applicable; order book supports spot, linear, inverse and options. | IP and endpoint/UID limits are distinct; docs state a default 600 requests / 5 seconds per IP and endpoint-level rolling limits. | Strong second CEX source; retain category and instrument identity in normalized records. |
 | Multi-exchange abstraction | CCXT | Unified public/private exchange classes across a broad and frequently updated list; supports REST clients and sandbox mode where supported. | Exchange support and endpoint semantics vary; per-exchange rate limits differ by endpoint and weights. Reuse one instance so the throttler/market cache is not reset. | Evaluate as an optional adapter, not a mandatory dependency. Direct public clients may be smaller and easier to audit for the first two exchanges. |
-| Solana aggregation | Jupiter Developer Platform | REST quote/pricing/token APIs; quote can be requested without a wallet/taker and returns routed liquidity information. | Keyless access is 0.5 requests/second; free API key is reported as 1 request/second; higher rate limits are paid. Swap build/execute endpoints exist but are outside this project scope. | High-priority independent market family. Use quote-only mode; never call build, sign, or execute endpoints. |
+| Solana aggregation | Jupiter Swap API V2 Meta-Aggregator | Official `GET /swap/v2/order` returns a quote with `transaction: null` when `taker` is omitted; no wallet is needed. It aggregates Metis, JupiterZ RFQ, Dflow and OKX routing. | Keyless access is 0.5 requests/second; free API key is 1 request/second. RFQ makers have last-look rights, so the quote is not a guaranteed fill. Old V1 `/quote` is superseded by V2 `/order`. | High-priority independent market family. Use only `/order` without `taker`; reject any non-null transaction. Never call `/build`, `/execute`, `/submit`, or any signing/landing path. |
 | EVM multi-chain | Direct JSON-RPC + per-chain trusted venue registries | Existing reader already uses chain ID, pinned block hashes, factory/pair verification and router quotes, but the current registry and candidate scan are Ethereum V2-specific. | Each chain/venue needs its own verified deployment addresses, fee model, RPC limits, finality/reorg rules and token identity. Public RPC access is not guaranteed or unlimited. | Extract a chain-aware adapter contract only after current V2 scanner lands; add networks one by one from official deployment sources. |
 | AMM protocol math | degenbot (MIT) | Open-source reference for V2/V3/V4, Curve, Balancer, Solidly and Aave V3 state/math and simulation concepts. | Larger Rust/PyO3 footprint than this stdlib-first module; do not import its executor or signer path. | Use for parity research and test vectors; no dependency until a reproducible benefit is demonstrated. |
 | Historical replay | arb-rewind (MIT) | Reference for historical fork replay and route research across multiple AMM families. | Project README documents limited strategies and non-production limitations. Historical simulation is not forward profitability evidence. | Adopt the replay/testing concept selectively after source adapters exist. |
@@ -30,12 +30,16 @@ Do not install a large framework or add a paid data dependency as the first step
 - Bybit V5 order book: https://bybit-exchange.github.io/docs/v5/market/orderbook
 - Bybit rate limits: https://bybit-exchange.github.io/docs/v5/rate-limit
 - CCXT manual and rate-limit guidance: https://docs.ccxt.com/docs/manual
-- Jupiter Developer Platform: https://developers.jup.ag/
-- Jupiter Swap API V2 docs: https://developers.jup.ag/docs/swap/index.md
-- Jupiter API docs index: https://github.com/jup-ag/docs/blob/main/llms.txt
+- Jupiter Swap API V2 quote-only overview: https://developers.jup.ag/docs/swap
+- Jupiter Developer Platform rate limits and keyless access: https://developers.jup.ag/changelog/developer-platform
+- Jupiter API docs index: https://developers.jup.ag/docs/llms.txt
 - degenbot: https://github.com/BowTiedDevil/degenbot
 - arb-rewind: https://github.com/gardennn/arb-rewind
 - Envio Uniswap V2 indexer: https://github.com/enviodev/uniswap-v2-indexer
+
+## Jupiter quote-only integration detail
+
+The current Jupiter Swap API V2 documentation explicitly distinguishes quote-only and transaction paths: `GET /swap/v2/order` without `taker` returns `transaction: null`; including `taker` returns a ready-to-sign transaction. Keyless calls are limited to 0.5 requests/second, so a zero-cost prototype should use at least a two-second per-client interval. The Meta-Aggregator combines Metis on-chain routing with JupiterZ RFQ, Dflow and OKX; JupiterZ market makers retain last-look rights. Treat the result as an indicative aggregator quote with source-specific fee/route evidence, not a guaranteed executable fill. Do not call V1 `/quote` (superseded), V2 `/build`, `/execute`, `/submit`, or any wallet/transaction path.
 
 ## Architecture decision
 
