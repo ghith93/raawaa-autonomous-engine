@@ -18,7 +18,7 @@ The project config defines read-only researcher/reviewer/security-reviewer profi
 
 AndroidHarness is registered as an optional external Android/Linux execution environment for this project. It complements GitHub Actions and Cloudflare; it does not replace the repository's control plane, task ledger, policy enforcement, or CI.
 
-**Integration status:** the repository has no direct AndroidHarness MCP/client adapter. A narrow GitHub issue bridge is merged and can run only four fixed operations after its local poller is started in the AndroidHarness 3.1 Code workspace. Until the bridge posts its first device-side result, the backend remains implemented-but-not-activated. GitHub Actions and this ChatGPT conversation cannot start a private tablet process. Never claim a device command ran unless the bridge posts its result to the corresponding GitHub issue.
+**Integration status:** the repository has no direct AndroidHarness MCP/client adapter. The bounded GitHub issue bridge has now returned a successful read-only doctor result from the AndroidHarness 3.1 Code workspace (issue #122), so its device-side execution path is verified for that allowlisted operation. A separate Python test task (issue #123) failed before tests began because the device could not fetch `origin/main`; retry issue #133 was claimed but had not returned a result at the latest check. This is limited task-bridge evidence, not proof of a continuously running poller, general remote shell, or always-on device worker. GitHub Actions and this ChatGPT conversation cannot start a private tablet process. Never claim a device command ran unless the bridge posts its result to the corresponding GitHub issue.
 
 The operator supplied a readiness snapshot dated 2026-11-01 22:40 UTC. It reported:
 - AndroidHarness device access: Auto with fallback enabled; temporary root mode enabled per project/use; direct root not checked.
@@ -113,7 +113,7 @@ When a real AndroidHarness tool/session becomes available to the engine, expose 
 
 Every call must carry a task ID, workspace boundary, timeout, output limit, and policy decision. Deny arbitrary shell strings from untrusted task payloads; use argument arrays or reviewed command templates. Root, network exposure, package installation, credential access, and external writes require separate policy gates. The adapter must integrate the repository operating-policy loader and audit log before any execution.
 
-The direct authenticated tool/session adapter described above does not exist. A narrower GitHub issue bridge is implemented below for four fixed operations; it is not a direct MCP tool interface or general device control.
+The direct authenticated tool/session adapter described above does not exist. A narrower GitHub issue bridge is implemented below for four fixed allowlisted operations (environment inspection, Git status, Python unit tests, and the read-only doctor); it is not a direct MCP tool interface or general device control. Python tests execute trusted repository test code under the AndroidHarness Linux/app UID and are not an OS sandbox; arbitrary shell commands are not exposed.
 
 ## GitHub-mediated AndroidHarness task bridge
 
