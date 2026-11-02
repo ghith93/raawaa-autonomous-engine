@@ -4,6 +4,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -13,6 +14,80 @@ from typing import Any
 
 class D1PaperLedgerError(RuntimeError):
     pass
+
+
+MAX_SAFE_JSON_INTEGER = (2**53) - 1
+MAX_RAW_INTEGER = (2**256) - 1
+RAW_FIELDS = {
+    "gross_profit_raw": True,
+    "gas_used": False,
+    "gas_price_wei": False,
+    "gas_cost_profit_raw": False,
+    "net_profit_raw": True,
+}
+
+
+def _validate_payload(value: Any, *, depth: int = 0) -> None:
+    if depth > 32:
+        raise ValueError("payload nesting exceeds 32 levels")
+    if value is None or isinstance(value, (str, bool)):
+        return
+    if isinstance(value, int) and not isinstance(value, bool):
+        if abs(value) > MAX_SAFE_JSON_INTEGER:
+            raise ValueError("payload integers must be JavaScript-safe; store large raw values as strings")
+        return
+    if isinstance(value, float):
+        raise ValueError("floating-point payload values are not supported; use decimal strings")
+    if isinstance(value, list):
+        for item in value:
+            _validate_payload(item, depth=depth + 1)
+        return
+    if isinstance(value, dict):
+        for key, item in value.items():
+            if not isinstance(key, str):
+                raise ValueError("payload object keys must be strings")
+            _validate_payload(item, depth=depth + 1)
+        return
+    raise ValueError("payload contains a non-JSON value")
+
+
+def _normalize_timestamp(value: datetime | str) -> str:
+    if isinstance(value, datetime):
+        parsed = value
+    elif isinstance(value, str):
+        if not re.search(r"(?:Z|[+-][0-9]{2}:[0-9]{2})$", value, re.IGNORECASE):
+            raise ValueError("occurred_at string must include an explicit timezone")
+        try:
+            parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        except ValueError as exc:
+            raise ValueError("occurred_at must be a valid ISO-8601 timestamp") from exc
+    else:
+        raise ValueError("occurred_at must be a timezone-aware datetime or ISO string")
+    if parsed.tzinfo is None or parsed.utcoffset() is None:
+        raise ValueError("occurred_at must be timezone-aware")
+    return parsed.astimezone(timezone.utc).isoformat(timespec="milliseconds")
+
+
+def _normalize_raw_fields(event: dict[str, Any]) -> None:
+    for name, signed in RAW_FIELDS.items():
+        value = event.get(name)
+        if value is None:
+            continue
+        if isinstance(value, int) and not isinstance(value, bool):
+            text = str(value)
+        elif isinstance(value, str):
+            text = value
+        else:
+            raise ValueError(f"{name} must be an integer or canonical decimal string")
+        pattern = r"-?(0|[1-9][0-9]*)" if signed else r"(0|[1-9][0-9]*)"
+        if not re.fullmatch(pattern, text):
+            raise ValueError(f"{name} must be a canonical decimal integer")
+        number = int(text)
+        if abs(number) > MAX_RAW_INTEGER or (not signed and number < 0):
+            raise ValueError(f"{name} is outside the supported 256-bit raw-unit range")
+        if name == "gas_used" and number <= 0:
+            raise ValueError("gas_used must be positive")
+        event[name] = text
 
 
 class D1PaperTradingLedger:
@@ -58,18 +133,17 @@ class D1PaperTradingLedger:
         return result
 
     def append_event(self, **event: Any) -> dict[str, Any]:
-        occurred_at = event.get("occurred_at")
-        if isinstance(occurred_at, datetime):
-            if occurred_at.tzinfo is None or occurred_at.utcoffset() is None:
-                raise ValueError("occurred_at must be timezone-aware")
-            event["occurred_at"] = occurred_at.astimezone(timezone.utc).isoformat()
-        elif not isinstance(occurred_at, str):
-            raise ValueError("occurred_at must be a timezone-aware datetime or ISO string")
-        payload = event.pop("payload", {})
+        normalized = dict(event)
+        if "occurred_at" not in normalized:
+            raise ValueError("occurred_at is required")
+        normalized["occurred_at"] = _normalize_timestamp(normalized["occurred_at"])
+        payload = normalized.pop("payload", {})
         if not isinstance(payload, dict):
             raise ValueError("payload must be an object")
+        _validate_payload(payload)
+        _normalize_raw_fields(normalized)
         return self._request("POST", "/v1/paper-ledger", {
-            "action": "append", "event": {**event, "payload": payload},
+            "action": "append", "event": {**normalized, "payload": payload},
         })
 
     def events(self, candidate_id: str, limit: int = 500) -> list[dict[str, Any]]:
@@ -78,7 +152,10 @@ class D1PaperTradingLedger:
         if type(limit) is not int or not 1 <= limit <= 500:
             raise ValueError("limit must be between 1 and 500")
         query = urllib.parse.urlencode({"candidate_id": candidate_id, "limit": limit})
-        return self._request("GET", "/v1/paper-ledger?" + query).get("events", [])
+        events = self._request("GET", "/v1/paper-ledger?" + query).get("events", [])
+        if not isinstance(events, list):
+            raise D1PaperLedgerError("paper ledger Worker returned an invalid event list")
+        return events
 
     def verify_chain(self, candidate_id: str, limit: int = 500) -> bool:
         if not isinstance(candidate_id, str) or not candidate_id.strip():
@@ -97,7 +174,6 @@ class D1PaperTradingLedger:
             or result.get("event_count") != head_sequence
             or result.get("checkpoint_count") != head_sequence
             or len(events) != head_sequence
-            or len(events) >= limit
         ):
             return False
         fields = (
