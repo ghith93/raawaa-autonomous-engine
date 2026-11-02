@@ -141,6 +141,92 @@ jobs:
                   output.write(f"status=request_failed\nray=not_supplied\n")
               raise SystemExit(1)
           PY
+      - name: Read D1-backed mobile status (read-only)
+        id: mobile
+        env:
+          ENGINE_API_URL: https://raawaa-autonomous-engine-control.ghith-shikhkhaled.workers.dev
+          ENGINE_API_TOKEN: ${{ secrets.ENGINE_API_TOKEN }}
+          CF_ACCESS_CLIENT_ID: ${{ secrets.CF_ACCESS_CLIENT_ID }}
+          CF_ACCESS_CLIENT_SECRET: ${{ secrets.CF_ACCESS_CLIENT_SECRET }}
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          from urllib.error import HTTPError, URLError
+          from urllib.request import Request, urlopen
+
+          headers = {
+              "Authorization": "Bearer " + os.environ["ENGINE_API_TOKEN"],
+              "Accept": "application/json",
+              "User-Agent": "RaawaaAutonomousEngine/1.0 (+https://github.com/ghith93/raawaa-autonomous-engine)",
+          }
+          client_id = os.environ.get("CF_ACCESS_CLIENT_ID", "")
+          client_secret = os.environ.get("CF_ACCESS_CLIENT_SECRET", "")
+          if bool(client_id) != bool(client_secret):
+              raise SystemExit("Cloudflare Access service-token secrets must be configured as a pair.")
+          if client_id and client_secret:
+              headers["CF-Access-Client-Id"] = client_id
+              headers["CF-Access-Client-Secret"] = client_secret
+
+          request = Request(
+              os.environ["ENGINE_API_URL"].rstrip("/") + "/v1/mobile/status",
+              headers=headers,
+              method="GET",
+          )
+          try:
+              with urlopen(request, timeout=15) as response:
+                  if response.status != 200:
+                      raise SystemExit(f"Mobile status returned HTTP {response.status}.")
+                  payload = json.loads(response.read().decode("utf-8"))
+                  unavailable = payload.get("unavailable_metrics") or {}
+                  task_counts = {
+                      item.get("status"): int(item.get("count", 0))
+                      for item in payload.get("tasks", [])
+                      if isinstance(item, dict) and isinstance(item.get("status"), str)
+                  }
+                  paper_events = sum(
+                      int(item.get("count", 0))
+                      for item in payload.get("paper_events", [])
+                      if isinstance(item, dict)
+                  )
+
+                  def flag(key, available_value="Available", missing="not_available"):
+                      return "available" if unavailable.get(key) == available_value else missing
+
+                  flags = {
+                      "paper_ledger": flag("paper_ledger"),
+                      "provider_usage": flag("provider_usage"),
+                      "last_scan": "not_recorded" if "not recorded" in str(unavailable.get("last_scan", "")).lower() else "available",
+                      "source_freshness": "not_aggregated" if "not yet aggregated" in str(unavailable.get("source_freshness", "")).lower() else "available",
+                      "ci_health": "not_ingested" if "not yet ingested" in str(unavailable.get("ci_health", "")).lower() else "available",
+                      "kill_switch": "not_mirrored" if "not yet mirrored" in str(unavailable.get("kill_switch", "")).lower() else "available",
+                  }
+                  outputs = {
+                      "http": response.status,
+                      "paper_ledger": flags["paper_ledger"],
+                      "provider_usage": flags["provider_usage"],
+                      "last_scan": flags["last_scan"],
+                      "source_freshness": flags["source_freshness"],
+                      "ci_health": flags["ci_health"],
+                      "kill_switch": flags["kill_switch"],
+                      "tasks_pending": task_counts.get("pending", 0),
+                      "tasks_running": task_counts.get("running", 0),
+                      "paper_events": paper_events,
+                  }
+                  with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
+                      for key, value in outputs.items():
+                          output.write(f"{key}={value}\n")
+                  print(
+                      "D1 mobile status read succeeded: "
+                      + ", ".join(f"{key}={value}" for key, value in outputs.items())
+                  )
+          except HTTPError as error:
+              print(f"Mobile status returned HTTP {error.code}.")
+              raise SystemExit(1)
+          except (URLError, TimeoutError, OSError, ValueError, TypeError) as error:
+              print(f"Mobile status read failed: {type(error).__name__}.")
+              raise SystemExit(1)
+          PY
       - name: Enqueue one-time D1 dry-run smoke task
         if: github.event_name == 'push'
         env:
@@ -228,6 +314,16 @@ jobs:
           BATCH_OUTCOME: ${{ steps.batch.outcome }}
           TASKS_PROCESSED: ${{ steps.batch.outputs.tasks_processed }}
           STOP_REASON: ${{ steps.batch.outputs.stop_reason }}
+          MOBILE_STATUS_HTTP: ${{ steps.mobile.outputs.http }}
+          MOBILE_PAPER_LEDGER: ${{ steps.mobile.outputs.paper_ledger }}
+          MOBILE_PROVIDER_USAGE: ${{ steps.mobile.outputs.provider_usage }}
+          MOBILE_LAST_SCAN: ${{ steps.mobile.outputs.last_scan }}
+          MOBILE_SOURCE_FRESHNESS: ${{ steps.mobile.outputs.source_freshness }}
+          MOBILE_CI_HEALTH: ${{ steps.mobile.outputs.ci_health }}
+          MOBILE_KILL_SWITCH: ${{ steps.mobile.outputs.kill_switch }}
+          MOBILE_TASKS_PENDING: ${{ steps.mobile.outputs.tasks_pending }}
+          MOBILE_TASKS_RUNNING: ${{ steps.mobile.outputs.tasks_running }}
+          MOBILE_PAPER_EVENTS: ${{ steps.mobile.outputs.paper_events }}
           JOB_STATUS: ${{ job.status }}
         with:
           script: |
@@ -243,6 +339,14 @@ jobs:
               "Batch step: " + (process.env.BATCH_OUTCOME || "not run"),
               "Tasks processed: " + (process.env.TASKS_PROCESSED || "unknown"),
               "Stop reason: " + (process.env.STOP_REASON || "unknown"),
+              "D1 mobile status GET: " + (process.env.MOBILE_STATUS_HTTP || "not run"),
+              "D1 paper ledger / quota ledger: " + (process.env.MOBILE_PAPER_LEDGER || "unknown") + " / " + (process.env.MOBILE_PROVIDER_USAGE || "unknown"),
+              "D1 pending / running tasks: " + (process.env.MOBILE_TASKS_PENDING || "unknown") + " / " + (process.env.MOBILE_TASKS_RUNNING || "unknown"),
+              "D1 paper events: " + (process.env.MOBILE_PAPER_EVENTS || "unknown"),
+              "Telemetry gaps — scan: " + (process.env.MOBILE_LAST_SCAN || "unknown") +
+                "; source freshness: " + (process.env.MOBILE_SOURCE_FRESHNESS || "unknown") +
+                "; CI: " + (process.env.MOBILE_CI_HEALTH || "unknown") +
+                "; kill switch: " + (process.env.MOBILE_KILL_SWITCH || "unknown"),
               "",
               "The batch remains bounded; live inference and external writes remain governed by repository policy."
             ].join("\n");
