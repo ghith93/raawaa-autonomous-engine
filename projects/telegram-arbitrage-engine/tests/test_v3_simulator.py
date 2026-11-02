@@ -51,6 +51,7 @@ def test_exact_input_simulates_across_two_initialized_ticks() -> None:
     assert result.amount_in > 0
     assert result.amount_out > 0
     assert result.fee_amount > 0
+    assert result.amount_in + result.fee_amount > result.amount_in
     assert result.amount_remaining > 0
     assert result.block_number == state.block_number
     assert result.block_hash == BLOCK_HASH
@@ -125,7 +126,7 @@ def test_zero_for_one_uses_leftward_bitmap_and_tick_crossing() -> None:
         chain_id=1, pool_address=POOL, token0=TOKEN0, token1=TOKEN1,
         fee_pips=3000, tick_spacing=60, sqrt_price_x96=Q96, tick=0,
         liquidity=100_000, block_number=20_000_000, block_hash=BLOCK_HASH,
-        bitmap_words={-1: 1 << 255}, initialized_ticks={-60: 500},
+        bitmap_words={0: 0, -1: 1 << 255}, initialized_ticks={-60: 500},
     )
     result = simulate_v3_swap(
         state, amount_specified=10**9, zero_for_one=True,
