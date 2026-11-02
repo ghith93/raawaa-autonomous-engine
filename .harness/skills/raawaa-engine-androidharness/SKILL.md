@@ -1,10 +1,10 @@
 ---
 name: raawaa-engine-androidharness
-description: Safe AndroidHarness 3.2 setup and operation for Raawaa Autonomous Engine.
+description: Safe AndroidHarness 3.1 current-device operation for Raawaa Autonomous Engine.
 category: project
 ---
 
-# Raawaa Engine — AndroidHarness 3.2 operating skill
+# Raawaa Engine — AndroidHarness 3.1 current-device operating skill
 
 This project uses AndroidHarness as an optional local Android/Linux worker. GitHub Actions remains the reproducible CI system; the cloud control plane remains separate. The tablet is not an always-on production host.
 
@@ -20,25 +20,15 @@ This project uses AndroidHarness as an optional local Android/Linux worker. GitH
 ## Start every AndroidHarness Code run
 
 1. Confirm the selected workspace is this repository and is writable. Chat mode is for read-only research; Code mode is required for project files, shell, Git and tests.
-2. Confirm AndroidHarness version in About/Settings. The upstream `v3.2-release` is the target. A GitHub clone or version note is not proof the device app has updated.
+2. The operator confirmed AndroidHarness 3.1 is installed and chose to stay on it. Do not request or perform an app upgrade. Treat all v3.2-only features as unavailable unless the operator later changes this decision.
 3. Run the built-in `/doctor` when tool health is uncertain. It checks the harness tool families; it is not a substitute for environment probes.
 4. Run `env_status` and `python scripts/androidharness/doctor.py --json`. Do not infer capability from an installed-package marker; verify the executable and its version.
 5. Check `git status --short`, current branch and HEAD. Never overwrite unrelated work. Fetch and fast-forward `main` only when the working tree is clean and the task requires it.
 6. Run `python -m engine.cli audit` and the relevant tests. Use `python -m unittest discover -s tests -v` for the complete Python suite.
 
-## One-time native build toolchain setup
+## Native Android build toolchain
 
-The operator explicitly requested a complete AndroidHarness development environment. If the Linux environment is ready and any required component is missing, use the built-in `android_sdk_install` tool once with:
-
-- `platform: 35`
-- `gradle: true`
-- `reason: One-time Android build toolchain setup for future native tooling and APK validation in the Raawaa Engine workspace.`
-
-This single approved action installs OpenJDK 21, D8, aapt2, apksigner, Gradle, and `android.jar` for API 35, skipping components already present. It downloads from the Linux package repository and Google's Android SDK repository and requires the tool's explicit approval card. If the operator declines, continue with the Python/Node workflow; do not retry or install pieces individually.
-
-After approval, verify with actual commands: `java -version`, `d8 --version`, `aapt2 version`, `apksigner version`, `gradle --version`, and existence of `$HOME/android-sdk/platforms/android-35/android.jar`. The tool provisions the SDK layout; do not download desktop SDK build-tools ZIPs or manually unpack JDK/Gradle tarballs. Use the active environment's returned `HARNESS_SCRATCH`; do not guess or hard-code Termux paths.
-
-This engine is Python-first. Missing Java/D8/Gradle must never block its Python tests or be described as a blocker for the current engine workflow.
+The engine is Python-first; Java, D8, Gradle and Android SDK tools are not required for its current tests. The consolidated `android_sdk_install` workflow belongs to AndroidHarness 3.2 and must not be assumed or invoked on the current 3.1 device. If a native Android build later becomes necessary, research and validate a supported 3.1-specific installation path before changing the device.
 
 ## SSH, Shizuku and root
 
@@ -100,15 +90,6 @@ When the operator asks to activate the bridge:
 Allowed bridge operations are fixed: inspect_environment, git_status, run_python_tests (only against the exact fetched origin/main SHA), and run_androidharness_doctor (read-only; must assert no mutations, no network requests, and no secret output). The Python test runner uses a minimal environment and temporary HOME, but it is not an OS sandbox: test code runs as the AndroidHarness Linux/app UID and can access files/network resources available to that UID. Run it only against trusted owner-controlled main code; do not store unrelated secrets in files accessible to the app UID. Do not modify the bridge to accept arbitrary shell or user-provided command strings. Do not enqueue root, package installation, SSH, provider, Cloudflare, production, or customer-facing operations. Task output is bounded and results are posted to the issue. If a task is left marked Running after interruption, inspect the private audit log before manually requeueing it.
 
 
-## Preferred recurring operation: WorkManager
+## Recurring operation on the current 3.1 device
 
-For ongoing project cycles, prefer AndroidHarness' native scheduled-message automation through Android WorkManager over a manually launched infinite GitHub issue poller.
-
-- Follow the complete one-time setup and recurring prompt in docs/androidharness-workmanager-automation.md.
-- Use one dedicated Code conversation and one hourly scheduled automation initially. Each occurrence may perform at most one bounded project task.
-- Enable bounded Auto-continue (initial retry count 3), conservative per-task token/time/cost limits, and notifications. Do not treat auto-continue as permission to bypass approvals.
-- Configure Android battery/background settings to avoid aggressive app suspension where the OS offers that control. Never request root, Full access, Shizuku, or disable system protections for persistence.
-- Verify a real scheduled occurrence and its next scheduled occurrence in Automation history before marking the backend active.
-- WorkManager scheduling is opportunistic and can be delayed or stopped by device power, force-stop, connectivity, battery policy, or OEM behavior. It is not guaranteed 24/7 execution.
-- Keep Cloudflare D1 as the durable task ledger and GitHub Actions as CI. AndroidHarness is a recurring optional worker, not the sole source of task state.
-- Do not run the legacy issue poller alongside the recurring Code automation unless a separately reviewed use case requires it; duplicate workers can race for workspace state.
+Do not assume the newer WorkManager scheduled-message workflow documented for later AndroidHarness versions is available on 3.1. Use the bounded GitHub issue bridge only when explicitly started in the foreground Code session. It accepts only four fixed operations and is not an always-on worker. Do not run multiple pollers or other project workers concurrently. Keep Cloudflare D1 as the durable task ledger and GitHub Actions as CI.
