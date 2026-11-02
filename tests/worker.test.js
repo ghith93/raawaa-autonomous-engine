@@ -305,7 +305,9 @@ test("quota reservation is one conditional parameterized insert", async () => {
       per_task_request_limit: 3, per_task_token_limit: 300 },
   }), { DB, ENGINE_API_TOKEN: TOKEN });
   assert.equal(response.status, 201);
-  assert.deepEqual(await response.json(), { reservation_id: 77, occurred_at: (await response.clone().json()).occurred_at });
+  const payload = await response.json();
+  assert.equal(payload.reservation_id, 77);
+  assert.equal(typeof payload.occurred_at, "string");
   assert.equal(calls.length, 1);
   assert.match(calls[0].sql, /^\s*INSERT INTO quota_usage/);
   assert.match(calls[0].sql, /NOT EXISTS \(SELECT 1 FROM quota_cooldowns/);
