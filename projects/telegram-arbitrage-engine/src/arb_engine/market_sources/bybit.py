@@ -72,10 +72,15 @@ def _decimal(value: object, field: str, *, positive: bool = True) -> Decimal:
     return parsed
 
 
-def _optional_decimal(value: object, field: str, *, positive: bool = False) -> Decimal | None:
+def _optional_decimal(
+    value: object, field: str, *, positive: bool = False, nonnegative: bool = False,
+) -> Decimal | None:
     if value is None or value == "":
         return None
-    return _decimal(value, field, positive=positive)
+    parsed = _decimal(value, field, positive=positive)
+    if nonnegative and parsed < 0:
+        raise BybitMarketDataError(f"invalid {field}")
+    return parsed
 
 
 def _positive_int(value: object, field: str) -> int:
@@ -169,7 +174,11 @@ class BybitPublicMarketData:
             payload = json.loads(raw.decode("utf-8"))
         except (UnicodeDecodeError, json.JSONDecodeError) as exc:
             raise BybitMarketDataError("Bybit returned malformed JSON") from exc
-        if not isinstance(payload, dict) or payload.get("retCode") != 0:
+        if (
+            not isinstance(payload, dict)
+            or type(payload.get("retCode")) is not int
+            or payload.get("retCode") != 0
+        ):
             raise BybitMarketDataError("Bybit returned an unsuccessful market-data response")
         result = payload.get("result")
         if not isinstance(result, dict):
@@ -244,6 +253,8 @@ class BybitPublicMarketData:
             params["symbol"] = _symbol(symbol)
         payload = self._get("/v5/market/tickers", params)
         result = payload["result"]
+        if result.get("category") not in (None, category):
+            raise BybitMarketDataError("Bybit ticker category did not match request")
         rows = result.get("list")
         if not isinstance(rows, list):
             raise BybitMarketDataError("Bybit ticker response omitted list")
@@ -254,8 +265,10 @@ class BybitPublicMarketData:
             if not isinstance(row, dict):
                 raise BybitMarketDataError("invalid ticker row")
             row_symbol = row.get("symbol")
-            if not isinstance(row_symbol, str) or row_symbol != row_symbol.upper():
-                raise BybitMarketDataError("invalid ticker symbol")
+            try:
+                row_symbol = _symbol(row_symbol)
+            except ValueError as exc:
+                raise BybitMarketDataError("invalid ticker symbol") from exc
             if symbol is not None and row_symbol != symbol:
                 raise BybitMarketDataError("Bybit ticker symbol did not match request")
             snapshots.append(TickerSnapshot(
@@ -267,11 +280,11 @@ class BybitPublicMarketData:
                 bid_size=_optional_decimal(row.get("bid1Size"), "best bid size", positive=True),
                 ask_price=_optional_decimal(row.get("ask1Price"), "best ask", positive=True),
                 ask_size=_optional_decimal(row.get("ask1Size"), "best ask size", positive=True),
-                volume_24h=_optional_decimal(row.get("volume24h"), "24h volume"),
-                turnover_24h=_optional_decimal(row.get("turnover24h"), "24h turnover"),
+                volume_24h=_optional_decimal(row.get("volume24h"), "24h volume", nonnegative=True),
+                turnover_24h=_optional_decimal(row.get("turnover24h"), "24h turnover", nonnegative=True),
                 mark_price=_optional_decimal(row.get("markPrice"), "mark price", positive=True),
                 index_price=_optional_decimal(row.get("indexPrice"), "index price", positive=True),
-                open_interest=_optional_decimal(row.get("openInterest"), "open interest"),
+                open_interest=_optional_decimal(row.get("openInterest"), "open interest", nonnegative=True),
                 funding_rate=_optional_decimal(row.get("fundingRate"), "funding rate"),
                 basis=_optional_decimal(row.get("basis"), "basis"),
                 exchange_timestamp_ms=_positive_int(payload.get("time"), "exchange response timestamp"),
