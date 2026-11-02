@@ -34,13 +34,56 @@ class OpportunityLedger:
                 total_volume_24h_usd TEXT NOT NULL,
                 classification TEXT NOT NULL,
                 payload_json TEXT NOT NULL,
-                UNIQUE(observed_at, chain, base_symbol, quote_symbol, buy_venue, sell_venue)
+                UNIQUE(observed_at, chain, base_symbol, quote_symbol,
+                       base_address, quote_address, buy_venue, sell_venue)
             )""")
             columns = {row[1] for row in db.execute("PRAGMA table_info(observations)")}
             if "base_address" not in columns:
                 db.execute("ALTER TABLE observations ADD COLUMN base_address TEXT NOT NULL DEFAULT ''")
             if "quote_address" not in columns:
                 db.execute("ALTER TABLE observations ADD COLUMN quote_address TEXT NOT NULL DEFAULT ''")
+
+            expected_unique = (
+                "observed_at", "chain", "base_symbol", "quote_symbol",
+                "base_address", "quote_address", "buy_venue", "sell_venue",
+            )
+            unique_keys = []
+            for index in db.execute("PRAGMA index_list(observations)").fetchall():
+                if index[2]:
+                    unique_keys.append(tuple(
+                        row[2] for row in db.execute(f"PRAGMA index_info('{index[1]}')").fetchall()
+                    ))
+            if expected_unique not in unique_keys:
+                db.execute("""CREATE TABLE observations_migrated (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    observed_at TEXT NOT NULL,
+                    chain TEXT NOT NULL,
+                    base_symbol TEXT NOT NULL,
+                    quote_symbol TEXT NOT NULL,
+                    base_address TEXT NOT NULL DEFAULT '',
+                    quote_address TEXT NOT NULL DEFAULT '',
+                    buy_venue TEXT NOT NULL,
+                    sell_venue TEXT NOT NULL,
+                    buy_price TEXT NOT NULL,
+                    sell_price TEXT NOT NULL,
+                    gross_spread_bps TEXT NOT NULL,
+                    min_liquidity_usd TEXT NOT NULL,
+                    total_volume_24h_usd TEXT NOT NULL,
+                    classification TEXT NOT NULL,
+                    payload_json TEXT NOT NULL,
+                    UNIQUE(observed_at, chain, base_symbol, quote_symbol,
+                           base_address, quote_address, buy_venue, sell_venue)
+                )""")
+                db.execute("""INSERT OR IGNORE INTO observations_migrated
+                    (id, observed_at, chain, base_symbol, quote_symbol, base_address, quote_address,
+                     buy_venue, sell_venue, buy_price, sell_price, gross_spread_bps,
+                     min_liquidity_usd, total_volume_24h_usd, classification, payload_json)
+                    SELECT id, observed_at, chain, base_symbol, quote_symbol, base_address, quote_address,
+                           buy_venue, sell_venue, buy_price, sell_price, gross_spread_bps,
+                           min_liquidity_usd, total_volume_24h_usd, classification, payload_json
+                    FROM observations""")
+                db.execute("DROP TABLE observations")
+                db.execute("ALTER TABLE observations_migrated RENAME TO observations")
             db.execute("CREATE INDEX IF NOT EXISTS idx_observations_pair_time ON observations(chain, base_symbol, observed_at)")
             db.execute("""CREATE TABLE IF NOT EXISTS engine_state (
                 key TEXT PRIMARY KEY,
@@ -91,7 +134,7 @@ class OpportunityLedger:
     def summarize(self, limit: int = 500) -> list[dict[str, str | int]]:
         """Summarize repeated indicative observations; this is not a backtest or PnL report."""
         rows = self.recent(limit)
-        grouped: dict[tuple[str, str, str, str, str], list[dict[str, str]]] = {}
+        grouped: dict[tuple[str, ...], list[dict[str, str]]] = {}
         for row in rows:
             key = (
                 row["chain"], row["base_symbol"], row["quote_symbol"],
