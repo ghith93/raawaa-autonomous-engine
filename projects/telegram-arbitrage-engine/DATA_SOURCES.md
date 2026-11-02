@@ -203,3 +203,10 @@ No item in this list authorizes live trading.
 ### MEV-Share
 - Specification repository: https://github.com/flashbots/mev-share . It describes an open-source order-flow auction protocol with privacy/validity conditions and searcher/builder interactions; it is not a simple free quote API or a profitability guarantee.
 - Consider only after historical backtesting, complete atomic-route simulation, risk controls, and a separately reviewed execution architecture. Private orderflow, builder competition, and inclusion economics are advanced operational concerns, not prerequisites for proving the scanner's correctness.
+
+
+### Independent public Ethereum RPC backstop
+
+- Nodely documents a no-account/no-key Ethereum mainnet HTTPS JSON-RPC endpoint at https://eth.nodely.dev, served by two European nodes with automatic failover. Its nodes are pruned and retain state for roughly 100,800 blocks (about 14 days); historical calls older than that window are not supported. Reference: https://nodely.io/docs/ethereum
+- This endpoint is used by the live cross-venue scanner smoke as an independent read-only provider, while the existing venue-deployment smoke continues to use PublicNode. This reduces dependence on a single RPC operator; it is not an SLA or a guarantee against shared public-endpoint throttling.
+- The scanner's --rpc-url option permits an operator-selected HTTPS endpoint. Do not assume a public endpoint supports archive history, trace/debug namespaces, WebSockets, or high request volume unless its operator documents those capabilities.
