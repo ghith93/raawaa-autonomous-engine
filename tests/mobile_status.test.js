@@ -15,7 +15,7 @@ function dbMock() {
         async all(){
           calls.push({kind:"all",sql,values:this.values});
           if(sql.includes("FROM tasks")) return {results:[{status:"pending",count:2}]};
-          if(sql.includes("schema_migrations")) return {results:[{version:"0003_durable_quota_ledger"},{version:"0004_paper_event_ledger"}]};
+          if(sql.includes("schema_migrations")) return {results:[{version:"0003_durable_quota_ledger"},{version:"0004_paper_event_ledger"},{version:"0005_telegram_webhook_receipts"}]};
           if(sql.includes("FROM paper_events")) return {results:[{event_type:"candidate_detected",count:4}]};
           if(sql.includes("FROM quota_usage")) return {results:[{route_id:"groq:gpt-oss-20b",requests:3,tokens:1200}]};
           if(sql.includes("FROM model_usage")) return {results:[{provider:"groq",requests:2,input_tokens:900,output_tokens:300,cost_usd:0.0125}]};
@@ -37,6 +37,7 @@ test("mobile status page is public static HTML and never embeds an API token",as
  const body=await response.text();
  assert.match(body,/Read-only operational snapshot/);
  assert.match(body,/Recorded model inference costs/);
+ assert.match(body,/Telegram control readiness/);
  assert.match(body,/model_costs_usd/);
  assert.match(body,/toFixed\(6\)/);
  assert.match(body,/sessionToken|accessToken/);
@@ -63,6 +64,7 @@ test("mobile status endpoint returns read-only D1 metrics and explicit unknowns"
  assert.deepEqual(body.latest_market_snapshot,{candidate_id:"candidate-2",occurred_at:"2026-11-02T12:30:00.000Z",chain_id:1,block_number:123});
  assert.deepEqual(body.provider_usage,[{route_id:"groq:gpt-oss-20b",requests:3,tokens:1200}]);
  assert.deepEqual(body.model_costs_usd,{total:0.0125,by_provider:[{provider:"groq",requests:2,input_tokens:900,output_tokens:300,cost_usd:0.0125}],source:"model_usage D1 ledger; recorded provider costs only"});
+ assert.deepEqual(body.telegram_webhook_schema,{available:true,status:"Migration 0005 applied; webhook activation remains separately gated"});
  assert.equal(body.unavailable_metrics.monetary_costs,undefined);
  assert.ok(DB.calls.every(call=>call.kind==="all"||call.kind==="first"));
 });
