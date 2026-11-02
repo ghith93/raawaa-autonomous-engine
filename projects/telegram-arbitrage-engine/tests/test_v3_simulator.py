@@ -55,6 +55,7 @@ def test_exact_input_simulates_across_two_initialized_ticks() -> None:
     assert result.amount_remaining > 0
     assert result.block_number == state.block_number
     assert result.block_hash == BLOCK_HASH
+    assert result.classification == "caller_supplied_snapshot_not_rpc_verified"
 
 
 def test_exact_output_partial_step_fills_requested_amount_without_crossing() -> None:
@@ -167,6 +168,7 @@ def test_zero_amount_is_a_complete_noop() -> None:
         sqrt_price_limit_x96=get_sqrt_ratio_at_tick(120),
     )
     assert result.complete is True
+    assert result.classification == "caller_supplied_snapshot_not_rpc_verified"
     assert result.steps == 0
     assert result.amount_in == result.amount_out == result.fee_amount == 0
 
