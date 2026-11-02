@@ -178,6 +178,28 @@ def test_stale_observation_blocks_net_profit_estimate():
     assert result.evaluation.net_profit_quote is None
 
 
+def test_cross_venue_quotes_must_be_synchronized_within_configured_skew():
+    result, _ = compare_cex_spot_orderbooks(
+        book_a=bybit_book(fetched_at=NOW - timedelta(seconds=4)),
+        book_b=binance_book(fetched_at=NOW - timedelta(seconds=1)),
+        registry=registry(),
+        base_quantity="0.5",
+        costs_by_direction={("bybit", "binance"): known_costs()},
+        now=NOW,
+        max_quote_age_seconds=5,
+        max_quote_skew_seconds=2,
+    )
+    assert result.status == "unsynchronized_data"
+    assert result.gross_profit_quote == Decimal("0.19")
+    assert result.evaluation.net_profit_quote is None
+
+    with pytest.raises(InstrumentMappingError, match="max_quote_skew_seconds"):
+        compare_cex_spot_orderbooks(
+            book_a=bybit_book(), book_b=binance_book(), registry=registry(),
+            base_quantity="0.5", max_quote_skew_seconds=-1,
+        )
+
+
 def test_quantity_must_match_both_venues_lot_steps():
     wrong_step = InstrumentRegistry([
         InstrumentSpec("bybit", "BTCUSDT", BTC, USDT, "0.01"),
