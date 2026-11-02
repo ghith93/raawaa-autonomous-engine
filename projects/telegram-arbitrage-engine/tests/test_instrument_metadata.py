@@ -76,6 +76,7 @@ def test_bybit_fetch_instrument_uses_public_metadata_and_exact_precision():
     assert meta.quote_asset_code == "USDT"
     assert meta.base_step_size == Decimal("0.000001")
     assert meta.price_tick_size == Decimal("0.1")
+    assert meta.min_base_quantity == Decimal("0.000011")
     assert meta.min_quote_notional == Decimal("5")
     assert meta.status == "Trading"
     parsed = urlsplit(calls[0][0])
@@ -163,6 +164,7 @@ def test_registry_requires_explicit_per_venue_asset_code_mappings():
     }
     registry = InstrumentRegistry.from_metadata([bybit, binance], aliases)
     assert registry.resolve("bybit", "BTCUSDT").base_step_size == Decimal("0.000001")
+    assert registry.resolve("bybit", "BTCUSDT").min_base_quantity is None
     assert registry.resolve("binance", "BTCUSDT").base_step_size == Decimal("0.00001")
     assert registry.resolve("binance", "BTCUSDT").base_asset_id == "asset:canonical:BTC"
 
