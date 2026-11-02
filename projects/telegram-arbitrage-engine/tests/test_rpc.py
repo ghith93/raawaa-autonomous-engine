@@ -58,6 +58,10 @@ def test_reader_returns_two_pool_states_pinned_to_same_block(monkeypatch):
     assert snapshots[1].state.fee_bps == 25
     assert snapshots[0].token0_decimals == 6
     assert snapshots[0].token1_decimals == 18
+    assert snapshots[0].reserve_timestamp_last == 1234
+    assert snapshots[0].seconds_since_last_reserve_update == (
+        snapshots[0].block_timestamp - 1234
+    )
     assert all(params[1] == "0x64" for method, params in calls if method == "eth_call")
 
 
