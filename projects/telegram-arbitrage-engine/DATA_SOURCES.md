@@ -48,3 +48,12 @@ No item in this list authorizes live trading.
 - The polling offset is stored in the local SQLite state table to avoid replaying already handled updates after a restart.
 - One bot polling process should run at a time for a given token and ledger. Telegram long polling and webhooks are mutually exclusive; the controller deliberately does not delete or replace an existing webhook.
 - A bot token is a secret. Supply it only as `TELEGRAM_BOT_TOKEN` in the runtime secret environment; set `TELEGRAM_ALLOWED_CHAT_IDS` to the operator's numeric private chat ID(s).
+
+
+## Router quote reference and integration choice
+
+- Uniswap's official V2 pricing guide documents exact-input `getAmountsOut` and slippage-aware minimum-output handling: https://developers.uniswap.org/docs/protocols/v2/concepts/pricing
+- The engine now calls the V2 router's `getAmountsOut(uint256,address[])` via read-only `eth_call`, pinned to the same block used for pool reserves. This is an independent quote cross-check, not a transaction simulation.
+- 0x Swap API provides indicative `/price` and firm `/quote` routes, but its current documentation requires an API key for requests. It is therefore not a dependency in the zero-cost baseline: https://docs.0x.org/docs/introduction/quickstart/swap-tokens-with-0x-swap-api
+- Uniswap's Aggregator Quote API describes route simulation and gas estimates, but it is an external API dependency and must be evaluated for access, key requirements, terms, and cost before integration: https://developers.uniswap.org/docs/api-reference/aggregator_quote
+- A router quote alone does not verify the factory, pair fee, token transfer semantics, allowance, balance, gas sufficiency, or actual transaction execution. Those remain release gates.
