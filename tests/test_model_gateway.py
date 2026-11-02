@@ -155,7 +155,7 @@ class ModelGatewayTests(unittest.TestCase):
         self.assertEqual(adapter.calls, 1)
         self.assertGreater(self.ledger.totals()["daily_reserved_usd"], 0.0)
         with self.assertRaises(BudgetExceeded):
-            self.ledger.reserve("mock", "model", "research", 1.0, 1.0, 1.0)
+            self.ledger.reserve("mock", "model", "research", 1.0, 1.0, 1.0, task_id="task-a", per_task_budget_usd=1.0)
 
     def test_unexpected_nonzero_cost_is_recorded_even_when_paid_calls_are_disabled(self):
         adapter = CostAdapter(cost_usd=0.02)
