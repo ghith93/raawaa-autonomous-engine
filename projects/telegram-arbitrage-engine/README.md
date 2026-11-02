@@ -48,6 +48,7 @@ arb-engine token-check --token-address 0x... --chain-id 1
 arb-engine venues --chain-id 1  # source-documented Ethereum V2 deployments
 arb-engine venue-check --chain-id 1  # read-only on-chain factory/router/pair verification
 arb-engine scan WETH/USDC --min-liquidity 10000 --min-volume 1000
+arb-engine v2-discover WETH/USDC --quote-token 0x... --capital-quote 50 --min-liquidity 10000
 arb-telegram  # optional read-only polling bot; requires TELEGRAM_BOT_TOKEN + TELEGRAM_ALLOWED_CHAT_IDS
 arb-engine v2-sim --buy-pair 0x... --buy-venue uniswap_v2_ethereum --sell-pair 0x... --sell-venue sushiswap_v2_ethereum --quote-token 0x... --base-token 0x... --capital-quote 50 --chain-id 1 --slippage-bps 50 --gas-units-assumption 350000 --gas-safety-bps 2000
 # optional exact-calldata simulation against a separately started local Anvil fork
@@ -58,6 +59,20 @@ arb-engine fork-call --chain-id 1 --fork-block 20000000 --to 0x... --data 0x... 
 Scan snapshots are saved to `data/opportunities.sqlite3`. Avoid tight polling and respect upstream rate limits.
 
 See [data sources and trust boundaries](DATA_SOURCES.md) for source rate limits, freshness limitations, and the release gates for future pool-state simulation.
+
+## On-chain V2 discovery
+
+The optional `v2-discover` command uses DEX Screener only to find candidate Ethereum pair addresses. It then requires the exact quote-token contract address and capital amount from the operator, groups by exact token addresses, reads both candidate pools at one pinned block, verifies each pair against the registered factory and each router against that factory, and requests same-block `getAmountsOut` quotes for both venue directions.
+
+Example:
+
+```bash
+arb-engine v2-discover WETH/USDC \
+  --quote-token 0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48 \
+  --capital-quote 50 --min-liquidity 10000 --max-candidates 5
+```
+
+Only the source-documented Ethereum Uniswap V2 and SushiSwap V2 registry entries are eligible. A DEX Screener label is not trusted as proof of protocol version; on-chain pair/factory/router checks must pass. The command evaluates both buy/sell directions and reports gross quote-token surplus only. It does not deduct gas, estimate MEV/inclusion risk, create paper orders, or execute transactions. It does not use token symbols as identity and does not infer the quote token from the query.
 
 ## Before any paper-profit claim
 The source-documented venue registry reduces manual address/fee entry for Ethereum Uniswap V2 and SushiSwap V2. Selecting a registry venue causes the CLI to verify pair.factory(), factory.getPair(), and router.factory() at the pinned block, but registry deployment addresses are not pre-verified on-chain and fee provenance remains a documented assumption. Still required: live fork validation, pool-state/block freshness, token transfer-tax/blacklist behavior, independently verified fee semantics, gas valuation, and a composed atomic multi-venue route simulation with full state-diff/revert analysis. The current Anvil adapter only proves a single supplied call on a pinned local fork and does not satisfy this gate. Cross-chain spreads remain informational only and require bridge cost, settlement delay, and custody/bridge risk modelling.
