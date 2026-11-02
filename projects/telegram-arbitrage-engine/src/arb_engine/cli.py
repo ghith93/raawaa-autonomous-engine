@@ -856,7 +856,7 @@ def main() -> None:
             )
             print(json.dumps(result, indent=2))
         except (CexUniverseScanError, ValueError, RuntimeError, OSError, ArithmeticError) as exc:
-            parser.exit(2, f"cex-universe-scan failed: {exc}\\n")
+            parser.exit(2, f"cex-universe-scan failed: {exc}\n")
     elif args.command == "cex-scan":
         try:
             print(json.dumps(run_cex_scan(args), indent=2))
