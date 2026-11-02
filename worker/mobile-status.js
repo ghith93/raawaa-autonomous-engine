@@ -42,7 +42,7 @@ h2{font-size:16px;margin:0 0 10px}.rows{display:grid;gap:8px}.item{display:flex;
 </div>
 <section class="panel"><h2>Paper research events</h2><div id="paper" class="rows"></div></section>
 <section class="panel"><h2>Provider usage · D1</h2><div id="usage" class="rows"></div></section>
-<section class="panel"><h2>Latest paper event</h2><div id="latest" class="muted">—</div></section>
+<section class="panel"><h2>Latest market snapshot</h2><div id="snapshot" class="muted">—</div></section><section class="panel"><h2>Latest paper event</h2><div id="latest" class="muted">—</div></section><section class="panel"><h2>GitHub CI health</h2><div id="ci" class="rows"></div></section>
 <section class="panel"><h2>Not yet connected to this status feed</h2><div id="gaps" class="rows"></div></section>
 <button id="refresh">Refresh</button><button class="secondary" id="disconnect">Disconnect</button>
 <p class="muted" id="updated"></p>
@@ -52,6 +52,15 @@ h2{font-size:16px;margin:0 0 10px}.rows{display:grid;gap:8px}.item{display:flex;
 let accessToken = "";
 const $ = id => document.getElementById(id);
 const escapeText = value => String(value ?? "—");
+async function loadCi() {
+  try {
+    const response=await fetch("https://api.github.com/repos/ghith93/raawaa-autonomous-engine/actions/runs?branch=main&per_page=10",{headers:{accept:"application/vnd.github+json"},cache:"no-store"});
+    if(!response.ok) throw new Error("GitHub API unavailable");
+    const data=await response.json();
+    const runs=(data.workflow_runs||[]).filter(run=>run.name==="Engine CI"||run.name==="Scheduled Open-Source Research Discovery").slice(0,4);
+    rows("ci",runs.map(run=>[run.name,run.status+(run.conclusion?" · "+run.conclusion:" · running")+" · "+run.updated_at]),"No recent CI runs");
+  } catch { rows("ci",[],"GitHub API unavailable or rate-limited"); }
+}
 function rows(target, values, empty) {
   $(target).replaceChildren();
   if (!values.length) { const p=document.createElement("div");p.className="muted";p.textContent=empty;$(target).append(p);return; }
@@ -68,7 +77,7 @@ async function load() {
   $("failed").textContent=(tasks.failed||0)+(tasks.blocked||0);
   rows("paper",(data.paper_events||[]).map(x=>[x.event_type,x.count]),"No paper events recorded");
   rows("usage",(data.provider_usage||[]).map(x=>[x.route_id,(x.requests||0)+" requests · "+(x.tokens||0)+" tokens"]),"No D1 provider usage recorded");
-  $("latest").textContent=data.latest_paper_event?data.latest_paper_event.event_type+" · "+data.latest_paper_event.candidate_id+" · "+data.latest_paper_event.occurred_at:"No paper event recorded";
+  $("snapshot").textContent=data.latest_market_snapshot?data.latest_market_snapshot.candidate_id+" · chain "+(data.latest_market_snapshot.chain_id??"—")+" · block "+(data.latest_market_snapshot.block_number??"—")+" · "+data.latest_market_snapshot.occurred_at:"No market snapshot recorded";\n  $("latest").textContent=data.latest_paper_event?data.latest_paper_event.event_type+" · "+data.latest_paper_event.candidate_id+" · "+data.latest_paper_event.occurred_at:"No paper event recorded";\n  await loadCi();
   rows("gaps",Object.entries(data.unavailable_metrics||{}),"No unavailable metrics");
   $("updated").textContent="Snapshot generated: "+data.generated_at;
   $("message").textContent="Connected · read-only";
@@ -87,7 +96,7 @@ export function handleMobilePage(request, url) {
     "cache-control": "no-store",
     "x-content-type-options": "nosniff",
     "referrer-policy": "no-referrer",
-    "content-security-policy": "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
+    "content-security-policy": "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'self' https://api.github.com; base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
   }});
 }
 
