@@ -63,3 +63,13 @@ No item in this list authorizes live trading.
 
 - Cross-DEX comparisons and persisted summaries are keyed by chain plus exact base/quote token contract addresses, not token symbols alone.
 - The SQLite migration preserves existing observations and upgrades the legacy symbol-only uniqueness constraint. Older records without contract addresses are retained with empty address fields and are not silently relabelled.
+
+
+## Price impact and gas-cost assumptions
+
+- The V2 simulator reports per-leg constant-product price impact separately from the configured pool fee. Price impact compares actual integer output against the post-fee marginal spot output; it excludes the fee itself and is not a guarantee against state changes or MEV.
+- Optional `--gas-units-assumption` multiplies an operator-supplied gas-unit assumption by the current node `eth_gasPrice` result. `--gas-safety-bps` adds a configurable unit buffer (default 20%).
+- The resulting estimate is denominated in the chain's native asset wei. It is deliberately not converted to the quote token and is not deducted from gross profit because there is no independently validated native-to-quote valuation route yet.
+- This is not `eth_estimateGas`, a signed transaction simulation, or a guarantee of actual gas used. A future transaction simulator must construct the exact atomic route call and simulate it against the same state before any gas estimate can be considered route-specific.
+- Example: `arb-engine v2-sim ... --gas-units-assumption 350000 --gas-safety-bps 2000`.
+- Ethereum JSON-RPC defines `eth_gasPrice` as a node-provided current gas-price estimate; it does not estimate gas units. The operator-supplied unit assumption and the node fee quote are therefore kept separately visible. Reference: https://ethereum.org/developers/docs/apis/json-rpc/
