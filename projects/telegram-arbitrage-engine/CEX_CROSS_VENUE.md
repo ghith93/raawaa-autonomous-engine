@@ -1,6 +1,6 @@
 CEX cross-venue spot depth scanner
 
-Status: deterministic read-only comparison component; not yet connected to a scheduler or live strategy loop.
+Status: deterministic read-only comparison component, now exposed through an operator-invoked bounded CLI. It is not connected to a scheduler or live strategy loop.
 
 Purpose
 
@@ -36,3 +36,11 @@ Depth and cost behavior
 - Missing fees or latency assumptions leave net_profit_quote unset. The scanner never assumes zero fees.
 
 This component does not fetch account-specific fee tiers, instrument metadata, deposits/withdrawals, transfer time, custody risk or execute orders. Canonical asset IDs and fee profiles must be independently verified. Even a positive result is an estimate with execution_verified=false.
+
+Operator-invoked read-only CLI
+
+The arb-engine cex-scan command fetches public spot instrument metadata and order books from two to four selected venues (Binance, Bybit, Coinbase Exchange, OKX) concurrently. Each venue must be passed as an exact venue_id=instrument_id pair. The caller must also supply exact uppercase base/quote asset codes, explicit canonical asset IDs, and a requested base quantity.
+
+The CLI rejects metadata that does not exactly match the requested base/quote codes or whose status is not TRADING. It does not infer aliases such as Kraken XBT/BTC, USD/USDT, USDT/USDC, or BTC/WBTC. Kraken remains available as a lower-level adapter but is not included in this first orchestration path because its canonical pair/asset aliases need an explicit reviewed mapping layer.
+
+Fetches are bounded to four concurrent venue workers and each adapter retains its own request pacing. A source failure is sanitized and retained as partial coverage; two successful compatible books are required to compare. The CLI intentionally supplies no fee profile, so the evaluator must leave net profit unknown and return incomplete_costs when depth and freshness pass. This is not a scheduler, execution engine, account-aware quote, or profitability signal.
