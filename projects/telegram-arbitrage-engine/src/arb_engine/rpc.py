@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -94,37 +95,26 @@ class EthereumV2PoolReader:
 
     @staticmethod
     def _uint(value: Any, label: str) -> int:
-        if not isinstance(value, str) or not value.startswith("0x") or len(value) <= 2:
+        if not isinstance(value, str) or not re.fullmatch(r"0x[0-9a-fA-F]+", value):
             raise RpcReadError(f"Invalid hexadecimal {label}")
-        try:
-            result = int(value, 16)
-        except ValueError as exc:
-            raise RpcReadError(f"Invalid hexadecimal {label}") from exc
+        result = int(value[2:], 16)
         if result < 0:
             raise RpcReadError(f"Negative {label}")
         return result
 
     @staticmethod
     def _address(value: Any, label: str) -> str:
-        if not isinstance(value, str) or not value.startswith("0x"):
-            raise RpcReadError(f"Invalid {label} response")
-        raw = value[2:]
-        if len(raw) != 64:
+        if not isinstance(value, str) or not re.fullmatch(r"0x[0-9a-fA-F]{64}", value):
             raise RpcReadError(f"Invalid ABI address word for {label}")
-        try:
-            int(raw, 16)
-        except ValueError as exc:
-            raise RpcReadError(f"Invalid ABI address word for {label}") from exc
+        raw = value[2:]
+        if raw[:24] != "0" * 24:
+            raise RpcReadError(f"ABI address word for {label} has non-zero address padding")
         return "0x" + raw[-40:].lower()
 
     @staticmethod
     def _pool_address(value: str) -> str:
-        if not isinstance(value, str) or len(value) != 42 or not value.startswith("0x"):
-            raise ValueError("Pool address must be a 20-byte EVM address")
-        try:
-            int(value[2:], 16)
-        except ValueError as exc:
-            raise ValueError("Pool address must be hexadecimal") from exc
+        if not isinstance(value, str) or not re.fullmatch(r"0x[0-9a-fA-F]{40}", value):
+            raise ValueError("Pool address must be a 20-byte hexadecimal EVM address")
         return value.lower()
 
     def read_pools(self, pools: list[tuple[str, int]]) -> list[EvmPoolSnapshot]:
@@ -151,12 +141,8 @@ class EthereumV2PoolReader:
         if not isinstance(block, dict) or not isinstance(block.get("hash"), str):
             raise RpcReadError("Pinned block response is missing its hash")
         block_hash = block["hash"].lower()
-        if len(block_hash) != 66 or not block_hash.startswith("0x"):
-            raise RpcReadError("Pinned block hash has an invalid shape")
-        try:
-            int(block_hash[2:], 16)
-        except ValueError as exc:
-            raise RpcReadError("Pinned block hash is not hexadecimal") from exc
+        if not re.fullmatch(r"0x[0-9a-fA-F]{64}", block_hash):
+            raise RpcReadError("Pinned block hash is not a 32-byte hexadecimal value")
         block_timestamp = self._uint(block.get("timestamp"), "block timestamp")
         now_timestamp = int(datetime.now(timezone.utc).timestamp())
         if block_timestamp > now_timestamp + 30 or now_timestamp - block_timestamp > 60:
