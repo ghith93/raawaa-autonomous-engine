@@ -26,6 +26,24 @@ class PriceSpread:
     classification: str = "indicative_only_not_executable"
 
 
+def _usable_pair(pair: object, now: datetime) -> bool:
+    if not isinstance(pair, DexPair):
+        return False
+    if not all(isinstance(value, str) and value.strip() for value in (
+        pair.chain, pair.dex, pair.base_address, pair.quote_address,
+        pair.base_symbol, pair.quote_symbol, pair.source_url,
+    )):
+        return False
+    if not isinstance(pair.fetched_at, datetime) or pair.fetched_at.tzinfo is None or pair.fetched_at.utcoffset() is None:
+        return False
+    if pair.fetched_at > now:
+        return False
+    for value in (pair.price_usd, pair.liquidity_usd, pair.volume_24h_usd):
+        if not isinstance(value, Decimal) or not value.is_finite():
+            return False
+    return pair.price_usd > 0 and pair.liquidity_usd > 0 and pair.volume_24h_usd >= 0
+
+
 def find_spreads(
     pairs: list[DexPair],
     *,
@@ -37,28 +55,28 @@ def find_spreads(
     if any(not isinstance(v, Decimal) or not v.is_finite() or v < 0
            for v in (min_liquidity_usd, min_volume_24h_usd, max_data_age_seconds)):
         raise ValueError("Scanner thresholds must be finite non-negative Decimals")
+    if not isinstance(pairs, list):
+        raise ValueError("pairs must be a list")
 
     groups: dict[tuple[str, str, str], list[DexPair]] = {}
     now = datetime.now(timezone.utc)
     for pair in pairs:
-        if pair.fetched_at.tzinfo is None or pair.fetched_at.utcoffset() is None or pair.fetched_at > now:
+        if not _usable_pair(pair, now):
             continue
-        age = Decimal(str((now - pair.fetched_at).total_seconds()))
+        age = Decimal(str((now - pair.fetched_at.astimezone(timezone.utc)).total_seconds()))
         if pair.liquidity_usd < min_liquidity_usd or pair.volume_24h_usd < min_volume_24h_usd:
             continue
         if age > max_data_age_seconds:
             continue
-        key = (pair.chain, pair.base_address, pair.quote_address)
+        key = (pair.chain.casefold(), pair.base_address.casefold(), pair.quote_address.casefold())
         groups.setdefault(key, []).append(pair)
 
     spreads = []
     for group in groups.values():
         for left, right in combinations(group, 2):
-            if left.dex.casefold() == right.dex.casefold():
+            if left.dex.casefold() == right.dex.casefold() or left.pair_address.casefold() == right.pair_address.casefold():
                 continue
             buy, sell = (left, right) if left.price_usd <= right.price_usd else (right, left)
-            if buy.price_usd <= 0:
-                continue
             gross_bps = (sell.price_usd / buy.price_usd - Decimal("1")) * Decimal("10000")
             if gross_bps <= 0:
                 continue
