@@ -161,6 +161,8 @@ class AnvilForkSimulator:
         )
         if estimated_gas <= 0 or estimated_gas > 30_000_000:
             raise ForkSimulationError("Estimated gas is outside the supported safety bound")
+        if gas_limit is not None and estimated_gas > gas_limit:
+            raise ForkSimulationError("Estimated gas exceeds the caller-supplied gas limit")
 
         trace = None
         if include_trace:
