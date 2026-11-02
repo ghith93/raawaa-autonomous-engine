@@ -169,7 +169,7 @@ class ModelGatewayTests(unittest.TestCase):
             allow_paid_calls=True, network_calls_enabled=True,
         )
         with self.assertRaisesRegex(BudgetExceeded, "Actual provider cost exceeded"):
-            gateway.generate(GenerationRequest("research", "short prompt", 10))
+            gateway.generate(GenerationRequest("research", "short prompt", 10, task_id="task-a"))
         self.assertEqual(self.ledger.totals()["daily_usd"], 0.02)
 
     def test_per_task_budget_is_aggregated_across_provider_routes(self):
