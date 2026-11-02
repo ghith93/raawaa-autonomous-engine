@@ -71,6 +71,47 @@ _SHARED_RATE_LIMITER = _RateLimiter()
 
 
 @dataclass(frozen=True)
+class KrakenFeeTier:
+    """Kraken's 30-day volume tier; fees are normalized from percent to basis points."""
+
+    volume_threshold: Decimal
+    taker_fee_bps: Decimal
+    maker_fee_bps: Decimal | None
+
+
+@dataclass(frozen=True)
+class KrakenInstrumentMetadata(InstrumentMetadata):
+    fee_volume_currency: str | None = None
+    fee_tiers: tuple[KrakenFeeTier, ...] = ()
+
+    def __post_init__(self) -> None:
+        super().__post_init__()
+        if self.fee_volume_currency is not None and (
+            not isinstance(self.fee_volume_currency, str) or not self.fee_volume_currency
+        ):
+            raise KrakenMarketDataError("invalid fee_volume_currency")
+        if not isinstance(self.fee_tiers, tuple):
+            raise KrakenMarketDataError("fee_tiers must be a tuple")
+        previous = Decimal("-1")
+        for tier in self.fee_tiers:
+            if not isinstance(tier, KrakenFeeTier):
+                raise KrakenMarketDataError("invalid fee tier")
+            if (
+                not tier.volume_threshold.is_finite()
+                or tier.volume_threshold < 0
+                or tier.volume_threshold <= previous
+                or not tier.taker_fee_bps.is_finite()
+                or tier.taker_fee_bps < 0
+                or (
+                    tier.maker_fee_bps is not None
+                    and (not tier.maker_fee_bps.is_finite() or tier.maker_fee_bps < 0)
+                )
+            ):
+                raise KrakenMarketDataError("invalid or unordered fee tier")
+            previous = tier.volume_threshold
+
+
+@dataclass(frozen=True)
 class KrakenOrderBookSnapshot:
     source: str
     category: str
@@ -108,6 +149,26 @@ def _precision(value: object, field: str) -> int:
     if type(value) is not int or not 0 <= value <= _MAX_PRECISION:
         raise KrakenMarketDataError(f"invalid {field}")
     return value
+
+
+def _fee_schedule(value: object, field: str) -> dict[Decimal, Decimal]:
+    if value in (None, []):
+        return {}
+    if not isinstance(value, list):
+        raise KrakenMarketDataError(f"invalid {field}")
+    result: dict[Decimal, Decimal] = {}
+    for row in value:
+        if not isinstance(row, list) or len(row) != 2:
+            raise KrakenMarketDataError(f"invalid {field} tier")
+        threshold = _decimal(row[0], f"{field} volume threshold", positive=False)
+        percent = _decimal(row[1], f"{field} fee percent", positive=False)
+        if threshold < 0 or percent < 0:
+            raise KrakenMarketDataError(f"invalid {field} tier")
+        if threshold in result:
+            raise KrakenMarketDataError(f"duplicate {field} volume threshold")
+        # Kraken reports fee percentages (e.g. 0.26 = 0.26%); normalize to bps.
+        result[threshold] = percent * Decimal("100")
+    return result
 
 
 def _retry_after_seconds(headers: object) -> float:
@@ -237,7 +298,7 @@ class KrakenPublicMarketData:
             raise KrakenMarketDataError("Kraken response omitted its result object")
         return result
 
-    def fetch_instrument(self, *, pair: str) -> InstrumentMetadata:
+    def fetch_instrument(self, *, pair: str) -> KrakenInstrumentMetadata:
         """Resolve an alias to Kraken's canonical REST pair ID and verified lot/tick rules."""
         pair = _pair(pair)
         result = self._get("/0/public/AssetPairs", {"pair": pair})
@@ -278,7 +339,18 @@ class KrakenPublicMarketData:
             status = "TRADING"
         else:
             status = str(raw_status).upper()
-        return InstrumentMetadata(
+        taker_fees = _fee_schedule(item.get("fees"), "fees")
+        maker_fees = _fee_schedule(item.get("fees_maker"), "fees_maker")
+        fee_tiers = tuple(
+            KrakenFeeTier(
+                volume_threshold=threshold,
+                taker_fee_bps=taker_fees[threshold],
+                maker_fee_bps=maker_fees.get(threshold),
+            )
+            for threshold in sorted(taker_fees)
+        )
+        fee_currency = item.get("fee_volume_currency")
+        return KrakenInstrumentMetadata(
             venue_id="kraken",
             instrument_id=instrument_id,
             market_family="cex_spot",
@@ -294,6 +366,8 @@ class KrakenPublicMarketData:
             min_quote_notional=(
                 _decimal(cost_min, "costmin") if cost_min not in (None, "") else None
             ),
+            fee_volume_currency=fee_currency if isinstance(fee_currency, str) and fee_currency else None,
+            fee_tiers=fee_tiers,
         )
 
     def fetch_orderbook(self, *, pair: str, count: int = 100) -> KrakenOrderBookSnapshot:
