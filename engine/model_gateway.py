@@ -126,6 +126,36 @@ class UsageLedger:
             "pending_reservations": pending_count,
         }
 
+    def budget_status(self, daily_budget_usd: float, monthly_budget_usd: float,
+                      now: datetime | None = None) -> dict[str, bool]:
+        """Compare actual plus outstanding spend to hard caps using integer nano-USD."""
+        daily_cap = _money_nanos(daily_budget_usd, round_up=False)
+        monthly_cap = _money_nanos(monthly_budget_usd, round_up=False)
+        totals = self.totals(now)
+        return {
+            "daily_over_budget": totals["daily_total_nanos"] > daily_cap,
+            "monthly_over_budget": totals["monthly_total_nanos"] > monthly_cap,
+        }
+
+    def release(self, reservation_id: int) -> None:
+        """Release only a pre-call reservation when no provider request was sent."""
+        with self._connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            row = db.execute(
+                "SELECT settled_at FROM model_usage_reservations WHERE id=?",
+                (reservation_id,),
+            ).fetchone()
+            if row is None:
+                raise KeyError("monetary reservation not found")
+            if row["settled_at"] is not None:
+                raise RuntimeError("settled monetary reservations cannot be released")
+            changed = db.execute(
+                "DELETE FROM model_usage_reservations WHERE id=? AND settled_at IS NULL",
+                (reservation_id,),
+            ).rowcount
+            if changed != 1:
+                raise RuntimeError("monetary reservation release state changed")
+
     def reserve(self, provider: str, model: str, task_kind: str,
                 estimated_cost_usd: float, daily_budget_usd: float,
                 monthly_budget_usd: float, now: datetime | None = None) -> int:
