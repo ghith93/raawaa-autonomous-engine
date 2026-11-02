@@ -207,6 +207,15 @@ No item in this list authorizes live trading.
 - No approvals, transfer calls, signing, or transactions are performed.
 
 
+
+## Chain-aware V2 venue selection
+
+- The read-only V2 scanner resolves its default venue pair from the selected chain ID rather than silently retaining Ethereum venue IDs.
+- The current registry has two source-documented candidates on Ethereum (Uniswap V2 and SushiSwap V2) and two on BNB Smart Chain (PancakeSwap V2 and ApeSwap V2). For these chains, `--venue-ids` is optional and the matching pair is selected automatically.
+- Chains with zero, one, or more than two registered V2 venues fail closed and require an explicit pair of venue IDs. No arbitrary first-two selection is made when registry choice is ambiguous.
+- Chain ID, DEX Screener network slug, venue factory/router, and the RPC-reported chain ID must still agree. BSC requires an operator-supplied HTTPS RPC endpoint; no paid RPC is enabled or assumed.
+- This is multi-chain configuration reuse of the existing V2 reader and verifier, not support for V3 concentrated-liquidity math, Solana AMMs, or other protocol families.
+
 ## DEX Screener pair-address discovery and on-chain V2 verification
 
 - Official endpoint: GET /token-pairs/v1/{chainId}/{tokenAddress}; published rate limit is 300 requests/minute. Reference: https://docs.dexscreener.com/api/reference
