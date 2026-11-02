@@ -115,6 +115,7 @@ def evaluate_two_leg_spread(
     gross_profit_quote_override: Decimal | str | None = None,
     now: datetime | None = None,
     max_quote_age_seconds: int = 5,
+    max_quote_skew_seconds: int = 2,
     buy_fill_fraction: Decimal | str = "1",
     sell_fill_fraction: Decimal | str = "1",
     cross_chain: bool = False,
@@ -140,6 +141,8 @@ def evaluate_two_leg_spread(
             raise OpportunityEvaluationError(f"{label} is required")
     if type(max_quote_age_seconds) is not int or not 1 <= max_quote_age_seconds <= 3600:
         raise OpportunityEvaluationError("max_quote_age_seconds must be between 1 and 3600")
+    if type(max_quote_skew_seconds) is not int or not 0 <= max_quote_skew_seconds <= 3600:
+        raise OpportunityEvaluationError("max_quote_skew_seconds must be between 0 and 3600")
 
     buy_price = _decimal(buy_price_quote_per_base, "buy_price_quote_per_base", positive=True)
     sell_price = _decimal(sell_price_quote_per_base, "sell_price_quote_per_base", positive=True)
@@ -221,9 +224,13 @@ def evaluate_two_leg_spread(
     known_cost = notional * known_bps / Decimal("10000") + known_flat
 
     stale = future_dated or max_age > Decimal(max_quote_age_seconds)
+    quote_skew = Decimal(str(abs((buy_time - sell_time).total_seconds())))
+    unsynchronized = quote_skew > Decimal(max_quote_skew_seconds)
     insufficient_depth = buy_fill < 1 or sell_fill < 1
     if stale:
         status = "stale_data"
+    elif unsynchronized:
+        status = "unsynchronized_data"
     elif insufficient_depth:
         status = "insufficient_depth"
     elif missing:
