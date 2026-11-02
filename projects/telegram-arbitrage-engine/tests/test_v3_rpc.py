@@ -118,6 +118,8 @@ def test_v3_reader_returns_same_block_snapshot_and_simulates_it(monkeypatch):
     assert snapshot.liquidity == 100_000
     assert snapshot.block_number == 100
     assert snapshot.block_hash == BLOCK_HASH
+    assert snapshot.rpc_verified is True
+    assert snapshot.source == "evm_rpc_same_block_factory_registered_block_hash_rechecked"
     assert dict(snapshot.bitmap_words) == {0: (1 << 1) | (1 << 2)}
     assert dict(snapshot.initialized_ticks) == {60: 500, 120: -500}
     assert [method for method, _ in calls].count("eth_getBlockByNumber") == 2
@@ -129,6 +131,7 @@ def test_v3_reader_returns_same_block_snapshot_and_simulates_it(monkeypatch):
         sqrt_price_limit_x96=get_sqrt_ratio_at_tick(120),
     )
     assert result.complete
+    assert result.classification == "rpc_snapshot_factory_registered_block_hash_rechecked"
     assert result.crossed_ticks == (60, 120)
 
 
