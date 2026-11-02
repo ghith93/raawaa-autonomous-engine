@@ -5,13 +5,14 @@ import pytest
 
 from arb_engine.dexscreener import DexPair
 from arb_engine.onchain_discovery import discover_pool_candidates, scan_onchain_v2
-from arb_engine.rpc import EvmPoolSnapshot
+from arb_engine.rpc import EvmPoolSnapshot, RpcVerificationError
 from arb_engine.v2 import V2PoolState
 
 
 QUOTE = "0x" + "1" * 40
 BASE = "0x" + "2" * 40
 UNI_PAIR = "0x" + "3" * 40
+INVALID_UNI_PAIR = "0x" + "9" * 40
 SUSHI_PAIR = "0x" + "4" * 40
 OTHER_PAIR = "0x" + "5" * 40
 HASH = "0x" + "a" * 64
@@ -51,11 +52,12 @@ def candidates():
 
 
 class FakeReader:
-    def __init__(self, states=None):
+    def __init__(self, states=None, invalid_pairs=None):
         self.states = states or {
             UNI_PAIR: snapshot(UNI_PAIR),
             SUSHI_PAIR: snapshot(SUSHI_PAIR),
         }
+        self.invalid_pairs = set(invalid_pairs or [])
         self.verified_pairs = []
         self.verified_routers = []
         self.canonical = []
@@ -66,6 +68,8 @@ class FakeReader:
         return [self.states[address] for address, _fee in pools]
 
     def verify_v2_pool_factory(self, pair_address, factory, token0, token1, block):
+        if pair_address in self.invalid_pairs:
+            raise RpcVerificationError("Pair factory does not match configured trusted factory")
         expected_factory = UNI_FACTORY if pair_address == UNI_PAIR else SUSHI_FACTORY
         assert factory.casefold() == expected_factory.casefold()
         assert {token0, token1} == {QUOTE, BASE}
@@ -235,3 +239,28 @@ def test_invalid_candidate_limit_is_rejected_before_dexscreener_network_call(mon
             "WETH USDC", quote_token=QUOTE, capital_quote=Decimal("50"),
             rpc_url="https://rpc.example", max_candidates=11,
         )
+
+
+
+def test_scan_skips_unverified_high_liquidity_dex_label_and_uses_valid_fallback():
+    fake = FakeReader(
+        {
+            INVALID_UNI_PAIR: snapshot(INVALID_UNI_PAIR),
+            UNI_PAIR: snapshot(UNI_PAIR),
+            SUSHI_PAIR: snapshot(SUSHI_PAIR),
+        },
+        invalid_pairs={INVALID_UNI_PAIR},
+    )
+    result = scan_onchain_v2(
+        "WETH USDC", quote_token=QUOTE, capital_quote=Decimal("50"),
+        rpc_url="https://rpc.example", reader=fake,
+        pairs=[
+            pair(INVALID_UNI_PAIR, "uniswap", liquidity="90000"),
+            pair(UNI_PAIR, "uniswap", liquidity="50000"),
+            pair(SUSHI_PAIR, "sushiswap", liquidity="50000"),
+        ],
+    )
+    assert result["candidate_pairs_discovered"] == 2
+    assert result["candidate_pairs_rejected"] == 1
+    assert result["candidate_pairs_verified"] == 1
+    assert result["opportunities"][0]["source_pairs"][0]["pair"] == UNI_PAIR
