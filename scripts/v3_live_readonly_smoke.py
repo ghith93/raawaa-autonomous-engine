@@ -10,7 +10,7 @@ from decimal import Decimal
 import json
 import re
 
-from arb_engine.rpc import DEFAULT_ETHEREUM_RPC, RpcTransportError
+from arb_engine.rpc import DEFAULT_ETHEREUM_RPC, RpcReadError, RpcTransportError
 from arb_engine.v3_math import MIN_TICK, get_sqrt_ratio_at_tick
 from arb_engine.v3_rpc import EvmV3PoolReader
 from arb_engine.v3_simulator import simulate_v3_swap
@@ -112,6 +112,14 @@ def _run_smoke(reader: EvmV3PoolReader) -> dict[str, object]:
     }
 
 
+def _is_provider_availability_error(exc: RpcReadError) -> bool:
+    return (
+        isinstance(exc, RpcTransportError)
+        or "code=-32005" in str(exc)
+        or "rate limit" in str(exc).casefold()
+    )
+
+
 def main() -> None:
     requests_used = 0
     transport_errors: list[str] = []
@@ -129,7 +137,9 @@ def main() -> None:
         )
         try:
             result = _run_smoke(reader)
-        except RpcTransportError as exc:
+        except RpcReadError as exc:
+            if not _is_provider_availability_error(exc):
+                raise
             requests_used += reader.rpc_request_count
             transport_errors.append(f"{endpoint}: {exc}")
             continue
