@@ -131,8 +131,8 @@ def test_funding_rows_reject_wrong_symbols_duplicate_times_and_malformed_rates()
         "retCode": 0, "result": {"category": "linear", "list": [{
             "symbol": "BTCUSDT", "fundingRate": "NaN",
             "fundingRateTimestamp": "1793620800000",
-        ]},
-    }}])
+        }]},
+    }])
     with pytest.raises(FundingMarketDataError, match="fundingRate"):
         api.fetch_funding_history(symbol="BTCUSDT")
 
