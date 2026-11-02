@@ -23,7 +23,7 @@ The default factory is the official Uniswap V3 Ethereum mainnet factory. Other c
 - RPC calls are individual bounded `eth_call` requests, not a Multicall batch. The request budget and per-request delay are explicit.
 - The reader verifies factory registration and the factory fee-tier spacing but does not verify pool bytecode against a pinned code hash or prove the expected factory address is trusted when supplied for another chain.
 - A snapshot is bounded by max bitmap words and max initialized ticks. If the path exceeds either bound, the reader fails closed.
-- The snapshot is pinned to one block number and its hash is checked before and after reads. It does not use EIP-1898 block-hash call parameters; reorgs detected by the final hash check abort the read.
+- The snapshot is pinned to one block number and its hash is checked before and after reads. It does not use EIP-1898 block-hash call parameters; reorgs detected by the final hash check abort the read. Reader-produced snapshots carry an explicit `rpc_verified` provenance flag, and simulation results distinguish those from caller-supplied snapshots. This flag records this reader's checks; it is not a cryptographic code-hash attestation.
 - This is still a read-only snapshot plus local simulator, not a net-profit calculation. Token decimals, transfer taxes, gas, router calldata, liquidity changes between blocks, MEV and transaction inclusion are outside this scope.
 - No transaction, signing, wallet, or live trading method exists in this adapter.
 
