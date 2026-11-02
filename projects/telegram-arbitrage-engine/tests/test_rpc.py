@@ -226,3 +226,21 @@ def test_zero_address_is_rejected_for_all_contract_roles():
     reader = EthereumV2PoolReader(min_request_interval=0)
     with pytest.raises(ValueError, match="Zero address"):
         reader._pool_address("0x" + "0" * 40)
+
+
+def test_v2_router_factory_verification(monkeypatch):
+    reader = EthereumV2PoolReader(min_request_interval=0)
+    factory = "0x" + "8" * 40
+    monkeypatch.setattr(reader, "_rpc", lambda method, params: address_word(factory))
+    reader.verify_v2_router_factory("0x" + "9" * 40, factory, 100)
+
+
+def test_v2_router_factory_verification_rejects_mismatch(monkeypatch):
+    import pytest
+
+    reader = EthereumV2PoolReader(min_request_interval=0)
+    monkeypatch.setattr(reader, "_rpc", lambda method, params: address_word("0x" + "7" * 40))
+    with pytest.raises(RpcReadError, match="Router factory does not match"):
+        reader.verify_v2_router_factory(
+            "0x" + "9" * 40, "0x" + "8" * 40, 100,
+        )
