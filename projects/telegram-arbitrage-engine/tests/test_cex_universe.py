@@ -117,7 +117,7 @@ def test_quote_currency_code_mismatch_is_not_joined_without_conversion():
     ]
 
     def fetcher(req):
-        if req.venue_id == "coinbase":
+        if req.venue_id == "binance":
             return snapshot(req, quote_code="USD")
         return snapshot(req)
 
@@ -129,7 +129,7 @@ def test_quote_currency_code_mismatch_is_not_joined_without_conversion():
     )
 
     assert result["status"] == "partial"
-    assert result["source_failures"] == {"coinbase": "quote_asset_code_mismatch"}
+    assert result["source_failures"] == {"binance": "quote_asset_code_mismatch"}
     assert result["compared_pair_count"] == 1
 
 
