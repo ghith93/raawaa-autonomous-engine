@@ -29,10 +29,10 @@ def test_v2_sim_cli_converts_human_amount_to_raw_units(monkeypatch, capsys):
             assert endpoint == "https://rpc.example"
 
         def read_pools(self, pools):
-            assert pools == [("0xbuy", 30), ("0xsell", 25)]
+            assert pools == [(POOL_A, 30), (POOL_B, 25)]
             return [
-                snapshot("0xbuy", 1_000_000_000_000, 10**24, 30),
-                snapshot("0xsell", 1_000_000_000_000, 10**24, 25),
+                snapshot(POOL_A, 1_000_000_000_000, 10**24, 30),
+                snapshot(POOL_B, 1_000_000_000_000, 10**24, 25),
             ]
 
     monkeypatch.setattr(cli, "EthereumV2PoolReader", FakeReader)
