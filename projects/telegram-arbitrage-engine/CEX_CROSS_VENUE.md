@@ -10,6 +10,20 @@ Explicit instrument identity
 
 A caller must register each venue/instrument pair in an InstrumentRegistry with a canonical base-asset ID, canonical quote-currency ID, venue base quantity step, optional minimum base quantity and minimum quote notional, and cex_spot market family. InstrumentRegistry.from_metadata propagates these constraints from supported public instrument metadata. Matching symbols are not proof of matching assets. Unknown instruments are rejected, and comparisons are blocked when canonical base or quote IDs differ. No implicit ETH/WETH, BTC/WBTC, USDT/USDC or cross-chain equivalence is assumed.
 
+
+
+Multi-venue comparison and partial source coverage
+
+`compare_cex_spot_orderbook_universe` accepts two to eight available order-book snapshots from different CEX spot venues and compares every venue pair in both directions. It uses the same InstrumentRegistry and cost evaluator as the two-venue function; no venue-specific symbol conversion is inferred. Binance, Bybit, Kraken and Coinbase snapshots satisfy the shared read-only book contract (`source`, `symbol`, `bids`, `asks`, timezone-aware `fetched_at`, optional `category`).
+
+The result includes:
+- every valid pairwise direction as a `CrossVenueOpportunity`;
+- `skipped_pairs` for pairs whose explicit canonical base/quote IDs differ;
+- bounded `source_failures` codes supplied by the caller, so one unavailable exchange does not erase valid comparisons from other sources;
+- `status=complete`, `partial`, or `insufficient_sources` and the number of compared venue pairs.
+
+The caller owns bounded/concurrent fetching and must pass only sanitized failure codes (not raw exception text or credentials). A maximum of eight total venues is enforced to bound pairwise work. Each venue's rate limiter remains independent and shared by its adapter instances. This function performs no network calls and does not itself schedule or execute scans.
+
 Depth and cost behavior
 
 - Buy leg consumes asks until the requested base quantity is filled; exact Decimal VWAP and quote spent are calculated.
