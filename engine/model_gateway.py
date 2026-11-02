@@ -212,6 +212,8 @@ class UsageLedger:
         if task_cap > 0 and task_id is None:
             raise ValueError("task_id is required when a per-task monetary budget is configured")
         estimate = _money_nanos(estimated_cost_usd, round_up=True)
+        if estimate > 0 and task_id is None:
+            raise ValueError("task_id is required for every non-zero-cost reservation")
         daily_cap = _money_nanos(daily_budget_usd, round_up=False)
         monthly_cap = _money_nanos(monthly_budget_usd, round_up=False)
         current = _utc(now)
@@ -351,6 +353,8 @@ class ModelGateway:
         model = self.router.select(request.task_kind)
         if model is None:
             raise ProviderUnavailable("No eligible model is configured.")
+        if request.task_kind != "offline_test" and not request.task_id:
+            raise ProviderUnavailable("A task ID is required before live provider execution.")
         adapter = self.adapters.get(model.provider)
         if adapter is None:
             raise ProviderUnavailable(f"No adapter registered for provider: {model.provider}")
