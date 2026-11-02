@@ -156,3 +156,26 @@ No item in this list authorizes live trading.
 - This is a read-only gross router-quote comparison. It is not a flash-swap repayment simulation, gas estimate, net-profit estimate, historical backtest, paper trade, or live execution. No calldata is built, no wallet/signer is used, and no transaction is submitted.
 - The scanner currently requires both registered Ethereum Uniswap V2 and SushiSwap V2 candidates for the exact token pair. If one is absent or fails factory verification, it returns an explicit insufficient-venues status instead of inventing or falling back to unverified routes.
 - DEX Screener documents the endpoint and its rate limit; Uniswap V2 factory source confirms getPair is the factory's canonical pair registry and pair creation emits PairCreated: https://github.com/Uniswap/v2-core/blob/master/contracts/UniswapV2Factory.sol
+
+## On-chain V2 cross-venue candidate scan
+
+- DEX Screener API reference: https://docs.dexscreener.com/api/reference
+- Discovery uses \`GET /token-pairs/v1/{chainId}/{tokenAddress}\` for the explicit base-token contract. The response contributes pair addresses, chain/DEX identifiers, token addresses, and optional display metadata only. DEX Screener price, USD liquidity, and volume fields are not read or used by the scanner.
+- The DEX Screener endpoint family is documented at up to 300 requests/minute; the client still enforces a one-second minimum interval between sequential requests. The scanner caps the response at 200 candidate rows, filters by the exact explicit quote-token contract, and rejects more than four relevant pair candidates rather than silently truncating them.
+- The operator must provide both exact base-token and quote-token contract addresses plus a quote-token capital amount. Symbols are display metadata only; stablecoins are never inferred from symbols.
+- DEX IDs map through the versioned trusted venue registry. A DEX label is only a discovery hint: each candidate must pass on-chain pair \`factory()\` and factory \`getPair(tokenA,tokenB)\` checks at the pinned block. Non-V2 candidates are skipped; transport/provider errors remain fatal.
+- Both verified pools are read at the exact same \`EvmBlockContext\`; the reader checks chain ID, block hash, block freshness, and canonicality. Both Router02 \`factory()\` relationships are verified at that block, then \`getAmountsOut(uint256,address[])\` is called for both buy/sell directions using the same block tag.
+- The Ethereum reader enforces a per-invocation RPC request budget (default 32; configurable up to 64). With four candidates, the scanner's fixed path is bounded below the default budget.
+- Output contains raw token units, on-chain token decimals, human-readable amounts, gross quote-token surplus, and gross return basis points. It is a same-block router round-trip quote only—not net profit, a flash-swap repayment proof, a paper order, or an execution guarantee.
+- Gas, flash-swap repayment mechanics, MEV/builder payments, inclusion/revert risk, transfer taxes, state changes after the pinned block, and execution overhead are excluded. No calldata is built, no wallet or signer is used, and no transaction is submitted.
+- Uniswap V2 Router02 reference: https://developers.uniswap.org/docs/protocols/v2/reference/smart-contracts/router-02
+- Uniswap V2 pricing reference: https://developers.uniswap.org/docs/protocols/v2/concepts/pricing
+- Uniswap V2 flash-swap repayment guide: https://developers.uniswap.org/docs/protocols/v2/guides/flash-swaps
+
+## Open-source implementation references
+
+- [BowTiedDevil/degenbot](https://github.com/BowTiedDevil/degenbot) (MIT) is a useful reference for deterministic AMM pool math and protocol adapters across Uniswap V2/V3/V4, Curve, Balancer, Solidly, and Aave V3. Prefer selective, version-pinned math/test reuse over adopting a complete bot.
+- [gardennn/arb-rewind](https://github.com/gardennn/arb-rewind) (MIT) is a reference for historical fork replay and route research. Its public maintenance/activity level is limited; treat it as a design reference, not production evidence.
+- [flashbots/mev-share](https://github.com/flashbots/mev-share) documents a later-stage private order-flow/MEV research path. It is not a dependency for the read-only scanner and should only be evaluated after route economics and execution simulation are proven.
+- No external bot, RPC provider, wallet, or paid aggregator is required by this read-only discovery path.
+
