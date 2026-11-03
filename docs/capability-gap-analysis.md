@@ -8,7 +8,7 @@
 
 The scheduled research workflow now performs:
 
-1. Public GitHub/Crossref metadata discovery.
+1. Public GitHub, Crossref, and arXiv metadata discovery (one bounded arXiv request per daily run).
 2. Deterministic candidate triage.
 3. Preservation of each GitHub candidate's `discovered_via` topic provenance.
 4. Capability-gap analysis against repository files and configuration.
@@ -27,7 +27,7 @@ The analyzer inspects the current repository state for:
 - Existing bounded task-runner foundations.
 - Presence of a skill security gate versus a research-only scanner candidate.
 - Unit-test presence versus a dedicated benchmark directory.
-- Configured GitHub discovery topics and academic metadata source.
+- Configured GitHub discovery topics, Crossref metadata source, and arXiv metadata source.
 
 It does not query GitHub Actions variable values, D1 rows, provider consoles, deployed Workers, billing or runtime health. A file's presence is not proof that a service is active.
 
@@ -57,7 +57,7 @@ The triage score is a metadata heuristic, not a security, quality, compatibility
 ## Limitations
 
 - The baseline is a repository snapshot; it cannot prove live runtime state or external account settings.
-- Academic records are not automatically mapped to capabilities because topic inference from paper titles alone would be too weak.
+- Crossref and arXiv records are triaged as research candidates but are not automatically mapped to capability gaps because title-only topic inference would be too weak. arXiv abstracts and full text are not ingested.
 - A capability may be partially implemented even when the repository contains no corresponding candidate in a scan.
 - The current report ranks by predefined impact band and count of related candidates; it is not a statistically calibrated value model.
 - All opportunities remain `PROPOSED` until primary-source verification, measurable baseline, controlled experiment and independent review.
