@@ -15,6 +15,8 @@ class ProviderWorkflowSecurityTests(unittest.TestCase):
             "GROQ_API_KEY": "${{ secrets.GROQ_API_KEY }}",
             "GEMINI_API_KEY": "${{ secrets.GEMINI_API_KEY }}",
             "RAAWAA_ENGINE_API_TOKEN": "${{ secrets.ENGINE_API_TOKEN }}",
+            "RAAWAA_ENGINE_CF_ACCESS_CLIENT_ID": "${{ secrets.CF_ACCESS_CLIENT_ID }}",
+            "RAAWAA_ENGINE_CF_ACCESS_CLIENT_SECRET": "${{ secrets.CF_ACCESS_CLIENT_SECRET }}",
         }
         for variable, expression in expected.items():
             self.assertIn(variable + ": " + expression, batch)
