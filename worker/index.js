@@ -44,6 +44,15 @@ async function readJson(request) {
   try { return JSON.parse(raw); } catch { throw new Error("invalid_json"); }
 }
 
+async function readOptionalJson(request) {
+  const declared = Number(request.headers.get("content-length") || 0);
+  if (declared > MAX_BODY_BYTES) throw new Error("body_too_large");
+  const raw = await request.text();
+  if (new TextEncoder().encode(raw).byteLength > MAX_BODY_BYTES) throw new Error("body_too_large");
+  if (!raw.trim()) return {};
+  try { return JSON.parse(raw); } catch { throw new Error("invalid_json"); }
+}
+
 
 function safeResearchString(value, max) {
   return typeof value === "string" && value.trim().length > 0 && value.length <= max;
@@ -277,7 +286,7 @@ export default {
       }
       try {
         const result = await env.DB.prepare(
-          "SELECT id,idempotency_key,task_type,title,payload_json,status,attempts,max_attempts,created_at,updated_at FROM tasks ORDER BY created_at DESC,id DESC LIMIT ?"
+          "SELECT id,idempotency_key,task_type,title,payload_json,status,attempts,max_attempts,created_at,updated_at,execution_mode FROM tasks ORDER BY created_at DESC,id DESC LIMIT ?"
         ).bind(rawLimit).all();
         return json({ tasks: result.results || [] });
       } catch {
@@ -295,6 +304,15 @@ export default {
     if (request.method === "POST" &&
         (url.pathname === "/v1/tasks/claim" || url.pathname === "/v1/codespace/tasks/claim")) {
       const codespaceClaim = url.pathname === "/v1/codespace/tasks/claim";
+      let claimInput;
+      try { claimInput = await readOptionalJson(request); }
+      catch (error) {
+        return json({ error: error.message === "body_too_large" ? "body_too_large" : "invalid_json" }, 400);
+      }
+      const executionMode = claimInput?.execution_mode ?? "unknown";
+      if (!["unknown", "dry_run", "live_inference"].includes(executionMode)) {
+        return json({ error: "invalid_execution_mode" }, 400);
+      }
       const taskTypeFilter = codespaceClaim
         ? `AND task_type IN (${CODESPACE_TASK_SQL})`
         : `AND task_type NOT IN (${CODESPACE_TASK_SQL})`;
@@ -305,19 +323,19 @@ export default {
       const leaseToken = crypto.randomUUID();
       try {
         const claim = await env.DB.prepare(`
-          UPDATE tasks SET status='running', attempts=attempts+1, updated_at=?,
+          UPDATE tasks SET status='running', attempts=attempts+1, execution_mode=?, updated_at=?,
             lease_token=?, lease_expires_at=?
           WHERE id=(SELECT id FROM tasks WHERE status='pending' ${taskTypeFilter}
             ORDER BY created_at,id LIMIT 1)
             AND status='pending' ${taskTypeFilter}
           RETURNING id,idempotency_key,task_type,title,payload_json,status,attempts,
-            max_attempts,created_at,updated_at,lease_token,lease_expires_at
-        `).bind(nowIso, leaseToken, expires).first();
+            max_attempts,created_at,updated_at,execution_mode,lease_token,lease_expires_at
+        `).bind(executionMode, nowIso, leaseToken, expires).first();
         if (!claim) return json({ task: null });
         await env.DB.prepare(
           "INSERT INTO audit_log(task_id,event,details_json,created_at) VALUES(?,?,?,?)"
         ).bind(claim.id, "task_claimed", JSON.stringify({
-          attempt: claim.attempts, lease_expires_at: expires
+          attempt: claim.attempts, lease_expires_at: expires, execution_mode: executionMode
         }), nowIso).run();
         return json({ task: claim, lease_token: leaseToken, lease_expires_at: expires });
       } catch {
@@ -340,7 +358,7 @@ export default {
       const nowIso = new Date().toISOString();
       try {
         const current = await env.DB.prepare(
-          "SELECT id,status,attempts,max_attempts,task_type,lease_token,lease_expires_at FROM tasks WHERE id=?"
+          "SELECT id,status,attempts,max_attempts,task_type,execution_mode,lease_token,lease_expires_at FROM tasks WHERE id=?"
         ).bind(taskId).first();
         if (!current) return json({ error: "task_not_found" }, 404);
         if (CODESPACE_TASK_TYPES.has(current.task_type) !== codespaceAction) {
@@ -390,14 +408,27 @@ export default {
           error = typeof input.error === "string" ? input.error.slice(0, 2000) : "Task retry requested.";
         }
 
+        let executionMode = current.execution_mode || "unknown";
+        if (input.execution_mode !== undefined) {
+          if (!["unknown", "not_started", "dry_run", "live_inference"].includes(input.execution_mode)) {
+            return json({ error: "invalid_execution_mode" }, 400);
+          }
+          executionMode = input.execution_mode;
+        } else if (resultJson) {
+          let parsedResult;
+          try { parsedResult = JSON.parse(resultJson); } catch { parsedResult = null; }
+          if (["dry_run", "live_inference"].includes(parsedResult?.mode)) {
+            executionMode = parsedResult.mode;
+          }
+        }
         const update = await env.DB.prepare(
-          "UPDATE tasks SET status=?,result_json=?,error=?,updated_at=?,lease_token=NULL,lease_expires_at=NULL WHERE id=? AND status='running' AND lease_token=? AND lease_expires_at>=?"
-        ).bind(status, resultJson, error, nowIso, taskId, leaseToken, nowIso).run();
+          "UPDATE tasks SET status=?,result_json=?,error=?,execution_mode=?,updated_at=?,lease_token=NULL,lease_expires_at=NULL WHERE id=? AND status='running' AND lease_token=? AND lease_expires_at>=?"
+        ).bind(status, resultJson, error, executionMode, nowIso, taskId, leaseToken, nowIso).run();
         if (!update.meta?.changes) return json({ error: "lease_lost" }, 409);
         await env.DB.prepare(
           "INSERT INTO audit_log(task_id,event,details_json,created_at) VALUES(?,?,?,?)"
         ).bind(taskId, action === "retry" ? (status === "pending" ? "task_retry_scheduled" : "task_failed") : "task_" + status,
-          JSON.stringify({ error }), nowIso).run();
+          JSON.stringify({ error, execution_mode: executionMode }), nowIso).run();
         return json({ ok: true, status });
       } catch {
         return json({ error: "storage_unavailable" }, 503);
@@ -443,14 +474,14 @@ export default {
     const now = new Date().toISOString();
     try {
       const insert = env.DB.prepare(
-        "INSERT OR IGNORE INTO tasks(id,idempotency_key,task_type,title,payload_json,status,attempts,max_attempts,created_at,updated_at) VALUES(?,?,?,?,?,'pending',0,?,?,?)"
+        "INSERT OR IGNORE INTO tasks(id,idempotency_key,task_type,title,payload_json,status,attempts,max_attempts,created_at,updated_at,execution_mode) VALUES(?,?,?,?,?,'pending',0,?,?,?,'not_started')"
       ).bind(id, key, taskType.trim(), title.trim(), payloadJson, maxAttempts, now, now);
       const audit = env.DB.prepare(
         "INSERT INTO audit_log(task_id,event,details_json,created_at) SELECT id,'task_enqueued',?,? FROM tasks WHERE idempotency_key=? AND changes() > 0"
       ).bind(JSON.stringify({ task_type: taskType.trim() }), now, key);
       await env.DB.batch([insert, audit]);
       const task = await env.DB.prepare(
-        "SELECT id,idempotency_key,task_type,title,payload_json,status,attempts,max_attempts,created_at,updated_at FROM tasks WHERE idempotency_key=?"
+        "SELECT id,idempotency_key,task_type,title,payload_json,status,attempts,max_attempts,created_at,updated_at,execution_mode FROM tasks WHERE idempotency_key=?"
       ).bind(key).first();
       if (!task) return json({ error: "storage_unavailable" }, 503);
       return json({ task, created: task.id === id }, task.id === id ? 201 : 200);
