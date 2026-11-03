@@ -19,6 +19,7 @@ from engine.research_discovery import discover_repositories
 from engine.budget_policy import validate_budget_policy
 from engine.tool_broker import validate_permission_matrix
 from engine.artemis_gateway import probe_artemis
+from engine.executive_intelligence import executive_status
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -148,6 +149,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Raawaa Autonomous Engine")
     sub = parser.add_subparsers(dest="command", required=True)
     sub.add_parser("audit")
+    executive = sub.add_parser("executive-status", help="Read-only executive portfolio snapshot and explainable task priorities")
+    executive.add_argument("--limit", type=int, default=10)
     sub.add_parser("artemis-status", help="Read-only ARTEMIS daemon/device probe; never submits a mobile task")
 
     discovery = sub.add_parser(
@@ -212,6 +215,8 @@ def main() -> int:
 
     if args.command == "audit":
         return audit()
+    elif args.command == "executive-status":
+        print(json.dumps(executive_status(store(), limit=args.limit), indent=2, ensure_ascii=False))
     elif args.command == "artemis-status":
         print(json.dumps(probe_artemis(os.environ), indent=2, ensure_ascii=False))
     elif args.command == "free-models":
