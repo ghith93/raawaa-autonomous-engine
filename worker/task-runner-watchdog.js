@@ -5,7 +5,7 @@ const GITHUB_API_VERSION = "2026-03-10";
 const REPOSITORY = "ghith93/raawaa-autonomous-engine";
 const WORKFLOW = "task-runner.yml";
 const REF = "main";
-const SCHEDULE_STALE_AFTER_MS = 10 * 60 * 1000;
+const DISPATCH_COOLDOWN_MS = 10 * 60 * 1000;
 const ACTIVE_STATUSES = new Set(["queued", "in_progress", "waiting", "requested", "pending"]);
 
 function apiHeaders(token) {
@@ -19,8 +19,13 @@ function apiHeaders(token) {
 
 function appConfiguration(env) {
   const names = ["GITHUB_APP_ID", "GITHUB_APP_INSTALLATION_ID", "GITHUB_APP_PRIVATE_KEY"];
-  const missing = names.filter(name => typeof env?.[name] !== "string" || !env[name].trim());
-  return missing;
+  return names.filter(name => typeof env?.[name] !== "string" || !env[name].trim());
+}
+
+function requireAuditBinding(env) {
+  if (!env?.DB || typeof env.DB.prepare !== "function") {
+    throw new Error("task_runner_dispatch_audit_unavailable");
+  }
 }
 
 async function getWorkflowRuns({ fetchImpl, token }) {
@@ -28,10 +33,7 @@ async function getWorkflowRuns({ fetchImpl, token }) {
     "/actions/workflows/" + WORKFLOW + "/runs?branch=" + encodeURIComponent(REF) + "&per_page=20";
   let response;
   try {
-    response = await fetchImpl(url, {
-      method: "GET",
-      headers: apiHeaders(token),
-    });
+    response = await fetchImpl(url, { method: "GET", headers: apiHeaders(token) });
   } catch {
     throw new Error("task_runner_run_list_failed");
   }
@@ -55,24 +57,63 @@ function hasActiveRun(runs) {
   return runs.some(run => ACTIVE_STATUSES.has(run?.status));
 }
 
-function hasRecentScheduledRun(runs, nowMs) {
-  const scheduledRuns = runs
-    .filter(run => run?.event === "schedule")
-    .sort((left, right) => {
-      const leftTime = Date.parse(left?.created_at || "");
-      const rightTime = Date.parse(right?.created_at || "");
-      return (Number.isFinite(rightTime) ? rightTime : -Infinity) -
-        (Number.isFinite(leftTime) ? leftTime : -Infinity);
-    });
-  if (!scheduledRuns.length) return false;
-  const createdAt = Date.parse(scheduledRuns[0]?.created_at || "");
-  return Number.isFinite(createdAt) && nowMs - createdAt <= SCHEDULE_STALE_AFTER_MS;
+function hasRecentTaskRunnerRun(runs, nowMs) {
+  return runs.some(run => {
+    const createdAt = Date.parse(run?.created_at || "");
+    return Number.isFinite(createdAt) && nowMs - createdAt <= DISPATCH_COOLDOWN_MS;
+  });
+}
+
+async function hasRecentDispatchIntent(env, nowMs) {
+  requireAuditBinding(env);
+  try {
+    const recent = await env.DB.prepare(
+      "SELECT 1 AS recent FROM audit_log WHERE event = ? AND created_at >= ? ORDER BY created_at DESC LIMIT 1",
+    ).bind(
+      "task_runner_dispatch_intent",
+      new Date(nowMs - DISPATCH_COOLDOWN_MS).toISOString(),
+    ).first();
+    return Boolean(recent);
+  } catch {
+    throw new Error("task_runner_dispatch_audit_read_failed");
+  }
+}
+
+async function reserveDispatchIntent(env, { scheduledTime, nowMs }) {
+  requireAuditBinding(env);
+  const details = {
+    workflow: WORKFLOW,
+    ref: REF,
+    scheduled_time: Number.isFinite(scheduledTime)
+      ? new Date(scheduledTime).toISOString()
+      : null,
+  };
+  try {
+    // A single conditional INSERT is the cross-isolate claim: D1 serializes writes,
+    // so concurrent Cron invocations cannot both reserve the same cooldown window.
+    const result = await env.DB.prepare(
+      "INSERT INTO audit_log(task_id,event,details_json,created_at) " +
+      "SELECT NULL,?,?,? WHERE NOT EXISTS (" +
+      "SELECT 1 FROM audit_log WHERE event = ? AND created_at >= ?)",
+    ).bind(
+      "task_runner_dispatch_intent",
+      JSON.stringify(details),
+      new Date(nowMs).toISOString(),
+      "task_runner_dispatch_intent",
+      new Date(nowMs - DISPATCH_COOLDOWN_MS).toISOString(),
+    ).run();
+    if (result?.success === false) throw new Error("audit_write_failed");
+    if (Number.isInteger(result?.meta?.changes) && result.meta.changes === 0) {
+      return false;
+    }
+    return true;
+  } catch {
+    throw new Error("task_runner_dispatch_audit_failed");
+  }
 }
 
 async function recordDispatch(env, { httpStatus, scheduledTime, nowMs }) {
-  if (!env?.DB || typeof env.DB.prepare !== "function") {
-    throw new Error("task_runner_dispatch_audit_unavailable");
-  }
+  requireAuditBinding(env);
   const details = {
     workflow: WORKFLOW,
     ref: REF,
@@ -105,11 +146,15 @@ export async function dispatchTaskRunnerIfStale({
   if (appConfiguration(env).length) {
     return { status: "disabled", reason: "missing_configuration" };
   }
+  requireAuditBinding(env);
   if (typeof fetchImpl !== "function") {
     throw new Error("task_runner_fetch_unavailable");
   }
   if (!Number.isFinite(nowMs)) {
     throw new Error("task_runner_clock_invalid");
+  }
+  if (await hasRecentDispatchIntent(env, nowMs)) {
+    return { status: "skipped", reason: "recent_dispatch_intent" };
   }
 
   const token = await createInstallationToken({
@@ -125,8 +170,11 @@ export async function dispatchTaskRunnerIfStale({
   if (hasActiveRun(runs)) {
     return { status: "skipped", reason: "active_run" };
   }
-  if (hasRecentScheduledRun(runs, nowMs)) {
-    return { status: "skipped", reason: "recent_schedule" };
+  if (hasRecentTaskRunnerRun(runs, nowMs)) {
+    return { status: "skipped", reason: "recent_task_runner_run" };
+  }
+  if (!await reserveDispatchIntent(env, { scheduledTime, nowMs })) {
+    return { status: "skipped", reason: "recent_dispatch_intent" };
   }
 
   let response;
@@ -151,10 +199,6 @@ export async function dispatchTaskRunnerIfStale({
     throw new Error("task_runner_dispatch_failed:" + status);
   }
 
-  await recordDispatch(env, {
-    httpStatus: response.status,
-    scheduledTime,
-    nowMs,
-  });
+  await recordDispatch(env, { httpStatus: response.status, scheduledTime, nowMs });
   return { status: "dispatched", httpStatus: response.status };
 }
