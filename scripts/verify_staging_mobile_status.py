@@ -125,6 +125,22 @@ def verify(environ: dict[str, str] | None = None, *, opener=None, readiness_time
     if isinstance(unavailable, dict) and ("ci_health" in unavailable or "kill_switch" in unavailable):
         raise RuntimeError("Mobile API still marks a verified snapshot unavailable")
 
+    execution_modes = data.get("task_execution_modes")
+    if not isinstance(execution_modes, dict) or execution_modes.get("available") is not True:
+        raise RuntimeError("Task execution mode migration is not available through the Staging mobile API")
+    counts = execution_modes.get("counts")
+    expected_modes = ("unknown", "dry_run", "live_inference", "codespace")
+    expected_statuses = ("pending", "running", "succeeded", "failed", "blocked")
+    if not isinstance(counts, dict):
+        raise RuntimeError("Task execution mode aggregate is invalid")
+    for mode in expected_modes:
+        per_status = counts.get(mode)
+        if not isinstance(per_status, dict) or any(
+            type(per_status.get(status)) is not int or per_status[status] < 0
+            for status in expected_statuses
+        ):
+            raise RuntimeError("Task execution mode aggregate is incomplete or invalid")
+
     return {
         "status": "verified",
         "run_id": int(expected_run_id),
@@ -134,6 +150,9 @@ def verify(environ: dict[str, str] | None = None, *, opener=None, readiness_time
         "paid_model_calls": False,
         "paid_fallback": False,
         "external_writes": False,
+        "task_execution_modes": "available",
+        "dry_run_succeeded": counts["dry_run"]["succeeded"],
+        "live_inference_succeeded": counts["live_inference"]["succeeded"],
     }
 
 
