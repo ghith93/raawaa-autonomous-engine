@@ -4,7 +4,6 @@ from __future__ import annotations
 import json
 import os
 import re
-import sys
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
@@ -129,6 +128,15 @@ def main() -> int:
             return 1
         if not isinstance(usage, dict):
             usage = {}
+        # Provider response fields are untrusted: emit only bounded integer counters.
+        usage = {
+            name: value
+            for name, value in usage.items()
+            if name in {"prompt_tokens", "completion_tokens", "total_tokens"}
+            and isinstance(value, int)
+            and not isinstance(value, bool)
+            and 0 <= value <= 100000000
+        }
     except (UnicodeDecodeError, json.JSONDecodeError, AttributeError, TypeError):
         print(json.dumps({
             "status": "failed",
