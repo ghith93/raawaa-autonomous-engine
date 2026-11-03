@@ -15,6 +15,20 @@ function validText(value, max) {
   return typeof value === "string" && value.trim().length > 0 && value.length <= max;
 }
 function positiveInt(value) { return Number.isSafeInteger(value) && value > 0; }
+function constantTimeEqual(a, b) {
+  if (typeof a !== "string" || typeof b !== "string" || !a || !b) return false;
+  let diff = a.length ^ b.length;
+  const length = Math.max(a.length, b.length);
+  for (let i = 0; i < length; i++) {
+    diff |= (a.charCodeAt(i % a.length) || 0) ^ (b.charCodeAt(i % b.length) || 0);
+  }
+  return diff === 0;
+}
+function quotaAdminAuthorized(request, env) {
+  const header = request.headers.get("authorization") || "";
+  const token = header.startsWith("Bearer ") ? header.slice(7) : "";
+  return constantTimeEqual(token, env.ENGINE_QUOTA_ADMIN_TOKEN);
+}
 function nonNegativeInt(value) { return Number.isSafeInteger(value) && value >= 0; }
 
 async function body(request) {
@@ -74,15 +88,16 @@ export async function handleQuota(request, env, url) {
   if (request.method === "GET") {
     const routeId = url.searchParams.get("route_id");
     const taskId = url.searchParams.get("task_id") || "read-only";
+    if (routeId && routeId !== "__no_route__" && !QUOTA_ROUTES.has(routeId)) return json({ error: "unknown_quota_route" }, 403);
     const limit = Number(url.searchParams.get("limit") || 100);
     if ((routeId !== null && !validText(routeId, 200)) || !validText(taskId, 200) || !Number.isInteger(limit) || limit < 1 || limit > 500) return json({ error: "invalid_query" }, 400);
     const now = new Date().toISOString();
     try {
       const snapshot = await usage(env.DB, routeId || "__no_route__", taskId, now);
       const cooldown = routeId ? await env.DB.prepare("SELECT until_at,reason FROM quota_cooldowns WHERE route_id=?").bind(routeId).first() : null;
-      const audit = routeId
+      const audit = routeId && routeId !== "__no_route__"
         ? await env.DB.prepare("SELECT id,event,route_id,task_kind,details_json,occurred_at FROM quota_audit_events WHERE route_id=? ORDER BY id DESC LIMIT ?").bind(routeId, limit).all()
-        : await env.DB.prepare("SELECT id,event,route_id,task_kind,details_json,occurred_at FROM quota_audit_events ORDER BY id DESC LIMIT ?").bind(limit).all();
+        : { results: [] };
       return json({ usage: snapshot, cooldown: cooldown || null, audit: (audit.results || []).map(row => ({...row, details: JSON.parse(row.details_json)})) });
     } catch { return json({ error: "storage_unavailable" }, 503); }
   }
@@ -163,14 +178,23 @@ export async function handleQuota(request, env, url) {
       return json({ error: "unsupported_action" }, 403);
     }
     if (input.action === "cool_down") {
-      if (!validText(input.route_id, 200) || !QUOTA_ROUTES.has(input.route_id) || !positiveInt(input.seconds)) return json({ error: "invalid_cooldown" }, 400);
+      if (!quotaAdminAuthorized(request, env)) return json({ error: "forbidden_scope" }, 403);
+      if (!validText(input.route_id, 200) || !QUOTA_ROUTES.has(input.route_id) ||
+          !positiveInt(input.seconds) || input.seconds > 3600) return json({ error: "invalid_cooldown" }, 400);
       const until = new Date(Date.now() + Math.min(input.seconds, 3600) * 1000).toISOString();
       const reason = typeof input.reason === "string" ? input.reason.slice(0,120) : "rate_limited";
       await env.DB.prepare("INSERT INTO quota_cooldowns(route_id,until_at,reason,updated_at) VALUES(?,?,?,?) ON CONFLICT(route_id) DO UPDATE SET until_at=excluded.until_at,reason=excluded.reason,updated_at=excluded.updated_at").bind(input.route_id,until,reason,now).run();
       return json({ ok: true, until_at: until });
     }
     if (input.action === "audit_event") {
-      if (!validText(input.event,80) ||
+      const allowedEvents = new Set([
+        "live_request_blocked", "quota_reserved", "monetary_start_failed",
+        "provider_error", "provider_cooldown", "provider_route_denied",
+        "provider_failure_stopped", "adapter_failure", "completion_received",
+        "route_quarantined",
+      ]);
+      if (!validText(input.event,80) || !allowedEvents.has(input.event) ||
+          (input.route_id && !QUOTA_ROUTES.has(input.route_id)) ||
           (input.route_id !== undefined && input.route_id !== null && !validText(input.route_id,200)) ||
           (input.task_kind !== undefined && input.task_kind !== null && !validText(input.task_kind,100)) ||
           (input.details !== undefined && (!input.details || typeof input.details !== "object" || Array.isArray(input.details)))) {
