@@ -48,7 +48,8 @@ def _priority(score: int, archived: bool = False) -> str:
 
 def score_github_candidate(item: dict, now: datetime) -> dict:
     score, reasons, risks = 0, [], []
-    license_id = item.get("license_spdx")
+    raw_license_id = item.get("license_spdx")
+    license_id = raw_license_id if isinstance(raw_license_id, str) and raw_license_id else None
     if license_id in PERMISSIVE_LICENSES:
         score += 20
         reasons.append("recognized_permissive_license_metadata")
