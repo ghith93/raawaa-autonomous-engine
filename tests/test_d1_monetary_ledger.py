@@ -84,6 +84,11 @@ class D1MonetaryLedgerTests(unittest.TestCase):
             "daily_spent_nanos": 10, "monthly_spent_nanos": 20,
             "pending_reserved_nanos": 30, "daily_total_nanos": 40,
             "monthly_total_nanos": 50, "pending_count": 1, "unresolved": [{"status":"ambiguous"}],
+        }, "budget_policy": {
+            "daily_budget_nanos": 400_000_000,
+            "monthly_budget_nanos": 12_000_000_000,
+            "per_task_budget_nanos": 200_000_000,
+            "enabled": True,
         }})
         totals = self.ledger.totals()
         self.assertEqual(totals["daily_total_nanos"], 40)
@@ -103,6 +108,28 @@ class D1MonetaryLedgerTests(unittest.TestCase):
         self.assertEqual(totals["total_nanos"], 9)
         self.assertEqual(open_url.call_args.args[0].full_url,
                          "https://engine.example/v1/monetary-ledger?task_id=task%20%2Fone")
+
+
+    @patch("urllib.request.urlopen")
+    def test_budget_status_requires_operator_owned_caps(self, open_url):
+        open_url.return_value = Response({
+            "snapshot": {
+                "daily_total_nanos": 10, "monthly_total_nanos": 20,
+                "task_total_nanos": 0,
+            },
+            "budget_policy": {
+                "daily_budget_nanos": 400_000_000,
+                "monthly_budget_nanos": 12_000_000_000,
+                "per_task_budget_nanos": 200_000_000,
+                "enabled": True,
+            },
+        })
+        self.assertEqual(
+            self.ledger.budget_status(0.4, 12.0),
+            {"daily_over_budget": False, "monthly_over_budget": False, "per_task_over_budget": False},
+        )
+        with self.assertRaisesRegex(D1MonetaryLedgerError, "operator-owned"):
+            self.ledger.budget_status(0.5, 12.0)
 
     def test_requires_https_and_token(self):
         for url, token in (("http://engine.example", "token"), ("https://engine.example", "")):
