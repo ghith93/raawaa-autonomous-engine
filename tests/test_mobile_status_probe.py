@@ -152,6 +152,8 @@ class MobileStatusProbeTests(unittest.TestCase):
         self.assertEqual(result["source_freshness"], "unknown")
         self.assertEqual(result["ci_health"], "unknown")
         self.assertEqual(result["kill_switch"], "unknown")
+        self.assertEqual(result["watchdog_ready"], "unknown")
+        self.assertEqual(result["watchdog_missing"], "unknown")
 
     def test_missing_worker_cron_heartbeat_is_reported_as_not_recorded(self):
         result = probe.summarize_mobile_status({
@@ -243,6 +245,10 @@ class MobileStatusProbeTests(unittest.TestCase):
         self.assertEqual(result["paper_ledger"], "route_not_deployed")
         self.assertEqual(result["last_scan"], "route_not_deployed")
         self.assertEqual(result["worker_cron_status"], "route_not_deployed")
+        self.assertEqual(result["watchdog_ready"], "route_not_deployed")
+        self.assertEqual(result["watchdog_missing"], "route_not_deployed")
+        self.assertEqual(result["watchdog_last_dispatch_requested"], "route_not_deployed")
+        self.assertEqual(result["watchdog_last_dispatch_intent_at"], "route_not_deployed")
         self.assertEqual(result["tasks_pending"], "unknown")
 
     def test_non_404_http_errors_still_fail_closed(self):
@@ -294,6 +300,10 @@ class MobileStatusProbeTests(unittest.TestCase):
             self.assertEqual(parsed["telegram_receipts"], "available")
             self.assertEqual(parsed["worker_cron_status"], "recorded")
             self.assertEqual(parsed["worker_cron_last_seen"], "2026-11-03T00:45:00.000Z")
+            self.assertEqual(parsed["watchdog_ready"], "not_ready")
+            self.assertEqual(parsed["watchdog_missing"], "GITHUB_APP_ID,GITHUB_APP_INSTALLATION_ID,GITHUB_APP_PRIVATE_KEY,GITHUB_APP_WATCHDOG_ENABLED")
+            self.assertEqual(parsed["watchdog_last_dispatch_requested"], "none")
+            self.assertEqual(parsed["watchdog_last_dispatch_intent_at"], "none")
             self.assertEqual(parsed["worker_cron_requeued"], "2")
             self.assertEqual(parsed["tasks_pending"], "2")
             self.assertEqual(parsed["paper_events"], "7")
