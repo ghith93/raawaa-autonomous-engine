@@ -11,3 +11,6 @@ migrations_dir = "migrations"
 
 [triggers]
 crons = ["*/15 * * * *", "1,6,11,16,21,26,31,36,41,46,51,56 * * * *"]
+
+[vars]
+QUOTA_ROUTE_LIMITS_JSON = '''{"groq:primary:openai/gpt-oss-20b":{"enabled":false,"minute_request_limit":30,"minute_token_limit":8000,"daily_request_limit":1000,"daily_token_limit":200000,"monthly_request_limit":10000,"monthly_token_limit":2000000,"per_task_request_limit":3,"per_task_token_limit":16000},"groq:primary:openai/gpt-oss-120b":{"enabled":false,"minute_request_limit":30,"minute_token_limit":8000,"daily_request_limit":1000,"daily_token_limit":200000,"monthly_request_limit":10000,"monthly_token_limit":2000000,"per_task_request_limit":3,"per_task_token_limit":16000},"groq:primary:qwen/qwen3.8-27b":{"enabled":false,"minute_request_limit":30,"minute_token_limit":8000,"daily_request_limit":1000,"daily_token_limit":200000,"monthly_request_limit":10000,"monthly_token_limit":2000000,"per_task_request_limit":3,"per_task_token_limit":16000}}'''
