@@ -15,7 +15,7 @@ Reasons not to embed it in the current runtime:
 ## Implemented in this change
 
 - Register OpenRouter as an OpenAI-compatible provider.
-- Add a strict runtime allowlist for the exact OpenRouter endpoint and the `openrouter/free` model alias only. This prevents the route from being configured to call an arbitrary paid model through this adapter.
+- Add a strict runtime allowlist for the exact OpenRouter endpoint and the two explicitly staged free identifiers (`openrouter/free` and `nvidia/nemotron-3-ultra-550b-a55b:free`). This prevents the route from being configured to call an arbitrary paid model through this adapter.
 - Add an OpenRouter route profile in disabled evaluation state.
 - Apply conservative internal request/token caps. Token caps are engine guardrails, not claims about OpenRouter's published token quota.
 - Keep commercial eligibility and production use disabled because the dynamic free router can select models with different licenses and data-handling terms.
@@ -25,16 +25,16 @@ Reasons not to embed it in the current runtime:
 
 The route must remain disabled until all of the following are completed:
 1. Operator adds `OPENROUTER_API_KEY` as a GitHub Actions secret; never put it in source control or chat.
-2. A specific model and its license, provider terms, data retention, and commercial-use permissions are pinned and reviewed. A dynamic alias alone is not enough for confidential or commercial workloads.
+2. A specific model and its license, provider terms, data retention, and commercial-use permissions are pinned and reviewed. OpenRouter's current Nemotron free-endpoint notice says request/session data is logged for security and product improvement; do not send confidential, personal, customer, or proprietary Raawaa data to this endpoint. A dynamic alias alone is not enough for confidential or commercial workloads.
 3. Provider account limits and an independently enforceable no-paid-route guarantee are verified.
 4. Live inference policy, provider hard-stop evidence, durable D1 quota and monetary ledgers, and the explicit runtime kill switch are reviewed and enabled by the operator.
-5. A real request is tested only with a public, non-sensitive prompt and an approved zero-cost route.
+5. A real request is tested only with a public, non-sensitive prompt and an approved zero-cost route. The one authorized smoke request reached the endpoint but failed strict response/model validation; no second inference request has been sent. Privacy-safe diagnostic flags have been added for a future explicitly authorized verification.
 
 ## Free-provider policy
 
 - Groq: existing account-confirmed free GPT-OSS routes remain disabled until the live-inference gates are explicitly opened.
 - Gemini: adapter support exists; free-tier limits and data policy must be verified for the specific account/model before activation.
-- OpenRouter: free alias staged, disabled, and non-commercial pending model-specific review.
+- OpenRouter: pinned Nemotron free endpoint and free alias staged, disabled, and non-commercial pending model-specific review; one bounded smoke request reached the endpoint but did not pass response/model validation.
 - Cloudflare Workers AI: listed for evaluation. Its published free allocation is measured in Neurons (10,000/day), not tokens; add a dedicated meter before routing production tasks.
 - Other providers (Mistral, SambaNova, NVIDIA NIM, Cohere, etc.) remain discovery candidates until current account-level quotas, exact endpoints, terms, and commercial permissions are verified.
 
