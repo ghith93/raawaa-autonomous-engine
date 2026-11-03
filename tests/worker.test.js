@@ -148,6 +148,41 @@ test("finish rejects unsupported terminal states", async () => {
 });
 
 
+test("retry endpoint persists a bounded next-attempt time", async () => {
+  const DB = dbMock();
+  const response = await worker.fetch(request("/v1/tasks/task-1/retry", {
+    method: "POST",
+    body: { lease_token: "lease-1", error: "provider_not_called:capacity", retry_after_seconds: 600 },
+  }), { DB, ENGINE_API_TOKEN: TOKEN });
+  assert.equal(response.status, 200);
+  assert.deepEqual(await response.json(), { ok: true, status: "pending" });
+  const update = DB.calls.find(x => x.kind === "run" && x.sql.startsWith("UPDATE tasks"));
+  assert.match(update.sql, /next_attempt_at/);
+  assert.equal(update.values[0], "pending");
+  assert.equal(Date.parse(update.values[4]) - Date.parse(update.values[3]), 600000);
+});
+
+test("retry endpoint rejects excessive delay before database writes", async () => {
+  const DB = dbMock();
+  const response = await worker.fetch(request("/v1/tasks/task-1/retry", {
+    method: "POST",
+    body: { lease_token: "lease-1", retry_after_seconds: 86401 },
+  }), { DB, ENGINE_API_TOKEN: TOKEN });
+  assert.equal(response.status, 400);
+  assert.deepEqual(await response.json(), { error: "invalid_retry_delay" });
+  assert.equal(DB.calls.some(x => x.kind === "run"), false);
+});
+
+test("claim endpoint only selects pending tasks whose retry delay has elapsed", async () => {
+  const DB = dbMock();
+  await worker.fetch(request("/v1/tasks/claim", { method: "POST", body: {} }), {
+    DB, ENGINE_API_TOKEN: TOKEN,
+  });
+  const claim = DB.calls.find(x => x.kind === "first" && x.sql.includes("UPDATE tasks SET status='running'"));
+  assert.match(claim.sql, /next_attempt_at IS NULL OR next_attempt_at<=\?/);
+  assert.equal(claim.values[3], claim.values[4]);
+});
+
 test("recover endpoint is authenticated and bounded to stale task selection", async () => {
   const DB = dbMock();
   const response = await worker.fetch(request("/v1/tasks/recover", { method: "POST", body: {} }), {
