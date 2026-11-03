@@ -7,7 +7,7 @@ This is a dated snapshot of the ChatGPT-connected environment used to operate th
 | Surface | Observed state | Operational interpretation |
 |---|---|---|
 | Callable tool definitions | 1,912 across 63 namespaces | Includes provider-specific actions and some tools whose account connection or consent is not complete. Not 1,912 independent integrations. |
-| Skill definitions | 248 across 31 skill packs | Skills are task instructions, not independent credentials or permissions. Only load the relevant skill for a task. |
+| Skill definitions | 248 across 33 skill packs | Skills are task instructions, not independent credentials or permissions. Only load the relevant skill for a task. |
 | GitHub | Installed and working | Current repository operations use the GitHub connector. Its app-specific permission is configured as full access; global default is low-risk auto-approval. |
 | GitHub repository guardrails | `main` reported `protected=false` and branch-protection checks disabled | PR/CI discipline is currently procedural, not enforced by a branch ruleset. The available GitHub connection cannot read or administer branch-protection settings requiring repository administration permission. |
 | Firecrawl | Installed; 427 of 1,000 plan credits remained when checked | Useful for search, developer research and page extraction. Credits are finite and the current balance is not evidence of a permanently free tier. |
@@ -15,7 +15,7 @@ This is a dated snapshot of the ChatGPT-connected environment used to operate th
 | Cloudflare | No Cloudflare plugin/connector found in plugin discovery. Read-only Cloudflare Worker, Access inventory and D1 migration workflows exist and run through GitHub Actions. | Worker inventory and D1 migration inventory succeeded. Cloudflare Access itself is not enabled (API returns 403 / `access.api.error.not_enabled`). This is optional: authenticated Worker API routes enforce `ENGINE_API_TOKEN` directly. The connector cannot inspect Cloudflare secret values or change Worker variables. |
 | Browser automation | TinyFish is installed but explicitly excluded from the engine operating path; no Playwright MCP plugin was found | Use APIs first. If a browser is essential, use a self-hosted Playwright runner in an ephemeral CI environment; do not use TinyFish. |
 | Runzumi | Tools are present, but the connection returned “no workspace consent” | No workspace runner metrics or cost data can be read until the user completes Runzumi onboarding and reconnects it. Do not infer runner cost from GitHub run duration. |
-| ChatGPT skills vs engine skills | 248 ChatGPT skill definitions are discoverable here; the engine has no local `skills/` loader/registry | ChatGPT plugin skills do not automatically transfer to the standalone engine and do not grant it credentials. Engine-local skills require a separate reviewed registry, loader and sandbox. |
+| ChatGPT skills vs engine skills | 248 ChatGPT skill definitions across 33 packs are discoverable here; `empire-llm-codex` and `soku` are present as skill packs, but no corresponding callable tool namespace was found. The engine has no local `skills/` loader/registry. | Skill instructions do not prove an external model runner is connected or executable. ChatGPT skills do not automatically transfer to the standalone engine or grant it credentials; engine-local skills require a separate reviewed registry, loader and sandbox. |
 
 ## Relevant connected capabilities
 
@@ -72,7 +72,10 @@ This addendum supersedes stale status statements above where noted. Counts and s
 - PR #334 merged: added the agent-runtime/platform evaluation and recorded the decision to retain the deterministic Python/D1 foundation rather than add overlapping frameworks prematurely.
 - PR #335 merged: added the isolated Staging D1 config and read-only migration inventory.
 - PR #336 merged: added automatic read-only staging inventory on relevant `main` updates, while retaining manual dispatch.
-- CI passed on each of those PR heads. PR #336 merge commit: `64d60f2fcef9ebfffa70f4747f545fa9e8f21584`.
+- PR #337 merged: revalidated the tool/skill inventory and watchdog evidence.
+- PR #338 merged but its `workflow_run` migration trigger was superseded by PR #339, which gates staging migrations directly behind successful main CI.
+- PR #340 merged: recorded verified Staging D1 schema readiness; the remote Staging D1 healthcheck succeeded and migrations `0001`–`0005` were applied without touching production.
+- CI passed on each merged PR head. PR #340 merge commit: `56ae80b181572cb7e11a76265e8e4c8236b37cbe`.
 
 ### Capability map (ChatGPT side, not inherited by the engine)
 
