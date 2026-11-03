@@ -32,7 +32,7 @@ class QuotaAwareLiveGateway:
             raise ValueError("per_task_budget_usd must be finite and non-negative")
         self.per_task_budget_usd = per_task_budget_usd
         # Validate configured caps before the gateway can make any provider request.
-        self.usage_ledger.budget_status(daily_budget_usd, monthly_budget_usd)
+        self.usage_ledger.budget_status(daily_budget_usd, monthly_budget_usd, per_task_budget_usd=self.per_task_budget_usd)
 
     def _live_enabled(self) -> bool:
         return (
@@ -137,6 +137,12 @@ class QuotaAwareLiveGateway:
                 estimated_tokens=estimated_tokens,
             )
             try:
+                # Durable cloud ledgers transition to in-flight immediately before
+                # provider I/O. A lost acknowledgement is treated as ambiguous and
+                # never followed by a release or route rotation.
+                mark_started = getattr(self.usage_ledger, "mark_started", None)
+                if callable(mark_started):
+                    mark_started(monetary_reservation_id)
                 response = adapter.generate(profile.model, request)
                 if response.provider != profile.provider or response.model != profile.model:
                     raise ValueError("adapter response route does not match reserved profile")
@@ -163,10 +169,14 @@ class QuotaAwareLiveGateway:
                 # The provider may have processed the request before a timeout,
                 # transport failure, or malformed response. Retain the full token
                 # reservation conservatively; request count is already consumed.
-                self.quota_manager.ledger.settle(reservation_id, estimated_tokens)
                 if exc.status_code == 429:
-                    # An explicit 429 rejects the request; no provider charge is expected.
-                    self.usage_ledger.release(monetary_reservation_id)
+                    # The provider explicitly rejected the request. Provider I/O did
+                    # occur, so settle zero cost; never release a started reservation.
+                    self.usage_ledger.settle(
+                        monetary_reservation_id, 0, 0, 0.0,
+                        cost_basis="provider_rejected_429",
+                    )
+                    self.quota_manager.ledger.settle(reservation_id, estimated_tokens)
                     self.quota_manager.ledger.cool_down(
                         profile.route_id, self.cooldown_seconds, "http_429"
                     )
@@ -178,8 +188,25 @@ class QuotaAwareLiveGateway:
                     # different verified route may be tried safely.
                     continue
                 # A timeout, transport failure, malformed response, 5xx, or
-                # non-429 HTTP error may follow provider-side processing. Never
-                # replay the same request against another route in this case.
+                # non-429 HTTP error may follow provider-side processing. Preserve
+                # the reservation as ambiguous before stopping; never release or replay.
+                mark_ambiguous = getattr(self.usage_ledger, "mark_ambiguous", None)
+                if callable(mark_ambiguous):
+                    try:
+                        mark_ambiguous(monetary_reservation_id, reason=(
+                            "provider_timeout" if exc.status_code is None else
+                            "provider_5xx" if exc.status_code >= 500 else
+                            "transport_error"
+                        ))
+                    except Exception as ledger_error:
+                        self._audit(
+                            "monetary_ambiguity_write_failed", request, profile,
+                            error_type=type(ledger_error).__name__,
+                        )
+                        raise ProviderUnavailable(
+                            "Provider outcome is ambiguous and the D1 ledger acknowledgement failed; execution stopped."
+                        ) from ledger_error
+                self.quota_manager.ledger.settle(reservation_id, estimated_tokens)
                 self._audit(
                     "provider_failure_stopped", request, profile,
                     reason="non_429_no_route_rotation",
@@ -189,9 +216,20 @@ class QuotaAwareLiveGateway:
                     "Provider error was not HTTP 429; route rotation stopped to avoid replay."
                 ) from exc
             except Exception as exc:
-                # Do not silently rotate after an unknown adapter/programming error.
                 # Unknown adapter failures have ambiguous remote execution status.
-                # Keep the reservation rather than making possibly-used quota reusable.
+                # Mark the monetary reservation ambiguous where supported; never release.
+                mark_ambiguous = getattr(self.usage_ledger, "mark_ambiguous", None)
+                if callable(mark_ambiguous):
+                    try:
+                        mark_ambiguous(monetary_reservation_id, reason="adapter_error")
+                    except Exception as ledger_error:
+                        self._audit(
+                            "monetary_ambiguity_write_failed", request, profile,
+                            error_type=type(ledger_error).__name__,
+                        )
+                        raise ProviderUnavailable(
+                            "Adapter outcome is ambiguous and the D1 ledger acknowledgement failed; execution stopped."
+                        ) from ledger_error
                 self.quota_manager.ledger.settle(reservation_id, estimated_tokens)
                 self._audit(
                     "adapter_failure", request, profile,
@@ -223,6 +261,7 @@ class QuotaAwareLiveGateway:
                 response.input_tokens,
                 response.output_tokens,
                 settled_cost_usd,
+                cost_basis=cost_basis,
             )
             self.quota_manager.ledger.settle(reservation_id, actual_tokens)
             self._audit(
