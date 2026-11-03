@@ -76,6 +76,22 @@ class ToolBrokerTests(unittest.TestCase):
         mismatched = {"agents": ROSTER["agents"][:1]}
         self.assertTrue(validate_permission_matrix(MATRIX, mismatched))
 
+    def test_read_permission_cannot_be_used_for_execution_or_network_actions(self):
+        for action in ("run_tests", "research"):
+            with self.subTest(action=action):
+                unsafe = {
+                    **MATRIX,
+                    "tools": {
+                        **MATRIX["tools"],
+                        "repository.read_file": {
+                            **MATRIX["tools"]["repository.read_file"],
+                            "action": action,
+                        },
+                    },
+                }
+                errors = validate_permission_matrix(unsafe, ROSTER)
+                self.assertTrue(any("read access is restricted to inspect_code" in error for error in errors))
+
     def test_authorized_read_executes_through_registered_adapter(self):
         result = self.broker.execute(request())
         self.assertEqual(result, "file contents")
@@ -199,6 +215,18 @@ class ToolBrokerTests(unittest.TestCase):
         with self.assertRaises(ToolBrokerAuditError):
             broker.execute(request())
         self.assertEqual(len(self.calls), 1)
+
+    def test_mutating_trusted_config_after_construction_does_not_widen_broker(self):
+        policy = dict(self.policy)
+        matrix = {
+            **MATRIX,
+            "tools": {name: dict(spec) for name, spec in MATRIX["tools"].items()},
+        }
+        broker = ToolBroker(policy, matrix, self.adapters, agent_roster=ROSTER, audit_sink=self.events.append)
+        policy["allow_external_writes"] = True
+        matrix["tools"]["repository.read_file"]["action"] = "run_tests"
+        decision = broker.authorize(request())
+        self.assertTrue(decision.allowed)
 
     def test_invalid_request_fails_closed(self):
         decision = self.broker.authorize(request(environment="unknown"))
