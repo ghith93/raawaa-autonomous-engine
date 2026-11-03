@@ -66,8 +66,11 @@ test("mobile status endpoint returns read-only D1 metrics and explicit unknowns"
  assert.deepEqual(body.paper_events,[{event_type:"candidate_detected",count:4}]);
  assert.equal(body.latest_paper_event.candidate_id,"candidate-1");
  assert.deepEqual(body.latest_market_snapshot,{candidate_id:"candidate-2",occurred_at:"2026-11-02T12:30:00.000Z",chain_id:1,block_number:123});
- assert.deepEqual(body.provider_usage,[{route_id:"groq:gpt-oss-20b",requests:3,tokens:1200}]);
- assert.deepEqual(body.model_costs_usd,{total:0.0125,by_provider:[{provider:"groq",requests:2,input_tokens:900,output_tokens:300,cost_usd:0.0125}],source:"model_usage D1 ledger; recorded provider costs only"});
+ assert.deepEqual(body.provider_usage,{requests:3,tokens:1200});
+ assert.deepEqual(body.model_costs_usd,{total:0.0125,source:"model_usage D1 ledger; recorded provider costs only"});
+ assert.equal(JSON.stringify(body).includes("groq:gpt-oss-20b"),false);
+ assert.equal(JSON.stringify(body).includes('"provider":"groq"'),false);
+ assert.equal(JSON.stringify(body).includes("reservation_id"),false);
  assert.deepEqual(body.telegram_webhook_schema,{available:true,status:"Migration 0005 applied; webhook activation remains separately gated"});
  assert.deepEqual(body.worker_cron,{last_seen_at:"2026-11-03T00:00:00.000Z",cron:"*/15 * * * *",requeued:2,failed:1});
  assert.deepEqual(body.task_runner_watchdog,{ready:false,missing:["GITHUB_APP_ID","GITHUB_APP_INSTALLATION_ID","GITHUB_APP_PRIVATE_KEY","GITHUB_APP_WATCHDOG_ENABLED"],last_dispatch_requested:null,last_dispatch_intent_at:null});
