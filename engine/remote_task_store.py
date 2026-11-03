@@ -32,7 +32,8 @@ class RemoteTaskStore:
     def __init__(self, base_url: str | None = None, token: str | None = None,
                  timeout: float = 15.0, access_client_id: str | None = None,
                  access_client_secret: str | None = None, reject_redirects: bool = False,
-                 require_retry_schedule: bool | None = None):
+                 require_retry_schedule: bool | None = None,
+                 require_execution_mode: bool = True):
         self.base_url = (base_url or os.environ.get("RAAWAA_ENGINE_API_URL", "")).rstrip("/")
         self.token = token or os.environ.get("RAAWAA_ENGINE_API_TOKEN", "")
         self.access_client_id = (
@@ -49,6 +50,7 @@ class RemoteTaskStore:
             os.environ.get("RAAWAA_ENGINE_LIVE_INFERENCE", "").strip().lower() == "enabled"
             if require_retry_schedule is None else bool(require_retry_schedule)
         )
+        self.require_execution_mode = bool(require_execution_mode)
         if not self.base_url.startswith("https://") or not self.token:
             raise ValueError("Remote task store requires an HTTPS API URL and token")
         if bool(self.access_client_id) != bool(self.access_client_secret):
@@ -144,16 +146,23 @@ class RemoteTaskStore:
     def claim_next(self, lease_timeout_seconds: int = 900) -> dict[str, Any] | None:
         if not 1 <= int(lease_timeout_seconds) <= 900:
             raise ValueError("remote lease timeout must be between 1 and 900 seconds")
-        # Live inference can encounter pre-provider capacity failures that must
-        # be deferred. Require the matching Worker/migration only in that mode;
-        # default dry-run queue processing remains compatible with the current
-        # production Worker during the staged rollout.
-        if self.require_retry_schedule:
+        # Do not let a new runner claim tasks from a Worker that cannot persist
+        # execution_mode. Live inference additionally requires delayed-retry support.
+        if self.require_execution_mode or self.require_retry_schedule:
             health = self._request("/health")
             capabilities = health.get("capabilities")
-            if not isinstance(capabilities, list) or "task_retry_schedule_v1" not in capabilities:
+            if not isinstance(capabilities, list):
+                capabilities = []
+            required = []
+            if self.require_execution_mode:
+                required.append("task_execution_mode_v1")
+            if self.require_retry_schedule:
+                required.append("task_retry_schedule_v1")
+            missing = [name for name in required if name not in capabilities]
+            if missing:
                 raise RemoteTaskStoreError(
-                    "Remote Worker lacks task_retry_schedule_v1; apply migration 0008 and deploy the updated Worker before live inference"
+                    "Remote Worker lacks required capabilities: " + ", ".join(missing) +
+                    "; apply the matching D1 migrations and deploy the updated Worker before claiming tasks"
                 )
         result = self._request("/v1/tasks/claim", "POST", {})
         task = result.get("task")
@@ -161,6 +170,10 @@ class RemoteTaskStore:
             return None
         if not isinstance(task, dict) or not result.get("lease_token"):
             raise RemoteTaskStoreError("Remote task API returned an invalid lease")
+        if self.require_execution_mode and "execution_mode" not in task:
+            raise RemoteTaskStoreError(
+                "Remote Worker claimed a task without execution-mode metadata; task was not executed"
+            )
         if self.require_retry_schedule and "next_attempt_at" not in task:
             raise RemoteTaskStoreError(
                 "Remote Worker claimed a live task without retry-schedule metadata; task was not executed"
@@ -195,7 +208,9 @@ class RemoteTaskStore:
             payload["execution_mode"] = execution_mode
         if error is not None:
             payload["error"] = error
-        self._request(f"/v1/tasks/{task_id}/finish", "POST", payload)
+        response = self._request(f"/v1/tasks/{task_id}/finish", "POST", payload)
+        if execution_mode is not None and response.get("execution_mode") != execution_mode:
+            raise RemoteTaskStoreError("Remote Worker did not confirm the persisted execution mode")
 
     def retry_or_fail(self, task_id: str, error: str,
                       lease_token: str | None = None,
@@ -212,6 +227,8 @@ class RemoteTaskStore:
         status = response.get("status")
         if status not in {"pending", "failed"}:
             raise RemoteTaskStoreError("Remote task API returned an invalid retry status")
+        if execution_mode is not None and response.get("execution_mode") != execution_mode:
+            raise RemoteTaskStoreError("Remote Worker did not confirm the persisted execution mode")
         if status == "pending" and retry_after_seconds > 0 and not isinstance(response.get("next_attempt_at"), str):
             raise RemoteTaskStoreError(
                 "Remote Worker did not confirm the delayed retry schedule; task runner stopped"
