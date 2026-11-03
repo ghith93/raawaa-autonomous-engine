@@ -223,6 +223,8 @@ class QuotaAwareLiveGateway:
                     # A 429 is after provider I/O began, so it is settled at zero rather
                     # than released. Release is reserved strictly for pre-I/O failures.
                     self.usage_ledger.settle(monetary_reservation_id, 0, 0, 0.0)
+                    if self.invocation_store is not None:
+                        self.invocation_store.reject(request.task_id, request.lease_token, request.invocation_id, profile.route_id, "http_429")
                     self.quota_manager.ledger.cool_down(
                         profile.route_id, self.cooldown_seconds, "http_429"
                     )
@@ -242,6 +244,8 @@ class QuotaAwareLiveGateway:
                     # The model request was rejected before inference. Settle zero,
                     # quarantine this exact route, and try another verified-free model.
                     self.usage_ledger.settle(monetary_reservation_id, 0, 0, 0.0)
+                    if self.invocation_store is not None:
+                        self.invocation_store.reject(request.task_id, request.lease_token, request.invocation_id, profile.route_id, "provider_permission_denied")
                     self.quota_manager.ledger.cool_down(
                         profile.route_id, self.cooldown_seconds,
                         "provider_model_permission_denied",
@@ -258,6 +262,8 @@ class QuotaAwareLiveGateway:
                 # unclassified HTTP error may follow provider-side processing. Never
                 # replay or release the reservation in this case.
                 self.usage_ledger.mark_ambiguous(monetary_reservation_id)
+                if self.invocation_store is not None:
+                    self.invocation_store.mark_ambiguous(request.task_id, request.lease_token, request.invocation_id)
                 self._audit(
                     "provider_failure_stopped", request, profile,
                     reason="non_429_no_route_rotation",
@@ -273,6 +279,8 @@ class QuotaAwareLiveGateway:
                 # Keep the reservation rather than making possibly-used quota reusable.
                 self.quota_manager.ledger.settle(reservation_id, estimated_tokens)
                 self.usage_ledger.mark_ambiguous(monetary_reservation_id)
+                if self.invocation_store is not None:
+                    self.invocation_store.mark_ambiguous(request.task_id, request.lease_token, request.invocation_id)
                 self._audit(
                     "adapter_failure", request, profile,
                     error_type=type(exc).__name__, reason="ambiguous_adapter_failure",
@@ -305,6 +313,8 @@ class QuotaAwareLiveGateway:
                 settled_cost_usd,
             )
             self.quota_manager.ledger.settle(reservation_id, actual_tokens)
+            if self.invocation_store is not None:
+                self.invocation_store.settle(request.task_id, request.lease_token, request.invocation_id)
             self._audit(
                 "completion_received", request, profile,
                 actual_tokens=actual_tokens,
