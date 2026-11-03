@@ -14,7 +14,7 @@
         "execution_trace_review",
         "mobile_web_quality_assurance"
       ],
-      "verified_operations": [
+      "implemented_probe_operations": [
         "GET /api/status",
         "GET /api/devices"
       ],
