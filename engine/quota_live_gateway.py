@@ -197,8 +197,8 @@ class QuotaAwareLiveGateway:
                 # reservation conservatively; request count is already consumed.
                 self.quota_manager.ledger.settle(reservation_id, estimated_tokens)
                 if exc.status_code == 429:
-                    # A 429 is after provider I/O began, so it is settled at zero rather
-                    # than released. Release is reserved strictly for pre-I/O failures.
+                    # A 429 is an explicit provider rejection. Preserve request quota,
+                    # settle monetary spend at zero, and permit a different route.
                     self.usage_ledger.settle(monetary_reservation_id, 0, 0, 0.0)
                     self.quota_manager.ledger.cool_down(
                         profile.route_id, self.cooldown_seconds, "http_429"
@@ -207,17 +207,36 @@ class QuotaAwareLiveGateway:
                         "provider_cooldown", request, profile,
                         reason="http_429", cooldown_seconds=self.cooldown_seconds,
                     )
-                    # An explicit rate-limit response rejects this request, so a
-                    # different verified route may be tried safely.
+                    continue
+                if (exc.status_code == 403 and exc.provider_error_code in {
+                    "permissions_error",
+                    "model_permission_blocked_org",
+                    "model_permission_blocked_project",
+                }):
+                    # Groq documents these machine codes as model-permission denials.
+                    # The request was rejected before inference; settle zero and
+                    # quarantine this model route, then try another verified-free model.
+                    self.usage_ledger.settle(monetary_reservation_id, 0, 0, 0.0)
+                    self.quota_manager.ledger.cool_down(
+                        profile.route_id, self.cooldown_seconds, "provider_model_permission_denied"
+                    )
+                    self._audit(
+                        "provider_route_denied", request, profile,
+                        reason="provider_model_permission_denied",
+                        http_status=403,
+                        provider_error_code=exc.provider_error_code,
+                        cooldown_seconds=self.cooldown_seconds,
+                    )
                     continue
                 # A timeout, transport failure, malformed response, 5xx, or
-                # non-429 HTTP error may follow provider-side processing. Never
+                # unclassified HTTP error may follow provider-side processing. Never
                 # replay or release the reservation in this case.
                 self.usage_ledger.mark_ambiguous(monetary_reservation_id)
                 self._audit(
                     "provider_failure_stopped", request, profile,
                     reason="non_429_no_route_rotation",
                     http_status=exc.status_code or 0,
+                    provider_error_code=exc.provider_error_code or "",
                 )
                 raise ProviderUnavailable(
                     "Provider error was not HTTP 429; route rotation stopped to avoid replay."
