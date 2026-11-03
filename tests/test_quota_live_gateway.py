@@ -98,6 +98,81 @@ class QuotaAwareGatewayTests(unittest.TestCase):
         values.update(changes)
         return QuotaProfile(**values)
 
+    def test_preflight_reports_capacity_without_reserving_or_calling_provider(self):
+        adapter = FakeAdapter("groq")
+        manager = QuotaManager([self.profile()], self.quota)
+        gateway = QuotaAwareLiveGateway(
+            manager, {"groq": adapter}, self.usage, True,
+            environ={"RAAWAA_ENGINE_LIVE_INFERENCE": "enabled"},
+        )
+        result = gateway.preflight_capacity(max_output_tokens=256)
+        self.assertTrue(result["eligible"])
+        self.assertEqual(result["reason"], "verified_free_route_available")
+        self.assertEqual(adapter.calls, 0)
+        self.assertEqual(manager.snapshot()[0]["daily_requests_used"], 0)
+        self.assertEqual(self.usage.totals()["pending_reservations"], 0)
+
+    def test_preflight_detects_exhausted_quota_and_cooldown(self):
+        profile = self.profile(minute_request_limit=1)
+        adapter = FakeAdapter("groq")
+        manager = QuotaManager([profile], self.quota)
+        gateway = QuotaAwareLiveGateway(
+            manager, {"groq": adapter}, self.usage, True,
+            environ={"RAAWAA_ENGINE_LIVE_INFERENCE": "enabled"},
+        )
+        self.quota.record(profile.route_id, 1)
+        result = gateway.preflight_capacity(max_output_tokens=256)
+        self.assertFalse(result["eligible"])
+        self.assertEqual(result["reason"], "provider_capacity_unavailable")
+        self.quota.cool_down(profile.route_id, 900, "test")
+        self.assertEqual(gateway.preflight_capacity()["reason"], "provider_capacity_unavailable")
+        self.assertEqual(adapter.calls, 0)
+
+    def test_preflight_detects_global_monetary_budget_exhaustion(self):
+        adapter = FakeAdapter("groq")
+        self.usage.record("groq", "model-x", "research", 1, 1, 0.01)
+        manager = QuotaManager([self.profile()], self.quota)
+        gateway = QuotaAwareLiveGateway(
+            manager, {"groq": adapter}, self.usage, True,
+            environ={"RAAWAA_ENGINE_LIVE_INFERENCE": "enabled"},
+            daily_budget_usd=0.0, monthly_budget_usd=1.0,
+        )
+        result = gateway.preflight_capacity()
+        self.assertFalse(result["eligible"])
+        self.assertEqual(result["reason"], "monetary_budget_exhausted")
+        self.assertEqual(adapter.calls, 0)
+
+    def test_preflight_fails_closed_when_live_switch_is_off(self):
+        adapter = FakeAdapter("groq")
+        manager = QuotaManager([self.profile()], self.quota)
+        gateway = QuotaAwareLiveGateway(
+            manager, {"groq": adapter}, self.usage, True, environ={},
+        )
+        result = gateway.preflight_capacity()
+        self.assertFalse(result["eligible"])
+        self.assertEqual(result["reason"], "live_inference_disabled")
+        self.assertEqual(adapter.calls, 0)
+
+    def test_checkpoint_prepare_failure_is_never_reclassified_as_safe_retry(self):
+        class BrokenCheckpoint:
+            def prepare(self, *args):
+                raise TimeoutError("checkpoint response lost")
+
+        adapter = FakeAdapter("groq")
+        manager = QuotaManager([self.profile()], self.quota)
+        gateway = QuotaAwareLiveGateway(
+            manager, {"groq": adapter}, self.usage, True,
+            environ={"RAAWAA_ENGINE_LIVE_INFERENCE": "enabled"},
+            invocation_store=BrokenCheckpoint(),
+        )
+        request = GenerationRequest(
+            "research", "hello", 20, task_id="task-1",
+            step_key="research:primary", lease_token="lease-1",
+        )
+        with self.assertRaises(ProviderUnavailable):
+            gateway.generate(request)
+        self.assertEqual(adapter.calls, 0)
+
     def test_missing_task_id_blocks_before_provider_call(self):
         adapter = FakeAdapter("groq")
         manager = QuotaManager([self.profile()], self.quota)
