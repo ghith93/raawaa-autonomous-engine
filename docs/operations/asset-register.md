@@ -111,3 +111,9 @@ At every session start, refresh counts, account/connection status, app permissio
 - Issue #440 remains open; Codespaces executor remains disabled.
 - F1 is next, then F5. Graphify (Apache-2.0, package `graphifyy`) is approved for later code-only local evaluation, not installed/run. Spec Kit (MIT) remains deferred.
 
+## F1 execution-mode separation — 2026-11-04
+
+- Introduces additive D1 migration `0008_task_execution_mode` and equivalent SQLite auto-migration. Legacy rows default to `unknown`; new claims record `dry_run`, `live_inference`, or `codespace`. Old clients without a mode remain compatible and record `unknown`.
+- Mobile API/dashboard and Task Runner status now distinguish dry-run simulation from successful live inference/Codespace execution. Dry-run successes are not counted as executed; unknown legacy successes are not guessed.
+- Migration/deployment is Staging-only in the normal post-merge pipeline; Production remains separately gated. No live inference, paid usage, external write, or Codespaces activation.
+
