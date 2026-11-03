@@ -1,0 +1,113 @@
+{
+  "mode": "live_inference_opt_in",
+  "daily_budget_usd": 0.4,
+  "monthly_budget_usd": 12,
+  "per_task_budget_usd": 0.2,
+  "allow_paid_model_calls": false,
+  "allow_external_writes": false,
+  "model_policy": {
+    "strategy": "hybrid",
+    "routing_order": [
+      "verified_free",
+      "paid_fallback"
+    ],
+    "prefer_free_first": true,
+    "paid_fallback_enabled": false,
+    "paid_fallback_requires_provider_hard_cap": true,
+    "paid_fallback_requires_prepaid_or_provider_enforced_cap": true,
+    "paid_fallback_monthly_cap_usd": 12,
+    "no_automatic_plan_upgrade": true,
+    "no_trial_or_promotional_credit_as_permanent_capacity": true,
+    "provider_hard_stop_verified": true,
+    "provider_hard_stop_evidence": {
+      "provider": "Groq",
+      "scope": "Groq Cloud Free plan, account=primary; only explicitly enabled GPT-OSS routes in this Staging smoke",
+      "hard_limit": "Free-plan use is fee-free; requests exceeding Free-plan model limits return HTTP 429; moving from Free to Developer requires an explicit upgrade and a valid payment method. Automatic plan upgrades and paid fallback remain disabled. Internal monthly and per-task limits are additional conservative engine caps, not provider-published quotas.",
+      "verified_at": "2026-11-03T05:04:00Z",
+      "source_url": "https://console.groq.com/docs/billing-faqs",
+      "supporting_source_urls": [
+        "https://console.groq.com/docs/rate-limits",
+        "https://community.groq.com/t/do-i-get-charged-for-anything-on-the-groq-free-plan/832"
+      ],
+      "account_verification": "Existing operator-confirmed Free-plan account and model visibility recorded 2026-11-01 in the default provider profile. API key presence re-confirmed by Task Runner on 2026-11-03. This overlay is Staging-smoke-only; revalidate account tier before any future plan change."
+    }
+  },
+  "budget_envelope": {
+    "currency": "USD",
+    "monthly_total_hard_cap_usd": 15,
+    "model_monthly_hard_cap_usd": 12,
+    "infrastructure_monthly_hard_cap_usd": 0,
+    "unallocated_reserve_usd": 3,
+    "daily_model_hard_cap_usd": 0.4,
+    "per_task_model_hard_cap_usd": 0.2,
+    "cloudflare": {
+      "plan": "free_only",
+      "paid_overages_allowed": false
+    },
+    "github_actions": {
+      "usage": "included_allowance_only",
+      "paid_overages_allowed": false
+    },
+    "stop_on_unknown_cost": true,
+    "stop_on_unsettled_reservation": true,
+    "require_atomic_pre_call_reservation": true
+  },
+  "require_human_approval_for": [
+    "publish_content",
+    "send_messages",
+    "spend_money",
+    "change_prices",
+    "deploy_production",
+    "delete_data",
+    "change_access",
+    "modify_storefront"
+  ],
+  "max_task_retries": 2,
+  "max_parallel_agents": 2,
+  "default_task_timeout_seconds": 300,
+  "live_inference_data_policy": {
+    "require_explicit_classification": true,
+    "allowed_classifications": [
+      "public"
+    ],
+    "allowed_task_types": [
+      "research_brief"
+    ],
+    "allowed_payload_keys": [
+      "data_classification",
+      "topic",
+      "questions",
+      "source_urls"
+    ],
+    "max_prompt_bytes": 7000,
+    "blocked_key_fragments": [
+      "password",
+      "passwd",
+      "secret",
+      "apikey",
+      "access_token",
+      "refresh_token",
+      "authorization",
+      "privatekey",
+      "credential",
+      "customer",
+      "personaldata",
+      "personalinformation",
+      "payment",
+      "cardnumber",
+      "cvv",
+      "bankaccount",
+      "nationalid",
+      "passport",
+      "medicalrecord",
+      "formula",
+      "ingredient",
+      "composition",
+      "proprietary",
+      "orderdata",
+      "email",
+      "phone",
+      "address"
+    ]
+  }
+}
