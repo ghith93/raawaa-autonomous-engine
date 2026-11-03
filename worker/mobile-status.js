@@ -80,15 +80,14 @@ async function load() {
   $("pending").textContent=tasks.pending||0;$("running").textContent=tasks.running||0;$("succeeded").textContent=tasks.succeeded||0;
   $("failed").textContent=(tasks.failed||0)+(tasks.blocked||0);
   rows("paper",(data.paper_events||[]).map(x=>[x.event_type,x.count]),"No paper events recorded");
-  rows("usage",(data.provider_usage||[]).map(x=>[x.route_id,(x.requests||0)+" requests · "+(x.tokens||0)+" tokens"]),"No D1 provider usage recorded");
+  const usage=data.provider_usage||{};
+  rows("usage",[
+    ["Requests",usage.requests||0],
+    ["Tokens",usage.tokens||0]
+  ],"No D1 provider usage recorded");
   const costs=data.model_costs_usd||{};
-  const byProvider=(costs.by_provider||[]).map(x=>[
-    x.provider,
-    "$"+(Number(x.cost_usd)||0).toFixed(6)+" · "+(x.requests||0)+" requests · "+((x.input_tokens||0)+(x.output_tokens||0))+" tokens"
-  ]);
   rows("modelCosts",[
-    ["Total recorded", "$"+(Number(costs.total)||0).toFixed(6)],
-    ...byProvider
+    ["Total recorded", "$"+(Number(costs.total)||0).toFixed(6)]
   ],"No recorded model inference costs");
   const money=data.monetary_ledger||{};
   rows("monetaryLedger",money.available?[
