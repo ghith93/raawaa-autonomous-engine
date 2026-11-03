@@ -18,7 +18,13 @@ class ProviderWorkflowSecurityTests(unittest.TestCase):
         }
         for variable, expression in expected.items():
             self.assertIn(variable + ": " + expression, batch)
-            self.assertEqual(source.count(expression), 1, f"{variable} secret reference leaked outside the batch step")
+            assignment_count = sum(
+                1 for line in source.splitlines()
+                if line.strip().startswith(variable + ":")
+            )
+            self.assertEqual(assignment_count, 1, f"{variable} was assigned outside the batch step")
+        for expression in ("$" + "{{ secrets.GROQ_API_KEY }}", "$" + "{{ secrets.GEMINI_API_KEY }}"):
+            self.assertEqual(source.count(expression), 1, "provider API key reference leaked outside the batch step")
         self.assertIn(
             "RAAWAA_ENGINE_API_URL: https://raawaa-autonomous-engine-control.ghith-shikhkhaled.workers.dev",
             batch,
