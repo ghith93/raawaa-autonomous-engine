@@ -64,6 +64,7 @@ def run_once(store: TaskStore, live_gateway=None, environ=None) -> dict | None:
         return {"id": task["id"], "status": "blocked", "reason": "unsupported_task_type"}
 
     heartbeat = LeaseHeartbeat(store, task["id"], task["lease_token"]).start()
+    execution_mode = "not_started"
     try:
         contract = build_task_contract(task, load_agent_roster())
         if _live_requested(environ):
@@ -115,6 +116,7 @@ def run_once(store: TaskStore, live_gateway=None, environ=None) -> dict | None:
                 step_key="primary-inference:v1",
                 lease_token=task["lease_token"],
             )
+            execution_mode = "live_inference"
             try:
                 response = live_gateway.generate(request)
                 if not isinstance(getattr(response, "text", None), str) or not response.text.strip():
@@ -146,7 +148,7 @@ def run_once(store: TaskStore, live_gateway=None, environ=None) -> dict | None:
                     f"provider_not_called:{exc.reason_code}",
                     lease_token=task["lease_token"],
                     retry_after_seconds=retry_delay,
-                    execution_mode="live_inference",
+                    execution_mode=execution_mode,
                 )
                 return {
                     "id": task["id"], "status": status,
@@ -164,12 +166,13 @@ def run_once(store: TaskStore, live_gateway=None, environ=None) -> dict | None:
                     task["id"], "blocked",
                     error=f"live_inference_blocked:{type(exc).__name__}",
                     lease_token=task["lease_token"],
-                    execution_mode="live_inference",
+                    execution_mode=execution_mode,
                 )
                 return {"id": task["id"], "status": "blocked",
                         "reason": "live_inference_failed_no_replay", "recovery": recovery}
         else:
             # Default path is deterministic, zero-network dry run.
+            execution_mode = "dry_run"
             result = contract
 
         result["operating_policy"] = {
@@ -178,7 +181,8 @@ def run_once(store: TaskStore, live_gateway=None, environ=None) -> dict | None:
         }
         heartbeat.stop()
         heartbeat.check()
-        store.finish(task["id"], "succeeded", result=result, lease_token=task["lease_token"])
+        store.finish(task["id"], "succeeded", result=result, lease_token=task["lease_token"],
+                     execution_mode=execution_mode)
         summary = {
             "id": task["id"], "status": "succeeded", "mode": result["mode"],
             "agent_id": result["agent_id"], "recovery": recovery,
@@ -206,7 +210,8 @@ def run_once(store: TaskStore, live_gateway=None, environ=None) -> dict | None:
             return {"id": task["id"], "status": "lease_lost",
                     "reason": "heartbeat_failed", "recovery": recovery}
         reason = f"worker_error:{type(exc).__name__}"
-        status = store.retry_or_fail(task["id"], reason, lease_token=task["lease_token"])
+        status = store.retry_or_fail(task["id"], reason, lease_token=task["lease_token"],
+                                     execution_mode=execution_mode)
         return {"id": task["id"], "status": status, "reason": reason,
                 "recovery": recovery}
     finally:
