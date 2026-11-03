@@ -315,8 +315,14 @@ def summarize_mobile_status(payload: object, http_status: int = 200) -> dict[str
         "telegram_receipts": telegram_receipts,
         **watchdog_values,
         **worker_cron_values,
-        "last_scan": gap_flag("last_scan", "not recorded", "not_recorded"),
-        "source_freshness": gap_flag("source_freshness", "not yet aggregated", "not_aggregated"),
+        "last_scan": snapshot_flag(
+            "last_scan", {"success", "partial", "failure"}, "last_scan",
+            "not recorded", "not_recorded",
+        ),
+        "source_freshness": snapshot_flag(
+            "source_freshness", {"fresh", "partial", "stale", "unavailable"},
+            "source_freshness", "not yet aggregated", "not_aggregated",
+        ),
         "ci_health": snapshot_flag(
             "ci_health", {"success", "failure", "incomplete"},
             "ci_health", "not yet ingested", "not_ingested",
