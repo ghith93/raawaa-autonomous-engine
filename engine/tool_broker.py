@@ -10,6 +10,7 @@ import math
 from dataclasses import dataclass
 from typing import Any, Callable, Mapping
 
+from engine.agent_runtime import TASK_AGENT_CONTRACTS
 from engine.policy import evaluate_action
 
 
@@ -61,8 +62,10 @@ AuditSink = Callable[[dict[str, Any]], None]
 ToolAdapter = Callable[[ToolRequest], Any]
 
 
-def validate_permission_matrix(matrix: dict[str, Any]) -> list[str]:
-    """Validate the static role/task/tool matrix; unknown fields fail closed."""
+def validate_permission_matrix(
+    matrix: dict[str, Any], roster: dict[str, Any] | None = None
+) -> list[str]:
+    """Validate the static role/task/tool matrix; unknown grants fail closed."""
     errors: list[str] = []
     if not isinstance(matrix, dict) or matrix.get("schema_version") != 1:
         return ["permission matrix must use schema_version 1"]
@@ -71,6 +74,15 @@ def validate_permission_matrix(matrix: dict[str, Any]) -> list[str]:
     tools = matrix.get("tools")
     if not isinstance(tools, dict) or not tools:
         return errors + ["permission matrix tools must be a non-empty object"]
+
+    agents = roster.get("agents", []) if isinstance(roster, dict) else None
+    agent_by_id = {
+        item.get("id"): item for item in agents
+        if isinstance(item, dict) and isinstance(item.get("id"), str)
+    } if isinstance(agents, list) else {}
+    if roster is not None and not agent_by_id:
+        errors.append("agent roster is unavailable for permission validation")
+
     for name, spec in tools.items():
         if not isinstance(name, str) or not name.strip() or not isinstance(spec, dict):
             errors.append("tool entries must have non-empty names and object definitions")
@@ -79,17 +91,53 @@ def validate_permission_matrix(matrix: dict[str, Any]) -> list[str]:
             errors.append(f"{name}: access must be read or write")
         if not isinstance(spec.get("action"), str) or not spec["action"].strip():
             errors.append(f"{name}: action is required")
-        for field in ("agent_roles", "task_types", "environments"):
-            values = spec.get(field)
-            if (not isinstance(values, list) or not values
-                    or any(not isinstance(value, str) or not value.strip() for value in values)
-                    or len(values) != len(set(values))):
-                errors.append(f"{name}: {field} must be a non-empty unique string list")
-        if isinstance(spec.get("environments"), list) and not set(spec["environments"]).issubset(
-            {"local", "staging", "production"}
-        ):
+        environments = spec.get("environments")
+        if (not isinstance(environments, list) or not environments
+                or any(not isinstance(value, str) or not value.strip() for value in environments)
+                or len(environments) != len(set(environments))):
+            errors.append(f"{name}: environments must be a non-empty unique string list")
+        elif not set(environments).issubset({"local", "staging", "production"}):
             errors.append(f"{name}: unsupported environment")
-        if spec.get("access") == "write" and "production" in spec.get("environments", []):
+
+        grants = spec.get("grants")
+        if not isinstance(grants, list) or not grants:
+            errors.append(f"{name}: grants must be a non-empty list")
+            continue
+        seen: set[tuple[str, str]] = set()
+        for grant in grants:
+            if not isinstance(grant, dict):
+                errors.append(f"{name}: each grant must be an object")
+                continue
+            role = grant.get("agent_role")
+            task_types = grant.get("task_types")
+            if not isinstance(role, str) or not role.strip():
+                errors.append(f"{name}: grant agent_role is required")
+                continue
+            if (not isinstance(task_types, list) or not task_types
+                    or any(not isinstance(task, str) or not task.strip() for task in task_types)
+                    or len(task_types) != len(set(task_types))):
+                errors.append(f"{name}: grant task_types must be a non-empty unique string list")
+                continue
+            if roster is not None:
+                matching_agents = [
+                    agent for agent in agent_by_id.values() if agent.get("role") == role
+                ]
+                if not matching_agents:
+                    errors.append(f"{name}: grant references unknown agent role {role}")
+                for task_type in task_types:
+                    assignment = TASK_AGENT_CONTRACTS.get(task_type)
+                    assigned_agent = agent_by_id.get(assignment[0]) if assignment else None
+                    if not assigned_agent or assigned_agent.get("role") != role:
+                        errors.append(
+                            f"{name}: role {role} is not assigned to task type {task_type}"
+                        )
+            for task_type in task_types:
+                key = (role, task_type)
+                if key in seen:
+                    errors.append(f"{name}: duplicate role/task grant {role}/{task_type}")
+                seen.add(key)
+
+        if spec.get("access") == "write" and "production" in environments:
             errors.append(f"{name}: production write tools are not permitted in this matrix")
     return errors
 
@@ -143,11 +191,7 @@ class ToolBroker:
         if not isinstance(request.payload, dict):
             return False
         cost = request.estimated_cost_usd
-        return (
-            type(cost) in (int, float)
-            and math.isfinite(cost)
-            and cost >= 0
-        )
+        return type(cost) in (int, float) and math.isfinite(cost) and cost >= 0
 
     def _audit(self, event: str, request: ToolRequest, reason: str) -> bool:
         record = {
@@ -178,10 +222,14 @@ class ToolBroker:
             return ToolDecision(False, False, "trusted_adapter_not_registered")
         if request.action != spec.get("action"):
             return ToolDecision(False, False, "tool_action_mismatch")
-        if request.agent_role not in spec.get("agent_roles", []):
-            return ToolDecision(False, False, "agent_role_not_authorized")
-        if request.task_type not in spec.get("task_types", []):
-            return ToolDecision(False, False, "task_type_not_authorized")
+        grants = spec.get("grants", [])
+        if not any(
+            isinstance(grant, dict)
+            and grant.get("agent_role") == request.agent_role
+            and request.task_type in grant.get("task_types", [])
+            for grant in grants
+        ):
+            return ToolDecision(False, False, "role_task_not_authorized")
         if request.environment not in spec.get("environments", []):
             return ToolDecision(False, False, "environment_not_authorized")
 
@@ -201,7 +249,7 @@ class ToolBroker:
             if request.action not in approval_actions:
                 return ToolDecision(False, False, "write_action_not_approval_gated")
             if not request.approval_id or not request.idempotency_key:
-                return ToolDecision(True, True, "human_approval_and_idempotency_required")
+                return ToolDecision(False, True, "human_approval_and_idempotency_required")
             if self._approval_verifier is None:
                 return ToolDecision(False, True, "trusted_approval_verifier_unavailable")
             try:
