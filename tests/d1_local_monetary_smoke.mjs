@@ -120,6 +120,8 @@ try {
   assert.equal(status.payload.caps.monthly_nanos, 12000000000);
   assert.equal(status.payload.caps.per_task_nanos, 200000000);
   assert.equal(status.payload.pending.count, 0);
+  assert.equal("provider" in status.payload, false, "status must not expose provider billing details");
+  assert.equal("task_id" in status.payload, false, "status must not expose task identifiers");
 
   const base = {
     action: "reserve",
@@ -140,6 +142,19 @@ try {
   assert.deepEqual(concurrent.map(item => item.status).sort((a, b) => a - b), [201, 409, 409],
     "per-task cap must be atomic across providers and concurrent requests");
   const reservationId = concurrent.find(item => item.status === 201).payload.reservation_id;
+
+  const idempotentId = randomUUID();
+  const idempotentBody = { ...base, task_id: "local-idempotent-task", estimated_cost_nanos: 10000000, reservation_id: idempotentId };
+  assertStatus(await api("/v1/monetary-ledger", { method: "POST", body: idempotentBody }), 201, "idempotent reservation create");
+  const idempotentReplay = await api("/v1/monetary-ledger", { method: "POST", body: idempotentBody });
+  assertStatus(idempotentReplay, 200, "idempotent reservation replay");
+  assert.equal(idempotentReplay.payload.replay, true);
+  assertStatus(await api("/v1/monetary-ledger", {
+    method: "POST", body: { ...idempotentBody, task_id: "different-task" },
+  }), 409, "reservation ID cannot be reused with different metadata");
+  assertStatus(await api("/v1/monetary-ledger", {
+    method: "POST", body: { action: "release", reservation_id: idempotentId, reason: "provider_not_called" },
+  }), 200, "release idempotent test reservation");
 
   assertStatus(await api("/v1/monetary-ledger", {
     method: "POST", body: { action: "mark_started", reservation_id: reservationId },
