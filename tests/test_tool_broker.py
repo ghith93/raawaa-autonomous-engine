@@ -133,7 +133,7 @@ class ToolBrokerTests(unittest.TestCase):
 
     def test_write_requires_trusted_approval_and_idempotency(self):
         policy = {**self.policy, "allow_external_writes": True}
-        broker = ToolBroker(policy, MATRIX, self.adapters, audit_sink=self.events.append)
+        broker = ToolBroker(policy, MATRIX, self.adapters, agent_roster=ROSTER, audit_sink=self.events.append)
         req = ToolRequest(
             task_id="task-2", agent_id="marketer",
             agent_role="marketing_and_content", task_type="content_draft",
