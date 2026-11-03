@@ -186,7 +186,7 @@ export async function handleMobileStatus(request, env, url) {
     };
     const ciHealth = (() => {
       const age = telemetryAge(ciHealthRow);
-      if (age === null || age > 24 * 60 * 60 * 1000) return null;
+      if (age === null) return null;
       let details;
       try { details = JSON.parse(ciHealthRow.details_json || "{}"); } catch { return null; }
       const conclusions = new Set(["success", "failure", "incomplete"]);
@@ -203,7 +203,7 @@ export async function handleMobileStatus(request, env, url) {
       ) return null;
       return {
         available: true,
-        status: details.conclusion,
+        status: age > 24 * 60 * 60 * 1000 ? "stale" : details.conclusion,
         conclusion: details.conclusion,
         workflow: details.workflow,
         run_id: details.run_id,
@@ -211,12 +211,12 @@ export async function handleMobileStatus(request, env, url) {
         head_sha: sha,
         jobs,
         recorded_at: ciHealthRow.created_at,
-        freshness: "fresh",
+        freshness: age > 24 * 60 * 60 * 1000 ? "stale" : "fresh",
       };
     })();
     const killSwitch = (() => {
       const age = telemetryAge(killSwitchRow);
-      if (age === null || age > 24 * 60 * 60 * 1000) return null;
+      if (age === null) return null;
       let details;
       try { details = JSON.parse(killSwitchRow.details_json || "{}"); } catch { return null; }
       if (
@@ -231,7 +231,7 @@ export async function handleMobileStatus(request, env, url) {
       ) return null;
       return {
         available: true,
-        status: details.status,
+        status: age > 24 * 60 * 60 * 1000 ? "stale" : details.status,
         scope: details.scope,
         policy_mode: details.policy_mode,
         live_inference_default: details.live_inference_default,
@@ -240,7 +240,7 @@ export async function handleMobileStatus(request, env, url) {
         allow_external_writes: details.allow_external_writes,
         source_sha: details.source_sha,
         recorded_at: killSwitchRow.created_at,
-        freshness: "fresh",
+        freshness: age > 24 * 60 * 60 * 1000 ? "stale" : "fresh",
       };
     })();
     const workerCronStatus = (() => {
