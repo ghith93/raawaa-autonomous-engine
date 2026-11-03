@@ -1,6 +1,7 @@
 import json
 import tempfile
 import unittest
+from unittest.mock import patch
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -63,17 +64,40 @@ class LiveRuntimeFactoryTests(unittest.TestCase):
         self.assertIn("groq:primary:openai/gpt-oss-20b", gateway.adapters)
         # Factory construction is local only; no adapter.generate/network call is made.
 
-    def test_cloud_mode_blocks_until_durable_monetary_ledger_exists(self):
-        with self.assertRaisesRegex(RuntimeError, "durable D1 monetary ledger"):
-            build_live_gateway(
-                self.db_path, self.policy_path, self.registry_path,
-                environ={
-                    "RAAWAA_ENGINE_LIVE_INFERENCE": "enabled",
-                    "RAAWAA_ENGINE_API_URL": "https://engine.example",
-                    "RAAWAA_ENGINE_API_TOKEN": "test-token",
-                    "GROQ_API_KEY": "test-key",
-                },
+    def test_cloud_mode_stays_blocked_until_external_spend_hard_stop_is_verified(self):
+        gateway = build_live_gateway(
+            self.db_path, self.policy_path, self.registry_path,
+            environ={
+                "RAAWAA_ENGINE_LIVE_INFERENCE": "enabled",
+                "RAAWAA_ENGINE_API_URL": "https://engine.example",
+                "RAAWAA_ENGINE_API_TOKEN": "test-token",
+                "RAAWAA_ENGINE_EXTERNAL_SPEND_HARD_STOP_VERIFIED": "enabled",
+                "GROQ_API_KEY": "test-key",
+            },
+        )
+        self.assertIsNone(gateway)
+
+    def test_cloud_mode_uses_d1_adapters_only_when_both_hard_stop_gates_are_true(self):
+        self.policy["budget_envelope"]["external_spend_hard_stop_verified"] = True
+        self.write_files()
+        environment = {
+            "RAAWAA_ENGINE_LIVE_INFERENCE": "enabled",
+            "RAAWAA_ENGINE_API_URL": "https://engine.example",
+            "RAAWAA_ENGINE_API_TOKEN": "test-token",
+            "RAAWAA_ENGINE_EXTERNAL_SPEND_HARD_STOP_VERIFIED": "enabled",
+            "GROQ_API_KEY": "test-key",
+        }
+        with patch("engine.live_runtime.D1QuotaLedger") as d1_quota, \
+             patch("engine.live_runtime.D1MonetaryLedger") as d1_money, \
+             patch("engine.live_runtime.load_provider_profile_registry", return_value=[]):
+            gateway = build_live_gateway(
+                self.db_path, self.policy_path, self.registry_path, environ=environment,
             )
+        self.assertIsNone(gateway)
+        d1_quota.assert_called_once_with(
+            base_url="https://engine.example", token="test-token", environ=environment,
+        )
+        d1_money.assert_called_once_with(environ=environment)
 
     def test_preview_profile_is_not_eligible_even_if_marked_enabled(self):
         qwen = next(route for route in self.registry["routes"]
