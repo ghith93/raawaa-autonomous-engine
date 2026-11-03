@@ -51,3 +51,21 @@
 - GitHub's official troubleshooting guidance says scheduled workflows can stop even while still enabled and manual dispatch works; it identifies the schedule actor being suspended/deprovisioned as one possible cause and recommends a write-access commit changing the cron expression to reactivate the schedule. See https://docs.github.com/en/actions/how-tos/troubleshoot-workflows and https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows.
 - This PR changes only the minute offset from `4,9,14,...,59` to `2,7,12,...,57`; cadence remains every five minutes and the run time stays away from minute 0. The push trigger for this workflow may run once after merge; its existing smoke task uses a stable idempotency key and safe-dry-run policy. No inference or external task execution is enabled.
 - **Not yet verified:** reactivation is successful only after a new `event=schedule` run appears on the merged main SHA. If it does not, inspect the workflow's last schedule actor and GitHub account state; keep the Worker watchdog variable restoration as a separate required fallback.
+
+
+## Current-state correction after PR #428 and #439 merges — 2026-11-03 22:44 UTC
+
+This section supersedes earlier statements above that PR #428 is open/unmerged or that PR #427 remains unsynchronized.
+
+- PR #428 (Executive Brain) merged as `478c815f9c64b338caa8548e87a34b9f8c45a696`. Its final exact-head CI #41732844871 passed. It adds deterministic read-only executive portfolio intelligence and proposal-only specialist workflow planning. It does not start persistent agents, execute workflow DAGs, enqueue tasks, call a model, or enable live inference. Default policy remains safe_dry_run and provider routes remain disabled.
+- Multi-step workflow execution remains blocked pending #438: atomic dependency-aware claim/release across SQLite and D1, including idempotency, concurrency, failure blocking, and recovery. Do not execute dependent DAGs until that issue's acceptance criteria pass.
+- PR #427 (Codespaces bridge) is now synchronized with current main and its exact-head CI #41733151325 passed. It remains open and must not be merged/activated: the same-UID child process can still potentially inspect the parent process environment and repository filesystem. Remediation is tracked in #440; ordinary CI success is not proof of OS isolation.
+- PR #439 merged as `d1a035f6705751fb432db428863a8bd5bd62b836`, refreshing the Task Runner's five-minute cron registration from minute offsets `4,9,14,...` to `2,7,12,...`. Post-merge run #41732816612 was a `push` event and succeeded with `queue_idle`, 0 tasks processed, and no inference. It again reported watchdog `not_ready`, missing `GITHUB_APP_WATCHDOG_ENABLED`. As of 22:44 UTC, no fresh `event=schedule` run on the new main SHA had yet been observed; wait for and verify a real scheduled event before claiming reactivation.
+- Latest main SHA at this checkpoint: `478c815f9c64b338caa8548e87a34b9f8c45a696`. Main Engine CI #41733119344 was still running at the last observation; do not claim it passed until terminal.
+- Read-only Cloudflare billing inventory #41733119271 succeeded: account subscription endpoint HTTP 200, 0 active subscriptions, and 0 active paid subscriptions. The spend-policy endpoint returned HTTP 404, so no external Workers/Durable Objects usage_block is verified. Keep paid overages and paid model fallback disabled; do not infer a provider-side hard spend stop.
+- The ChatGPT Daily Ops automation remains enabled but has `next_run_time=null`; its recurring scheduler is not verified. A manual run_now produced inline execution only, not a background run.
+- Production Worker/D1 remain untouched. No production variable or secret was changed, no live inference was sent, no task was enqueued, and no Codespace was activated.
+
+## Remaining operator unblock
+
+Cloudflare Dashboard: https://dash.cloudflare.com/ . Select the account → Workers & Pages → `raawaa-autonomous-engine-control` → Settings → Variables and Secrets → Production. Add the non-secret variable `GITHUB_APP_WATCHDOG_ENABLED=enabled`, save, then verify authenticated `/v1/mobile/status` reports `task_runner_watchdog.ready=true` and `missing=[]`. Do not paste credentials into chat. A protected production deployment must be treated as a separate, explicitly approved step.
