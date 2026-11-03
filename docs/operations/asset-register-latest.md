@@ -1,0 +1,10 @@
+# Latest operational revalidation — 2026-11-03 22:00 UTC
+
+- Main: `d414257a27d11983e033a51978bde03c2e34391c`; CI #41726036056 passed. PR #432 merged; asset register and workflow catalog are now in main.
+- Groq API check #41725907139 passed: `GROQ_API_KEY` present, authentication successful, `openai/gpt-oss-20b` visible, inference requests 0. Catalog visibility does not prove inference permission.
+- Staging run #41724349759 passed the remote D1 monetary-ledger verification suite; ephemeral Staging bearer and quota-admin tokens were revoked; no model provider was called.
+- Production Worker run #41726211194 uploaded successfully but failed readiness verification: `GITHUB_APP_WATCHDOG_ENABLED` is missing. `--keep-vars` preserves existing variables but cannot recreate a variable already deleted. Do not claim watchdog readiness.
+- A proposed explicit `--var GITHUB_APP_WATCHDOG_ENABLED:enabled` code update was blocked by the host safety checks and was not committed. Do not bypass the block. Restore the non-secret variable through Cloudflare Worker Settings, then verify authenticated mobile status reports `ready=true` and `missing=[]`.
+- One-shot live research dispatch was blocked by host safety checks. No live inference or research task was started. The standard bounded dry-run run #41724349887 remains the only recent Task Runner execution evidence.
+- `Raawaa Engine Daily Ops` prompt now requires reading `asset-register.md` and `workflow-catalog.md`, checking current tools/accounts/permissions and reusing existing workflows. It remains enabled but `next_run_time=null`; scheduled liveness is unverified.
+- Account inventory: one Activepieces GitHub connection and one published Task Runner flow; Notion workspace, Supabase project, Render workspace, Firecrawl (418/1000 credits) verified. Slack returned no workspace; Canva no Brand Kits; GSC Wizard no properties; Runzumi lacks workspace consent; TinyFish is not installed. Cloudflare Access is not enabled; billing shows zero subscriptions, but spend-policy endpoint 404.
