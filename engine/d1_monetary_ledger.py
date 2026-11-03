@@ -10,7 +10,6 @@ import urllib.error
 import urllib.request
 import uuid
 from typing import Any
-from urllib.parse import quote
 
 from engine.model_gateway import BudgetExceeded, _money_nanos
 
