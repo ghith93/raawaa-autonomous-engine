@@ -13,6 +13,9 @@ import urllib.error
 import urllib.request
 import uuid
 import time
+import tomllib
+from decimal import Decimal
+from pathlib import Path
 from urllib.parse import quote
 from typing import Any
 
@@ -23,6 +26,71 @@ BASE_URL = os.environ.get(
 ).rstrip("/")
 TOKEN = os.environ.get("RAAWAA_ENGINE_STAGING_API_TOKEN", "")
 PREFIX = "staging-verification-"
+
+STAGING_D1_ID = "231dd948-04a0-49e3-ad73-444f77d69477"
+PRODUCTION_D1_ID = "f0ffbed3-940f-488d-a7d1-31cbc5fbf742"
+
+
+def verify_staging_target() -> None:
+    with Path("wrangler.staging.toml").open("rb") as stream:
+        staging = tomllib.load(stream)
+    with Path("wrangler.toml").open("rb") as stream:
+        production = tomllib.load(stream)
+    staging_bindings = staging.get("d1_databases", [])
+    production_bindings = production.get("d1_databases", [])
+    require(staging.get("name") == "raawaa-autonomous-engine-staging",
+            "Refusing Staging policy update: Worker config name mismatch")
+    require(len(staging_bindings) == 1 and len(production_bindings) == 1,
+            "Refusing Staging policy update: expected exactly one D1 binding per config")
+    require(staging_bindings[0].get("database_name") == "raawaa-engine-staging" and
+            staging_bindings[0].get("database_id") == STAGING_D1_ID,
+            "Refusing Staging policy update: staging D1 identity mismatch")
+    require(production_bindings[0].get("database_id") == PRODUCTION_D1_ID and
+            staging_bindings[0].get("database_id") != production_bindings[0].get("database_id"),
+            "Refusing Staging policy update: production/staging separation mismatch")
+
+
+def default_policy_nanos() -> tuple[int, int, int]:
+    policy = json.loads(Path("config/policy.json").read_text(encoding="utf-8"))
+    def nanos(value: Any) -> int:
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            raise RuntimeError("Configured monetary budget is not numeric")
+        amount = Decimal(str(value)) * Decimal(1_000_000_000)
+        if amount != amount.to_integral_value() or amount < 0:
+            raise RuntimeError("Configured monetary budget cannot be represented as integer nano-USD")
+        return int(amount)
+    return (
+        nanos(policy["daily_budget_usd"]),
+        nanos(policy["monthly_budget_usd"]),
+        nanos(policy["per_task_budget_usd"]),
+    )
+
+
+def set_staging_policy(daily: int, monthly: int, per_task: int) -> None:
+    verify_staging_target()
+    if any(type(value) is not int or value < 0 for value in (daily, monthly, per_task)):
+        raise RuntimeError("Refusing invalid Staging monetary policy values")
+    if not os.environ.get("CLOUDFLARE_API_TOKEN") or not os.environ.get("CLOUDFLARE_ACCOUNT_ID"):
+        raise RuntimeError("Cloudflare credentials are required for Staging-only policy setup")
+    sql = (
+        "UPDATE monetary_budget_policy SET "
+        f"daily_budget_nanos={daily},monthly_budget_nanos={monthly},"
+        f"per_task_budget_nanos={per_task},updated_at=CURRENT_TIMESTAMP "
+        "WHERE policy_key='default'"
+    )
+    result = subprocess.run(
+        [
+            "npx", "--yes", "wrangler@4.156.1", "d1", "execute",
+            "raawaa-engine-staging", "--remote", "--command", sql,
+            "--config", "wrangler.staging.toml", "--yes",
+        ],
+        check=False, capture_output=True, text=True, timeout=60,
+        env=os.environ.copy(),
+    )
+    if result.returncode != 0:
+        detail = (result.stderr or result.stdout or "unknown Wrangler error")[-1200:]
+        raise RuntimeError("Staging-only monetary policy update failed: " + detail)
+
 
 
 def api(method: str, path: str, payload: dict[str, Any] | None = None,
@@ -194,32 +262,44 @@ def cap_test(label: str, run_tag: str, cap_kind: str) -> None:
     else:
         raise ValueError("unknown cap kind")
 
-    def attempt(index: int):
-        task_id = f"{PREFIX}{run_tag}-{label}-task" if cap_kind == "task" else f"{PREFIX}{run_tag}-{label}-{index}"
-        return reserve(
-            f"{PREFIX}{run_tag}-{label}-{index}",
-            f"model-{index}",
-            task_id,
-            estimate, daily, monthly, task_cap,
-        )
+    defaults = default_policy_nanos()
+    try:
+        # The Worker accepts only operator-owned D1 caps. Temporarily set a
+        # deliberately small policy on the verified Staging DB to exercise
+        # each independent ceiling, then restore the repository's approved
+        # policy even if the test assertion fails.
+        set_staging_policy(daily, monthly, task_cap)
 
-    with concurrent.futures.ThreadPoolExecutor(max_workers=3) as pool:
-        results = list(pool.map(attempt, range(3)))
-    statuses = sorted(item[0] for item in results)
-    require(statuses == [201, 201, 409],
-            f"{label} cap did not admit exactly two of three concurrent reservations: {statuses}")
-    for status, body, rid in results:
-        if status == 201:
-            released, _ = action("release", rid)
-            require(released == 200, f"{label} test reservation was not releasable before provider I/O")
-        else:
-            require(body.get("error") == "budget_exceeded",
-                    f"{label} cap returned an unexpected rejection")
+        def attempt(index: int):
+            task_id = f"{PREFIX}{run_tag}-{label}-task" if cap_kind == "task" else f"{PREFIX}{run_tag}-{label}-{index}"
+            return reserve(
+                f"{PREFIX}{run_tag}-{label}-{index}",
+                f"model-{index}",
+                task_id,
+                estimate, daily, monthly, task_cap,
+            )
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=3) as pool:
+            results = list(pool.map(attempt, range(3)))
+        statuses = sorted(item[0] for item in results)
+        require(statuses == [201, 201, 409],
+                f"{label} cap did not admit exactly two of three concurrent reservations: {statuses}")
+        for status, body, rid in results:
+            if status == 201:
+                released, _ = action("release", rid)
+                require(released == 200, f"{label} test reservation was not releasable before provider I/O")
+            else:
+                require(body.get("error") == "budget_exceeded",
+                        f"{label} cap returned an unexpected rejection")
+    finally:
+        set_staging_policy(*defaults)
 
 
 def run() -> None:
     require(BASE_URL.startswith("https://"), "Staging Worker URL must use HTTPS")
     require(bool(TOKEN), "RAAWAA_ENGINE_STAGING_API_TOKEN is required")
+    verify_staging_target()
+    set_staging_policy(*default_policy_nanos())
     wait_for_worker()
     health, _ = api("GET", "/health", authenticated=False)
     require(health == 200, f"Staging Worker health returned HTTP {health}")
@@ -360,6 +440,10 @@ if __name__ == "__main__":
     try:
         run()
     except Exception as exc:
+        try:
+            set_staging_policy(*default_policy_nanos())
+        except Exception:
+            pass
         try:
             cleanup_test_reservations()
         except Exception:
