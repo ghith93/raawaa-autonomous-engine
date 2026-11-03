@@ -87,6 +87,81 @@ def _request_crossref(query: str, max_results: int = 10, timeout: int = 20) -> d
     return message
 
 
+def _request_arxiv(query: str, max_results: int = 10, timeout: int = 20) -> dict:
+    """Retrieve one bounded arXiv Atom metadata page; never fetch paper full text."""
+    if not isinstance(query, str) or not query.strip():
+        raise ValueError("arxiv query must be a non-empty string")
+    if isinstance(max_results, bool) or not isinstance(max_results, int) or not 1 <= max_results <= 10:
+        raise ValueError("arxiv max_results must be an integer between 1 and 10")
+    params = {"search_query": query, "start": "0", "max_results": str(max_results),
+              "sortBy": "submittedDate", "sortOrder": "descending"}
+    request = Request(ARXIV_API + "?" + urlencode(params),
+                      headers={"Accept": "application/atom+xml", "User-Agent": USER_AGENT},
+                      method="GET")
+    try:
+        with urlopen(request, timeout=timeout) as response:
+            if response.status != 200:
+                raise ResearchDiscoveryError(f"arXiv returned HTTP {response.status}")
+            raw = response.read(MAX_RESPONSE_BYTES + 1)
+            if len(raw) > MAX_RESPONSE_BYTES:
+                raise ResearchDiscoveryError("arXiv response exceeded the 1 MiB safety limit")
+            if b"<!DOCTYPE" in raw.upper() or b"<!ENTITY" in raw.upper():
+                raise ResearchDiscoveryError("arXiv XML declarations with DTD/entities are not accepted")
+            root = ET.fromstring(raw)
+    except HTTPError as exc:
+        raise ResearchDiscoveryError(f"arXiv returned HTTP {exc.code}") from exc
+    except (URLError, TimeoutError, OSError) as exc:
+        raise ResearchDiscoveryError(f"arXiv request failed: {type(exc).__name__}") from exc
+    except ET.ParseError as exc:
+        raise ResearchDiscoveryError(f"arXiv returned malformed Atom XML: {type(exc).__name__}") from exc
+    if root.tag != f"{{{ATOM_NS}}}feed":
+        raise ResearchDiscoveryError("arXiv returned an unexpected Atom response shape")
+    return {"entries": root.findall(f"{{{ATOM_NS}}}entry")}
+
+
+def _normalize_arxiv_entry(entry: ET.Element, retrieved_at: str) -> dict | None:
+    """Keep bounded bibliographic metadata only; abstracts/full text stay un-ingested."""
+    def value(tag: str) -> str | None:
+        node = entry.find(f"{{{ATOM_NS}}}{tag}")
+        text = " ".join((node.text or "").split()) if node is not None else ""
+        return text[:1000] if text else None
+
+    paper_id = value("id")
+    title = value("title")
+    if not paper_id or not title or not paper_id.startswith(("https://arxiv.org/abs/", "http://arxiv.org/abs/")):
+        return None
+    authors = []
+    for author in entry.findall(f"{{{ATOM_NS}}}author")[:5]:
+        name = author.find(f"{{{ATOM_NS}}}name")
+        if name is not None and isinstance(name.text, str) and name.text.strip():
+            authors.append(" ".join(name.text.split())[:160])
+    categories = []
+    for category in entry.findall(f"{{{ATOM_NS}}}category")[:8]:
+        term = category.attrib.get("term")
+        if isinstance(term, str) and term:
+            categories.append(term[:80])
+    primary = entry.find(f"{{{ARXIV_NS}}}primary_category")
+    primary_category = primary.attrib.get("term") if primary is not None else None
+    doi = value("doi")
+    return {
+        "arxiv_id": paper_id.rsplit("/", 1)[-1],
+        "title": title,
+        "url": paper_id,
+        "authors": authors,
+        "published": value("published"),
+        "updated": value("updated"),
+        "categories": categories,
+        "primary_category": primary_category[:80] if isinstance(primary_category, str) else None,
+        "doi": doi,
+        "source": "arxiv",
+        "discovered_at": retrieved_at,
+        "review_status": "unreviewed",
+        "license_verified": False,
+        "abstract_retrieved": False,
+        "full_text_retrieved": False,
+    }
+
+
 def _normalize_crossref_item(item: dict, retrieved_at: str) -> dict | None:
     doi, titles = item.get("DOI"), item.get("title")
     if not isinstance(doi, str) or not doi or not isinstance(titles, list) or not titles:
