@@ -284,6 +284,7 @@ def cleanup_test_reservations() -> None:
         f"DELETE FROM monetary_route_quarantines WHERE route_id LIKE '{prefix}%'",
         f"DELETE FROM monetary_reservations WHERE provider LIKE '{prefix}%'",
         f"DELETE FROM quota_usage WHERE route_id LIKE '{prefix}%'",
+        f"DELETE FROM quota_usage WHERE task_id LIKE '{prefix}%'",
         f"DELETE FROM quota_cooldowns WHERE route_id LIKE '{prefix}%'",
         f"DELETE FROM quota_audit_events WHERE route_id LIKE '{prefix}%'",
         f"DELETE FROM audit_log WHERE task_id LIKE '{prefix}%'",
