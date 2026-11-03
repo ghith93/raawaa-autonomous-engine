@@ -31,6 +31,17 @@ Deployment lifecycle (verified against the workflow files on 2026-11-03):
 - `.github/workflows/d1-migrate.yml` is also **manual-dispatch only**. Its `confirm_database` input must equal `raawaa-autonomous-e`; it first lists remote migration status and then applies reviewed migrations to that explicitly confirmed production D1 database.
 - Neither Worker deployment nor production D1 migration is automatic after a merge. Treat them as separate production actions with separate explicit confirmations.
 
+### Last verified production rollout snapshot — 2026-11-03 00:31 UTC
+
+This is a read-only history snapshot, not authorization to repeat either production action:
+
+- The latest observed successful `Deploy Control Worker` run in the current Actions history is [run #41546403591](https://github.com/ghith93/raawaa-autonomous-engine/actions/runs/41546403591). Its job log confirms it checked out main SHA `43b4f0d7ad2e3e63c10dd6f92fbebc00739610e7`, passed the explicit `DEPLOY_CONTROL_WORKER` confirmation, uploaded the existing `ENGINE_API_TOKEN` secret, and deployed Worker version `9d49bcfe-36b1-42e4-8882-902522c4e379` to the existing workers.dev endpoint.
+- The latest observed successful production migration run is [run #41547859981](https://github.com/ghith93/raawaa-autonomous-engine/actions/runs/41547859981). Its remote preflight listed only `0004_paper_event_ledger.sql` and `0005_telegram_webhook_receipts.sql` as pending, and the apply step reported both successful. Migrations `0001`–`0003` were not pending at that check. The confirmed D1 database ID in the log is `f0ffbed3-940f-488d-a7d1-31cbc5fbf742`.
+- The deployed Worker SHA predates PR #271's Worker Cron heartbeat implementation (main commit `263526278234e4680629ae841dd528e8f0299aa2`). The heartbeat code is merged on main but **not included in that observed production Worker version**. Do not infer that `worker_cron_tick` is being recorded until a separately authorized deployment and a subsequent authenticated status read confirm it.
+- A later bounded Task Runner push run, [#41549379045](https://github.com/ghith93/raawaa-autonomous-engine/actions/runs/41549379045), successfully read the authenticated mobile status route (HTTP 200); paper-ledger, provider-usage and Telegram-receipt data were available, with zero pending/running tasks and `queue_idle`. It processed zero tasks. This confirms the route and listed data were working at that time, but does not verify the newer Worker Cron heartbeat or recurring schedule delivery.
+
+Do not rerun deployment or migration workflows based on this historical record. The user has explicitly withheld authorization for further production deployment and trading; any future production action requires a new, action-specific approval.
+
 One-time setup required before the first deployment: create a strong, random application bearer token and add it as the repository Actions secret `ENGINE_API_TOKEN`. Never reuse `CLOUDFLARE_API_TOKEN`. The deployment workflow checks that this secret exists and stops before deployment if it is missing. The Cloudflare API token must have Workers Scripts write permission in addition to the D1 permissions already used by migrations.
 
 No secret is stored in source control. Do not enable public enqueue routes without
