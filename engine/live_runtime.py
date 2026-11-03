@@ -14,7 +14,6 @@ from engine.model_gateway import UsageLedger
 from engine.quota_config import load_provider_profile_registry
 from engine.quota_live_gateway import QuotaAwareLiveGateway
 from engine.quota_manager import QuotaLedger, QuotaManager
-from engine.d1_quota_ledger import D1QuotaLedger
 from engine.budget_policy import validate_budget_policy
 
 
@@ -42,6 +41,14 @@ def build_live_gateway(
         return None
     if validate_budget_policy(policy):
         return None
+    # The D1 quota ledger is durable, but the monetary UsageLedger is currently
+    # SQLite-backed. GitHub-hosted runners are ephemeral, so cloud live inference
+    # must remain blocked until a D1-backed monetary reservation/settlement ledger
+    # is implemented and its migration is safely verified.
+    if source.get("RAAWAA_ENGINE_API_URL"):
+        raise RuntimeError(
+            "Cloud live inference is blocked until the durable D1 monetary ledger is implemented."
+        )
 
     entries = load_provider_profile_registry(registry_path)
     candidates = [
@@ -51,14 +58,7 @@ def build_live_gateway(
     if not candidates:
         return None
 
-    # Scheduled/cloud execution sets the control-plane URL and therefore must use
-    # the durable Worker-backed ledger. Missing token or transport errors fail closed;
-    # there is deliberately no silent SQLite fallback in that mode.
-    quota_ledger = (
-        D1QuotaLedger()
-        if source.get("RAAWAA_ENGINE_API_URL")
-        else QuotaLedger(db_path)
-    )
+    quota_ledger = QuotaLedger(db_path)
     manager = QuotaManager([entry.profile for entry in candidates], quota_ledger)
     adapters = {}
     eligible_profiles = []
