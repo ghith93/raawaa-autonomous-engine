@@ -11,8 +11,8 @@ class SkillsRegistryTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.root = Path(self.temp.name)
-        self.skill_dir = self.root / "example-skill"
-        self.skill_dir.mkdir()
+        self.skill_dir = self.root / "skills" / "example-skill"
+        self.skill_dir.mkdir(parents=True)
         self.instructions = b"# Example\n\nUntrusted instruction text.\n"
         (self.skill_dir / "SKILL.md").write_bytes(self.instructions)
         self.manifest = {
@@ -35,7 +35,9 @@ class SkillsRegistryTests(unittest.TestCase):
             "approved": True,
         }
         self.write_manifest()
-        (self.root / "revocations.json").write_text(
+        revocations = self.root / "config" / "skills" / "revocations.json"
+        revocations.parent.mkdir(parents=True)
+        revocations.write_text(
             json.dumps({"schema_version": 1, "revoked_skill_ids": []}), encoding="utf-8"
         )
 
@@ -75,7 +77,7 @@ class SkillsRegistryTests(unittest.TestCase):
             self.load()
 
     def test_revoked_skill_is_rejected(self):
-        (self.root / "revocations.json").write_text(
+        (self.root / "config" / "skills" / "revocations.json").write_text(
             json.dumps({"schema_version": 1, "revoked_skill_ids": ["example-skill"]}),
             encoding="utf-8",
         )
