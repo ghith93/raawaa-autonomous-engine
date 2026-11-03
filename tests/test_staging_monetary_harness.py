@@ -49,6 +49,31 @@ class StagingMonetaryHarnessTests(unittest.TestCase):
             harness.set_staging_policy(True, 200, 50)
         run.assert_not_called()
 
+    def test_worker_readiness_waits_for_authenticated_token_propagation(self):
+        responses = [
+            (200, {"ok": True}),
+            (401, {"error": "unauthorized"}),
+            (200, {"ok": True}),
+            (200, {"snapshot": {}, "budget_policy": {"enabled": True}}),
+        ]
+        with patch.object(harness, "api", side_effect=responses) as request:
+            with patch.object(harness.time, "sleep") as sleep:
+                harness.wait_for_worker(timeout_seconds=10)
+        self.assertEqual(request.call_count, 4)
+        sleep.assert_called_once_with(2)
+        self.assertEqual(request.call_args_list[1].args, ("GET", "/v1/monetary-ledger"))
+
+    def test_worker_readiness_fails_fast_on_authenticated_configuration_error(self):
+        with patch.object(harness, "api", side_effect=[
+            (200, {"ok": True}),
+            (403, {"error": "forbidden"}),
+        ]) as request:
+            with patch.object(harness.time, "sleep") as sleep:
+                with self.assertRaisesRegex(RuntimeError, "HTTP 403"):
+                    harness.wait_for_worker(timeout_seconds=10)
+        self.assertEqual(request.call_count, 2)
+        sleep.assert_not_called()
+
     def test_monthly_cap_test_restores_original_staging_policy(self):
         from itertools import count
         from unittest.mock import call
