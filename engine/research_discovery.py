@@ -142,7 +142,8 @@ def _normalize_arxiv_entry(entry: ET.Element, retrieved_at: str) -> dict | None:
             categories.append(term[:80])
     primary = entry.find(f"{{{ARXIV_NS}}}primary_category")
     primary_category = primary.attrib.get("term") if primary is not None else None
-    doi = value("doi")
+    doi_node = entry.find(f"{{{ARXIV_NS}}}doi")
+    doi = " ".join((doi_node.text or "").split())[:160] if doi_node is not None and doi_node.text else None
     return {
         "arxiv_id": paper_id.rsplit("/", 1)[-1],
         "title": title,
