@@ -76,3 +76,11 @@ Cloudflare Dashboard: https://dash.cloudflare.com/ . Select the account → Work
 - PR #427 was merged by GitHub at 22:46:14 UTC as `bdaf97006aedd431f051c0fec8a182037ed0320b`. The exact PR head `504b68bfcc04b55db69e6144596e16191f1151dd` passed CI #41733151325. This does not resolve the sandbox finding: current `engine/codespace_bridge.py` still calls `subprocess.run` under the same UID and repository filesystem. Issue #440 remains open. Explicit bridge opt-in is required, the default policy is safe_dry_run, and no Codespaces runner workflow or active Codespace was found. Do not set the opt-in flag or provision the scoped token before #440 passes.
 - Main commit `bdaf97006aedd431f051c0fec8a182037ed0320b` is now the current baseline. Its Engine CI #41733664183 was still running at 22:46 UTC. The scheduled Open-Source Research Discovery workflow also started from this push; its success/failure must be checked separately.
 - The PR #439 cron refresh has not yet produced a verified `event=schedule` run as of 22:46 UTC. The next expected five-minute slot is minute 47; continue checking the event type and SHA, not just successful push/manual runs.
+
+
+## Isolated Staging verification — 2026-11-03 22:49 UTC
+
+- Main Engine CI #41733664183 completed successfully on `bdaf97006aedd431f051c0fec8a182037ed0320b`: full test suite passed, reviewed migrations applied to Staging only, isolated Staging Worker deployed, remote D1 monetary ledger verification passed, sanitized CI/inference-gate telemetry published to Staging D1, and authenticated Staging mobile status readback passed.
+- The authenticated Staging readback returned `status=verified`, `ci_health=success`, `kill_switch=engaged`, `paid_fallback=false`, `paid_model_calls=false`, and `external_writes=false`. Ephemeral Staging bearer and quota-admin tokens were revoked by workflow cleanup.
+- This is isolated Staging evidence only; no Production Worker/D1 deployment or mutation occurred.
+- Task Runner manual dispatch #41733799185 on the same main SHA succeeded with no tasks processed; authenticated D1 status still reports watchdog `not_ready`, missing `GITHUB_APP_WATCHDOG_ENABLED`. As of 22:49 UTC, no new `event=schedule` run was observed after PR #439. The cron refresh remains unverified until a true scheduled event appears.
