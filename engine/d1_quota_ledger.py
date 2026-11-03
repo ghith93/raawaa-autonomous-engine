@@ -18,9 +18,12 @@ class D1QuotaLedgerError(RuntimeError):
 
 class D1QuotaLedger:
     def __init__(self, base_url: str | None = None, token: str | None = None,
-                 timeout: int = 15):
-        self.base_url = (base_url or os.getenv("RAAWAA_ENGINE_API_URL", "")).rstrip("/")
-        self.token = token or os.getenv("RAAWAA_ENGINE_API_TOKEN", "")
+                 timeout: int = 15, environ=None):
+        source = os.environ if environ is None else environ
+        self.base_url = (base_url or source.get("RAAWAA_ENGINE_API_URL", "")).rstrip("/")
+        self.token = token or source.get("RAAWAA_ENGINE_API_TOKEN", "")
+        self.access_id = source.get("RAAWAA_ENGINE_CF_ACCESS_CLIENT_ID", "")
+        self.access_secret = source.get("RAAWAA_ENGINE_CF_ACCESS_CLIENT_SECRET", "")
         self.timeout = timeout
         if not self.base_url.startswith("https://") or not self.token:
             raise D1QuotaLedgerError(
@@ -37,8 +40,8 @@ class D1QuotaLedger:
             "Authorization": f"Bearer {self.token}",
             "User-Agent": "RaawaaAutonomousEngine/1.0",
         }
-        access_id = os.getenv("RAAWAA_ENGINE_CF_ACCESS_CLIENT_ID", "")
-        access_secret = os.getenv("RAAWAA_ENGINE_CF_ACCESS_CLIENT_SECRET", "")
+        access_id = self.access_id
+        access_secret = self.access_secret
         if bool(access_id) != bool(access_secret):
             raise D1QuotaLedgerError("Cloudflare Access service-token secrets must be configured as a pair")
         if access_id and access_secret:
