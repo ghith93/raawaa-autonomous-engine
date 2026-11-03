@@ -5,7 +5,9 @@ This client intentionally exposes no enqueue, list, quota, recovery, or admin me
 from __future__ import annotations
 
 import os
+import re
 from typing import Any
+from urllib.parse import urlsplit
 
 from engine.remote_task_store import RemoteTaskStore, RemoteTaskStoreError
 
@@ -23,12 +25,18 @@ class CodespaceTaskStore:
         admin_token = os.environ.get("RAAWAA_ENGINE_QUOTA_ADMIN_TOKEN", "")
         if not code_token or code_token == shared_token or code_token == admin_token:
             raise ValueError("Codespace bridge requires a distinct scoped token")
+        resolved_url = (base_url or os.environ.get("RAAWAA_ENGINE_API_URL", "")).rstrip("/")
+        parsed = urlsplit(resolved_url)
+        if (parsed.scheme != "https" or not parsed.hostname or parsed.username or parsed.password
+                or parsed.query or parsed.fragment or parsed.path not in {"", "/"}):
+            raise ValueError("Codespace bridge requires a clean HTTPS Worker origin")
         self._client = RemoteTaskStore(
-            base_url=base_url,
+            base_url=resolved_url,
             token=code_token,
             timeout=timeout,
             access_client_id=access_client_id,
             access_client_secret=access_client_secret,
+            reject_redirects=True,
         )
 
     def _request(self, path: str, method: str = "GET",
@@ -45,6 +53,20 @@ class CodespaceTaskStore:
             raise RemoteTaskStoreError("Codespace bridge preflight returned an unexpected scope")
         return result
 
+    @staticmethod
+    def _validate_task_id(task_id: str) -> str:
+        if not isinstance(task_id, str) or not re.fullmatch(
+                r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}",
+                task_id):
+            raise ValueError("invalid Codespace task identifier")
+        return task_id
+
+    @staticmethod
+    def _validate_lease_token(lease_token: str) -> str:
+        if not isinstance(lease_token, str) or not lease_token.strip() or len(lease_token) > 200:
+            raise ValueError("invalid Codespace lease token")
+        return lease_token
+
     def claim_next(self) -> dict[str, Any] | None:
         result = self._request("/v1/codespace/tasks/claim", "POST", {})
         task = result.get("task")
@@ -54,10 +76,19 @@ class CodespaceTaskStore:
                 or not isinstance(result.get("lease_token"), str)
                 or not result["lease_token"]):
             raise RemoteTaskStoreError("Codespace API returned an invalid or out-of-scope lease")
+        try:
+            self._validate_task_id(task.get("id"))
+            self._validate_lease_token(result["lease_token"])
+        except ValueError as exc:
+            raise RemoteTaskStoreError("Codespace API returned an invalid lease identity") from exc
+        if False:
+            raise RemoteTaskStoreError("Codespace API returned an invalid or out-of-scope lease")
         task["lease_token"] = result["lease_token"]
         return task
 
     def heartbeat(self, task_id: str, lease_token: str) -> str:
+        task_id = self._validate_task_id(task_id)
+        lease_token = self._validate_lease_token(lease_token)
         result = self._request(
             f"/v1/codespace/tasks/{task_id}/heartbeat", "POST", {"lease_token": lease_token}
         )
@@ -68,6 +99,8 @@ class CodespaceTaskStore:
 
     def finish(self, task_id: str, status: str, result: dict[str, Any] | None = None,
                error: str | None = None, lease_token: str | None = None) -> None:
+        task_id = self._validate_task_id(task_id)
+        lease_token = self._validate_lease_token(lease_token)
         if status not in {"succeeded", "failed", "blocked"}:
             raise ValueError("invalid terminal status")
         payload: dict[str, Any] = {"lease_token": lease_token, "status": status}
