@@ -147,18 +147,45 @@ def require(condition: bool, message: str) -> None:
         raise RuntimeError(message)
 
 
-def wait_for_worker(timeout_seconds: int = 45) -> None:
+def wait_for_worker(timeout_seconds: int = 90) -> None:
+    """Wait for both Worker readiness and propagation of its ephemeral API secret.
+
+    A healthy public /health response does not prove that the just-installed
+    ENGINE_API_TOKEN is already visible to authenticated routes. Retry only the
+    read-only monetary status request; never mutate D1 while auth is unsettled.
+    """
     deadline = time.monotonic() + timeout_seconds
     last_status = None
+    last_error = "worker_not_ready"
     while time.monotonic() < deadline:
         try:
-            last_status, _ = api("GET", "/health", authenticated=False)
-            if last_status == 200:
-                return
-        except RuntimeError:
-            pass
+            health_status, _ = api("GET", "/health", authenticated=False)
+            last_status = health_status
+            if health_status == 200:
+                auth_status, body = api("GET", "/v1/monetary-ledger", authenticated=True)
+                last_status = auth_status
+                last_error = str(body.get("error", ""))[:80]
+                if (auth_status == 200 and isinstance(body.get("snapshot"), dict)
+                        and isinstance(body.get("budget_policy"), dict)
+                        and body["budget_policy"].get("enabled") is True):
+                    return
+                # 401 can be a short secret-propagation window immediately after
+                # Wrangler reports a successful secret upload. 5xx may be startup
+                # propagation. Other 4xx responses indicate a configuration error.
+                if auth_status not in (401, 500, 502, 503, 504):
+                    raise RuntimeError(
+                        f"Staging Worker authenticated readiness failed (HTTP {auth_status}, error={last_error})"
+                    )
+        except RuntimeError as exc:
+            message = str(exc)
+            if message.startswith("Staging Worker authenticated readiness failed"):
+                raise
+            last_error = type(exc).__name__
         time.sleep(2)
-    raise RuntimeError(f"Staging Worker did not become healthy (last HTTP status: {last_status})")
+    raise RuntimeError(
+        f"Staging Worker did not become authenticated within {timeout_seconds}s "
+        f"(last HTTP status: {last_status}, error={last_error})"
+    )
 
 
 def monetary_status(task_id: str | None = None) -> dict[str, Any]:
