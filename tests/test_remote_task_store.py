@@ -24,11 +24,13 @@ class RemoteTaskStoreTests(unittest.TestCase):
     @patch("engine.remote_task_store.urlopen")
     def test_claim_returns_server_lease_token(self, open_url):
         open_url.return_value = FakeResponse({
-            "task": {"id": "task-1", "payload_json": "{}", "status": "running"},
+            "task": {"id": "task-1", "payload_json": "{}", "status": "running", "execution_mode": "live_inference"},
             "lease_token": "lease-1",
         })
-        task = self.store.claim_next()
+        task = self.store.claim_next(execution_mode="live_inference")
         self.assertEqual(task["lease_token"], "lease-1")
+        self.assertEqual(task["execution_mode"], "live_inference")
+        self.assertEqual(json.loads(open_url.call_args.args[0].data), {"execution_mode": "live_inference"})
         request = open_url.call_args.args[0]
         self.assertEqual(request.full_url, "https://engine.example/v1/tasks/claim")
         self.assertEqual(request.get_method(), "POST")
@@ -56,6 +58,10 @@ class RemoteTaskStoreTests(unittest.TestCase):
                 "https://engine.example", "app-bearer",
                 access_client_id="access-client-id",
             )
+
+    def test_claim_rejects_invalid_execution_mode(self):
+        with self.assertRaisesRegex(ValueError, "invalid execution_mode"):
+            self.store.claim_next(execution_mode="pretend_success")
 
     @patch("engine.remote_task_store.urlopen")
     def test_empty_claim_returns_none(self, open_url):
