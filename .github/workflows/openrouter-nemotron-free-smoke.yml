@@ -1,0 +1,37 @@
+name: One-shot OpenRouter Nemotron Free smoke
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: openrouter-nemotron-one-shot-smoke
+  cancel-in-progress: false
+
+jobs:
+  smoke:
+    if: ${{ github.ref == 'refs/heads/feat/free-model-provider-expansion' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Check out the reviewed provider-expansion branch
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - name: Set up Python
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7
+        with:
+          python-version: "3.12"
+      - name: Verify key presence without printing or exposing it
+        env:
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+        run: |
+          if [ -z "$OPENROUTER_API_KEY" ]; then
+            echo "OPENROUTER_API_KEY is missing or empty in repository Actions secrets."
+            exit 1
+          fi
+          echo "OPENROUTER_API_KEY is present."
+      - name: Send exactly one bounded request to the pinned Free Nemotron endpoint
+        env:
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+        run: python scripts/openrouter_nemotron_smoke.py
