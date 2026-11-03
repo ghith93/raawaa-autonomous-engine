@@ -57,7 +57,7 @@ function makeFetch({ runs = [], dispatchStatus = 204, dispatchBody = "", runList
       });
     }
     if (target === "https://api.github.com/repos/ghith93/raawaa-autonomous-engine/actions/workflows/task-runner.yml/dispatches") {
-      return new Response(dispatchBody, { status: dispatchStatus });
+      return new Response(dispatchStatus === 204 ? null : dispatchBody, { status: dispatchStatus });
     }
     throw new Error("unexpected_url");
   };
