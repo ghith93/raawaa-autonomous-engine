@@ -123,10 +123,11 @@ jobs:
           service_tokens = fetch_all("Access service tokens", "/access/service_tokens")
 
           summary = ({
-              "access_status": "not_enabled_optional",
+              "access_status": "not_enabled",
               "access_applications": "not_applicable",
               "access_service_tokens": "not_applicable",
-          } if access_disabled and not failures else {
+              "other_failures": failures,
+          } if access_disabled else {
               "access_status": "enabled_or_unknown",
               "access_applications": "failed" if apps is None else f"ok; records={len(apps)}",
               "access_service_tokens": "failed" if service_tokens is None else f"ok; records={len(service_tokens)}",
