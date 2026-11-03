@@ -297,7 +297,7 @@ class ResearchDiscoveryTests(unittest.TestCase):
             def __exit__(self, *args): return False
             def geturl(self): return "https://other.example.org/search"
             def read(self, limit): return b'{"results":[]}'
-        with patch("engine.research_discovery.urlopen", return_value=Response()):
+        with patch("engine.research_discovery._open_without_redirects", return_value=Response()):
             with self.assertRaisesRegex(ResearchDiscoveryError, "redirected outside"):
                 _request_searxng("agent security", "https://search.example.org", 5)
 
@@ -310,7 +310,7 @@ class ResearchDiscoveryTests(unittest.TestCase):
             def __exit__(self, *args): return False
             def geturl(self): return "https://search.example.org/search"
             def read(self, limit): return b"x" * (MAX_RESPONSE_BYTES + 1)
-        with patch("engine.research_discovery.urlopen", return_value=Response()):
+        with patch("engine.research_discovery._open_without_redirects", return_value=Response()):
             with self.assertRaisesRegex(ResearchDiscoveryError, "1 MiB"):
                 _request_searxng("agent security", "https://search.example.org", 5)
 
