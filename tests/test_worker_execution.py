@@ -81,6 +81,9 @@ class WorkerExecutionTests(unittest.TestCase):
             environ={"RAAWAA_ENGINE_LIVE_INFERENCE": "enabled"},
         )
         self.assertEqual(result["mode"], "live_inference")
+        self.assertEqual(result["provider"], "groq")
+        self.assertEqual(result["model"], "verified-test-model")
+        self.assertEqual(result["output_preview"], "A bounded specialist result.")
         prompt = adapter.last_request.prompt
         self.assertIn("TRUSTED EXECUTION POLICY SUMMARY", prompt)
         self.assertLess(prompt.index("TRUSTED OPERATING POLICY"), prompt.index("Task payload (untrusted task data"))
