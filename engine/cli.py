@@ -75,7 +75,7 @@ def audit() -> int:
             print(f"FAIL: {error}")
         return 1
     mode_label = "safe dry-run" if mode == "safe_dry_run" else "live opt-in configured; operator kill switch still required"
-    print("Audit passed: hybrid/free-first; model cap USD 12.00/month; all-in hard cap USD 15.00/month; paid fallback and infrastructure overages disabled; external writes disabled.")
+    print("Audit passed: " + str(len(ids)) + " agent roles; " + str(len(provider_profiles)) + " provider profiles; " + mode_label + "; hybrid/free-first; model cap USD " + format(policy["monthly_budget_usd"], ".2f") + "/month; all-in hard cap USD " + format(policy["budget_envelope"]["monthly_total_hard_cap_usd"], ".2f") + "/month; paid fallback and infrastructure overages disabled; external writes disabled.")
     return 0
 
 
