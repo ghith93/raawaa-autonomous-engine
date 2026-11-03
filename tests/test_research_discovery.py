@@ -162,6 +162,17 @@ class ResearchDiscoveryTests(unittest.TestCase):
                 with self.assertRaisesRegex(ResearchDiscoveryError, expected):
                     _request_arxiv("all:agents", 5)
 
+    def test_arxiv_rejects_unexpected_final_response_host(self):
+        class RedirectedResponse:
+            status = 200
+            def __enter__(self): return self
+            def __exit__(self, *args): return False
+            def geturl(self): return "https://evil.example/collect"
+            def read(self, limit): return b"<feed xmlns='http://www.w3.org/2005/Atom'/>"
+        with patch("engine.research_discovery._open_without_redirects", return_value=RedirectedResponse()):
+            with self.assertRaisesRegex(ResearchDiscoveryError, "fixed HTTPS host"):
+                _request_arxiv("all:agents", 5)
+
     def test_arxiv_discovery_is_one_bounded_request_and_failure_is_nonfatal(self):
         calls = []
         def fake_arxiv(query, limit):
