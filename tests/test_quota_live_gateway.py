@@ -233,6 +233,29 @@ class QuotaAwareGatewayTests(unittest.TestCase):
         self.assertEqual(limited.calls, 1)
         self.assertEqual(backup.calls, 1)
 
+    def test_durable_invocation_store_marks_timeout_ambiguous_and_never_retries(self):
+        first = self.profile()
+        second = self.profile(provider="cerebras", account="backup", priority=20)
+        invocation_store = FakeInvocationStore()
+        timed_out = FakeAdapter("groq", LiveAdapterError("request timed out"))
+        backup = FakeAdapter("cerebras")
+        manager = QuotaManager([first, second], self.quota)
+        gateway = QuotaAwareLiveGateway(
+            manager, {"groq": timed_out, "cerebras": backup}, self.usage, True,
+            environ={"RAAWAA_ENGINE_LIVE_INFERENCE": "enabled"},
+            invocation_store=invocation_store,
+        )
+        request = GenerationRequest(
+            "research", "hello world", 20, task_id="task-1",
+            step_key="research:primary", lease_token="lease-1",
+        )
+        with self.assertRaisesRegex(ProviderUnavailable, "route rotation was stopped"):
+            gateway.generate(request)
+        self.assertEqual(timed_out.calls, 1)
+        self.assertEqual(backup.calls, 0)
+        self.assertEqual([call[0] for call in invocation_store.calls],
+                         ["prepare", "start", "ambiguous"])
+
     def test_durable_invocation_store_blocks_without_step_or_lease(self):
         adapter = FakeAdapter("groq")
         invocation_store = FakeInvocationStore()
