@@ -258,40 +258,59 @@ def verify_token_quota_concurrency(run_tag: str) -> None:
 def cap_test(label: str, run_tag: str, cap_kind: str) -> None:
     current = snapshot()
     policy = budget_policy()
-    daily = int(policy["daily_budget_nanos"])
-    monthly = int(policy["monthly_budget_nanos"])
-    task_cap = int(policy["per_task_budget_nanos"])
+    original_policy = (
+        int(policy["daily_budget_nanos"]),
+        int(policy["monthly_budget_nanos"]),
+        int(policy["per_task_budget_nanos"]),
+    )
+    daily, monthly, task_cap = original_policy
+    restore_policy = False
     if cap_kind == "daily":
         remaining = daily - int(current["daily_total_nanos"])
         estimate = min(task_cap, remaining // 2)
         require(estimate > 0, "Staging daily monetary cap has no room for a safe concurrency test")
+    elif cap_kind == "monthly":
+        remaining = monthly - int(current["monthly_total_nanos"])
+        estimate = remaining // 2
+        require(estimate > 0, "Staging monthly monetary cap has no room for a safe concurrency test")
+        # Raise only the temporary Staging daily ceiling so the monthly ceiling
+        # is the limiting dimension; restore the exact original policy in finally.
+        daily = int(current["daily_total_nanos"]) + 100 * estimate
+        monthly = int(current["monthly_total_nanos"]) + 2 * estimate
+        task_cap = estimate
+        set_staging_policy(daily, monthly, task_cap)
+        restore_policy = True
     elif cap_kind == "task":
         estimate = task_cap // 2
         require(estimate > 0, "Staging per-task monetary cap is too small for a concurrency test")
     else:
         raise ValueError("unknown cap kind")
 
-    def attempt(index: int):
-        task_id = f"{PREFIX}{run_tag}-{label}-task" if cap_kind == "task" else f"{PREFIX}{run_tag}-{label}-{index}"
-        return reserve(
-            f"{PREFIX}{run_tag}-{label}-{index}",
-            f"model-{index}",
-            task_id,
-            estimate, daily, monthly, task_cap,
-        )
+    try:
+        def attempt(index: int):
+            task_id = f"{PREFIX}{run_tag}-{label}-task" if cap_kind == "task" else f"{PREFIX}{run_tag}-{label}-{index}"
+            return reserve(
+                f"{PREFIX}{run_tag}-{label}-{index}",
+                f"model-{index}",
+                task_id,
+                estimate, daily, monthly, task_cap,
+            )
 
-    with concurrent.futures.ThreadPoolExecutor(max_workers=3) as pool:
-        results = list(pool.map(attempt, range(3)))
-    statuses = sorted(item[0] for item in results)
-    require(statuses == [201, 201, 409],
-            f"{label} cap did not admit exactly two of three concurrent reservations: {statuses}")
-    for status, body, rid in results:
-        if status == 201:
-            released, _ = action("release", rid)
-            require(released == 200, f"{label} test reservation was not releasable before provider I/O")
-        else:
-            require(body.get("error") == "budget_exceeded",
-                    f"{label} cap returned an unexpected rejection")
+        with concurrent.futures.ThreadPoolExecutor(max_workers=3) as pool:
+            results = list(pool.map(attempt, range(3)))
+        statuses = sorted(item[0] for item in results)
+        require(statuses == [201, 201, 409],
+                f"{label} cap did not admit exactly two of three concurrent reservations: {statuses}")
+        for status, body, rid in results:
+            if status == 201:
+                released, _ = action("release", rid)
+                require(released == 200, f"{label} test reservation was not releasable before provider I/O")
+            else:
+                require(body.get("error") == "budget_exceeded",
+                        f"{label} cap returned an unexpected rejection")
+    finally:
+        if restore_policy:
+            set_staging_policy(*original_policy)
 
 
 def verify_operator_policy(run_tag: str) -> None:
