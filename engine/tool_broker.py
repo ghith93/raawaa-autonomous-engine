@@ -88,7 +88,8 @@ def validate_permission_matrix(
         if not isinstance(name, str) or not name.strip() or not isinstance(spec, dict):
             errors.append("tool entries must have non-empty names and object definitions")
             continue
-        if spec.get("access") not in {"read", "write"}:
+        access = spec.get("access")
+        if not isinstance(access, str) or access not in {"read", "write"}:
             errors.append(f"{name}: access must be read or write")
         if not isinstance(spec.get("action"), str) or not spec["action"].strip():
             errors.append(f"{name}: action is required")
@@ -142,7 +143,7 @@ def validate_permission_matrix(
                     errors.append(f"{name}: duplicate role/task grant {role}/{task_type}")
                 seen.add(key)
 
-        if spec.get("access") == "write" and "production" in environments:
+        if access == "write" and isinstance(environments, list) and "production" in environments:
             errors.append(f"{name}: production write tools are not permitted in this matrix")
     return errors
 
@@ -180,6 +181,13 @@ class ToolBroker:
         }
         if not isinstance(adapters, Mapping):
             raise ValueError("trusted adapter registry must be a mapping")
+        if any(
+            not isinstance(name, str)
+            or name not in permission_matrix["tools"]
+            or not callable(adapter)
+            for name, adapter in adapters.items()
+        ):
+            raise ValueError("every trusted adapter must be callable and explicitly allowlisted")
         if not callable(audit_sink):
             raise ValueError("a durable audit sink is required")
         if approval_verifier is not None and not callable(approval_verifier):
