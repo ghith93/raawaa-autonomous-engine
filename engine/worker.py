@@ -137,17 +137,21 @@ def run_once(store: TaskStore, live_gateway=None, environ=None) -> dict | None:
                 # spin on exhausted capacity. Ambiguous failures remain blocked.
                 heartbeat.stop()
                 heartbeat.check()
+                retry_delay = min(
+                    exc.retry_after_seconds * (2 ** max(0, int(task.get("attempts", 1)) - 1)),
+                    86400,
+                )
                 status = store.retry_or_fail(
                     task["id"],
                     f"provider_not_called:{exc.reason_code}",
                     lease_token=task["lease_token"],
-                    retry_after_seconds=exc.retry_after_seconds,
+                    retry_after_seconds=retry_delay,
                 )
                 return {
                     "id": task["id"], "status": status,
                     "reason": "provider_not_called_retry_scheduled" if status == "pending"
                               else "provider_not_called_attempts_exhausted",
-                    "retry_after_seconds": exc.retry_after_seconds if status == "pending" else 0,
+                    "retry_after_seconds": retry_delay if status == "pending" else 0,
                     "recovery": recovery,
                 }
             except Exception as exc:
