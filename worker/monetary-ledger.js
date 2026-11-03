@@ -97,8 +97,8 @@ export async function handleMonetaryLedger(request, env, url) {
           estimated_cost_nanos,daily_budget_nanos,monthly_budget_nanos,per_task_budget_nanos,created_at
         )
         SELECT ?,?,?,?,?,?,'reserved',?,?,?,?,?
-        WHERE
-          (SELECT COALESCE(SUM(actual_cost_nanos),0) FROM monetary_reservations WHERE status='settled' AND settled_at>=?) +
+        WHERE NOT EXISTS (SELECT 1 FROM monetary_route_quarantines WHERE route_id=?)
+          AND (SELECT COALESCE(SUM(actual_cost_nanos),0) FROM monetary_reservations WHERE status='settled' AND settled_at>=?) +
           (SELECT COALESCE(SUM(estimated_cost_nanos),0) FROM monetary_reservations WHERE ${pending}) + ? <= ?
           AND
           (SELECT COALESCE(SUM(actual_cost_nanos),0) FROM monetary_reservations WHERE status='settled' AND settled_at>=?) +
@@ -110,6 +110,7 @@ export async function handleMonetaryLedger(request, env, url) {
       `).bind(
         input.reservation_id,input.idempotency_key,input.provider,input.model,input.task_kind,input.task_id,
         input.estimated_cost_nanos,input.daily_budget_nanos,input.monthly_budget_nanos,input.per_task_budget_nanos,now,
+        input.provider+":"+input.model,
         day,input.estimated_cost_nanos,input.daily_budget_nanos,
         month,input.estimated_cost_nanos,input.monthly_budget_nanos,
         input.task_id,input.task_id,input.estimated_cost_nanos,input.per_task_budget_nanos
