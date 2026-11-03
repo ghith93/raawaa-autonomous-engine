@@ -168,10 +168,14 @@ class QuotaAwareLiveGateway:
                 # Another worker may have reserved the remaining token capacity.
                 # No provider request was sent, so releasing the monetary reservation is safe.
                 self.usage_ledger.release(monetary_reservation_id)
+                if self.invocation_store is not None:
+                    self.invocation_store.reject(request.task_id, request.lease_token, request.invocation_id, profile.route_id, "quota_capacity_unavailable")
                 continue
             except Exception:
                 # The token reservation did not return, so no provider request was sent.
                 self.usage_ledger.release(monetary_reservation_id)
+                if self.invocation_store is not None:
+                    self.invocation_store.reject(request.task_id, request.lease_token, request.invocation_id, profile.route_id, "quota_reservation_error")
                 raise
 
             self._audit(
