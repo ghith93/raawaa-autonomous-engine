@@ -43,7 +43,7 @@ python -m engine.cli executive-status
 python -m engine.cli executive-status --limit 5
 ```
 
-The command prints JSON and reads up to 200 most recent tasks from the existing configured store. It does not claim that the returned priority order is the actual queue claim order.
+The command prints JSON and reads the most recent tasks through the existing adapter (up to 200 locally; the remote D1 adapter currently caps the response at 100). It does not claim that the returned priority order is the actual queue claim order.
 
 ## Next stages
 
