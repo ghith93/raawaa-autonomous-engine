@@ -52,7 +52,7 @@ jobs:
   staging-migrate:
     name: Apply reviewed migrations to Staging
     needs: test
-    if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+    if: ${{ github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch') }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     concurrency:
@@ -116,7 +116,7 @@ jobs:
   staging-worker-verify:
     name: Deploy isolated Staging Worker and verify monetary ledger
     needs: [test, staging-migrate]
-    if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+    if: ${{ github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch') }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     concurrency:
@@ -216,7 +216,7 @@ jobs:
   publish-staging-ops-telemetry:
     name: Publish sanitized CI and inference-gate telemetry to Staging
     needs: [test, staging-migrate, staging-worker-verify]
-    if: ${{ always() && github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+    if: ${{ always() && github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch') }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -239,7 +239,7 @@ jobs:
   staging-mobile-status-verify:
     name: Verify authenticated Staging mobile status readback
     needs: [publish-staging-ops-telemetry, staging-worker-verify]
-    if: ${{ always() && github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.publish-staging-ops-telemetry.result == 'success' && needs.staging-worker-verify.result == 'success' }}
+    if: ${{ always() && github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && needs.publish-staging-ops-telemetry.result == 'success' && needs.staging-worker-verify.result == 'success' }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
     concurrency:
