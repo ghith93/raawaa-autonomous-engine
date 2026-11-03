@@ -32,7 +32,7 @@ class QuotaAwareLiveGateway:
             raise ValueError("per_task_budget_usd must be finite and non-negative")
         self.per_task_budget_usd = per_task_budget_usd
         # Validate configured caps before the gateway can make any provider request.
-        self.usage_ledger.budget_status(daily_budget_usd, monthly_budget_usd, per_task_budget_usd=self.per_task_budget_usd)
+        self.usage_ledger.budget_status(daily_budget_usd, monthly_budget_usd)
 
     def _live_enabled(self) -> bool:
         return (
