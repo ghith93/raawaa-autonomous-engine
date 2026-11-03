@@ -142,6 +142,8 @@ try {
 
   const unauthenticated = await api("/v1/mobile/status", { token: null });
   assertStatus(unauthenticated, 401, "mobile status must require bearer auth");
+  const unauthenticatedMonetary = await api("/v1/monetary-ledger", { token: null });
+  assertStatus(unauthenticatedMonetary, 401, "monetary ledger status requires authentication");
 
   let status = await api("/v1/mobile/status");
   assertStatus(status, 200, "mobile status must query migrated D1");
@@ -266,6 +268,11 @@ try {
   assertStatus(idemReplay, 200, "monetary idempotency replay");
   assert.equal(idemReplay.payload.reservation_id, idemId);
   assert.equal(idemReplay.payload.replay, true);
+  const idemConflict = await api("/v1/monetary-ledger", {
+    method: "POST",
+    body: { ...idempotentBase, estimated_cost_nanos: 3_000_000, reservation_id: randomUUID(), idempotency_key: idemKey },
+  });
+  assertStatus(idemConflict, 409, "idempotency key cannot be reused for a different reservation");
   const idemRelease = await api("/v1/monetary-ledger", {
     method: "POST", body: { action: "release", reservation_id: idemId },
   });
@@ -315,6 +322,37 @@ try {
     assertStatus(releasedGlobal, 200, "release global-cap test reservation before I/O");
   }
 
+  const monthlyBase = {
+    ...globalBase,
+    daily_budget_nanos: 100_000_000,
+    monthly_budget_nanos: 30_000_000,
+  };
+  const monthlyAttempts = await Promise.all([1, 2, 3].map(index => {
+    const reservation_id = randomUUID();
+    return api("/v1/monetary-ledger", {
+      method: "POST",
+      body: {
+        ...monthlyBase,
+        provider: "d1-local-monthly-provider-" + index,
+        model: "d1-local-monthly-model-" + index,
+        task_id: "d1-local-monthly-task-" + index,
+        reservation_id,
+        idempotency_key: randomUUID(),
+      },
+    });
+  }));
+  assert.deepEqual(
+    monthlyAttempts.map(item => item.status).sort((a,b) => a-b),
+    [201, 201, 409],
+    "monthly monetary cap must be global across providers and concurrent tasks",
+  );
+  for (const item of monthlyAttempts.filter(item => item.status === 201)) {
+    const releasedMonthly = await api("/v1/monetary-ledger", {
+      method: "POST", body: { action: "release", reservation_id: item.payload.reservation_id },
+    });
+    assertStatus(releasedMonthly, 200, "release monthly-cap test reservation before I/O");
+  }
+
   const started = await api("/v1/monetary-ledger", {
     method: "POST", body: { action: "start", reservation_id: inFlight },
   });
@@ -345,6 +383,14 @@ try {
   });
   assertStatus(duplicateSettlement, 200, "duplicate settlement is idempotent");
   assert.equal(duplicateSettlement.payload.replay, true);
+  const conflictingSettlement = await api("/v1/monetary-ledger", {
+    method: "POST",
+    body: {
+      action: "settle", reservation_id: inFlight,
+      actual_cost_nanos: 26_000_000, input_tokens: 11, output_tokens: 7,
+    },
+  });
+  assertStatus(conflictingSettlement, 409, "conflicting settlement replay must be rejected");
   const quarantinedAttempt = await api("/v1/monetary-ledger", {
     method: "POST",
     body: { ...monetaryBase, reservation_id: randomUUID(), idempotency_key: randomUUID() },
@@ -414,6 +460,8 @@ try {
   assert.equal(status.payload.tasks.find(row => row.status === "succeeded")?.count, 1);
   assert.equal(status.payload.monetary_ledger.available, true);
   assert.equal(status.payload.monetary_ledger.pending_count, 1);
+  assert.equal(status.payload.monetary_ledger.daily_spent_usd, 0.025);
+  assert.equal(status.payload.model_costs_usd.total, 0.025);
 
   const webhookDisabled = await api("/v1/telegram/webhook", {
     method: "POST",
@@ -423,7 +471,7 @@ try {
 
   console.log(
     "Local D1 integration passed: migrations, authenticated status, task enqueue/idempotency/lease fencing, " +
-    "concurrent token and monetary caps, pre-I/O-only release, ambiguous reservations, idempotent settlement, quarantine, mobile monetary status, append-only paper ledger/hash replay, and disabled Telegram webhook.",
+    "concurrent token plus global daily/monthly/per-task monetary caps, idempotency conflict/replay, pre-I/O-only release, ambiguous reservations across restart, duplicate/conflicting settlement, quarantine, mobile monetary status and spend breakdown, append-only paper ledger/hash replay, and disabled Telegram webhook.",
   );
 } catch (error) {
   throw new Error(String(error?.stack || error) + "\nWrangler logs:\n" + logs);
