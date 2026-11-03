@@ -150,7 +150,7 @@ test("claim endpoint persists an explicit dry-run execution mode", async () => {
   const claim = DB.calls.find(x => x.kind === "first" && x.sql.includes("UPDATE tasks SET status='running'"));
   assert.equal(claim.values[0], "dry_run");
   const audit = DB.calls.find(x => x.kind === "run" && x.sql.includes("INSERT INTO audit_log"));
-  assert.match(audit.values[1], /"execution_mode":"dry_run"/);
+  assert.match(audit.values[2], /"execution_mode":"dry_run"/);
 });
 
 test("claim endpoint rejects unsupported execution modes before D1 writes", async () => {
