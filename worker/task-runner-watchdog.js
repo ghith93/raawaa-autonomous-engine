@@ -21,7 +21,11 @@ function apiHeaders(token) {
 
 function appConfiguration(env) {
   const names = ["GITHUB_APP_ID", "GITHUB_APP_INSTALLATION_ID", "GITHUB_APP_PRIVATE_KEY"];
-  return names.filter(name => typeof env?.[name] !== "string" || !env[name].trim());
+  const missing = names.filter(name => typeof env?.[name] !== "string" || !env[name].trim());
+  if (env?.GITHUB_APP_WATCHDOG_ENABLED !== "enabled") {
+    missing.push("GITHUB_APP_WATCHDOG_ENABLED");
+  }
+  return missing;
 }
 
 function auditBindingAvailable(env) {
