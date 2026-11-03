@@ -3,20 +3,95 @@
   "mode": "discovery_only",
   "network_calls_enabled": false,
   "providers": [
-    {"id": "openai", "api_style": "openai_responses", "model_discovery": true, "docs": "https://developers.openai.com/api/docs/models", "priority": "frontier_reasoning_coding"},
-    {"id": "google", "api_style": "gemini", "model_discovery": true, "docs": "https://ai.google.dev/gemini-api/docs", "priority": "frontier_multimodal_long_context"},
-    {"id": "anthropic", "api_style": "messages", "model_discovery": true, "docs": "https://platform.claude.com/docs/en/api/models/list", "priority": "frontier_coding_agents"},
-    {"id": "xai", "api_style": "openai_compatible", "model_discovery": true, "docs": "https://docs.x.ai/developers/models", "priority": "frontier_reasoning_realtime_search"},
-    {"id": "deepseek", "api_style": "openai_compatible", "model_discovery": true, "docs": "https://api-docs.deepseek.com/api/list-models/", "priority": "reasoning_cost_efficiency"},
-    {"id": "huggingface", "api_style": "inference_providers", "model_discovery": true, "docs": "https://huggingface.co/docs/inference-providers", "priority": "open_models_multi_provider"},
-    {"id": "groq", "api_style": "openai_compatible", "model_discovery": "provider_catalog", "docs": "https://console.groq.com/docs", "priority": "fast_inference"},
-    {"id": "cerebras", "api_style": "openai_compatible", "model_discovery": "provider_catalog", "docs": "https://inference-docs.cerebras.ai/", "priority": "fast_inference"},
-    {"id": "cloudflare_workers_ai", "api_style": "cloudflare", "model_discovery": "provider_catalog", "docs": "https://developers.cloudflare.com/workers-ai/", "priority": "edge_and_free_tier"}
+    {
+      "id": "openai",
+      "api_style": "openai_responses",
+      "model_discovery": true,
+      "docs": "https://developers.openai.com/api/docs/models",
+      "priority": "frontier_reasoning_coding"
+    },
+    {
+      "id": "google",
+      "api_style": "gemini",
+      "model_discovery": true,
+      "docs": "https://ai.google.dev/gemini-api/docs",
+      "priority": "frontier_multimodal_long_context"
+    },
+    {
+      "id": "anthropic",
+      "api_style": "messages",
+      "model_discovery": true,
+      "docs": "https://platform.claude.com/docs/en/api/models/list",
+      "priority": "frontier_coding_agents"
+    },
+    {
+      "id": "xai",
+      "api_style": "openai_compatible",
+      "model_discovery": true,
+      "docs": "https://docs.x.ai/developers/models",
+      "priority": "frontier_reasoning_realtime_search"
+    },
+    {
+      "id": "deepseek",
+      "api_style": "openai_compatible",
+      "model_discovery": true,
+      "docs": "https://api-docs.deepseek.com/api/list-models/",
+      "priority": "reasoning_cost_efficiency"
+    },
+    {
+      "id": "huggingface",
+      "api_style": "inference_providers",
+      "model_discovery": true,
+      "docs": "https://huggingface.co/docs/inference-providers",
+      "priority": "open_models_multi_provider"
+    },
+    {
+      "id": "groq",
+      "api_style": "openai_compatible",
+      "model_discovery": "provider_catalog",
+      "docs": "https://console.groq.com/docs",
+      "priority": "fast_inference"
+    },
+    {
+      "id": "cerebras",
+      "api_style": "openai_compatible",
+      "model_discovery": "provider_catalog",
+      "docs": "https://inference-docs.cerebras.ai/",
+      "priority": "fast_inference"
+    },
+    {
+      "id": "cloudflare_workers_ai",
+      "api_style": "cloudflare",
+      "model_discovery": "provider_catalog",
+      "docs": "https://developers.cloudflare.com/workers-ai/",
+      "priority": "edge_and_free_tier"
+    },
+    {
+      "id": "openrouter",
+      "api_style": "openai_compatible",
+      "model_discovery": true,
+      "docs": "https://openrouter.ai/docs",
+      "priority": "free_model_aggregation"
+    }
   ],
   "gateways_to_evaluate": [
-    {"id": "omniroute", "repository": "https://github.com/cheaper-inference/OmniRoute", "status": "not_a_dependency"},
-    {"id": "litellm", "repository": "https://github.com/BerriAI/litellm", "status": "not_a_dependency"},
-    {"id": "new_api", "repository": "https://github.com/QuantumNous/new-api", "status": "not_a_dependency"}
+    {
+      "id": "litellm",
+      "repository": "https://github.com/BerriAI/litellm",
+      "status": "not_a_dependency"
+    },
+    {
+      "id": "new_api",
+      "repository": "https://github.com/QuantumNous/new-api",
+      "status": "not_a_dependency"
+    },
+    {
+      "id": "omniroute",
+      "repository": "https://github.com/cheaper-inference/OmniRoute",
+      "status": "reference_only_not_runtime_dependency",
+      "reviewed_release": "3.8.53",
+      "notes": "Large standalone Node.js gateway; do not embed in the Python/Cloudflare Worker runtime without a separate hosting and security review."
+    }
   ],
   "selection_policy": {
     "discover_models_at_runtime": true,
