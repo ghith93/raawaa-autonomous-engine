@@ -229,11 +229,21 @@ try {
     model: "d1-local-model",
     task_kind: "integration_test",
     task_id: "d1-local-monetary-cap-task",
-    estimated_cost_nanos: 10_000_000,
-    daily_budget_nanos: 1_000_000_000,
-    monthly_budget_nanos: 2_000_000_000,
-    per_task_budget_nanos: 20_000_000,
+    estimated_cost_nanos: 100_000_000,
+    daily_budget_nanos: 400_000_000,
+    monthly_budget_nanos: 12_000_000_000,
+    per_task_budget_nanos: 200_000_000,
   };
+  const policyMismatch = await api("/v1/monetary-ledger", {
+    method: "POST",
+    body: {
+      ...monetaryBase,
+      reservation_id: randomUUID(),
+      idempotency_key: randomUUID(),
+      daily_budget_nanos: 400_000_001,
+    },
+  });
+  assertStatus(policyMismatch, 409, "caller cannot raise the operator-owned monetary hard cap");
   const monetaryAttempts = await Promise.all([1, 2, 3].map(() => {
     const reservation_id = randomUUID();
     return api("/v1/monetary-ledger", {
@@ -254,7 +264,7 @@ try {
     ...monetaryBase,
     task_id: "d1-local-idempotency-task",
     estimated_cost_nanos: 2_000_000,
-    per_task_budget_nanos: 10_000_000,
+    per_task_budget_nanos: 200_000_000,
   };
   const idemId = randomUUID();
   const idemKey = randomUUID();
@@ -291,10 +301,10 @@ try {
   );
   const globalBase = {
     ...monetaryBase,
-    estimated_cost_nanos: 10_000_000,
-    daily_budget_nanos: 30_000_000,
-    monthly_budget_nanos: 50_000_000,
-    per_task_budget_nanos: 10_000_000,
+    estimated_cost_nanos: 200_000_000,
+    daily_budget_nanos: 400_000_000,
+    monthly_budget_nanos: 12_000_000_000,
+    per_task_budget_nanos: 200_000_000,
   };
   const globalAttempts = await Promise.all([1, 2, 3].map(index => {
     const reservation_id = randomUUID();
@@ -312,7 +322,7 @@ try {
   }));
   assert.deepEqual(
     globalAttempts.map(item => item.status).sort((a,b) => a-b),
-    [201, 201, 409],
+    [201, 409, 409],
     "daily monetary cap must be global across providers and concurrent tasks; responses=" + JSON.stringify(globalAttempts.map(item => ({status:item.status,payload:item.payload}))),
   );
   for (const item of globalAttempts.filter(item => item.status === 201)) {
@@ -369,7 +379,7 @@ try {
     method: "POST",
     body: {
       action: "settle", reservation_id: inFlight,
-      actual_cost_nanos: 25_000_000, input_tokens: 11, output_tokens: 7,
+      actual_cost_nanos: 250_000_000, input_tokens: 11, output_tokens: 7,
     },
   });
   assertStatus(settledMoney, 200, "settle actual monetary cost");
@@ -402,8 +412,8 @@ try {
     task_id: "d1-local-crash-recovery-task",
     provider: "d1-local-crash-provider",
     model: "d1-local-crash-model",
-    estimated_cost_nanos: 3_000_000,
-    per_task_budget_nanos: 20_000_000,
+    estimated_cost_nanos: 30_000_000,
+    per_task_budget_nanos: 200_000_000,
   };
   const crashReservation = await api("/v1/monetary-ledger", {
     method: "POST",
