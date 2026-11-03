@@ -121,6 +121,26 @@ class MobileStatusProbeTests(unittest.TestCase):
         self.assertEqual(result["worker_cron_last_seen"], "unknown")
         self.assertEqual(result["worker_cron_requeued"], "unknown")
 
+    def test_worker_cron_metadata_rejects_control_characters(self):
+        for field, value in (
+            ("cron", "*/15 * * * *\nINJECTED=value"),
+            ("last_seen_at", "2026-11-03\n00:45:00+00:00"),
+        ):
+            payload = {
+                "worker_cron": {
+                    "last_seen_at": "2026-11-03T00:45:00.000Z",
+                    "cron": "*/15 * * * *",
+                    "requeued": 0,
+                    "failed": 0,
+                    field: value,
+                },
+            }
+            with self.subTest(field=field):
+                result = probe.summarize_mobile_status(payload)
+                self.assertEqual(result["worker_cron_status"], "invalid")
+                self.assertEqual(result["worker_cron_schedule"], "unknown")
+                self.assertEqual(result["worker_cron_last_seen"], "unknown")
+
     def test_telegram_receipt_schema_absence_is_reported_without_enabling_webhook(self):
         payload = status_payload()
         payload["telegram_webhook_schema"] = {
