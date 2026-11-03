@@ -137,13 +137,16 @@ def load_approved_skill(
         raise SkillRegistryError("skill is not approved for this role and task type")
 
     revocations = repository_root / "config" / "skills" / "revocations.json"
-    if revocations.exists():
-        revoked = _json_object(_inside(repository_root, revocations))
-        entries = revoked.get("revoked_skill_ids", [])
-        if not isinstance(entries, list) or any(not isinstance(x, str) for x in entries):
-            raise SkillRegistryError("invalid revocation registry")
-        if skill_id in entries:
-            raise SkillRegistryError("skill has been revoked")
+    if not revocations.exists():
+        raise SkillRegistryError("revocation registry is missing")
+    revoked = _json_object(_inside(repository_root, revocations))
+    entries = revoked.get("revoked_skill_ids", [])
+    if revoked.get("schema_version") != 1 or not isinstance(entries, list) or any(
+        not isinstance(x, str) for x in entries
+    ):
+        raise SkillRegistryError("invalid revocation registry")
+    if skill_id in entries:
+        raise SkillRegistryError("skill has been revoked")
 
     content = instruction_path.read_bytes()
     digest = hashlib.sha256(content).hexdigest()
