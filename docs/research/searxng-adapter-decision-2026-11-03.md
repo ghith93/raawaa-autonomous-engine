@@ -3,9 +3,9 @@
 ## Decision
 
 **Adapter status:** `IMPLEMENTED_NOT_VERIFIED`
-**Runtime status:** `BLOCKED`
+**Runtime status:** `NOT_VERIFIED`
 
-The engine contains an optional, read-only SearXNG JSON adapter. It is not active until the operator configures `RAAWAA_SEARXNG_BASE_URL`. No public SearXNG instance is selected, no self-hosted instance is deployed, and no SearXNG request has been sent by the current scheduled discovery configuration.
+The engine contains an optional, read-only SearXNG JSON adapter. It runs only when `RAAWAA_SEARXNG_BASE_URL` is present in the scheduled workflow environment. The current value of that GitHub Actions variable was not inspected, and no scheduled discovery artifact containing `searxng_endpoint_configured`/`searxng_requests_made` was verified in this review. Therefore actual activation is `NOT_VERIFIED`; no claim is made that the endpoint is currently configured or unconfigured. No public instance is selected or hardcoded, and this PR does not deploy a self-hosted instance.
 
 ## Evidence
 
@@ -36,4 +36,4 @@ SearXNG can aggregate many configured search engines, but the actual enabled eng
 4. Run one bounded manual scan and verify endpoint identity, JSON response shape, result count and source telemetry.
 5. Record actual enabled engines and availability; do not infer them from SearXNG marketing or generic documentation.
 
-Until all five checks pass, keep the runtime marked `BLOCKED`.
+Until all five checks pass and a scan artifact verifies endpoint identity, request count and telemetry, keep runtime activation marked `NOT_VERIFIED`.
