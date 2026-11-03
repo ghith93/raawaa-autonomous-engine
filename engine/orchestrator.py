@@ -80,6 +80,12 @@ def validate_and_plan(
 ) -> WorkflowPlan:
     """Validate a bounded DAG, assign specialists from trusted mappings, and return plan-only waves."""
     policy = {**DEFAULT_POLICY, **(policy or {})}
+    if not isinstance(workflow, dict):
+        raise WorkflowValidationError("workflow must be an object")
+    if not isinstance(agent_roster, dict) or not isinstance(agent_roster.get("agents"), list):
+        raise WorkflowValidationError("agent roster must contain an agents list")
+    if not isinstance(policy, dict):
+        raise WorkflowValidationError("policy must be an object")
     workflow_id = workflow.get("id")
     steps = workflow.get("steps")
     if not isinstance(workflow_id, str) or not ID_RE.fullmatch(workflow_id):
@@ -104,7 +110,7 @@ def validate_and_plan(
         if step_id in by_id:
             raise WorkflowValidationError(f"duplicate step id: {step_id}")
         task_type = step.get("task_type")
-        if task_type not in SAFE_TASK_TYPES:
+        if not isinstance(task_type, str) or task_type not in SAFE_TASK_TYPES:
             raise WorkflowValidationError(f"task type is not allowlisted: {task_type}")
         title = step.get("title")
         if not isinstance(title, str) or not title.strip():
@@ -123,7 +129,7 @@ def validate_and_plan(
         if step_id in deps:
             raise WorkflowValidationError(f"step cannot depend on itself: {step_id}")
         risk = step.get("risk", "low")
-        if risk not in {"low", "medium", "high", "critical"}:
+        if not isinstance(risk, str) or risk not in {"low", "medium", "high", "critical"}:
             raise WorkflowValidationError(f"invalid risk level for step: {step_id}")
         estimate = _cost(step.get("estimated_model_cost_usd", 0), f"{step_id}.estimated_model_cost_usd")
         if estimate > per_task_cap:
