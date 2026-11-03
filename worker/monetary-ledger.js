@@ -65,8 +65,20 @@ export async function handleMonetaryLedger(request, env, url) {
     try {
       const now = new Date().toISOString();
       const snapshot = await spendSnapshot(env.DB, taskId, now);
+      const policy = await env.DB.prepare("SELECT policy_key,daily_budget_nanos,monthly_budget_nanos,per_task_budget_nanos,enabled,updated_at FROM monetary_budget_policy WHERE policy_key='default'").first();
       const quarantines = await env.DB.prepare("SELECT route_id,reason,reservation_id,quarantined_at FROM monetary_route_quarantines ORDER BY quarantined_at DESC LIMIT 100").all();
-      return json({snapshot,quarantined_routes:quarantines.results || []});
+      return json({
+        snapshot,
+        budget_policy: policy ? {
+          policy_key: policy.policy_key,
+          daily_budget_nanos: Number(policy.daily_budget_nanos),
+          monthly_budget_nanos: Number(policy.monthly_budget_nanos),
+          per_task_budget_nanos: Number(policy.per_task_budget_nanos),
+          enabled: Number(policy.enabled) === 1,
+          updated_at: policy.updated_at,
+        } : null,
+        quarantined_routes: quarantines.results || [],
+      });
     } catch { return json({error:"storage_unavailable"},503); }
   }
   if (request.method !== "POST") return json({error:"method_not_allowed"},405);
@@ -83,6 +95,10 @@ export async function handleMonetaryLedger(request, env, url) {
           !["estimated_cost_nanos","daily_budget_nanos","monthly_budget_nanos","per_task_budget_nanos"].every(key => safeInt(input[key]))) {
         return json({error:"invalid_reservation"},400);
       }
+      const existing = await env.DB.prepare("SELECT * FROM monetary_reservations WHERE idempotency_key=?").bind(input.idempotency_key).first();
+      if (existing) return sameReservation(existing,input)
+        ? json({reservation_id:existing.reservation_id,status:existing.status,replay:true})
+        : json({error:"idempotency_conflict"},409);
       // Hard caps are operator-owned in D1, not caller-controlled. This prevents
       // any runner holding the API token from silently raising the spend ceiling.
       const policy = await env.DB.prepare("SELECT daily_budget_nanos,monthly_budget_nanos,per_task_budget_nanos FROM monetary_budget_policy WHERE policy_key='default' AND enabled=1").first();
@@ -92,10 +108,6 @@ export async function handleMonetaryLedger(request, env, url) {
           Number(policy.per_task_budget_nanos) !== input.per_task_budget_nanos) {
         return json({error:"budget_policy_mismatch"},409);
       }
-      const existing = await env.DB.prepare("SELECT * FROM monetary_reservations WHERE idempotency_key=?").bind(input.idempotency_key).first();
-      if (existing) return sameReservation(existing,input)
-        ? json({reservation_id:existing.reservation_id,status:existing.status,replay:true})
-        : json({error:"idempotency_conflict"},409);
       const date = new Date(now);
       const day = new Date(Date.UTC(date.getUTCFullYear(),date.getUTCMonth(),date.getUTCDate())).toISOString();
       const month = new Date(Date.UTC(date.getUTCFullYear(),date.getUTCMonth(),1)).toISOString();
