@@ -140,5 +140,31 @@ class LiveDataPolicyTests(unittest.TestCase):
         self.assertEqual(reason, "payload_schema_invalid")
 
 
+    def test_proprietary_formula_terms_in_topic_are_blocked(self):
+        payload = self.valid_payload()
+        payload["topic"] = "Review Raawaa hair serum formula and ingredient blend"
+        allowed, reason = validate_live_payload(
+            "research_brief", "Public research", payload, POLICY
+        )
+        self.assertFalse(allowed)
+        self.assertEqual(reason, "sensitive_content_detected")
+
+    def test_customer_and_personal_data_terms_in_questions_are_blocked(self):
+        payload = self.valid_payload()
+        payload["questions"] = ["Summarize customer order and payment details"]
+        allowed, reason = validate_live_payload(
+            "research_brief", "Public research", payload, POLICY
+        )
+        self.assertFalse(allowed)
+        self.assertEqual(reason, "sensitive_content_detected")
+
+    def test_confidential_marker_in_title_is_blocked(self):
+        allowed, reason = validate_live_payload(
+            "research_brief", "Confidential internal analysis", self.valid_payload(), POLICY
+        )
+        self.assertFalse(allowed)
+        self.assertEqual(reason, "sensitive_content_detected")
+
+
 if __name__ == "__main__":
     unittest.main()
