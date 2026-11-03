@@ -141,11 +141,13 @@ class TaskStore:
                 raise KeyError(task_id)
             self._assert_lease(row, lease_token)
             now = utc_now()
-            mode = execution_mode or (
+            if execution_mode is not None and execution_mode not in {"unknown", "dry_run", "live_inference"}:
+                raise ValueError("invalid execution_mode")
+            mode = execution_mode if execution_mode is not None else (
                 result.get("mode") if isinstance(result, dict) and
                 result.get("mode") in {"dry_run", "live_inference"} else row["execution_mode"]
             )
-            if mode not in {"unknown", "not_started", "dry_run", "live_inference"}:
+            if mode not in {"unknown", "dry_run", "live_inference"}:
                 raise ValueError("invalid execution_mode")
             changed = db.execute("""UPDATE tasks SET status=?,result_json=?,error=?,execution_mode=?,updated_at=?,
                 lease_token=NULL,lease_expires_at=NULL

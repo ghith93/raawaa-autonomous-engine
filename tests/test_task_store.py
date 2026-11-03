@@ -46,6 +46,18 @@ class TaskStoreTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             self.store.claim_next(execution_mode="shell")
 
+    def test_finish_rejects_not_started_execution_mode(self):
+        task = self.store.enqueue("research_brief", "Mode cannot revert after claim")
+        claim = self.store.claim_next(execution_mode="dry_run")
+        with self.assertRaisesRegex(ValueError, "invalid execution_mode"):
+            self.store.finish(
+                task["id"], "succeeded", result={"ok": True},
+                lease_token=claim["lease_token"], execution_mode="not_started",
+            )
+        saved = self.store.list_tasks()[0]
+        self.assertEqual(saved["status"], "running")
+        self.assertEqual(saved["execution_mode"], "dry_run")
+
     def test_existing_database_rows_migrate_to_unknown_mode(self):
         legacy_path = Path(self.tmp.name) / "legacy.db"
         with sqlite3.connect(legacy_path) as db:
