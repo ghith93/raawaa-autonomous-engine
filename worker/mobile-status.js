@@ -196,7 +196,9 @@ export async function handleMobileStatus(request, env, url) {
       applied.has("0003_durable_quota_ledger")
         ? env.DB.prepare("SELECT route_id,COUNT(*) AS requests,COALESCE(SUM(tokens),0) AS tokens FROM quota_usage GROUP BY route_id ORDER BY route_id").all()
         : Promise.resolve({ results: [] }),
-      env.DB.prepare("SELECT provider,COUNT(*) AS requests,COALESCE(SUM(input_tokens),0) AS input_tokens,COALESCE(SUM(output_tokens),0) AS output_tokens,COALESCE(SUM(cost_usd),0) AS cost_usd FROM model_usage GROUP BY provider ORDER BY provider").all(),
+      applied.has("0006_monetary_budget_ledger")
+        ? env.DB.prepare("SELECT provider,COUNT(*) AS requests,COALESCE(SUM(input_tokens),0) AS input_tokens,COALESCE(SUM(output_tokens),0) AS output_tokens,COALESCE(SUM(actual_cost_nanos),0)/1000000000.0 AS cost_usd FROM monetary_reservations WHERE status='settled' GROUP BY provider ORDER BY provider").all()
+        : env.DB.prepare("SELECT provider,COUNT(*) AS requests,COALESCE(SUM(input_tokens),0) AS input_tokens,COALESCE(SUM(output_tokens),0) AS output_tokens,COALESCE(SUM(cost_usd),0) AS cost_usd FROM model_usage GROUP BY provider ORDER BY provider").all(),
       applied.has("0006_monetary_budget_ledger")
         ? (async () => {
             const current = new Date();
@@ -249,7 +251,7 @@ export async function handleMobileStatus(request, env, url) {
           output_tokens: Number(row.output_tokens) || 0,
           cost_usd: Number(row.cost_usd) || 0,
         })),
-        source: "model_usage D1 ledger; recorded provider costs only",
+        source: applied.has("0006_monetary_budget_ledger") ? "D1 monetary_reservations; legacy model_usage costs backfilled" : "model_usage D1 ledger; recorded provider costs only",
       },
       monetary_ledger: monetary ? {
         available: true,
