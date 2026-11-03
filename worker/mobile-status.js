@@ -189,7 +189,7 @@ export async function handleMobileStatus(request, env, url) {
 
     const safeScanId = value => typeof value === "string" && value.length <= 160 && /^[A-Za-z0-9_.:-]+$/.test(value);
     const validTimestamp = value => typeof value === "string" && value.length <= 40 &&
-      /(?:Z|[+-]\\d{2}:\\d{2})$/.test(value) && Number.isFinite(Date.parse(value));
+      /(?:Z|[+-]\d{2}:\d{2})$/.test(value) && Number.isFinite(Date.parse(value));
     const researchScan = (() => {
       const unknown = { value: null, unavailable: "No valid research scan has been recorded" };
       if (!scanRows) return unknown;
