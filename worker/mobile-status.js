@@ -226,6 +226,7 @@ export async function handleMobileStatus(request, env, url) {
         let details;
         try { details = JSON.parse(row.details_json || "{}"); } catch { continue; }
         if (!details || !["github","crossref"].includes(details.source) || values[details.source] ||
+            !researchScan.value || details.scan_id !== researchScan.value.scan_id ||
             !["fresh","unavailable"].includes(details.status) || !validTimestamp(details.observed_at) ||
             !Number.isSafeInteger(details.freshness_hours) || details.freshness_hours < 1 ||
             !Number.isSafeInteger(details.request_count) || details.request_count < 0 ||
@@ -244,7 +245,7 @@ export async function handleMobileStatus(request, env, url) {
       const present = ["github","crossref"].filter(source => values[source]);
       const aggregate = present.length !== 2 ? "unknown" :
         (Object.values(values).every(item=>item.status==="fresh") ? "fresh" :
-         Object.values(values).some(item=>item.status==="fresh") ? "partial" :
+         Object.values(values).some(item=>item.status==="fresh") || Object.values(values).some(item=>item.status==="unavailable") && Object.values(values).some(item=>item.status==="stale") ? "partial" :
          Object.values(values).some(item=>item.status==="stale") ? "stale" : "unavailable");
       return { value: present.length ? values : null, status: aggregate };
     })();
