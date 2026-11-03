@@ -180,6 +180,24 @@ try {
   assert.equal(status.payload.unavailable_metrics.paper_ledger, "Available");
   assert.equal(status.payload.unavailable_metrics.provider_usage, "Available");
 
+  // Verify the widened source CHECK constraint and real Worker normalization after local migrations.
+  const researchIngest = await api("/v1/research/candidates", {
+    method: "POST",
+    body: { candidates: [
+      { source: "arxiv", arxiv_id: "2601.01234v2", title: "Local arXiv schema check",
+        url: "https://arxiv.org/abs/2601.01234v2", abstract_retrieved: false, full_text_retrieved: false },
+      { source: "searxng", title: "Local SearXNG schema check",
+        url: "https://docs.example.org/agent-security?source=searxng", snippet: "metadata only" },
+    ] },
+  });
+  assertStatus(researchIngest, 201, "arXiv and SearXNG research ingestion");
+  assert.equal(researchIngest.payload.accepted_count, 2);
+  const researchReadback = await api("/v1/research/candidates?status=all&limit=100&keys_only=true");
+  assertStatus(researchReadback, 200, "multi-source research readback");
+  const persistedSources = new Set(researchReadback.payload.candidates.map(item => item.source_key));
+  assert.ok(persistedSources.has("arxiv:2601.01234v2"));
+  assert.ok(persistedSources.has("searxng:https://docs.example.org/agent-security?source=searxng"));
+
   const taskPayload = {
     task_type: "system_audit",
     title: "Local D1 integration smoke",
