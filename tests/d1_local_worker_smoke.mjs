@@ -244,6 +244,7 @@ try {
   });
   assertStatus(deferred, 200, "schedule delayed retry");
   assert.equal(deferred.payload.status, "pending");
+  assert.ok(deferred.payload.next_attempt_at, "retry response must confirm its due time");
   const listedDeferred = await api("/v1/tasks?limit=20");
   assertStatus(listedDeferred, 200, "read delayed retry schedule");
   const deferredRow = listedDeferred.payload.tasks.find(task => task.id === deferredId);
