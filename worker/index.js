@@ -7,6 +7,8 @@ import { handleMobilePage, handleMobileStatus } from "./mobile-status.js";
 import { dispatchTaskRunnerIfStale } from "./task-runner-watchdog.js";
 const JSON_HEADERS = { "content-type": "application/json; charset=utf-8", "cache-control": "no-store" };
 const MAX_BODY_BYTES = 32 * 1024;
+const CODESPACE_TASK_TYPES = new Set(["codespace_inspect", "codespace_test"]);
+const CODESPACE_TASK_SQL = "'codespace_inspect','codespace_test'";
 
 function json(data, status = 200) {
   return new Response(JSON.stringify(data), { status, headers: JSON_HEADERS });
@@ -204,7 +206,10 @@ export default {
     if (telegramResponse) return telegramResponse;
 
     if (url.pathname !== "/v1/tasks" && url.pathname !== "/v1/tasks/enqueue" &&
-        url.pathname !== "/v1/tasks/claim" && url.pathname !== "/v1/tasks/recover" &&
+        url.pathname !== "/v1/tasks/claim" && url.pathname !== "/v1/codespace/status" &&
+        url.pathname !== "/v1/codespace/tasks/claim" &&
+        !/^\/v1\/codespace\/tasks\/[A-Za-z0-9-]+\/(heartbeat|finish|retry)$/.test(url.pathname) &&
+        url.pathname !== "/v1/tasks/recover" &&
         url.pathname !== "/v1/diagnostics/auth" &&
         url.pathname !== "/v1/research/candidates" &&
         url.pathname !== "/v1/quota" &&
@@ -216,11 +221,24 @@ export default {
         !/^\/v1\/tasks\/[A-Za-z0-9-]+\/(heartbeat|finish|retry)$/.test(url.pathname)) {
       return json({ error: "not_found" }, 404);
     }
+    const codespaceClaimRoute = url.pathname === "/v1/codespace/tasks/claim";
+    const codespaceStatusRoute = url.pathname === "/v1/codespace/status";
+    const codespaceActionRoute = /^\/v1\/codespace\/tasks\/[A-Za-z0-9-]+\/(heartbeat|finish|retry)$/.test(url.pathname);
+    const codespaceRoute = codespaceClaimRoute || codespaceStatusRoute || codespaceActionRoute;
+    const codespaceAuthorized = Boolean(env.ENGINE_CODESPACE_TOKEN) &&
+      env.ENGINE_CODESPACE_TOKEN !== env.ENGINE_API_TOKEN &&
+      env.ENGINE_CODESPACE_TOKEN !== env.ENGINE_QUOTA_ADMIN_TOKEN &&
+      constantTimeEqual(bearer(request), env.ENGINE_CODESPACE_TOKEN);
     const quotaAdminAccess = url.pathname === "/v1/quota" &&
       Boolean(env.ENGINE_QUOTA_ADMIN_TOKEN) && env.ENGINE_QUOTA_ADMIN_TOKEN !== env.ENGINE_API_TOKEN &&
       constantTimeEqual(bearer(request), env.ENGINE_QUOTA_ADMIN_TOKEN);
-    if (!(await authorized(request, env)) && !quotaAdminAccess) {
+    if (codespaceRoute ? !codespaceAuthorized : (!(await authorized(request, env)) && !quotaAdminAccess)) {
       return json({ error: "unauthorized" }, 401);
+    }
+    if (codespaceStatusRoute) {
+      if (request.method !== "GET") return json({ error: "method_not_allowed" }, 405);
+      return json({ ok: true, executor: "codespace", capabilities: ["inspect", "test"],
+        task_types: [...CODESPACE_TASK_TYPES], max_lease_seconds: 900 });
     }
 
     const mobileStatusResponse = await handleMobileStatus(request, env, url);
@@ -268,7 +286,12 @@ export default {
 
     // Claim one pending task atomically. The lease token is generated server-side
     // and returned only to the authenticated runner that claimed the task.
-    if (request.method === "POST" && url.pathname === "/v1/tasks/claim") {
+    if (request.method === "POST" &&
+        (url.pathname === "/v1/tasks/claim" || url.pathname === "/v1/codespace/tasks/claim")) {
+      const codespaceClaim = url.pathname === "/v1/codespace/tasks/claim";
+      const taskTypeFilter = codespaceClaim
+        ? `AND task_type IN (${CODESPACE_TASK_SQL})`
+        : `AND task_type NOT IN (${CODESPACE_TASK_SQL})`;
       const leaseSeconds = 900;
       const now = new Date();
       const nowIso = now.toISOString();
@@ -278,9 +301,9 @@ export default {
         const claim = await env.DB.prepare(`
           UPDATE tasks SET status='running', attempts=attempts+1, updated_at=?,
             lease_token=?, lease_expires_at=?
-          WHERE id=(SELECT id FROM tasks WHERE status='pending'
+          WHERE id=(SELECT id FROM tasks WHERE status='pending' ${taskTypeFilter}
             ORDER BY created_at,id LIMIT 1)
-            AND status='pending'
+            AND status='pending' ${taskTypeFilter}
           RETURNING id,idempotency_key,task_type,title,payload_json,status,attempts,
             max_attempts,created_at,updated_at,lease_token,lease_expires_at
         `).bind(nowIso, leaseToken, expires).first();
@@ -297,8 +320,10 @@ export default {
     }
 
     const taskAction = url.pathname.match(/^\/v1\/tasks\/([A-Za-z0-9-]+)\/(heartbeat|finish|retry)$/);
-    if (request.method === "POST" && taskAction) {
-      const [, taskId, action] = taskAction;
+    const codespaceTaskAction = url.pathname.match(/^\/v1\/codespace\/tasks\/([A-Za-z0-9-]+)\/(heartbeat|finish|retry)$/);
+    if (request.method === "POST" && (taskAction || codespaceTaskAction)) {
+      const codespaceAction = Boolean(codespaceTaskAction);
+      const [, taskId, action] = codespaceAction ? codespaceTaskAction : taskAction;
       let input;
       try { input = await readJson(request); }
       catch (error) {
@@ -309,9 +334,12 @@ export default {
       const nowIso = new Date().toISOString();
       try {
         const current = await env.DB.prepare(
-          "SELECT id,status,attempts,max_attempts,lease_token,lease_expires_at FROM tasks WHERE id=?"
+          "SELECT id,status,attempts,max_attempts,task_type,lease_token,lease_expires_at FROM tasks WHERE id=?"
         ).bind(taskId).first();
         if (!current) return json({ error: "task_not_found" }, 404);
+        if (CODESPACE_TASK_TYPES.has(current.task_type) !== codespaceAction) {
+          return json({ error: "executor_mismatch" }, 403);
+        }
         if (current.status !== "running" || current.lease_token !== leaseToken ||
             !current.lease_expires_at || current.lease_expires_at < nowIso) {
           return json({ error: "lease_lost" }, 409);
