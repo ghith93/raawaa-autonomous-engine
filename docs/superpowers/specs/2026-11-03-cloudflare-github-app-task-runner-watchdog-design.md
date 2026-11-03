@@ -2,7 +2,7 @@
 
 ## Intent
 
-Restore dependable bounded Task Runner invocation when GitHub's best-effort schedule event stops firing. Keep the current Python worker, D1 task ledger, Cloudflare control Worker, and GitHub Actions workflow as the canonical execution path. Use the existing Cloudflare Cron Trigger as a watchdog that dispatches the existing workflow_dispatch event only when no recent scheduled or active Task Runner run exists.
+Restore dependable bounded Task Runner invocation when GitHub's best-effort schedule event stops firing. Keep the current Python worker, D1 task ledger, Cloudflare control Worker, and GitHub Actions workflow as the canonical execution path. Use the existing Cloudflare Cron Trigger as a watchdog that dispatches the existing workflow_dispatch event only when no recent Task Runner run of any trigger type, no active run, and no durable dispatch intent exists.
 
 ## Why this change
 
@@ -16,7 +16,7 @@ Restore dependable bounded Task Runner invocation when GitHub's best-effort sche
 
 1. Add an optional Cloudflare Cron watchdog that checks the Task Runner workflow's recent runs.
 2. If a queued/running Task Runner exists, do nothing.
-3. If a scheduled invocation was created within the last 10 minutes, do nothing; the watchdog is a fallback, not a second primary schedule.
+3. If any Task Runner invocation on main was created within the last 10 minutes, do nothing; the watchdog is a fallback, not a second primary schedule.
 4. Otherwise dispatch only ghith93/raawaa-autonomous-engine/.github/workflows/task-runner.yml on main.
 5. Authenticate with a GitHub App installation token scoped to this single repository and Actions: write.
 6. Generate short-lived installation tokens in memory; never persist, print, or log them.
@@ -44,7 +44,7 @@ Restore dependable bounded Task Runner invocation when GitHub's best-effort sche
 ### Cron behavior
 
 - Preserve the existing recovery schedule: */15 * * * *.
-- Add a watchdog schedule: 2,7,12,17,22,27,32,37,42,47,52,57 * * * *.
+- Add a watchdog schedule: 1,6,11,16,21,26,31,36,41,46,51,56 * * * * (two minutes after the primary Task Runner tick).
 - Branch on the exact controller.cron string.
 - Keep the watchdog's early return when App configuration is absent. Missing configuration must cause zero network calls and zero D1 writes.
 - The two Cron expressions are deliberately offset from each other and from the GitHub Task Runner schedule.
@@ -77,7 +77,7 @@ GET /repos/ghith93/raawaa-autonomous-engine/actions/workflows/task-runner.yml/ru
 
 - If any returned run is queued, in_progress, waiting, or requested, return active_run.
 - Find the latest run with event === schedule.
-- If its created_at is no more than 10 minutes old, return recent_schedule.
+- If any Task Runner run's created_at is no more than 10 minutes old, return recent_task_runner_run.
 - Otherwise call POST /repos/ghith93/raawaa-autonomous-engine/actions/workflows/task-runner.yml/dispatches with { "ref": "main" }.
 - Accept documented success responses 200 and 204.
 - Do not follow URLs from GitHub API responses or task payloads.
@@ -103,13 +103,14 @@ GET /repos/ghith93/raawaa-autonomous-engine/actions/workflows/task-runner.yml/ru
 
 ## Acceptance criteria
 
-1. Unit tests cover PEM parsing/wrapping, JWT signing/claims, token scoping, missing settings, active-run suppression, recent-schedule suppression, stale-schedule dispatch, and sanitized failure behavior.
+1. Unit tests cover PEM parsing/wrapping, JWT signing/claims, token scoping, missing settings, active-run suppression, recent Task Runner run suppression for any event type, atomic D1 intent deduplication, stale-run dispatch, and sanitized failure behavior.
 2. Worker tests prove the watchdog Cron does not run stale-lease recovery and the recovery Cron does not call GitHub.
 3. All existing Python, Worker, D1, and Workflows tests pass.
 4. Exact-head GitHub Actions CI passes before merge.
 5. The merged Worker is deployed only through the existing reviewed deployment workflow.
-6. Before secrets are configured, the deployed watchdog performs no network calls and no D1 writes.
-7. After App setup, a real watchdog-triggered workflow_dispatch run is observed and the Task Runner completes its bounded batch.
+6. Before secrets are configured, the deployed watchdog performs no network calls and no D1 reads or writes.
+7. Before dispatch, an atomic D1 `task_runner_dispatch_intent` insert reserves a 10-minute dedupe window; a failed outcome audit cannot immediately cause a duplicate external dispatch.
+8. After App setup, a real watchdog-triggered workflow_dispatch run is observed and the Task Runner completes its bounded batch.
 8. A successful dispatch is not reported as proof of task execution; both stages require separate evidence.
 
 ## Rollback
