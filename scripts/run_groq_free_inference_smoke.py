@@ -37,6 +37,10 @@ def _wait_for_authenticated_worker(store: RemoteTaskStore, timeout_seconds: int 
             if client_id and client_secret:
                 headers["CF-Access-Client-Id"] = client_id
                 headers["CF-Access-Client-Secret"] = client_secret
+            headers["User-Agent"] = (
+                "RaawaaAutonomousEngine/1.0 "
+                "(+https://github.com/ghith93/raawaa-autonomous-engine)"
+            )
             request = urllib.request.Request(
                 os.environ["RAAWAA_ENGINE_API_URL"].rstrip("/") + "/health",
                 headers=headers,
