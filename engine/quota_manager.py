@@ -290,7 +290,9 @@ class QuotaLedger:
             raise ValueError("audit event name is invalid")
         allowed = {
             "reason", "error_type", "http_status", "estimated_tokens",
-            "actual_tokens", "cooldown_seconds", "cost_usd",
+            "actual_tokens", "cooldown_seconds", "cost_usd", "cost_basis",
+            "profile_estimated_cost_usd", "provider_reported_cost_usd",
+            "provider_reported_cost_available",
         }
         safe = {}
         for key, value in (details or {}).items():
