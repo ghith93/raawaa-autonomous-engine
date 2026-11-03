@@ -154,6 +154,7 @@ class ResearchDiscoveryTests(unittest.TestCase):
             def read(self, limit): return self.body
         for body, expected in (
             (b'<!DOCTYPE feed [<!ENTITY x "y">]><feed/>', "DTD/entities"),
+            ('<!DOCTYPE feed [<!ENTITY x "y">]><feed/>'.encode("utf-16"), "valid UTF-8"),
             (b"<feed>", "malformed Atom XML"),
             (b"x" * (MAX_RESPONSE_BYTES + 1), "1 MiB"),
         ):
