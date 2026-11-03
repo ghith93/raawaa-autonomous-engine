@@ -118,6 +118,15 @@ function launchWorker() {
     "--log-level", "error",
     "--persist-to", stateDir,
     "--var", "ENGINE_API_TOKEN:" + TOKEN,
+    "--var", "QUOTA_ROUTE_LIMITS_JSON:" + JSON.stringify({
+      "d1-local:concurrency": {
+        enabled: true,
+        minute_request_limit: 2, minute_token_limit: 20,
+        daily_request_limit: 10, daily_token_limit: 100,
+        monthly_request_limit: 20, monthly_token_limit: 500,
+        per_task_request_limit: 3, per_task_token_limit: 50,
+      },
+    }),
   ], {
     cwd: process.cwd(),
     env: safeEnvironment(),
@@ -316,14 +325,6 @@ try {
     route_id: "d1-local:concurrency",
     task_id: "d1-local-quota-task",
     estimated_tokens: 5,
-    daily_request_limit: 10,
-    daily_token_limit: 100,
-    monthly_request_limit: 20,
-    monthly_token_limit: 500,
-    minute_request_limit: 2,
-    minute_token_limit: 20,
-    per_task_request_limit: 3,
-    per_task_token_limit: 50,
   };
   const reservations = await Promise.all([
     api("/v1/quota", { method: "POST", body: quotaBase }),
@@ -339,14 +340,14 @@ try {
   for (const reservation of accepted) {
     const settled = await api("/v1/quota", {
       method: "POST",
-      body: { action: "settle", reservation_id: reservation.payload.reservation_id, actual_tokens: 3 },
+      body: { action: "settle", reservation_id: reservation.payload.reservation_id, route_id: "d1-local:concurrency", task_id: "d1-local-quota-task", actual_tokens: 3 },
     });
     assertStatus(settled, 200, "quota settlement");
   }
   const quota = await api("/v1/quota?route_id=d1-local%3Aconcurrency&task_id=d1-local-quota-task");
   assertStatus(quota, 200, "quota usage read");
   assert.equal(quota.payload.usage.minute.requests, 2);
-  assert.equal(quota.payload.usage.minute.tokens, 6);
+  assert.equal(quota.payload.usage.minute.tokens, 10, "settlement cannot reduce the reserved token estimate");
 
   const monetaryBase = {
     action: "reserve",
