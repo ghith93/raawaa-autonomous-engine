@@ -7,6 +7,8 @@ import { handleMobilePage, handleMobileStatus } from "./mobile-status.js";
 import { dispatchTaskRunnerIfStale } from "./task-runner-watchdog.js";
 const JSON_HEADERS = { "content-type": "application/json; charset=utf-8", "cache-control": "no-store" };
 const MAX_BODY_BYTES = 32 * 1024;
+// Release remains hard-disabled until issue #440 adversarial sandbox criteria pass.
+const CODESPACE_EXECUTOR_RELEASE_ENABLED = false;
 const CODESPACE_TASK_TYPES = new Set(["codespace_inspect", "codespace_test"]);
 const CODESPACE_TASK_SQL = "'codespace_inspect','codespace_test'";
 
@@ -225,6 +227,9 @@ export default {
     const codespaceStatusRoute = url.pathname === "/v1/codespace/status";
     const codespaceActionRoute = /^\/v1\/codespace\/tasks\/[A-Za-z0-9-]+\/(heartbeat|finish)$/.test(url.pathname);
     const codespaceRoute = codespaceClaimRoute || codespaceStatusRoute || codespaceActionRoute;
+    if (codespaceRoute && !CODESPACE_EXECUTOR_RELEASE_ENABLED) {
+      return json({ error: "codespace_executor_disabled" }, 503);
+    }
     const codespaceAuthorized = typeof env.ENGINE_CODESPACE_TOKEN === "string" &&
       env.ENGINE_CODESPACE_TOKEN.length >= 32 &&
       env.ENGINE_CODESPACE_TOKEN !== env.ENGINE_API_TOKEN &&
@@ -410,6 +415,9 @@ export default {
     }
 
     const taskType = input?.task_type;
+    if (CODESPACE_TASK_TYPES.has(taskType) && !CODESPACE_EXECUTOR_RELEASE_ENABLED) {
+      return json({ error: "codespace_executor_disabled" }, 503);
+    }
     const title = input?.title;
     const key = input?.idempotency_key;
     const payload = input?.payload ?? {};
