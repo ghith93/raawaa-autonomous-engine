@@ -12,6 +12,7 @@ from pathlib import Path
 from engine.live_adapters import OpenAICompatibleAdapter
 from engine.model_gateway import UsageLedger
 from engine.d1_monetary_ledger import D1MonetaryLedger
+from engine.d1_quota_ledger import D1QuotaLedger
 from engine.quota_config import load_provider_profile_registry
 from engine.quota_live_gateway import QuotaAwareLiveGateway
 from engine.quota_manager import QuotaLedger, QuotaManager
@@ -45,14 +46,15 @@ def build_live_gateway(
     # Cloud runners must use the shared D1 ledger. Never fall back to ephemeral
     # SQLite when the control Worker is configured or when running in GitHub Actions.
     if source.get("RAAWAA_ENGINE_API_URL"):
-        monetary_ledger = D1MonetaryLedger(
-            base_url=source.get("RAAWAA_ENGINE_API_URL"),
-            token=source.get("RAAWAA_ENGINE_API_TOKEN"),
-        )
+        control_url = source.get("RAAWAA_ENGINE_API_URL")
+        control_token = source.get("RAAWAA_ENGINE_API_TOKEN")
+        monetary_ledger = D1MonetaryLedger(base_url=control_url, token=control_token)
+        quota_ledger = D1QuotaLedger(base_url=control_url, token=control_token)
     else:
         if source.get("GITHUB_ACTIONS", "").lower() == "true":
-            raise RuntimeError("Cloud live inference requires the durable D1 monetary ledger.")
+            raise RuntimeError("Cloud live inference requires both durable D1 monetary and token quota ledgers.")
         monetary_ledger = UsageLedger(db_path)
+        quota_ledger = QuotaLedger(db_path)
 
     entries = load_provider_profile_registry(registry_path)
     candidates = [
@@ -62,7 +64,6 @@ def build_live_gateway(
     if not candidates:
         return None
 
-    quota_ledger = QuotaLedger(db_path)
     manager = QuotaManager([entry.profile for entry in candidates], quota_ledger)
     adapters = {}
     eligible_profiles = []
