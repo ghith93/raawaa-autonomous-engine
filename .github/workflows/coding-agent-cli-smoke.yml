@@ -1,14 +1,23 @@
 name: Coding Agent CLI Installation Smoke
 
 on:
+  pull_request:
+    paths:
+      - ".github/workflows/coding-agent-cli-smoke.yml"
+      - ".devcontainer/**"
+      - "docs/coding-agent-cli-readiness.md"
+      - "docs/coding-agent-codespaces.md"
   push:
     branches: [main]
     paths:
       - ".github/workflows/coding-agent-cli-smoke.yml"
+      - ".devcontainer/**"
       - "docs/coding-agent-cli-readiness.md"
+      - "docs/coding-agent-codespaces.md"
   workflow_dispatch:
 
-permissions: {}
+permissions:
+  contents: read
 
 concurrency:
   group: coding-agent-cli-smoke-${{ github.ref }}
@@ -19,24 +28,19 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - name: Install OpenCode CLI
-        shell: bash
-        run: |
-          set -euo pipefail
-          npm install --global @opencode/cli
-          opencode --version
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
-      - name: Install Codex CLI
-        shell: bash
-        run: |
-          set -euo pipefail
-          npm install --global @openai/codex
-          codex --version
+      - name: Set up Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
+        with:
+          node-version: "22"
 
-      - name: Install Google Antigravity CLI
-        shell: bash
+      - name: Validate Codespaces configuration and bootstrap script
         run: |
-          set -euo pipefail
-          curl -fsSL https://antigravity.google/cli/install.sh | bash
-          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
-          "$HOME/.local/bin/agy" --version
+          python -m json.tool .devcontainer/devcontainer.json >/dev/null
+          bash -n .devcontainer/post-create.sh
+
+      - name: Install coding-agent CLIs using the Codespaces bootstrap script
+        shell: bash
+        run: bash .devcontainer/post-create.sh
