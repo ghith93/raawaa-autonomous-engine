@@ -122,6 +122,17 @@ test("claim endpoint is authenticated and returns an empty queue safely", async 
   assert.deepEqual(await response.json(), { task: null });
 });
 
+test("claim endpoint keeps legacy empty-body callers in unknown mode", async () => {
+  const DB = dbMock();
+  const response = await worker.fetch(request("/v1/tasks/claim", { method: "POST" }), {
+    DB, ENGINE_API_TOKEN: TOKEN,
+  });
+  assert.equal(response.status, 200);
+  assert.deepEqual(await response.json(), { task: null });
+  const claim = DB.calls.find(x => x.kind === "first" && x.sql.includes("UPDATE tasks SET status='running'"));
+  assert.equal(claim.values[0], "unknown");
+});
+
 test("claim endpoint persists an explicit dry-run execution mode", async () => {
   const DB = dbMock({ normalClaim: {
     id: "task-1", idempotency_key: "key-1", task_type: "research_brief",
