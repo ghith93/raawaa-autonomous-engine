@@ -11,16 +11,12 @@ class CloudflareAccessAuditTests(unittest.TestCase):
         for filename in ("cloudflare-access-audit.yml", "cloudflare-access-inventory.yml"):
             with self.subTest(filename=filename):
                 workflow = (root / ".github" / "workflows" / filename).read_text(encoding="utf-8")
-                marker = "        run: |\n"
+                marker = "python - <<'PY'\\n"
                 self.assertIn(marker, workflow)
                 block = workflow.split(marker, 1)[1]
-                lines = []
-                for line in block.splitlines():
-                    if line and len(line) - len(line.lstrip()) <= 8:
-                        break
-                    lines.append(line)
-                source = textwrap.dedent("\n".join(lines))
-                compile(source, filename + ":run", "exec")
+                source = block.split("\\n          PY", 1)[0]
+                source = textwrap.dedent(source)
+                compile(source, filename + ":python-heredoc", "exec")
 
     def test_account_level_access_not_enabled_is_an_optional_state(self):
         self.assertTrue(is_access_not_enabled(403, [{
