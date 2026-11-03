@@ -42,74 +42,6 @@ async function readJson(request) {
 
 
 
-function safeScanText(value, max = 120) {
-  return typeof value === "string" && value.length > 0 && value.length <= max &&
-    !/[\u0000-\u001f\u007f]/.test(value);
-}
-
-function scanReasonCode(value) {
-  if (typeof value !== "string") return "source_unavailable";
-  const match = value.match(/HTTP (\d{3})/);
-  if (match) return "http_" + match[1];
-  if (value.includes("rate_limit")) return "rate_limited";
-  if (value.includes("Timeout")) return "timeout";
-  return "request_failed";
-}
-
-async function recordResearchScan(request, env) {
-  if (request.method !== "POST") return json({ error: "method_not_allowed" }, 405);
-  let input;
-  try { input = await readJson(request); }
-  catch { return json({ error: "invalid_json" }, 400); }
-  const scan = input?.scan;
-  const observations = input?.source_observations;
-  if (!scan || typeof scan !== "object" || Array.isArray(scan) ||
-      !Array.isArray(observations) || observations.length !== 2) return json({ error: "invalid_scan" }, 400);
-  const timestamp = value => {
-    if (!safeScanText(value, 40)) return false;
-    const date = new Date(value);
-    return Number.isFinite(date.getTime()) && date.toISOString() === new Date(date.getTime()).toISOString() &&
-      /(?:Z|[+-]\d{2}:\d{2})$/.test(value);
-  };
-  const nonnegative = value => Number.isSafeInteger(value) && value >= 0;
-  if (!safeScanText(scan.scan_id, 160) || !["github_crossref"].includes(scan.scan_type) ||
-      !safeScanText(scan.workflow, 100) || scan.workflow !== "research-discovery.yml" ||
-      !nonnegative(scan.run_id) || !nonnegative(scan.run_number) || !nonnegative(scan.run_attempt) ||
-      !/^[0-9a-f]{40}$/.test(scan.head_sha || "") ||
-      !timestamp(scan.started_at) || !timestamp(scan.completed_at) ||
-      Date.parse(scan.completed_at) < Date.parse(scan.started_at) ||
-      !["success", "partial", "failure"].includes(scan.status) ||
-      !nonnegative(scan.requests_made) || !nonnegative(scan.academic_requests_made) ||
-      !nonnegative(scan.candidate_count) || !nonnegative(scan.academic_candidate_count) ||
-      !nonnegative(scan.unavailable_query_count)) return json({ error: "invalid_scan" }, 400);
-  const allowedSources = new Set(["github", "crossref"]);
-  const seen = new Set();
-  for (const item of observations) {
-    if (!item || typeof item !== "object" || !allowedSources.has(item.source) || item.scan_id !== scan.scan_id ||
-        seen.has(item.source) || !["fresh", "unavailable"].includes(item.status) ||
-        !timestamp(item.observed_at) || !nonnegative(item.request_count) ||
-        !nonnegative(item.item_count) || ![6, 12, 24, 48].includes(item.freshness_hours) ||
-        (item.status === "unavailable" && !["http_403","http_404","http_408","http_429","http_500","http_502","http_503","http_504","rate_limited","timeout","request_failed","source_unavailable"].includes(item.reason_code)) ||
-        (item.status === "fresh" && item.reason_code !== null)) return json({ error: "invalid_source_observation" }, 400);
-    seen.add(item.source);
-  }
-  if (seen.size !== 2) return json({ error: "invalid_source_observation" }, 400);
-  const scanId = scan.scan_id;
-  const now = new Date().toISOString();
-  const statements = [
-    env.DB.prepare("INSERT INTO audit_log(task_id,event,details_json,created_at) SELECT NULL,'research_scan_completed',?,? WHERE NOT EXISTS (SELECT 1 FROM audit_log WHERE event='research_scan_completed' AND json_extract(details_json,'$.scan_id')=?)")
-      .bind(JSON.stringify(scan), now, scanId),
-    ...observations.map(item => env.DB.prepare(
-      "INSERT INTO audit_log(task_id,event,details_json,created_at) SELECT NULL,'research_source_observation',?,? WHERE NOT EXISTS (SELECT 1 FROM audit_log WHERE event='research_source_observation' AND json_extract(details_json,'$.scan_id')=? AND json_extract(details_json,'$.source')=?)"
-    ).bind(JSON.stringify(item), now, scanId, item.source)),
-  ];
-  try {
-    const results = await env.DB.batch(statements);
-    const recordedEvents = (results || []).reduce((sum, item) => sum + (Number(item?.meta?.changes) || 0), 0);
-    return json({ ok: true, scan_id: scanId, recorded_events: recordedEvents }, recordedEvents ? 201 : 200);
-  } catch { return json({ error: "storage_unavailable" }, 503); }
-}
-
 function safeResearchString(value, max) {
   return typeof value === "string" && value.trim().length > 0 && value.length <= max;
 }
@@ -282,7 +214,6 @@ export default {
         url.pathname !== "/v1/mobile/status" &&
         !/^\/v1\/tasks\/[A-Za-z0-9-]+\/invocations$/.test(url.pathname) &&
         url.pathname !== "/v1/research/candidates/review" &&
-        url.pathname !== "/v1/research/scan-runs" &&
         !/^\/v1\/tasks\/[A-Za-z0-9-]+\/(heartbeat|finish|retry)$/.test(url.pathname)) {
       return json({ error: "not_found" }, 404);
     }
@@ -303,7 +234,6 @@ export default {
     if (url.pathname === "/v1/research/candidates" && request.method === "GET") return listResearchCandidates(url, env);
     if (url.pathname === "/v1/research/candidates" && request.method === "POST") return ingestResearchCandidates(request, env);
     if (url.pathname === "/v1/research/candidates/review" && request.method === "POST") return reviewResearchCandidate(request, env);
-    if (url.pathname === "/v1/research/scan-runs") return recordResearchScan(request, env);
 
     // Authenticated, read-only POST probe used to distinguish application auth
     // from edge blocks before the runner mutates task state.
