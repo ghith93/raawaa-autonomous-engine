@@ -1,12 +1,84 @@
+import io
 import os
 import unittest
+from urllib.error import HTTPError
 from types import SimpleNamespace
 from unittest.mock import patch
 
 from scripts import verify_staging_monetary_ledger as harness
 
 
+class ApiResponse:
+    status = 200
+
+    def __init__(self, payload):
+        self.payload = payload
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *args):
+        return False
+
+    def read(self):
+        return self.payload
+
+
 class StagingMonetaryHarnessTests(unittest.TestCase):
+    def test_authenticated_api_retries_401_until_secret_propagates(self):
+        unauthorized = HTTPError(
+            "https://example.invalid/v1/monetary-ledger",
+            401, "Unauthorized", {}, io.BytesIO(b'{"error":"unauthorized"}')
+        )
+        success = ApiResponse(b'{"snapshot":{},"budget_policy":{"enabled":true}}')
+        with (
+            patch.object(harness, "BASE_URL", "https://example.invalid"),
+            patch.object(harness, "TOKEN", "test-token"),
+            patch("scripts.verify_staging_monetary_ledger.urllib.request.urlopen",
+                  side_effect=[unauthorized, success]) as open_url,
+            patch.object(harness.time, "sleep") as sleep,
+        ):
+            status, body = harness.api("GET", "/v1/monetary-ledger")
+        self.assertEqual(status, 200)
+        self.assertTrue(body["budget_policy"]["enabled"])
+        self.assertEqual(open_url.call_count, 2)
+        sleep.assert_called_once_with(2)
+
+    def test_authenticated_api_does_not_retry_non_auth_4xx(self):
+        forbidden = HTTPError(
+            "https://example.invalid/v1/monetary-ledger",
+            403, "Forbidden", {}, io.BytesIO(b'{"error":"forbidden"}')
+        )
+        with (
+            patch.object(harness, "BASE_URL", "https://example.invalid"),
+            patch.object(harness, "TOKEN", "test-token"),
+            patch("scripts.verify_staging_monetary_ledger.urllib.request.urlopen",
+                  side_effect=forbidden) as open_url,
+            patch.object(harness.time, "sleep") as sleep,
+        ):
+            status, body = harness.api("GET", "/v1/monetary-ledger")
+        self.assertEqual(status, 403)
+        self.assertEqual(body["error"], "forbidden")
+        open_url.assert_called_once()
+        sleep.assert_not_called()
+
+    def test_unauthenticated_api_does_not_retry_401(self):
+        unauthorized = HTTPError(
+            "https://example.invalid/health",
+            401, "Unauthorized", {}, io.BytesIO(b'{"error":"unauthorized"}')
+        )
+        with (
+            patch.object(harness, "BASE_URL", "https://example.invalid"),
+            patch("scripts.verify_staging_monetary_ledger.urllib.request.urlopen",
+                  side_effect=unauthorized) as open_url,
+            patch.object(harness.time, "sleep") as sleep,
+        ):
+            status, body = harness.api("GET", "/health", authenticated=False)
+        self.assertEqual(status, 401)
+        self.assertEqual(body["error"], "unauthorized")
+        open_url.assert_called_once()
+        sleep.assert_not_called()
+
     def test_default_policy_uses_integer_nano_usd(self):
         self.assertEqual(
             harness.default_policy_nanos(),
