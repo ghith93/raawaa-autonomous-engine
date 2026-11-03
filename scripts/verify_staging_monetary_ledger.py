@@ -67,22 +67,30 @@ def default_policy_nanos() -> tuple[int, int, int]:
 
 
 
-def execute_staging_sql(sql: str) -> None:
+def execute_staging_sql(sql: str, *, retry_safe: bool = False) -> None:
+    """Execute a Staging-only statement; retry 7429 only when the caller proves idempotency."""
     verify_staging_target()
     if not os.environ.get("CLOUDFLARE_API_TOKEN") or not os.environ.get("CLOUDFLARE_ACCOUNT_ID"):
         raise RuntimeError("Cloudflare credentials are required for Staging-only test cleanup")
-    result = subprocess.run(
-        [
-            "npx", "--yes", "wrangler@4.156.1", "d1", "execute",
-            "raawaa-engine-staging", "--remote", "--command", sql,
-            "--config", "wrangler.staging.toml", "--yes",
-        ],
-        check=False, capture_output=True, text=True, timeout=60,
-        env=os.environ.copy(),
-    )
-    if result.returncode != 0:
+    for attempt in range(3):
+        result = subprocess.run(
+            [
+                "npx", "--yes", "wrangler@4.156.1", "d1", "execute",
+                "raawaa-engine-staging", "--remote", "--command", sql,
+                "--config", "wrangler.staging.toml", "--yes",
+            ],
+            check=False, capture_output=True, text=True, timeout=60,
+            env=os.environ.copy(),
+        )
+        if result.returncode == 0:
+            return
         detail = (result.stderr or result.stdout or "unknown Wrangler error")[-1200:]
-        raise RuntimeError("Staging-only test cleanup failed: " + detail)
+        transient_api_error = "[code: 7429]" in detail.lower()
+        if not (retry_safe and transient_api_error and attempt < 2):
+            raise RuntimeError("Staging-only test cleanup failed: " + detail)
+        # D1 write retries are opt-in at each call site and limited to
+        # idempotent fixture INSERT OR IGNORE / DELETE statements only.
+        time.sleep(2 ** (attempt + 1))
 
 
 
@@ -114,7 +122,16 @@ def set_staging_policy(daily: int, monthly: int, per_task: int) -> None:
 
 
 def api(method: str, path: str, payload: dict[str, Any] | None = None,
-        authenticated: bool = True) -> tuple[int, dict[str, Any]]:
+        authenticated: bool = True, readiness_timeout_seconds: int = 90) -> tuple[int, dict[str, Any]]:
+    """Call the Staging Worker, tolerating bounded propagation of its fresh secret.
+
+    The Worker checks bearer authentication before dispatching any authenticated
+    route. Therefore a 401 response proves that no GET or POST handler ran, and
+    retrying that exact request is safe while Cloudflare propagates a new secret
+    across edge isolates. No other 4xx response is retried.
+    """
+    if type(readiness_timeout_seconds) is not int or not 1 <= readiness_timeout_seconds <= 180:
+        raise ValueError("Staging readiness timeout must be between 1 and 180 seconds")
     data = None if payload is None else json.dumps(payload, separators=(",", ":")).encode()
     headers = {"Accept": "application/json", "User-Agent": "RaawaaStagingLedgerVerification/1.0"}
     if authenticated:
@@ -123,23 +140,29 @@ def api(method: str, path: str, payload: dict[str, Any] | None = None,
         headers["Authorization"] = "Bearer " + TOKEN
     if data is not None:
         headers["Content-Type"] = "application/json"
-    request = urllib.request.Request(BASE_URL + path, data=data, headers=headers, method=method)
-    try:
-        with urllib.request.urlopen(request, timeout=20) as response:
-            status = response.status
-            raw = response.read()
-    except urllib.error.HTTPError as exc:
-        status = exc.code
-        raw = exc.read()
-    except (urllib.error.URLError, TimeoutError, OSError) as exc:
-        raise RuntimeError("Staging Worker transport failed: " + type(exc).__name__) from None
-    try:
-        body = json.loads(raw.decode("utf-8")) if raw else {}
-    except (UnicodeDecodeError, json.JSONDecodeError):
-        raise RuntimeError(f"Staging Worker returned non-JSON HTTP {status}") from None
-    if not isinstance(body, dict):
-        raise RuntimeError(f"Staging Worker returned an invalid JSON object (HTTP {status})")
-    return status, body
+
+    deadline = time.monotonic() + readiness_timeout_seconds if authenticated else None
+    while True:
+        request = urllib.request.Request(BASE_URL + path, data=data, headers=headers, method=method)
+        try:
+            with urllib.request.urlopen(request, timeout=20) as response:
+                status = response.status
+                raw = response.read()
+        except urllib.error.HTTPError as exc:
+            status = exc.code
+            raw = exc.read()
+            if authenticated and status == 401 and time.monotonic() < deadline:
+                time.sleep(2)
+                continue
+        except (urllib.error.URLError, TimeoutError, OSError) as exc:
+            raise RuntimeError("Staging Worker transport failed: " + type(exc).__name__) from None
+        try:
+            body = json.loads(raw.decode("utf-8")) if raw else {}
+        except (UnicodeDecodeError, json.JSONDecodeError):
+            raise RuntimeError(f"Staging Worker returned non-JSON HTTP {status}") from None
+        if not isinstance(body, dict):
+            raise RuntimeError(f"Staging Worker returned an invalid JSON object (HTTP {status})")
+        return status, body
 
 
 def require(condition: bool, message: str) -> None:
@@ -262,7 +285,7 @@ def cleanup_test_reservations() -> None:
         f"DELETE FROM quota_audit_events WHERE route_id LIKE '{prefix}%'",
         f"DELETE FROM audit_log WHERE task_id LIKE '{prefix}%'",
     ):
-        execute_staging_sql(statement)
+        execute_staging_sql(statement, retry_safe=True)
 
 
 def verify_token_quota_concurrency(run_tag: str) -> None:
@@ -403,10 +426,11 @@ def verify_task_invocation_lifecycle(run_tag: str) -> None:
     for value in sql_values:
         require("'" not in value, "Generated Staging invocation fixture contained an unsafe SQL character")
     execute_staging_sql(
-        "INSERT INTO tasks(id,idempotency_key,task_type,title,payload_json,status,attempts,max_attempts,"
+        "INSERT OR IGNORE INTO tasks(id,idempotency_key,task_type,title,payload_json,status,attempts,max_attempts,"
         "created_at,updated_at,lease_token,lease_expires_at) VALUES("
         f"'{task_id}','{idempotency_key}','system_audit','Invocation lifecycle verification','{{}}',"
-        f"'running',1,2,'{now}','{now}','{lease_token}','{expires}')"
+        f"'running',1,2,'{now}','{now}','{lease_token}','{expires}')",
+        retry_safe=True,
     )
     base_path = f"/v1/tasks/{task_id}/invocations"
     invocation_ids: list[str] = []
@@ -512,12 +536,14 @@ def verify_task_invocation_lifecycle(run_tag: str) -> None:
         invocation_id_list = ",".join("'" + value.replace("'", "''") + "'" for value in invocation_ids)
         if invocation_id_list:
             execute_staging_sql(
-                "DELETE FROM task_model_invocation_attempts WHERE invocation_id IN (" + invocation_id_list + ")"
+                "DELETE FROM task_model_invocation_attempts WHERE invocation_id IN (" + invocation_id_list + ")",
+                retry_safe=True,
             )
             execute_staging_sql(
-                "DELETE FROM task_model_invocations WHERE invocation_id IN (" + invocation_id_list + ")"
+                "DELETE FROM task_model_invocations WHERE invocation_id IN (" + invocation_id_list + ")",
+                retry_safe=True,
             )
-        execute_staging_sql("DELETE FROM tasks WHERE id='" + task_id + "'")
+        execute_staging_sql("DELETE FROM tasks WHERE id='" + task_id + "'", retry_safe=True)
 
 def run() -> None:
     require(BASE_URL.startswith("https://"), "Staging Worker URL must use HTTPS")

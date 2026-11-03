@@ -1,12 +1,84 @@
+import io
 import os
 import unittest
+from urllib.error import HTTPError
 from types import SimpleNamespace
 from unittest.mock import patch
 
 from scripts import verify_staging_monetary_ledger as harness
 
 
+class ApiResponse:
+    status = 200
+
+    def __init__(self, payload):
+        self.payload = payload
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *args):
+        return False
+
+    def read(self):
+        return self.payload
+
+
 class StagingMonetaryHarnessTests(unittest.TestCase):
+    def test_authenticated_api_retries_401_until_secret_propagates(self):
+        unauthorized = HTTPError(
+            "https://example.invalid/v1/monetary-ledger",
+            401, "Unauthorized", {}, io.BytesIO(b'{"error":"unauthorized"}')
+        )
+        success = ApiResponse(b'{"snapshot":{},"budget_policy":{"enabled":true}}')
+        with (
+            patch.object(harness, "BASE_URL", "https://example.invalid"),
+            patch.object(harness, "TOKEN", "test-token"),
+            patch("scripts.verify_staging_monetary_ledger.urllib.request.urlopen",
+                  side_effect=[unauthorized, success]) as open_url,
+            patch.object(harness.time, "sleep") as sleep,
+        ):
+            status, body = harness.api("GET", "/v1/monetary-ledger")
+        self.assertEqual(status, 200)
+        self.assertTrue(body["budget_policy"]["enabled"])
+        self.assertEqual(open_url.call_count, 2)
+        sleep.assert_called_once_with(2)
+
+    def test_authenticated_api_does_not_retry_non_auth_4xx(self):
+        forbidden = HTTPError(
+            "https://example.invalid/v1/monetary-ledger",
+            403, "Forbidden", {}, io.BytesIO(b'{"error":"forbidden"}')
+        )
+        with (
+            patch.object(harness, "BASE_URL", "https://example.invalid"),
+            patch.object(harness, "TOKEN", "test-token"),
+            patch("scripts.verify_staging_monetary_ledger.urllib.request.urlopen",
+                  side_effect=forbidden) as open_url,
+            patch.object(harness.time, "sleep") as sleep,
+        ):
+            status, body = harness.api("GET", "/v1/monetary-ledger")
+        self.assertEqual(status, 403)
+        self.assertEqual(body["error"], "forbidden")
+        open_url.assert_called_once()
+        sleep.assert_not_called()
+
+    def test_unauthenticated_api_does_not_retry_401(self):
+        unauthorized = HTTPError(
+            "https://example.invalid/health",
+            401, "Unauthorized", {}, io.BytesIO(b'{"error":"unauthorized"}')
+        )
+        with (
+            patch.object(harness, "BASE_URL", "https://example.invalid"),
+            patch("scripts.verify_staging_monetary_ledger.urllib.request.urlopen",
+                  side_effect=unauthorized) as open_url,
+            patch.object(harness.time, "sleep") as sleep,
+        ):
+            status, body = harness.api("GET", "/health", authenticated=False)
+        self.assertEqual(status, 401)
+        self.assertEqual(body["error"], "unauthorized")
+        open_url.assert_called_once()
+        sleep.assert_not_called()
+
     def test_default_policy_uses_integer_nano_usd(self):
         self.assertEqual(
             harness.default_policy_nanos(),
@@ -15,6 +87,63 @@ class StagingMonetaryHarnessTests(unittest.TestCase):
 
     def test_staging_target_matches_isolated_database_config(self):
         self.assertIsNone(harness.verify_staging_target())
+
+    @patch.dict(os.environ, {
+        "CLOUDFLARE_API_TOKEN": "test-cloudflare-token",
+        "CLOUDFLARE_ACCOUNT_ID": "test-account",
+    })
+    @patch("scripts.verify_staging_monetary_ledger.subprocess.run")
+    def test_safe_staging_cleanup_delete_retries_transient_d1_7429(self, run):
+        run.side_effect = [
+            SimpleNamespace(returncode=1, stdout="", stderr="internal error [code: 7429]"),
+            SimpleNamespace(returncode=0, stdout="ok", stderr=""),
+        ]
+        with patch.object(harness, "verify_staging_target") as verify:
+            with patch.object(harness.time, "sleep") as sleep:
+                harness.execute_staging_sql(
+                    "DELETE FROM monetary_reservations WHERE provider LIKE 'staging-verification-%'",
+                    retry_safe=True,
+                )
+        verify.assert_called_once_with()
+        self.assertEqual(run.call_count, 2)
+        sleep.assert_called_once_with(2)
+
+    @patch.dict(os.environ, {
+        "CLOUDFLARE_API_TOKEN": "test-cloudflare-token",
+        "CLOUDFLARE_ACCOUNT_ID": "test-account",
+    })
+    @patch("scripts.verify_staging_monetary_ledger.subprocess.run")
+    def test_idempotent_insert_or_ignore_retries_only_with_explicit_opt_in(self, run):
+        run.side_effect = [
+            SimpleNamespace(returncode=1, stdout="", stderr="internal error [code: 7429]"),
+            SimpleNamespace(returncode=0, stdout="ok", stderr=""),
+        ]
+        with patch.object(harness, "verify_staging_target"):
+            with patch.object(harness.time, "sleep") as sleep:
+                harness.execute_staging_sql(
+                    "INSERT OR IGNORE INTO tasks(id) VALUES ('staging-verification-fixture')",
+                    retry_safe=True,
+                )
+        self.assertEqual(run.call_count, 2)
+        sleep.assert_called_once_with(2)
+
+    @patch.dict(os.environ, {
+        "CLOUDFLARE_API_TOKEN": "test-cloudflare-token",
+        "CLOUDFLARE_ACCOUNT_ID": "test-account",
+    })
+    @patch("scripts.verify_staging_monetary_ledger.subprocess.run")
+    def test_non_idempotent_staging_write_is_not_retried_on_d1_7429(self, run):
+        run.return_value = SimpleNamespace(
+            returncode=1, stdout="", stderr="internal error [code: 7429]"
+        )
+        with patch.object(harness, "verify_staging_target"):
+            with patch.object(harness.time, "sleep") as sleep:
+                with self.assertRaisesRegex(RuntimeError, "Staging-only test cleanup failed"):
+                    harness.execute_staging_sql(
+                        "INSERT INTO tasks(id) VALUES ('staging-verification-fixture')"
+                    )
+        run.assert_called_once()
+        sleep.assert_not_called()
 
     @patch.dict(os.environ, {
         "CLOUDFLARE_API_TOKEN": "test-cloudflare-token",
