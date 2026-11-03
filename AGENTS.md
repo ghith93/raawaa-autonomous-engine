@@ -4,7 +4,7 @@ Before every work cycle, every executive/lead agent, specialist, coding agent, r
 1. `docs/master-autonomous-execution-directive.ar.md`
 2. `docs/continuous-improvement-charter.md`
 3. `docs/architecture.md`
-4. `docs/operations.md` and applicable subsystem policies.
+4. `docs/operations.md`, `docs/operations/tooling-capability-inventory-2026-11-03.md`, `config/integrations.json`, `config/tool_permissions.json`, and applicable subsystem policies.
 
 These are mandatory repository policies, not optional context. Re-read them each cycle; do not rely only on chat history or cached summaries. If a runtime cannot read them, report that limitation and do not claim policy loading succeeded.
 
@@ -15,3 +15,7 @@ Use the highest legitimate access already granted and needed. The operator has a
 
 The Python engine worker now loads and validates all five required policy documents at the start of every `run_once` cycle, before claiming a task. It reads the full documents locally, then supplies a compact trusted execution-policy summary plus SHA-256 fingerprints to the live model prompt before untrusted task payload. Regression tests cover missing/empty policy, fail-closed behavior, and prompt ordering. This enforcement applies to the Python worker/CLI Task Runner path; every new agent or provider invocation path must reuse `load_operating_policy()` and add equivalent tests. Do not imply that unrelated services or future runtimes inherit this enforcement automatically.
 
+
+## Mandatory capability and asset preflight
+
+Before creating a workflow, connector, agent, scheduler, provider route, account setup request, or new infrastructure, inspect the current tool/skill catalog, the dated tooling capability inventory, existing Activepieces projects/connections/flows, and the repository workflow tree. Distinguish catalog presence from an authenticated account, and distinguish ChatGPT-side connectors from credentials and adapters available inside the standalone engine. Reuse a verified existing mechanism before implementing another one. Refresh the durable inventory with evidence, last-verified time, permission scope, secret names only, costs/quotas, usage instructions, and limitations. Never record secret values.
