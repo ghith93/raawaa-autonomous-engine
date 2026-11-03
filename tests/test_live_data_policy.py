@@ -67,7 +67,7 @@ class LiveDataPolicyTests(unittest.TestCase):
             "research_brief", "Research", payload, POLICY
         )
         self.assertFalse(allowed)
-        self.assertEqual(reason, "payload_schema_invalid")
+        self.assertEqual(reason, "sensitive_field_detected")
 
     def test_sensitive_field_names_are_blocked(self):
         payload = self.valid_payload()
