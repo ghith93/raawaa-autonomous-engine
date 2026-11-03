@@ -4,6 +4,7 @@ from __future__ import annotations
 import math
 import os
 import uuid
+from dataclasses import replace
 
 from engine.live_adapters import LiveAdapterError
 from engine.model_gateway import BudgetExceeded, ProviderUnavailable, UsageLedger
@@ -17,12 +18,14 @@ class QuotaAwareLiveGateway:
     def __init__(self, quota_manager: QuotaManager, adapters: dict, usage_ledger: UsageLedger,
                  network_calls_enabled: bool = False, cooldown_seconds: int = 900,
                  environ=None, daily_budget_usd: float = 0.0,
-                 monthly_budget_usd: float = 0.0, per_task_budget_usd: float = 0.0):
+                 monthly_budget_usd: float = 0.0, per_task_budget_usd: float = 0.0,
+                 invocation_store=None):
         if cooldown_seconds < 1:
             raise ValueError("cooldown_seconds must be positive")
         self.quota_manager = quota_manager
         self.adapters = adapters
         self.usage_ledger = usage_ledger
+        self.invocation_store = invocation_store
         self.network_calls_enabled = network_calls_enabled
         self.cooldown_seconds = cooldown_seconds
         self.environ = os.environ if environ is None else environ
@@ -58,6 +61,18 @@ class QuotaAwareLiveGateway:
             raise ValueError("prompt is required")
         if not isinstance(request.task_id, str) or not request.task_id.strip():
             raise ProviderUnavailable("A task ID is required for per-task quota enforcement.")
+        if self.invocation_store is not None:
+            if not isinstance(request.step_key, str) or not request.step_key.strip():
+                raise ProviderUnavailable("A durable step_key is required for invocation checkpoints.")
+            if not isinstance(request.lease_token, str) or not request.lease_token.strip():
+                raise ProviderUnavailable("A current task lease_token is required for invocation checkpoints.")
+            try:
+                checkpoint = self.invocation_store.prepare(
+                    request.task_id, request.lease_token, request.step_key, request.task_kind
+                )
+            except Exception as exc:
+                raise ProviderUnavailable("Could not prepare a durable task-step invocation; provider was not called.") from exc
+            request = replace(request, request_id=checkpoint["request_id"], invocation_id=checkpoint["invocation_id"])
         if not isinstance(request.request_id, str) or not request.request_id.strip():
             raise ProviderUnavailable(
                 "A stable request_id is required; persist it with the task step before inference."
@@ -127,6 +142,13 @@ class QuotaAwareLiveGateway:
                     reason="monetary_budget_exceeded",
                 )
                 continue
+
+            if self.invocation_store is not None:
+                try:
+                    self.invocation_store.start(request.task_id, request.lease_token, request.invocation_id, profile.route_id)
+                except Exception as exc:
+                    self.usage_ledger.release(monetary_reservation_id)
+                    raise ProviderUnavailable("Could not durably start the task-step invocation; provider was not called.") from exc
 
             try:
                 reservation_id = self.quota_manager.ledger.reserve(
