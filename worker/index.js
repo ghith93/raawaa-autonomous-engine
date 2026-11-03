@@ -218,7 +218,7 @@ export default {
         url.pathname !== "/v1/mobile/status" &&
         !/^\/v1\/tasks\/[A-Za-z0-9-]+\/invocations$/.test(url.pathname) &&
         url.pathname !== "/v1/research/candidates/review" &&
-        !/^\/v1\/tasks\/[A-Za-z0-9-]+\/(heartbeat|finish)$/.test(url.pathname)) {
+        !/^\/v1\/tasks\/[A-Za-z0-9-]+\/(heartbeat|finish|retry)$/.test(url.pathname)) {
       return json({ error: "not_found" }, 404);
     }
     const codespaceClaimRoute = url.pathname === "/v1/codespace/tasks/claim";
@@ -319,7 +319,7 @@ export default {
       }
     }
 
-    const taskAction = url.pathname.match(/^\/v1\/tasks\/([A-Za-z0-9-]+)\/(heartbeat|finish)$/);
+    const taskAction = url.pathname.match(/^\/v1\/tasks\/([A-Za-z0-9-]+)\/(heartbeat|finish|retry)$/);
     const codespaceTaskAction = url.pathname.match(/^\/v1\/codespace\/tasks\/([A-Za-z0-9-]+)\/(heartbeat|finish)$/);
     if (request.method === "POST" && (taskAction || codespaceTaskAction)) {
       const codespaceAction = Boolean(codespaceTaskAction);
