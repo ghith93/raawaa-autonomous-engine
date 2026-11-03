@@ -79,10 +79,10 @@ class OpenAICompatibleAdapter:
                 raise ValueError
         except (KeyError, IndexError, TypeError, ValueError) as exc:
             raise LiveAdapterError("Provider completion response is malformed") from exc
-        # cost_usd=0.0 is a placeholder, not a measured price. Live routing
-        # must remain disabled until pricing and free eligibility are verified.
+        # The API response exposes token usage, not invoice-level billing.
+        # None tells the gateway to estimate from the verified route profile.
         return GenerationResponse(
-            self.provider, model, text, input_tokens, output_tokens, 0.0, mocked=False
+            self.provider, model, text, input_tokens, output_tokens, None, mocked=False
         )
 
 
@@ -123,6 +123,8 @@ class GeminiAdapter:
                 raise ValueError
         except (KeyError, IndexError, TypeError, ValueError) as exc:
             raise LiveAdapterError("Gemini completion response is malformed") from exc
+        # Gemini usage metadata does not include the billed amount.
+        # The gateway records a verified-profile estimate, not an invoice value.
         return GenerationResponse(
-            self.provider, model, text, input_tokens, output_tokens, 0.0, mocked=False
+            self.provider, model, text, input_tokens, output_tokens, None, mocked=False
         )

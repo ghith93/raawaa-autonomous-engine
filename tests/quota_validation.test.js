@@ -53,10 +53,21 @@ test("quota audit event accepts bounded metadata and writes parameterized values
     event: "provider_error",
     route_id: "groq:main:model",
     task_kind: "research",
-    details: { reason: "rate_limited", secret: "must_not_be_stored" },
+    details: {
+      reason: "rate_limited",
+      cost_basis: "verified_profile_estimate",
+      profile_estimated_cost_usd: 0,
+      provider_reported_cost_available: false,
+      secret: "must_not_be_stored",
+    },
   }, DB);
   assert.equal(response.status, 201);
   assert.deepEqual(await response.json(), { id: 9 });
   assert.equal(DB.calls.length, 1);
-  assert.deepEqual(JSON.parse(DB.calls[0].values[3]), { reason: "rate_limited" });
+  assert.deepEqual(JSON.parse(DB.calls[0].values[3]), {
+    reason: "rate_limited",
+    cost_basis: "verified_profile_estimate",
+    profile_estimated_cost_usd: 0,
+    provider_reported_cost_available: false,
+  });
 });

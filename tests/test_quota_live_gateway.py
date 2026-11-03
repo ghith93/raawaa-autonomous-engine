@@ -11,16 +11,17 @@ from engine.quota_live_gateway import QuotaAwareLiveGateway
 
 
 class FakeAdapter:
-    def __init__(self, provider, error=None):
+    def __init__(self, provider, error=None, cost_usd=0.0):
         self.provider = provider
         self.error = error
+        self.cost_usd = cost_usd
         self.calls = 0
 
     def generate(self, model, request):
         self.calls += 1
         if self.error:
             raise self.error
-        return GenerationResponse(self.provider, model, "ok", 5, 7, 0.0, mocked=False)
+        return GenerationResponse(self.provider, model, "ok", 5, 7, self.cost_usd, mocked=False)
 
 
 class QuotaAwareGatewayTests(unittest.TestCase):
@@ -178,6 +179,52 @@ class QuotaAwareGatewayTests(unittest.TestCase):
                          {"quota_reserved", "completion_received"})
         self.assertNotIn("hello world", str(events))
         self.assertNotIn('"ok"', str(events))
+
+    def test_missing_provider_billing_uses_verified_profile_estimate(self):
+        adapter = FakeAdapter("groq", cost_usd=None)
+        manager = QuotaManager([self.profile()], self.quota)
+        gateway = QuotaAwareLiveGateway(
+            manager, {"groq": adapter}, self.usage, True,
+            environ={"RAAWAA_ENGINE_LIVE_INFERENCE": "enabled"},
+        )
+        result = gateway.generate(self.request)
+        self.assertIsNone(result.cost_usd)
+        completion = next(
+            event for event in self.quota.audit_events()
+            if event["event"] == "completion_received"
+        )
+        self.assertEqual(completion["details"]["cost_basis"], "verified_profile_estimate")
+        self.assertEqual(completion["details"]["cost_usd"], 0.0)
+        self.assertEqual(self.usage.totals()["daily_usd"], 0.0)
+
+    def test_provider_reported_nonzero_cost_is_recorded_and_quarantines_free_route(self):
+        profile = self.profile()
+        adapter = FakeAdapter("groq", cost_usd=0.0001)
+        manager = QuotaManager([profile], self.quota)
+        gateway = QuotaAwareLiveGateway(
+            manager, {"groq": adapter}, self.usage, True,
+            environ={"RAAWAA_ENGINE_LIVE_INFERENCE": "enabled"},
+        )
+        with self.assertRaisesRegex(ProviderUnavailable, "non-zero cost"):
+            gateway.generate(self.request)
+        self.assertAlmostEqual(self.usage.totals()["daily_usd"], 0.0001)
+        self.assertTrue(self.quota.cooldown_active(profile.route_id))
+        completion = next(
+            event for event in self.quota.audit_events()
+            if event["event"] == "completion_received"
+        )
+        self.assertEqual(completion["details"]["cost_basis"], "provider_reported")
+
+    def test_boolean_provider_cost_is_rejected_as_invalid(self):
+        adapter = FakeAdapter("groq", cost_usd=True)
+        manager = QuotaManager([self.profile()], self.quota)
+        gateway = QuotaAwareLiveGateway(
+            manager, {"groq": adapter}, self.usage, True,
+            environ={"RAAWAA_ENGINE_LIVE_INFERENCE": "enabled"},
+        )
+        with self.assertRaisesRegex(ProviderUnavailable, "failed unexpectedly"):
+            gateway.generate(self.request)
+        self.assertEqual(self.usage.totals()["daily_usd"], 0.0)
 
     def test_429_cools_down_and_rotates(self):
         first = self.profile()

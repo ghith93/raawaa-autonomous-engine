@@ -147,7 +147,11 @@ class QuotaAwareLiveGateway:
                 if (type(response.input_tokens) is not int or type(response.output_tokens) is not int
                         or response.input_tokens < 0 or response.output_tokens < 0):
                     raise ValueError("adapter response token counts are invalid")
-                if not math.isfinite(response.cost_usd) or response.cost_usd < 0:
+                reported_cost_usd = response.cost_usd
+                if (reported_cost_usd is not None
+                        and (type(reported_cost_usd) not in (int, float)
+                             or not math.isfinite(reported_cost_usd)
+                             or reported_cost_usd < 0)):
                     raise ValueError("adapter response cost is invalid")
             except LiveAdapterError as exc:
                 last_error = exc
@@ -198,18 +202,37 @@ class QuotaAwareLiveGateway:
                 ) from exc
 
             actual_tokens = response.input_tokens + response.output_tokens
-            # Persist monetary usage first so a later token-ledger failure cannot
-            # lose the provider's actual charge.
+            profile_estimated_cost_usd = (
+                response.input_tokens * input_price
+                + response.output_tokens * output_price
+            ) / 1_000_000
+            if reported_cost_usd is None:
+                settled_cost_usd = profile_estimated_cost_usd
+                cost_basis = "verified_profile_estimate"
+            else:
+                settled_cost_usd = max(profile_estimated_cost_usd, reported_cost_usd)
+                cost_basis = (
+                    "provider_reported"
+                    if reported_cost_usd >= profile_estimated_cost_usd
+                    else "verified_profile_floor"
+                )
+            # Persist the provider-reported amount or verified-profile estimate
+            # first so a later token-ledger failure cannot lose cost evidence.
             self.usage_ledger.settle(
                 monetary_reservation_id,
                 response.input_tokens,
                 response.output_tokens,
-                response.cost_usd,
+                settled_cost_usd,
             )
             self.quota_manager.ledger.settle(reservation_id, actual_tokens)
             self._audit(
                 "completion_received", request, profile,
-                actual_tokens=actual_tokens, cost_usd=response.cost_usd,
+                actual_tokens=actual_tokens,
+                cost_usd=settled_cost_usd,
+                cost_basis=cost_basis,
+                profile_estimated_cost_usd=profile_estimated_cost_usd,
+                provider_reported_cost_available=reported_cost_usd is not None,
+                provider_reported_cost_usd=reported_cost_usd,
             )
             if (response.input_tokens > estimated_input_tokens
                     or response.output_tokens > request.max_output_tokens):
@@ -227,10 +250,10 @@ class QuotaAwareLiveGateway:
                 raise ProviderUnavailable(
                     "Provider response exceeded reserved token ceilings; route quarantined."
                 )
-            if response.cost_usd > 0:
+            if settled_cost_usd > 0:
                 # A route advertised as free has contradicted its verified profile.
-                # Preserve the measured usage/cost, quarantine the route, and fail
-                # closed rather than returning a result or silently trying another.
+                # Preserve the provider-reported amount or profile estimate, quarantine
+                # the route, and fail closed rather than returning a result or rotating.
                 self.quota_manager.ledger.cool_down(
                     profile.route_id, self.cooldown_seconds, "unexpected_nonzero_cost"
                 )
@@ -238,10 +261,11 @@ class QuotaAwareLiveGateway:
                     "route_quarantined", request, profile,
                     reason="unexpected_nonzero_cost",
                     cooldown_seconds=self.cooldown_seconds,
-                    cost_usd=response.cost_usd,
+                    cost_usd=settled_cost_usd,
+                    cost_basis=cost_basis,
                 )
                 raise ProviderUnavailable(
-                    "Provider reported non-zero cost for a verified-free route; route quarantined."
+                    "Provider or profile non-zero cost detected for a verified-free route; route quarantined."
                 )
             budget_status = self.usage_ledger.budget_status(
                 self.daily_budget_usd, self.monthly_budget_usd,
@@ -288,8 +312,11 @@ class QuotaAwareLiveGateway:
             },
             "monetary_usage": self.usage_ledger.totals(),
             "cost_accounting_note": (
-                "Monetary spend is reserved before provider I/O and settled idempotently; "
-                "ambiguous outcomes retain reservations. Only verified zero-cost profiles "
-                "are currently eligible; unexpected charges are recorded and quarantine the route."
+                "Provider adapters may not expose invoice-level billing. When cost_usd is null, "
+                "the gateway estimates cost from actual token counts and the verified route price; "
+                "the audit event records cost_basis. This is not an invoice-level measurement, so "
+                "provider billing must be reconciled externally. Only verified zero-cost profiles "
+                "are eligible and no paid fallback is allowed; any reported or profile-estimated "
+                "non-zero cost is recorded and quarantines the route."
             ),
         }
