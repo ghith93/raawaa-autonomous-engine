@@ -286,13 +286,13 @@ jobs:
               "source_url": "https://console.groq.com/docs/rate-limits",
               "support_url": "https://community.groq.com/t/do-i-get-charged-for-anything-on-the-groq-free-plan/832"
           }
-          policy_path.write_text(json.dumps(policy, indent=2) + "\\n", encoding="utf-8")
+          policy_path.write_text(json.dumps(policy, indent=2) + "\n", encoding="utf-8")
 
           profiles_path = Path("config/provider_profiles.json")
           profiles = json.loads(profiles_path.read_text(encoding="utf-8"))
           for route in profiles["routes"]:
               route["enabled"] = route["id"] == "groq-free-gpt-oss-20b-primary"
-          profiles_path.write_text(json.dumps(profiles, indent=2) + "\\n", encoding="utf-8")
+          profiles_path.write_text(json.dumps(profiles, indent=2) + "\n", encoding="utf-8")
           PY
           python -m engine.cli audit
 
