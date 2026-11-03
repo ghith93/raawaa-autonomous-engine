@@ -58,11 +58,14 @@ function dbMock(options = {}) {
         async run() {
           state.calls.push({ kind: "run", sql, values: this.values });
           if (sql.includes("UPDATE workers_ai_neuron_policy SET enabled=?")) {
+            if (this.values[0] === 1 && state.quarantine) return { meta: { changes: 0 } };
             state.enabled = this.values[0];
             return { meta: { changes: 1 } };
           }
           if (sql.includes("UPDATE workers_ai_neuron_reservations SET status='in_flight'")) {
-            if (state.reservation?.status !== "reserved") return { meta: { changes: 0 } };
+            if (state.reservation?.status !== "reserved" || state.enabled !== 1 || state.quarantine) {
+              return { meta: { changes: 0 } };
+            }
             state.reservation.status = "in_flight";
             return { meta: { changes: 1 } };
           }
