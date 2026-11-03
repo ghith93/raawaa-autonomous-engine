@@ -9,6 +9,7 @@ on:
       - "config/research_sources.json"
       - "scripts/persist_research_candidates.py"
       - "scripts/triage_research_candidates.py"
+      - "scripts/publish_staging_scan_telemetry.py"
       - "worker/index.js"
       - "migrations/**"
   schedule:
@@ -37,10 +38,17 @@ jobs:
           python-version: "3.12"
       - name: Validate engine policy
         run: python -m engine.cli audit
+      - name: Record scan start timestamp
+        run: echo "RAAWAA_SCAN_STARTED_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_ENV"
       - name: Discover public research candidates
         run: python -m engine.cli research-discover --max-per-query 5 > research-candidates.json
       - name: Rank candidates for manual review
         run: python scripts/triage_research_candidates.py research-candidates.json > research-triage.json
+      - name: Publish scan and source freshness telemetry to isolated Staging D1
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: python scripts/publish_staging_scan_telemetry.py research-candidates.json
       - name: Upload bounded research snapshot
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
