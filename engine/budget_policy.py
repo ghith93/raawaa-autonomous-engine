@@ -93,6 +93,8 @@ def validate_budget_policy(policy: dict[str, Any]) -> list[str]:
         errors.append("unsettled monetary reservations must block further spending")
     if envelope.get("require_atomic_pre_call_reservation") is not True:
         errors.append("atomic pre-call monetary reservations are mandatory")
+    if type(envelope.get("external_spend_hard_stop_verified")) is not bool:
+        errors.append("external_spend_hard_stop_verified must be an explicit boolean")
     cloudflare = envelope.get("cloudflare")
     actions = envelope.get("github_actions")
     if not isinstance(cloudflare, dict) or cloudflare.get("plan") != "free_only" or cloudflare.get("paid_overages_allowed") is not False:
