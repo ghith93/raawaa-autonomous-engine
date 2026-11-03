@@ -141,20 +141,20 @@ export async function handleQuota(request, env, url) {
         input.task_id, input.estimated_tokens, input.per_task_token_limit
       ).first();
       if (!result) return json({ error: "quota_unavailable" }, 409);
-      return json({ reservation_id: result.id, reservation_key: reservationKey, occurred_at: now }, 201);
+      return json({ reservation_id: result.id, settlement_key: reservationKey, occurred_at: now }, 201);
     }
     if (input.action === "settle") {
       if (!positiveInt(input.reservation_id) || !nonNegativeInt(input.actual_tokens) ||
           !validText(input.route_id, 200) || !validText(input.task_id, 200) ||
-          !validText(input.reservation_key, 100)) return json({ error: "invalid_settlement" }, 400);
+          !validText(input.settlement_key, 100)) return json({ error: "invalid_settlement" }, 400);
       if (!QUOTA_ROUTES.has(input.route_id)) return json({ error: "unknown_quota_route" }, 403);
       const updated = await env.DB.prepare(
-        "UPDATE quota_usage SET tokens=?,settled_at=? WHERE id=? AND route_id=? AND task_id=? AND reservation_key=? AND settled_at IS NULL"
-      ).bind(input.actual_tokens, now, input.reservation_id, input.route_id, input.task_id, input.reservation_key).run();
+        "UPDATE quota_usage SET tokens=?,settled_at=? WHERE id=? AND route_id=? AND task_id=? AND settlement_key=? AND settled_at IS NULL"
+      ).bind(input.actual_tokens, now, input.reservation_id, input.route_id, input.task_id, input.settlement_key).run();
       if (updated.meta?.changes === 1) return json({ ok: true, settled: true });
       const existing = await env.DB.prepare(
-        "SELECT tokens,settled_at FROM quota_usage WHERE id=? AND route_id=? AND task_id=? AND reservation_key=?"
-      ).bind(input.reservation_id, input.route_id, input.task_id, input.reservation_key).first();
+        "SELECT tokens,settled_at FROM quota_usage WHERE id=? AND route_id=? AND task_id=? AND settlement_key=?"
+      ).bind(input.reservation_id, input.route_id, input.task_id, input.settlement_key).first();
       if (!existing) return json({ error: "reservation_not_found" }, 404);
       if (existing.settled_at && Number(existing.tokens) === input.actual_tokens) return json({ ok: true, settled: true, replay: true });
       return json({ error: "settlement_conflict" }, 409);
