@@ -33,6 +33,12 @@ An explicit provider HTTP 429 occurs after I/O begins, so the gateway settles it
 
 When actual cost exceeds its estimate, or the settled total exceeds the daily/monthly/task cap, the actual amount is retained and the provider/model route is quarantined. Subsequent reservations for that route are rejected.
 
+## Live-inference hard-stop gate
+
+The repository policy keeps `model_policy.provider_hard_stop_verified=false` and `provider_hard_stop_evidence=null`. The live-runtime factory checks this flag before constructing any provider adapter, even when a provider profile is marked free and an API key is present. If the flag is ever changed to true, policy validation also requires auditable evidence containing the provider, account/scope, enforced hard limit, verification timestamp, and an HTTPS source. This is intentionally separate from Cloudflare's Free-tier infrastructure ceilings: those protect Workers/D1 usage but do not prove a model provider will block charges.
+
+The paid fallback remains disabled. Do not set the provider hard-stop flag or the live-inference switch based only on a free-tier label, pricing page, quota error, or notification-only budget alert.
+
 ## Python integration
 
 - `engine/d1_monetary_ledger.py` implements the existing `UsageLedger` interface against the authenticated Worker endpoint.
@@ -53,14 +59,14 @@ References:
 
 ## Verification and remaining gates
 
-The local D1/Workerd integration suite exercises concurrent global daily/monthly and per-task reservations, rejection of caller-raised caps, pre-I/O-only release, post-start release rejection, ambiguous state across restart, idempotent settlement, over-estimate quarantine, route rejection, legacy spend backfill, and authenticated mobile status. Monthly-cap concurrency is tested locally by temporarily changing only the ephemeral local D1 policy. The remote Staging harness tests concurrent daily/per-task monetary reservations against the operator-owned caps, policy tamper rejection, and concurrent D1 token quota reservations. Python adapter tests cover nano-USD conversion, authentication, status reads, and fail-closed transport behavior.
+The local D1/Workerd integration suite exercises concurrent global daily/monthly and per-task reservations, rejection of caller-raised caps, pre-I/O-only release, post-start release rejection, ambiguous state across restart, idempotent settlement, over-estimate quarantine, route rejection, legacy spend backfill, and authenticated mobile status. Monthly-cap concurrency is tested locally by temporarily changing only the ephemeral local D1 policy. The remote Staging harness tests concurrent daily, monthly, and per-task monetary reservations; the monthly case temporarily adjusts only the isolated Staging policy row and restores the repository-approved caps in a `finally` block. It also tests policy tamper rejection and concurrent D1 token quota reservations. Python adapter tests cover nano-USD conversion, authentication, status reads, and fail-closed transport behavior.
 
 The issue is not complete until:
 1. This branch is reviewed and merged.
 2. Migration 0006 is applied to the isolated Staging D1 database by the existing green-main CI migration gate.
 3. The CI-gated `staging-worker-verify` job deploys an isolated Staging Worker after successful tests and Staging migrations, installs a per-run ephemeral `ENGINE_API_TOKEN` that is masked and not stored in GitHub, and runs remote verification. No production Worker deployment is implied.
 4. Remote Staging tests verify cross-runner concurrency, crash/restart persistence, duplicate settlement, ambiguous provider outcomes, and over-cap behavior.
-5. The authenticated mobile status surface reports the D1 monetary totals.
+5. The authenticated mobile status surface reports aggregate D1 monetary totals, pending/ambiguous counts, and quarantined-route count only; it does not expose reservation IDs, task IDs, provider/model details, or credentials. The authenticated operator ledger endpoint may return bounded unresolved reservation metadata for internal reconciliation.
 6. Provider-side hard-stop semantics are independently verified. The Cloudflare spend-policy endpoint previously returned HTTP 404, so account-wide infrastructure spend blocking remains unverified.
 
 Do not enable live inference, paid fallback, or production deployment as part of this implementation.
