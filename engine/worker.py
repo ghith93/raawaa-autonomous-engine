@@ -9,7 +9,6 @@ from pathlib import Path
 from engine.agent_runtime import build_task_contract, load_agent_roster
 from engine.lease_heartbeat import LeaseHeartbeat, LeaseHeartbeatLost
 from engine.provider import GenerationRequest
-from engine.model_gateway import ProviderNotCalled
 from engine.task_store import TaskStore
 from engine.live_data_policy import validate_live_payload
 from engine.operating_policy import OperatingPolicyError, load_operating_policy
@@ -53,6 +52,31 @@ def run_once(store: TaskStore, live_gateway=None, environ=None) -> dict | None:
 
     # Recover abandoned work before claiming another item.
     recovery = store.recover_stale()
+
+    # In live mode, check current free-route capacity before consuming a task lease.
+    # This is read-only and deliberately does not reserve quota; generate() repeats
+    # the eligibility check and atomically reserves immediately before provider I/O.
+    if _live_requested(environ):
+        if live_gateway is None:
+            return {"status": "blocked", "reason": "live_gateway_unavailable",
+                    "recovery": recovery}
+        preflight = getattr(live_gateway, "preflight_capacity", None)
+        if not callable(preflight):
+            return {"status": "blocked", "reason": "live_gateway_preflight_unavailable",
+                    "recovery": recovery}
+        try:
+            capacity = preflight(max_output_tokens=LIVE_MAX_OUTPUT_TOKENS)
+        except Exception as exc:
+            return {"status": "blocked", "reason": "live_capacity_preflight_failed",
+                    "detail": type(exc).__name__, "recovery": recovery}
+        if not isinstance(capacity, dict) or capacity.get("eligible") is not True:
+            reason = capacity.get("reason") if isinstance(capacity, dict) else "invalid_preflight_result"
+            if reason in {"provider_capacity_unavailable", "monetary_budget_exhausted"}:
+                return {"status": "idle", "reason": "live_capacity_unavailable",
+                        "capacity_reason": reason, "recovery": recovery}
+            return {"status": "blocked", "reason": "live_capacity_preflight_blocked",
+                    "capacity_reason": reason, "recovery": recovery}
+
     task = store.claim_next()
     if task is None:
         return {"status": "idle", "recovery": recovery} if any(recovery.values()) else None
@@ -130,29 +154,6 @@ def run_once(store: TaskStore, live_gateway=None, environ=None) -> dict | None:
                     "input_tokens": response.input_tokens,
                     "output_tokens": response.output_tokens,
                     "external_writes": 0,
-                }
-            except ProviderNotCalled as exc:
-                # This exception is reserved for paths proven to stop before
-                # adapter.generate(). Delay the retry so a bounded batch cannot
-                # spin on exhausted capacity. Ambiguous failures remain blocked.
-                heartbeat.stop()
-                heartbeat.check()
-                retry_delay = min(
-                    exc.retry_after_seconds * (2 ** max(0, int(task.get("attempts", 1)) - 1)),
-                    86400,
-                )
-                status = store.retry_or_fail(
-                    task["id"],
-                    f"provider_not_called:{exc.reason_code}",
-                    lease_token=task["lease_token"],
-                    retry_after_seconds=retry_delay,
-                )
-                return {
-                    "id": task["id"], "status": status,
-                    "reason": "provider_not_called_retry_scheduled" if status == "pending"
-                              else "provider_not_called_attempts_exhausted",
-                    "retry_after_seconds": retry_delay if status == "pending" else 0,
-                    "recovery": recovery,
                 }
             except Exception as exc:
                 # A provider outcome may be ambiguous. Never send the same task

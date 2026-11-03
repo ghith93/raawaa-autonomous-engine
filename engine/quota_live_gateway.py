@@ -7,7 +7,7 @@ import uuid
 from dataclasses import replace
 
 from engine.live_adapters import LiveAdapterError
-from engine.model_gateway import BudgetExceeded, ProviderNotCalled, ProviderUnavailable, UsageLedger
+from engine.model_gateway import BudgetExceeded, ProviderUnavailable, UsageLedger
 from engine.provider import GenerationRequest
 from engine.quota_manager import QuotaManager
 
@@ -53,6 +53,51 @@ class QuotaAwareLiveGateway:
             details=details,
         )
 
+    def preflight_capacity(self, max_output_tokens: int = 256,
+                           estimated_input_tokens: int = 1) -> dict:
+        """Read-only capacity signal before a task is claimed; never reserves or calls a provider."""
+        if not self._live_enabled():
+            return {"eligible": False, "reason": "live_inference_disabled"}
+        if (type(max_output_tokens) is not int or not 1 <= max_output_tokens <= 4096
+                or type(estimated_input_tokens) is not int or estimated_input_tokens < 1):
+            return {"eligible": False, "reason": "invalid_preflight_request"}
+        try:
+            budget = self.usage_ledger.budget_status(
+                self.daily_budget_usd, self.monthly_budget_usd,
+            )
+        except Exception:
+            return {"eligible": False, "reason": "monetary_budget_status_unavailable"}
+        if budget["daily_over_budget"] or budget["monthly_over_budget"]:
+            return {"eligible": False, "reason": "monetary_budget_exhausted"}
+
+        estimated_tokens = estimated_input_tokens + max_output_tokens
+        candidates = sorted(
+            self.quota_manager.profiles,
+            key=lambda profile: (
+                profile.priority, profile.provider, profile.account, profile.model
+            ),
+        )
+        for profile in candidates:
+            if (profile.max_output_tokens is None
+                    or max_output_tokens > profile.max_output_tokens):
+                continue
+            if not self.quota_manager.eligible(profile, estimated_tokens):
+                continue
+            if self.adapters.get(profile.route_id) is None and self.adapters.get(profile.provider) is None:
+                continue
+            return {
+                "eligible": True,
+                "reason": "verified_free_route_available",
+                "route_id": profile.route_id,
+                "estimated_tokens": estimated_tokens,
+                "per_task_budget_checked_after_claim": self.per_task_budget_usd > 0,
+            }
+        return {
+            "eligible": False,
+            "reason": "provider_capacity_unavailable",
+            "estimated_tokens": estimated_tokens,
+        }
+
     def generate(self, request: GenerationRequest):
         if not self._live_enabled():
             self._audit("live_request_blocked", request, reason="kill_switch_off")
@@ -71,19 +116,7 @@ class QuotaAwareLiveGateway:
                     request.task_id, request.lease_token, request.step_key, request.task_kind
                 )
             except Exception as exc:
-                # A confirmed replay/lease conflict means a prior invocation may
-                # already be in flight; preserve the no-replay block. Transient
-                # transport/5xx failures happened before adapter.generate().
-                status = getattr(exc, "http_status", None)
-                code = getattr(exc, "error_code", None)
-                if code or status in {400, 401, 403, 404, 409}:
-                    raise ProviderUnavailable(
-                        "Could not prepare a durable task-step invocation; replay remains blocked."
-                    ) from exc
-                raise ProviderNotCalled(
-                    "Could not prepare a durable task-step invocation; provider was not called.",
-                    retry_after_seconds=60, reason_code="checkpoint_unavailable",
-                ) from exc
+                raise ProviderUnavailable("Could not prepare a durable task-step invocation; provider was not called.") from exc
             request = replace(request, request_id=checkpoint["request_id"], invocation_id=checkpoint["invocation_id"])
         if not isinstance(request.request_id, str) or not request.request_id.strip():
             raise ProviderUnavailable(
@@ -393,18 +426,14 @@ class QuotaAwareLiveGateway:
             return response
 
         if isinstance(last_error, BudgetExceeded):
-            raise ProviderNotCalled(
-                "No eligible provider route remains within the configured monetary budget.",
-                retry_after_seconds=3600, reason_code="monetary_budget_exhausted",
+            raise ProviderUnavailable(
+                "No eligible provider route remains within the configured monetary budget."
             ) from last_error
         if last_error is not None:
             raise ProviderUnavailable(
-                "A provider route failed with an outcome that may be ambiguous; replay is blocked."
+                "All eligible free routes failed or were rate-limited."
             ) from last_error
-        raise ProviderNotCalled(
-            "No verified free route has sufficient remaining quota.",
-            retry_after_seconds=900, reason_code="provider_capacity_unavailable",
-        )
+        raise ProviderUnavailable("No verified free route has sufficient remaining quota.")
 
     def status(self):
         return {

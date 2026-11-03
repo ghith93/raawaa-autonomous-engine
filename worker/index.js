@@ -198,7 +198,7 @@ export default {
       try {
         const row = await env.DB.prepare("SELECT 1 AS ok").first();
         if (!row || row.ok !== 1) return json({ ok: false }, 503);
-        return json({ ok: true, capabilities: ["task_retry_schedule_v1"] });
+        return json({ ok: true });
       } catch {
         return json({ ok: false }, 503);
       }
@@ -277,7 +277,7 @@ export default {
       }
       try {
         const result = await env.DB.prepare(
-          "SELECT id,idempotency_key,task_type,title,payload_json,status,attempts,max_attempts,created_at,updated_at,next_attempt_at FROM tasks ORDER BY created_at DESC,id DESC LIMIT ?"
+          "SELECT id,idempotency_key,task_type,title,payload_json,status,attempts,max_attempts,created_at,updated_at FROM tasks ORDER BY created_at DESC,id DESC LIMIT ?"
         ).bind(rawLimit).all();
         return json({ tasks: result.results || [] });
       } catch {
@@ -305,15 +305,14 @@ export default {
       const leaseToken = crypto.randomUUID();
       try {
         const claim = await env.DB.prepare(`
-          UPDATE tasks SET status='running', attempts=attempts+1, updated_at=?,next_attempt_at=NULL,
+          UPDATE tasks SET status='running', attempts=attempts+1, updated_at=?,
             lease_token=?, lease_expires_at=?
-          WHERE id=(SELECT id FROM tasks WHERE status='pending'
-            AND (next_attempt_at IS NULL OR next_attempt_at<=?) ${taskTypeFilter}
+          WHERE id=(SELECT id FROM tasks WHERE status='pending' ${taskTypeFilter}
             ORDER BY created_at,id LIMIT 1)
-            AND status='pending' AND (next_attempt_at IS NULL OR next_attempt_at<=?) ${taskTypeFilter}
+            AND status='pending' ${taskTypeFilter}
           RETURNING id,idempotency_key,task_type,title,payload_json,status,attempts,
-            max_attempts,created_at,updated_at,next_attempt_at,lease_token,lease_expires_at
-        `).bind(nowIso, leaseToken, expires, nowIso, nowIso).first();
+            max_attempts,created_at,updated_at,lease_token,lease_expires_at
+        `).bind(nowIso, leaseToken, expires).first();
         if (!claim) return json({ task: null });
         await env.DB.prepare(
           "INSERT INTO audit_log(task_id,event,details_json,created_at) VALUES(?,?,?,?)"
@@ -338,13 +337,7 @@ export default {
       }
       const leaseToken = input?.lease_token;
       if (!validText(leaseToken, 200)) return json({ error: "invalid_lease" }, 400);
-      const retryAfterSeconds = action === "retry" ? (input?.retry_after_seconds ?? 0) : 0;
-      if (action === "retry" && (!Number.isInteger(retryAfterSeconds) ||
-          retryAfterSeconds < 0 || retryAfterSeconds > 86400)) {
-        return json({ error: "invalid_retry_delay" }, 400);
-      }
-      const now = new Date();
-      const nowIso = now.toISOString();
+      const nowIso = new Date().toISOString();
       try {
         const current = await env.DB.prepare(
           "SELECT id,status,attempts,max_attempts,task_type,lease_token,lease_expires_at FROM tasks WHERE id=?"
@@ -397,18 +390,15 @@ export default {
           error = typeof input.error === "string" ? input.error.slice(0, 2000) : "Task retry requested.";
         }
 
-        const nextAttemptAt = status === "pending" && retryAfterSeconds > 0
-          ? new Date(now.getTime() + retryAfterSeconds * 1000).toISOString()
-          : null;
         const update = await env.DB.prepare(
-          "UPDATE tasks SET status=?,result_json=?,error=?,updated_at=?,next_attempt_at=?,lease_token=NULL,lease_expires_at=NULL WHERE id=? AND status='running' AND lease_token=? AND lease_expires_at>=?"
-        ).bind(status, resultJson, error, nowIso, nextAttemptAt, taskId, leaseToken, nowIso).run();
+          "UPDATE tasks SET status=?,result_json=?,error=?,updated_at=?,lease_token=NULL,lease_expires_at=NULL WHERE id=? AND status='running' AND lease_token=? AND lease_expires_at>=?"
+        ).bind(status, resultJson, error, nowIso, taskId, leaseToken, nowIso).run();
         if (!update.meta?.changes) return json({ error: "lease_lost" }, 409);
         await env.DB.prepare(
           "INSERT INTO audit_log(task_id,event,details_json,created_at) VALUES(?,?,?,?)"
         ).bind(taskId, action === "retry" ? (status === "pending" ? "task_retry_scheduled" : "task_failed") : "task_" + status,
           JSON.stringify({ error }), nowIso).run();
-        return json({ ok: true, status, next_attempt_at: nextAttemptAt });
+        return json({ ok: true, status });
       } catch {
         return json({ error: "storage_unavailable" }, 503);
       }
@@ -460,7 +450,7 @@ export default {
       ).bind(JSON.stringify({ task_type: taskType.trim() }), now, key);
       await env.DB.batch([insert, audit]);
       const task = await env.DB.prepare(
-        "SELECT id,idempotency_key,task_type,title,payload_json,status,attempts,max_attempts,created_at,updated_at,next_attempt_at FROM tasks WHERE idempotency_key=?"
+        "SELECT id,idempotency_key,task_type,title,payload_json,status,attempts,max_attempts,created_at,updated_at FROM tasks WHERE idempotency_key=?"
       ).bind(key).first();
       if (!task) return json({ error: "storage_unavailable" }, 503);
       return json({ task, created: task.id === id }, task.id === id ? 201 : 200);

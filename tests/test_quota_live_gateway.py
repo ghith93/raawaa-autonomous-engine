@@ -4,7 +4,7 @@ import unittest
 from pathlib import Path
 
 from engine.live_adapters import LiveAdapterError
-from engine.model_gateway import ProviderNotCalled, ProviderUnavailable, UsageLedger
+from engine.model_gateway import ProviderUnavailable, UsageLedger
 from engine.provider import GenerationRequest, GenerationResponse
 from engine.quota_manager import QuotaLedger, QuotaManager, QuotaProfile
 from engine.quota_live_gateway import QuotaAwareLiveGateway
@@ -97,6 +97,81 @@ class QuotaAwareGatewayTests(unittest.TestCase):
                       output_cost_per_million_usd=0.0)
         values.update(changes)
         return QuotaProfile(**values)
+
+    def test_preflight_reports_capacity_without_reserving_or_calling_provider(self):
+        adapter = FakeAdapter("groq")
+        manager = QuotaManager([self.profile()], self.quota)
+        gateway = QuotaAwareLiveGateway(
+            manager, {"groq": adapter}, self.usage, True,
+            environ={"RAAWAA_ENGINE_LIVE_INFERENCE": "enabled"},
+        )
+        result = gateway.preflight_capacity(max_output_tokens=256)
+        self.assertTrue(result["eligible"])
+        self.assertEqual(result["reason"], "verified_free_route_available")
+        self.assertEqual(adapter.calls, 0)
+        self.assertEqual(manager.snapshot()[0]["daily_requests_used"], 0)
+        self.assertEqual(self.usage.totals()["pending_reservations"], 0)
+
+    def test_preflight_detects_exhausted_quota_and_cooldown(self):
+        profile = self.profile(minute_request_limit=1)
+        adapter = FakeAdapter("groq")
+        manager = QuotaManager([profile], self.quota)
+        gateway = QuotaAwareLiveGateway(
+            manager, {"groq": adapter}, self.usage, True,
+            environ={"RAAWAA_ENGINE_LIVE_INFERENCE": "enabled"},
+        )
+        self.quota.record(profile.route_id, 1)
+        result = gateway.preflight_capacity(max_output_tokens=256)
+        self.assertFalse(result["eligible"])
+        self.assertEqual(result["reason"], "provider_capacity_unavailable")
+        self.quota.cool_down(profile.route_id, 900, "test")
+        self.assertEqual(gateway.preflight_capacity()["reason"], "provider_capacity_unavailable")
+        self.assertEqual(adapter.calls, 0)
+
+    def test_preflight_detects_global_monetary_budget_exhaustion(self):
+        adapter = FakeAdapter("groq")
+        self.usage.record("groq", "model-x", "research", 1, 1, 0.01, task_id="previous-task")
+        manager = QuotaManager([self.profile()], self.quota)
+        gateway = QuotaAwareLiveGateway(
+            manager, {"groq": adapter}, self.usage, True,
+            environ={"RAAWAA_ENGINE_LIVE_INFERENCE": "enabled"},
+            daily_budget_usd=0.0, monthly_budget_usd=1.0,
+        )
+        result = gateway.preflight_capacity()
+        self.assertFalse(result["eligible"])
+        self.assertEqual(result["reason"], "monetary_budget_exhausted")
+        self.assertEqual(adapter.calls, 0)
+
+    def test_preflight_fails_closed_when_live_switch_is_off(self):
+        adapter = FakeAdapter("groq")
+        manager = QuotaManager([self.profile()], self.quota)
+        gateway = QuotaAwareLiveGateway(
+            manager, {"groq": adapter}, self.usage, True, environ={},
+        )
+        result = gateway.preflight_capacity()
+        self.assertFalse(result["eligible"])
+        self.assertEqual(result["reason"], "live_inference_disabled")
+        self.assertEqual(adapter.calls, 0)
+
+    def test_checkpoint_prepare_failure_is_never_reclassified_as_safe_retry(self):
+        class BrokenCheckpoint:
+            def prepare(self, *args):
+                raise TimeoutError("checkpoint response lost")
+
+        adapter = FakeAdapter("groq")
+        manager = QuotaManager([self.profile()], self.quota)
+        gateway = QuotaAwareLiveGateway(
+            manager, {"groq": adapter}, self.usage, True,
+            environ={"RAAWAA_ENGINE_LIVE_INFERENCE": "enabled"},
+            invocation_store=BrokenCheckpoint(),
+        )
+        request = GenerationRequest(
+            "research", "hello", 20, task_id="task-1",
+            step_key="research:primary", lease_token="lease-1",
+        )
+        with self.assertRaises(ProviderUnavailable):
+            gateway.generate(request)
+        self.assertEqual(adapter.calls, 0)
 
     def test_missing_task_id_blocks_before_provider_call(self):
         adapter = FakeAdapter("groq")
@@ -655,61 +730,6 @@ class QuotaAwareGatewayTests(unittest.TestCase):
         gateway = QuotaAwareLiveGateway(manager, {"groq": adapter}, self.usage, True, environ={"RAAWAA_ENGINE_LIVE_INFERENCE": "enabled"})
         with self.assertRaises(ProviderUnavailable):
             gateway.generate(self.request)
-        self.assertEqual(adapter.calls, 0)
-
-
-    def test_quota_exhaustion_is_a_confirmed_pre_provider_retry(self):
-        adapter = FakeAdapter("groq")
-        profile = self.profile(minute_request_limit=1, minute_token_limit=8000)
-        self.quota.record(profile.route_id, 1)
-        manager = QuotaManager([profile], self.quota)
-        gateway = QuotaAwareLiveGateway(
-            manager, {"groq": adapter}, self.usage, True,
-            environ={"RAAWAA_ENGINE_LIVE_INFERENCE": "enabled"},
-        )
-        with self.assertRaises(ProviderNotCalled) as caught:
-            gateway.generate(self.request)
-        self.assertEqual(caught.exception.reason_code, "provider_capacity_unavailable")
-        self.assertEqual(caught.exception.retry_after_seconds, 900)
-        self.assertEqual(adapter.calls, 0)
-
-    def test_checkpoint_transport_failure_is_retryable_but_replay_conflict_is_not(self):
-        class BrokenCheckpoint:
-            def prepare(self, *args):
-                raise TimeoutError("checkpoint API unavailable")
-
-        profile = self.profile()
-        adapter = FakeAdapter("groq")
-        manager = QuotaManager([profile], self.quota)
-        gateway = QuotaAwareLiveGateway(
-            manager, {"groq": adapter}, self.usage, True,
-            environ={"RAAWAA_ENGINE_LIVE_INFERENCE": "enabled"},
-            invocation_store=BrokenCheckpoint(),
-        )
-        request = GenerationRequest(
-            "research", "hello", 20, task_id="task-1",
-            step_key="research:primary", lease_token="lease-1",
-        )
-        with self.assertRaises(ProviderNotCalled) as caught:
-            gateway.generate(request)
-        self.assertEqual(caught.exception.reason_code, "checkpoint_unavailable")
-        self.assertEqual(adapter.calls, 0)
-
-        from engine.remote_task_store import RemoteTaskStoreError
-        class ReplayBlocked:
-            def prepare(self, *args):
-                raise RemoteTaskStoreError(
-                    "invocation replay is blocked", error_code="invocation_replay_blocked"
-                )
-
-        blocked_gateway = QuotaAwareLiveGateway(
-            manager, {"groq": adapter}, self.usage, True,
-            environ={"RAAWAA_ENGINE_LIVE_INFERENCE": "enabled"},
-            invocation_store=ReplayBlocked(),
-        )
-        with self.assertRaises(ProviderUnavailable) as blocked:
-            blocked_gateway.generate(request)
-        self.assertNotIsInstance(blocked.exception, ProviderNotCalled)
         self.assertEqual(adapter.calls, 0)
 
 

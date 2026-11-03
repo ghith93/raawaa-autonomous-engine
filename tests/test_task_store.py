@@ -52,25 +52,6 @@ class TaskStoreTests(unittest.TestCase):
         self.assertEqual(stored["status"], "failed")
         self.assertEqual(stored["error"], "worker_error:AgentContractError")
 
-    def test_delayed_retry_is_not_claimed_until_due(self):
-        task = self.store.enqueue("research_brief", "Capacity retry", max_attempts=3)
-        claim = self.store.claim_next()
-        self.assertEqual(claim["id"], task["id"])
-        status = self.store.retry_or_fail(
-            task["id"], "provider_not_called:provider_capacity_unavailable",
-            lease_token=claim["lease_token"], retry_after_seconds=3600,
-        )
-        self.assertEqual(status, "pending")
-        deferred = self.store.list_tasks(1)[0]
-        self.assertIsNotNone(deferred["next_attempt_at"])
-        self.assertIsNone(self.store.claim_next(), "deferred work must not spin in the same batch")
-        with sqlite3.connect(self.store.db_path) as db:
-            db.execute("UPDATE tasks SET next_attempt_at='2000-01-01T00:00:00+00:00' WHERE id=?",
-                       (task["id"],))
-        resumed = self.store.claim_next()
-        self.assertEqual(resumed["id"], task["id"])
-        self.assertEqual(resumed["attempts"], 2)
-
     def test_recover_stale_running_task(self):
         task = self.store.enqueue("research_brief", "Interrupted", max_attempts=2)
         claimed = self.store.claim_next()

@@ -92,3 +92,13 @@ At every session start, refresh counts, account/connection status, app permissio
 - Spec Kit remains a deferred optional developer tool; no dependency or runtime asset was added.
 
 - F2 verification: workflow-dispatch CI `41737974145` passed; PR #444 was opened and PR-event CI `41738158606` passed on PR head `23a38b61a387549f33548a58d9815cccfe36d76f`, including local D1 delayed-retry smoke. PR #444 remains open/unmerged. Remote migration/deployment remains pending.
+
+## F2 correction and developer-tool evaluation — 2026-11-04
+
+- PR #444 merged at `a9c3273201cab33ea0193609b0377453ad194391`; exact PR-head CI run [#41738158606](https://github.com/ghith93/raawaa-autonomous-engine/actions/runs/41738158606) passed its test job. Staging migration/deployment jobs were skipped. No evidence shows migration 0008 or its Worker deployment reached Staging/Production.
+- Review found unsafe classification of invocation checkpoint transport failures as retryable. Corrective work is on branch `fix/f2-capacity-preflight`: restore the previous queue/migration contract; use read-only pre-claim capacity checks; leave uncertain checkpoint/provider outcomes blocked; no replay.
+- Preflight reuses quota eligibility and monetary budget checks, performs no network/provider I/O and creates no reservations. When no eligible verified-free route exists or global budget is exhausted, leave tasks pending and return idle. Gateway repeats the actual request check and atomically reserves before provider I/O. Per-task budget and exact prompt size remain checked after claim; races remain fail-closed.
+- No new migration or D1/Worker deployment is planned for this F2 correction. No spend or policy limits changed.
+- Graphify approved for a later code-only local evaluation: official source https://github.com/Graphify-Labs/graphify, Apache-2.0, official PyPI package `graphifyy`, CLI `graphify`. Offline code parsing is local; optional semantic extraction can send docs/media to the configured model backend. Not installed, not run, and not added as a runtime dependency. Security/privacy notes: https://graphify.com/security.
+- Spec Kit remains a deferred optional MIT developer tool; no installation performed. F1/F5 remain pending.
+
