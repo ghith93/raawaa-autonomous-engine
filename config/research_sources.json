@@ -26,5 +26,8 @@
   "academic_source": "Crossref public REST API; one sequential request per daily run",
   "arxiv_query": "all:\"multi-agent\" OR all:\"LLM agents\" OR all:\"agentic workflow\" OR all:\"tool use agents\" OR all:\"coding agents\"",
   "max_arxiv_results": 10,
-  "arxiv_source": "arXiv Atom API; one bounded request per daily run; no abstracts or full text ingested"
+  "arxiv_source": "arXiv Atom API; one bounded request per daily run; no abstracts or full text ingested",
+  "searxng_query": "open source AI agent frameworks MCP tools agent security memory evaluation",
+  "max_searxng_results": 10,
+  "searxng_source": "Optional operator-hosted SearXNG HTTPS endpoint; skipped unless RAAWAA_SEARXNG_BASE_URL is configured; JSON format required"
 }
