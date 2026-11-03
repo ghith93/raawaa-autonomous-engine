@@ -28,6 +28,10 @@ _OUTPUT_KEYS = (
     "worker_cron_schedule",
     "worker_cron_requeued",
     "worker_cron_failed",
+    "watchdog_ready",
+    "watchdog_missing",
+    "watchdog_last_dispatch_requested",
+    "watchdog_last_dispatch_intent_at",
     "last_scan",
     "source_freshness",
     "ci_health",
@@ -85,6 +89,93 @@ def _count(value: object) -> int:
     raise ValueError("status count must be a non-negative integer")
 
 
+_WATCHDOG_MISSING_SETTINGS = {
+    "GITHUB_APP_ID",
+    "GITHUB_APP_INSTALLATION_ID",
+    "GITHUB_APP_PRIVATE_KEY",
+    "GITHUB_APP_WATCHDOG_ENABLED",
+}
+
+
+def _safe_timestamp(value: object) -> str | None:
+    if (
+        not isinstance(value, str)
+        or not value
+        or len(value) > 40
+        or any(ord(char) < 32 or ord(char) == 127 for char in value)
+    ):
+        return None
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except (TypeError, ValueError, OverflowError):
+        return None
+    if parsed.tzinfo is None or parsed.utcoffset() is None:
+        return None
+    return value
+
+
+def _watchdog_values(payload: dict) -> dict[str, str]:
+    unknown = {
+        "watchdog_ready": "unknown",
+        "watchdog_missing": "unknown",
+        "watchdog_last_dispatch_requested": "unknown",
+        "watchdog_last_dispatch_intent_at": "unknown",
+    }
+    watchdog = payload.get("task_runner_watchdog")
+    if watchdog is None:
+        return unknown
+    invalid = {
+        "watchdog_ready": "invalid",
+        "watchdog_missing": "unknown",
+        "watchdog_last_dispatch_requested": "unknown",
+        "watchdog_last_dispatch_intent_at": "unknown",
+    }
+    if not isinstance(watchdog, dict):
+        return invalid
+    ready = watchdog.get("ready")
+    missing = watchdog.get("missing")
+    if (
+        type(ready) is not bool
+        or not isinstance(missing, list)
+        or len(missing) > len(_WATCHDOG_MISSING_SETTINGS)
+        or any(not isinstance(item, str) or item not in _WATCHDOG_MISSING_SETTINGS for item in missing)
+        or (ready and missing)
+        or (not ready and not missing)
+    ):
+        return invalid
+
+    requested = watchdog.get("last_dispatch_requested")
+    if requested is None:
+        requested_at = "none"
+    elif isinstance(requested, dict):
+        candidate = _safe_timestamp(requested.get("created_at"))
+        if (
+            requested.get("event") == "task_runner_dispatch_requested"
+            and requested.get("workflow") == "task-runner.yml"
+            and requested.get("ref") == "main"
+            and requested.get("http_status") in (200, 204)
+            and candidate is not None
+        ):
+            requested_at = candidate
+        else:
+            requested_at = "unknown"
+    else:
+        requested_at = "unknown"
+
+    intent_value = watchdog.get("last_dispatch_intent_at")
+    if intent_value is None:
+        intent_at = "none"
+    else:
+        intent_at = _safe_timestamp(intent_value) or "unknown"
+
+    return {
+        "watchdog_ready": "ready" if ready else "not_ready",
+        "watchdog_missing": ",".join(missing) if missing else "none",
+        "watchdog_last_dispatch_requested": requested_at,
+        "watchdog_last_dispatch_intent_at": intent_at,
+    }
+
+
 def summarize_mobile_status(payload: object, http_status: int = 200) -> dict[str, str]:
     if not isinstance(payload, dict):
         raise ValueError("mobile status payload must be an object")
@@ -127,6 +218,8 @@ def summarize_mobile_status(payload: object, http_status: int = 200) -> dict[str
         else "not_available" if telegram_available is False
         else "unknown"
     )
+
+    watchdog_values = _watchdog_values(payload)
 
     def gap_flag(key: str, marker: str, missing_label: str) -> str:
         value = text_value(key)
@@ -208,6 +301,7 @@ def summarize_mobile_status(payload: object, http_status: int = 200) -> dict[str
         "paper_ledger": migration_flag("paper_ledger"),
         "provider_usage": migration_flag("provider_usage"),
         "telegram_receipts": telegram_receipts,
+        **watchdog_values,
         **worker_cron_values,
         "last_scan": gap_flag("last_scan", "not recorded", "not_recorded"),
         "source_freshness": gap_flag("source_freshness", "not yet aggregated", "not_aggregated"),
@@ -251,6 +345,10 @@ def probe_mobile_status(
             "worker_cron_schedule": "route_not_deployed",
             "worker_cron_requeued": "route_not_deployed",
             "worker_cron_failed": "route_not_deployed",
+            "watchdog_ready": "route_not_deployed",
+            "watchdog_missing": "route_not_deployed",
+            "watchdog_last_dispatch_requested": "route_not_deployed",
+            "watchdog_last_dispatch_intent_at": "route_not_deployed",
             "last_scan": "route_not_deployed",
             "source_freshness": "route_not_deployed",
             "ci_health": "route_not_deployed",
