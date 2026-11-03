@@ -100,6 +100,17 @@ class ArtemisGatewayTests(unittest.TestCase):
         self.assertEqual(opener.calls[0][0].get_method(), "GET")
         self.assertEqual(opener.calls[1][0].get_method(), "GET")
 
+    def test_probe_rejects_non_object_health_payload(self):
+        base = "http://127.0.0.1:8000"
+        opener = FakeOpener([
+            FakeResponse([], base + "/api/status"),
+            FakeResponse([], base + "/api/devices"),
+        ])
+        with patch.object(gateway, "build_opener", return_value=opener):
+            result = gateway.probe_artemis({"ARTEMIS_BASE_URL": base})
+        self.assertEqual(result["status"], "INVALID_RESPONSE")
+        self.assertFalse(result["task_submission_enabled"])
+
     def test_redirect_is_not_followed(self):
         base = "http://127.0.0.1:8000"
         opener = FakeOpener([FakeResponse({"status": "running"}, "http://127.0.0.1:8000/other")])
