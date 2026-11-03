@@ -526,7 +526,7 @@ def run() -> None:
             "Mobile status does not report the D1 token quota ledger as available")
 
     cleanup_test_reservations()
-    print("Staging D1 verification passed: token quota concurrency/settlement, global daily/task monetary caps, operator-policy tamper rejection, idempotency, pre-I/O release, ambiguous settlement, over-estimate quarantine, Worker redeploy persistence, and authenticated mobile status. Monthly-cap concurrency is covered by the isolated local D1 test. No model provider was called.")
+    print("Staging D1 verification passed: token quota concurrency/settlement, global daily/monthly/task monetary caps, operator-policy tamper rejection, idempotency, pre-I/O release, ambiguous settlement, over-estimate quarantine, Worker redeploy persistence, and aggregate-only authenticated mobile status. No model provider was called.")
 
 
 if __name__ == "__main__":
