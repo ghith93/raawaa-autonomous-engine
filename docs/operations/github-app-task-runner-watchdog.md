@@ -17,7 +17,7 @@ The watchdog requires three Cloudflare Worker secrets and one explicit non-secre
 - GITHUB_APP_INSTALLATION_ID
 - GITHUB_APP_PRIVATE_KEY
 
-Also add the plain-text Worker variable GITHUB_APP_WATCHDOG_ENABLED with the exact value enabled. This is a separate activation switch; adding the App secrets alone does not start the watchdog.
+The explicit non-secret activation variable GITHUB_APP_WATCHDOG_ENABLED=enabled is now version-controlled in wrangler.toml and deployed with the Worker. Do not add a duplicate dashboard variable. The three GitHub App secrets remain required; if any is absent, the handler returns disabled before D1 or network access.
 
 The private key is never needed in ChatGPT and must never be pasted into a conversation, issue, pull request, log, or source file.
 
@@ -39,8 +39,7 @@ The Worker requests an installation token narrowed again to repository ID 144135
 2. Go to Workers & Pages and select raawaa-autonomous-engine-control.
 3. Open Settings, then Variables and Secrets.
 4. Add GITHUB_APP_ID, GITHUB_APP_INSTALLATION_ID, and GITHUB_APP_PRIVATE_KEY as Secrets. Paste the App ID and installation ID into their matching fields; paste the PEM contents only into GITHUB_APP_PRIVATE_KEY.
-5. Add GITHUB_APP_WATCHDOG_ENABLED as a plain-text Variable with the exact value enabled.
-6. Save the settings. Do not send the private key to ChatGPT.
+5. Save the three Secrets. Do not send the private key to ChatGPT.
 
 No GitHub Actions secret is required for this integration. No D1 migration is required.
 
@@ -48,7 +47,7 @@ No GitHub Actions secret is required for this integration. No D1 migration is re
 
 The watchdog code was first deployed at 01:25 UTC from main SHA `4800d2aa3fb9dcd31c7dd0aaffe2e4d1b1b5638e` (Worker version `546a233f-5d93-4328-b71f-f3afed990b4c`). After PR #305 added the explicit `GITHUB_APP_WATCHDOG_ENABLED=enabled` opt-in, the production Worker was redeployed at 01:34 UTC from main SHA `15e0ff5c4051cd396a59e76dd9503db5448ff52a` (Worker version `b1cb1429-3914-412c-b681-20c245466269`). Deployment workflow [#41560533199](https://github.com/ghith93/raawaa-autonomous-engine/actions/runs/41560533199) completed successfully, and the public health endpoint returned `{"ok":true}`.
 
-The current deployed code returns `disabled` before D1 or network access unless the three App secrets and the exact opt-in variable are all present. This verifies deployment and public Worker health only. No watchdog-triggered `workflow_dispatch` Task Runner run has yet been observed. The GitHub connector cannot inspect Cloudflare Worker secret values, so the presence of `GITHUB_APP_ID`, `GITHUB_APP_INSTALLATION_ID`, and `GITHUB_APP_PRIVATE_KEY` is not independently confirmed. Do not treat the fallback as active until a real dispatch event and completed bounded Task Runner batch are verified.
+The Worker configuration now sets the explicit `GITHUB_APP_WATCHDOG_ENABLED=enabled` opt-in in version-controlled `wrangler.toml`. The current deployed code returns `disabled` before D1 or network access unless the three App secrets are present. This verifies deployment and public Worker health only. No watchdog-triggered `workflow_dispatch` Task Runner run has yet been observed. The GitHub connector cannot inspect Cloudflare Worker secret values, so the presence of `GITHUB_APP_ID`, `GITHUB_APP_INSTALLATION_ID`, and `GITHUB_APP_PRIVATE_KEY` is not independently confirmed. Do not treat the fallback as active until a real dispatch event and completed bounded Task Runner batch are verified.
 
 ## Verify activation
 
@@ -71,7 +70,7 @@ If the dispatch fails, inspect Cloudflare Worker Cron Events for the sanitized f
 - A D1 dispatch-intent row is written before the GitHub side effect; it suppresses another attempt for 10 minutes even if the post-dispatch audit write fails.
 - GitHub's workflow concurrency group and D1 atomic task claims remain the duplicate-execution controls.
 - Live inference, external writes, trading, and Telegram delivery remain disabled.
-- Missing App secrets or the explicit GITHUB_APP_WATCHDOG_ENABLED=enabled variable cause a no-op. No recurring network calls are made until all four settings are present.
+- Missing App secrets cause a no-op. The explicit activation variable is version-controlled; recurring GitHub API calls remain disabled until all three App secrets are present.
 
 ## Disable or roll back
 
