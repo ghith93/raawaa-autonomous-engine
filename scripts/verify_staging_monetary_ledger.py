@@ -357,6 +357,7 @@ def run() -> None:
     verify_token_quota_concurrency(run_tag)
 
     cap_test("daily", run_tag, "daily")
+    cap_test("monthly", run_tag, "monthly")
     cap_test("task", run_tag, "task")
     verify_operator_policy(run_tag)
 
