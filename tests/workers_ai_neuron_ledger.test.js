@@ -210,6 +210,17 @@ test("reserved work cannot enter provider I/O after the ledger is disabled", asy
   assert.deepEqual(await response.json(), { error: "neuron_ledger_disabled" });
 });
 
+test("quarantined model cannot start another provider attempt", async () => {
+  const DB = dbMock({ enabled: 1, quarantine: { model_id: MODEL }, reservation: {
+    reservation_id: RESERVATION, model_id: MODEL, task_kind: "research_brief",
+    task_id: "research-1", status: "reserved", estimated_neurons: 500,
+    actual_neurons: null,
+  }});
+  const response = await worker.fetch(request({ action: "mark_in_flight", reservation_id: RESERVATION }), env(DB));
+  assert.equal(response.status, 409);
+  assert.deepEqual(await response.json(), { error: "model_quarantined" });
+});
+
 test("ambiguous provider outcome preserves its reservation and cannot be released", async () => {
   const DB = dbMock({ enabled: 1, reservation: {
     reservation_id: RESERVATION, model_id: MODEL, task_kind: "research_brief",
