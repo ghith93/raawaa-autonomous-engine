@@ -37,6 +37,7 @@ class WorkflowPlan:
     ready: tuple[str, ...]
     waiting: dict[str, tuple[str, ...]]
     assignments: dict[str, str]
+    steps: dict[str, dict[str, Any]]
     execution_waves: tuple[tuple[str, ...], ...]
     dispatch_blockers: tuple[str, ...]
     estimated_model_cost_usd: float
@@ -50,6 +51,7 @@ class WorkflowPlan:
             "ready": list(self.ready),
             "waiting": {key: list(value) for key, value in self.waiting.items()},
             "assignments": dict(self.assignments),
+            "steps": {key: dict(value) for key, value in self.steps.items()},
             "execution_waves": [list(wave) for wave in self.execution_waves],
             "dispatch_blockers": list(self.dispatch_blockers),
             "estimated_model_cost_usd": self.estimated_model_cost_usd,
@@ -156,6 +158,7 @@ def validate_and_plan(
             "payload": payload,
             "depends_on": list(deps),
             "assigned_agent": contract["agent_id"],
+            "assigned_agent_role": contract["agent_role"],
             "required_capability": contract["required_capability"],
             "risk": risk,
             "estimated_model_cost_usd": estimate,
@@ -217,6 +220,17 @@ def validate_and_plan(
         ready=ready,
         waiting=waiting,
         assignments=assignments,
+        steps={step_id: {
+            "task_type": by_id[step_id]["task_type"],
+            "title": by_id[step_id]["title"],
+            "assigned_agent": by_id[step_id]["assigned_agent"],
+            "assigned_agent_role": by_id[step_id]["assigned_agent_role"],
+            "required_capability": by_id[step_id]["required_capability"],
+            "depends_on": list(by_id[step_id]["depends_on"]),
+            "acceptance_checks": [check.strip() for check in by_id[step_id]["acceptance_checks"]],
+            "risk": by_id[step_id]["risk"],
+            "estimated_model_cost_usd": float(by_id[step_id]["estimated_model_cost_usd"]),
+        } for step_id in order},
         execution_waves=tuple(execution_waves),
         dispatch_blockers=tuple(blockers),
         estimated_model_cost_usd=float(total_estimate),
