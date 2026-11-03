@@ -180,24 +180,35 @@ class RemoteTaskStore:
         return expiry
 
     def finish(self, task_id: str, status: str, result: dict[str, Any] | None = None,
-               error: str | None = None, lease_token: str | None = None) -> None:
+               error: str | None = None, lease_token: str | None = None,
+               execution_mode: str | None = None) -> None:
         if status not in {"succeeded", "failed", "blocked"}:
             raise ValueError("invalid terminal status")
         payload: dict[str, Any] = {"lease_token": lease_token, "status": status}
         if result is not None:
             payload["result"] = result
+            if execution_mode is None and result.get("mode") in {"dry_run", "live_inference"}:
+                execution_mode = result["mode"]
+        if execution_mode is not None:
+            if execution_mode not in {"not_started", "dry_run", "live_inference"}:
+                raise ValueError("invalid execution_mode")
+            payload["execution_mode"] = execution_mode
         if error is not None:
             payload["error"] = error
         self._request(f"/v1/tasks/{task_id}/finish", "POST", payload)
 
     def retry_or_fail(self, task_id: str, error: str,
                       lease_token: str | None = None,
-                      retry_after_seconds: int = 0) -> str:
+                      retry_after_seconds: int = 0,
+                      execution_mode: str | None = None) -> str:
         if type(retry_after_seconds) is not int or not 0 <= retry_after_seconds <= 86400:
             raise ValueError("retry_after_seconds must be an integer from 0 to 86400")
+        if execution_mode is not None and execution_mode not in {"not_started", "dry_run", "live_inference"}:
+            raise ValueError("invalid execution_mode")
         response = self._request(f"/v1/tasks/{task_id}/retry", "POST",
                                  {"lease_token": lease_token, "error": error,
-                                  "retry_after_seconds": retry_after_seconds})
+                                  "retry_after_seconds": retry_after_seconds,
+                                  "execution_mode": execution_mode})
         status = response.get("status")
         if status not in {"pending", "failed"}:
             raise RemoteTaskStoreError("Remote task API returned an invalid retry status")
