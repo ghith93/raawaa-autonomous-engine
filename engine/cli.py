@@ -281,6 +281,9 @@ def main() -> int:
             max_academic_results=research_config.get("max_academic_results", 10),
             arxiv_query=research_config.get("arxiv_query"),
             max_arxiv_results=research_config.get("max_arxiv_results", 10),
+            searxng_query=research_config.get("searxng_query"),
+            searxng_base_url=os.environ.get("RAAWAA_SEARXNG_BASE_URL"),
+            max_searxng_results=research_config.get("max_searxng_results", 10),
         )
         print(json.dumps(result, indent=2, ensure_ascii=False))
     elif args.command == "provider-profile-status":

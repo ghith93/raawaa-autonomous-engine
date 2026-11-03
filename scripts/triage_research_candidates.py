@@ -243,6 +243,38 @@ def score_arxiv_candidate(item: dict, today: date) -> dict:
     }
 
 
+def score_searxng_candidate(item: dict, today: date) -> dict:
+    """Rank web metadata for manual review only; never infer trust or license from search rank."""
+    title = item.get("title") if isinstance(item.get("title"), str) else ""
+    snippet = item.get("snippet") if isinstance(item.get("snippet"), str) else ""
+    searchable = (title + " " + snippet).lower()
+    matches = sorted(term for term in RELEVANT_PAPER_TERMS if term in searchable)
+    score = min(80, len(matches) * 10)
+    risks = ["license_not_verified", "source_and_page_content_require_independent_review"]
+    if not snippet:
+        risks.append("search_snippet_missing")
+    if not matches:
+        risks.append("weak_topic_match")
+    return {
+        "source": "searxng",
+        "source_key": item.get("source_key", "searxng:" + str(item.get("url", ""))[:900]),
+        "title": title[:240],
+        "url": item.get("url", "")[:1000] if isinstance(item.get("url"), str) else "",
+        "score": score,
+        "priority": _priority(score),
+        "license_review_required": True,
+        "security_review_required": True,
+        "cost_review_required": True,
+        "compatibility_review_required": True,
+        "relevance_terms": matches,
+        "engines": [value for value in item.get("engines", [])[:5] if isinstance(value, str)]
+        if isinstance(item.get("engines"), list) else [],
+        "risk_flags": risks,
+        "review_status": "unreviewed",
+        "automatic_adoption": False,
+    }
+
+
 def triage_candidates(snapshot: dict, now: datetime | None = None) -> dict:
     if not isinstance(snapshot, dict):
         raise ValueError("research snapshot must be an object")
@@ -254,17 +286,19 @@ def triage_candidates(snapshot: dict, now: datetime | None = None) -> dict:
     github = [score_github_candidate(x, current) for x in snapshot.get("candidates", []) if isinstance(x, dict)]
     academic = [score_academic_candidate(x, today) for x in snapshot.get("academic_candidates", []) if isinstance(x, dict)]
     arxiv = [score_arxiv_candidate(x, today) for x in snapshot.get("arxiv_candidates", []) if isinstance(x, dict)]
-    combined = sorted(github + academic + arxiv, key=lambda x: (x["score"], x["title"]), reverse=True)
+    searxng = [score_searxng_candidate(x, today) for x in snapshot.get("searxng_candidates", []) if isinstance(x, dict)]
+    combined = sorted(github + academic + arxiv + searxng, key=lambda x: (x["score"], x["title"]), reverse=True)
     return {
         "schema_version": 1,
         "triage_only": True,
         "review_required": True,
         "automatic_adoption": False,
         "model_calls": 0,
-        "source_counts": {"github": len(github), "crossref": len(academic), "arxiv": len(arxiv)},
+        "source_counts": {"github": len(github), "crossref": len(academic), "arxiv": len(arxiv), "searxng": len(searxng)},
         "github_candidates": sorted(github, key=lambda x: x["score"], reverse=True),
         "academic_candidates": sorted(academic, key=lambda x: x["score"], reverse=True),
         "arxiv_candidates": sorted(arxiv, key=lambda x: x["score"], reverse=True),
+        "searxng_candidates": sorted(searxng, key=lambda x: x["score"], reverse=True),
         "recommended_for_manual_review": [x for x in combined if x["priority"] == "high"][:10],
         "all_candidates": combined,
     }

@@ -1,8 +1,9 @@
+import json
 import unittest
 import xml.etree.ElementTree as ET
 from unittest.mock import patch
 from datetime import datetime, timezone
-from engine.research_discovery import DEFAULT_QUERIES, MAX_RESPONSE_BYTES, ResearchDiscoveryError, _request_arxiv, _request_crossref, _request_json, discover_repositories
+from engine.research_discovery import DEFAULT_QUERIES, MAX_RESPONSE_BYTES, ResearchDiscoveryError, _request_arxiv, _request_crossref, _request_json, _request_searxng, _validate_searxng_base_url, discover_repositories
 
 class ResearchDiscoveryTests(unittest.TestCase):
     def test_default_queries_target_skill_scanners_and_evaluation_benchmarks(self):
@@ -189,6 +190,102 @@ class ResearchDiscoveryTests(unittest.TestCase):
         self.assertEqual(failed["arxiv_requests_made"], 1)
         self.assertIn("503", failed["arxiv_unavailable"])
         self.assertEqual(failed["arxiv_candidates"], [])
+
+
+    def test_searxng_requires_operator_configured_public_https_endpoint(self):
+        self.assertEqual(
+            _validate_searxng_base_url("https://search.example.org"),
+            "https://search.example.org",
+        )
+        for endpoint in (
+            "http://search.example.org",
+            "https://user:pass@search.example.org",
+            "https://localhost:8080",
+            "https://127.0.0.1:8080",
+            "https://search.example.org/?q=secret",
+        ):
+            with self.subTest(endpoint=endpoint):
+                with self.assertRaises(ResearchDiscoveryError):
+                    _validate_searxng_base_url(endpoint)
+
+    def test_searxng_json_response_is_bounded_and_normalized(self):
+        payload = json.dumps({
+            "results": [{
+                "title": "Open source agent security",
+                "url": "https://docs.example.org/agent-security",
+                "content": "Research on agent tool security and prompt injection.",
+                "engines": ["duckduckgo", "brave"],
+                "category": "it",
+                "score": 4.5,
+            }]
+        }).encode()
+        class Response:
+            status = 200
+            headers = {"Content-Type": "application/json"}
+            def __enter__(self): return self
+            def __exit__(self, *args): return False
+            def geturl(self): return "https://search.example.org/search?q=agents&format=json"
+            def read(self, limit): return payload
+        with patch("engine.research_discovery.urlopen", return_value=Response()) as opened:
+            result = _request_searxng("agent security", "https://search.example.org", 5)
+        request = opened.call_args.args[0]
+        self.assertIn("format=json", request.full_url)
+        self.assertEqual(len(result["results"]), 1)
+        from engine.research_discovery import _normalize_searxng_result
+        normalized = _normalize_searxng_result(result["results"][0], "2026-11-03T00:00:00+00:00")
+        self.assertEqual(normalized["source"], "searxng")
+        self.assertEqual(normalized["engines"], ["duckduckgo", "brave"])
+        self.assertFalse(normalized["license_verified"])
+
+    def test_searxng_is_skipped_without_endpoint_and_failure_is_nonfatal(self):
+        calls = []
+        skipped = discover_repositories(
+            {"agents": "agent framework"}, {},
+            request_fn=lambda query, token: {"items": []},
+            searxng_query="agent security",
+            searxng_request_fn=lambda *args: calls.append(args),
+        )
+        self.assertEqual(calls, [])
+        self.assertEqual(skipped["searxng_requests_made"], 0)
+        self.assertEqual(skipped["searxng_unavailable"], "endpoint_not_configured")
+
+        def fail(query, endpoint, limit):
+            raise ResearchDiscoveryError("SearXNG returned HTTP 403; verify JSON format is enabled")
+        failed = discover_repositories(
+            {"agents": "agent framework"}, {},
+            request_fn=lambda query, token: {"items": []},
+            searxng_query="agent security",
+            searxng_base_url="https://search.example.org",
+            searxng_request_fn=fail,
+        )
+        self.assertEqual(failed["searxng_requests_made"], 1)
+        self.assertIn("403", failed["searxng_unavailable"])
+        self.assertEqual(failed["searxng_candidates"], [])
+
+    def test_searxng_rejects_cross_host_or_port_redirect(self):
+        class Response:
+            status = 200
+            headers = {"Content-Type": "application/json"}
+            def __enter__(self): return self
+            def __exit__(self, *args): return False
+            def geturl(self): return "https://other.example.org/search"
+            def read(self, limit): return b'{"results":[]}'
+        with patch("engine.research_discovery.urlopen", return_value=Response()):
+            with self.assertRaisesRegex(ResearchDiscoveryError, "redirected outside"):
+                _request_searxng("agent security", "https://search.example.org", 5)
+
+
+    def test_searxng_rejects_oversized_response(self):
+        class Response:
+            status = 200
+            headers = {"Content-Type": "application/json"}
+            def __enter__(self): return self
+            def __exit__(self, *args): return False
+            def geturl(self): return "https://search.example.org/search"
+            def read(self, limit): return b"x" * (MAX_RESPONSE_BYTES + 1)
+        with patch("engine.research_discovery.urlopen", return_value=Response()):
+            with self.assertRaisesRegex(ResearchDiscoveryError, "1 MiB"):
+                _request_searxng("agent security", "https://search.example.org", 5)
 
 
 if __name__ == "__main__": unittest.main()

@@ -1,16 +1,18 @@
-"""Bounded, read-only GitHub repository discovery for proactive research.
+"""Bounded, read-only multi-source discovery for proactive research.
 
-This module retrieves public repository metadata only. It never clones, imports,
- executes, installs, or modifies discovered projects.
+This module retrieves public metadata only. It never clones, imports, executes,
+installs, or modifies discovered projects. Search results remain untrusted data.
 """
 from __future__ import annotations
 
 import json
+import math
 import os
+import ipaddress
 import xml.etree.ElementTree as ET
 from datetime import datetime, timezone
 from urllib.error import HTTPError, URLError
-from urllib.parse import urlencode
+from urllib.parse import urlencode, urlsplit
 from urllib.request import Request, urlopen
 
 API = "https://api.github.com/search/repositories"
@@ -191,7 +193,95 @@ def _normalize_crossref_item(item: dict, retrieved_at: str) -> dict | None:
             "source": "crossref", "discovered_at": retrieved_at, "review_status": "unreviewed",
             "license_verified": False, "abstract_retrieved": False}
 
-def discover_repositories(queries=None, environ=None, max_per_query=5, max_queries=6, request_fn=None, now=None, academic_query=None, max_academic_results=10, academic_request_fn=None, arxiv_query=None, max_arxiv_results=10, arxiv_request_fn=None):
+def _validate_searxng_base_url(base_url: str) -> str:
+    """Accept only an operator-configured public HTTPS SearXNG origin/path."""
+    if not isinstance(base_url, str) or not base_url.strip() or len(base_url) > 500:
+        raise ResearchDiscoveryError("SearXNG endpoint is missing or malformed")
+    try:
+        parsed = urlsplit(base_url.strip())
+        _ = parsed.port
+    except ValueError:
+        raise ResearchDiscoveryError("SearXNG endpoint URL is malformed") from None
+    host = parsed.hostname
+    if (parsed.scheme != "https" or not host or parsed.username or parsed.password
+            or parsed.query or parsed.fragment):
+        raise ResearchDiscoveryError("SearXNG endpoint must be HTTPS without credentials, query, or fragment")
+    normalized_host = host.lower().rstrip(".")
+    if normalized_host in {"localhost", "localhost.localdomain"} or normalized_host.endswith((".local", ".internal")):
+        raise ResearchDiscoveryError("SearXNG endpoint must not target a local hostname")
+    try:
+        address = ipaddress.ip_address(normalized_host)
+    except ValueError:
+        address = None
+    if address is not None and not address.is_global:
+        raise ResearchDiscoveryError("SearXNG endpoint must not target a private or reserved IP")
+    return base_url.strip().rstrip("/")
+
+
+def _request_searxng(query: str, base_url: str, max_results: int = 10, timeout: int = 15) -> dict:
+    """Request one JSON page from an operator-configured SearXNG instance."""
+    if not isinstance(query, str) or not query.strip():
+        raise ValueError("SearXNG query must be a non-empty string")
+    if isinstance(max_results, bool) or not isinstance(max_results, int) or not 1 <= max_results <= 10:
+        raise ValueError("SearXNG max_results must be an integer between 1 and 10")
+    endpoint = _validate_searxng_base_url(base_url)
+    parsed = urlsplit(endpoint)
+    params = {"q": query, "format": "json", "pageno": "1", "safesearch": "1"}
+    request_url = endpoint + "/search?" + urlencode(params)
+    request = Request(request_url, headers={"Accept": "application/json", "User-Agent": USER_AGENT}, method="GET")
+    try:
+        with urlopen(request, timeout=timeout) as response:
+            if response.status != 200:
+                raise ResearchDiscoveryError(f"SearXNG returned HTTP {response.status}")
+            final_url = response.geturl() if callable(getattr(response, "geturl", None)) else request_url
+            final = urlsplit(final_url)
+            if final.scheme != "https" or final.netloc != parsed.netloc:
+                raise ResearchDiscoveryError("SearXNG redirected outside the configured HTTPS host")
+            content_type = response.headers.get("Content-Type", "") if getattr(response, "headers", None) else ""
+            if content_type and "json" not in content_type.lower():
+                raise ResearchDiscoveryError("SearXNG did not return JSON; enable search.formats=json on the instance")
+            raw = response.read(MAX_RESPONSE_BYTES + 1)
+            if len(raw) > MAX_RESPONSE_BYTES:
+                raise ResearchDiscoveryError("SearXNG response exceeded the 1 MiB safety limit")
+            payload = json.loads(raw.decode("utf-8"))
+    except HTTPError as exc:
+        raise ResearchDiscoveryError(f"SearXNG returned HTTP {exc.code}; verify JSON format is enabled") from exc
+    except (URLError, TimeoutError, OSError, json.JSONDecodeError, UnicodeDecodeError) as exc:
+        raise ResearchDiscoveryError(f"SearXNG request failed: {type(exc).__name__}") from exc
+    if not isinstance(payload, dict) or not isinstance(payload.get("results"), list):
+        raise ResearchDiscoveryError("SearXNG returned an unexpected JSON response shape")
+    return payload
+
+
+def _normalize_searxng_result(item: dict, retrieved_at: str) -> dict | None:
+    title, url = item.get("title"), item.get("url")
+    if not isinstance(title, str) or not title.strip() or not isinstance(url, str):
+        return None
+    parsed = urlsplit(url)
+    if (parsed.scheme not in {"http", "https"} or not parsed.hostname or parsed.username
+            or parsed.password or len(url) > 1000):
+        return None
+    engines = item.get("engines", [])
+    if not isinstance(engines, list):
+        engines = []
+    score = item.get("score")
+    return {
+        "source": "searxng",
+        "source_key": "searxng:" + url[:900],
+        "title": " ".join(title.split())[:240],
+        "url": url[:1000],
+        "snippet": " ".join(item.get("content", "").split())[:500] if isinstance(item.get("content"), str) else "",
+        "engines": [engine[:80] for engine in engines[:5] if isinstance(engine, str)],
+        "category": item.get("category")[:80] if isinstance(item.get("category"), str) else None,
+        "score": score if type(score) in (int, float) and math.isfinite(score) and score >= 0 else None,
+        "discovered_at": retrieved_at,
+        "review_status": "unreviewed",
+        "license_verified": False,
+        "automatic_adoption": False,
+    }
+
+
+def discover_repositories(queries=None, environ=None, max_per_query=5, max_queries=6, request_fn=None, now=None, academic_query=None, max_academic_results=10, academic_request_fn=None, arxiv_query=None, max_arxiv_results=10, arxiv_request_fn=None, searxng_query=None, searxng_base_url=None, max_searxng_results=10, searxng_request_fn=None):
     """Search a bounded set of GitHub topics and return unreviewed candidates."""
     if isinstance(max_per_query, bool) or not isinstance(max_per_query, int) or not 1 <= max_per_query <= 10:
         raise ValueError("max_per_query must be an integer between 1 and 10")
@@ -205,6 +295,10 @@ def discover_repositories(queries=None, environ=None, max_per_query=5, max_queri
         raise ValueError("arxiv_query must be a non-empty string when supplied")
     if isinstance(max_arxiv_results, bool) or not isinstance(max_arxiv_results, int) or not 1 <= max_arxiv_results <= 10:
         raise ValueError("max_arxiv_results must be an integer between 1 and 10")
+    if searxng_query is not None and (not isinstance(searxng_query, str) or not searxng_query.strip()):
+        raise ValueError("searxng_query must be a non-empty string when supplied")
+    if isinstance(max_searxng_results, bool) or not isinstance(max_searxng_results, int) or not 1 <= max_searxng_results <= 10:
+        raise ValueError("max_searxng_results must be an integer between 1 and 10")
     query_map = DEFAULT_QUERIES if queries is None else queries
     if not isinstance(query_map, dict) or not 1 <= len(query_map) <= 10:
         raise ValueError("queries must contain between 1 and 10 named queries")
@@ -298,17 +392,39 @@ def discover_repositories(queries=None, environ=None, max_per_query=5, max_queri
             arxiv_candidates.sort(key=lambda item: (item.get("published") or "", item["title"]), reverse=True)
         except ResearchDiscoveryError as exc:
             arxiv_unavailable = str(exc)
+    searxng_candidates, searxng_unavailable, searxng_requests_made = [], None, 0
+    if searxng_query:
+        if not searxng_base_url:
+            searxng_unavailable = "endpoint_not_configured"
+        else:
+            try:
+                searxng_fetch = searxng_request_fn or _request_searxng
+                searxng_requests_made = 1
+                payload = searxng_fetch(searxng_query, searxng_base_url, max_searxng_results)
+                results = payload.get("results", []) if isinstance(payload, dict) else None
+                if not isinstance(results, list):
+                    raise ResearchDiscoveryError("SearXNG result list is malformed")
+                for item in results[:max_searxng_results]:
+                    if isinstance(item, dict):
+                        candidate = _normalize_searxng_result(item, retrieved_at)
+                        if candidate is not None:
+                            searxng_candidates.append(candidate)
+            except ResearchDiscoveryError as exc:
+                searxng_unavailable = str(exc)
     return {
         "schema_version": 1, "discovery_only": True, "source": "multi_source_public_research_metadata",
         "retrieved_at": retrieved_at, "queries_attempted": len(query_items),
         "requests_made": requests_made, "academic_requests_made": academic_requests_made,
-        "total_requests_made": requests_made + academic_requests_made + arxiv_requests_made,
+        "total_requests_made": requests_made + academic_requests_made + arxiv_requests_made + searxng_requests_made,
         "academic_candidates": academic_candidates, "academic_unavailable": academic_unavailable,
         "arxiv_candidates": arxiv_candidates, "arxiv_unavailable": arxiv_unavailable,
         "arxiv_requests_made": arxiv_requests_made,
+        "searxng_candidates": searxng_candidates, "searxng_unavailable": searxng_unavailable,
+        "searxng_requests_made": searxng_requests_made,
+        "searxng_endpoint_configured": bool(searxng_base_url),
         "generation_requests": 0, "code_execution": False,
         "installation_or_cloning": False, "candidate_count": len(ordered),
-        "total_metadata_candidate_count": len(ordered) + len(academic_candidates) + len(arxiv_candidates),
+        "total_metadata_candidate_count": len(ordered) + len(academic_candidates) + len(arxiv_candidates) + len(searxng_candidates),
         "candidates": ordered,
         "unavailable": unavailable, "review_required": True,
     }

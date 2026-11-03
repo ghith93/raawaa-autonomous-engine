@@ -52,5 +52,34 @@ class ResearchCandidateTriageTests(unittest.TestCase):
         self.assertEqual(result["all_candidates"][0]["source"], "arxiv")
 
 
+    def test_searxng_candidates_are_manual_review_only_and_license_unverified(self):
+        from scripts.triage_research_candidates import score_searxng_candidate, triage_candidates
+        result = score_searxng_candidate({
+            "source_key": "searxng:https://example.org/agent",
+            "title": "Agent tool security",
+            "url": "https://example.org/agent",
+            "snippet": "Prompt injection and tool security research",
+            "engines": ["brave"],
+        }, datetime(2026, 11, 3, tzinfo=timezone.utc).date())
+        self.assertEqual(result["source"], "searxng")
+        self.assertTrue(result["license_review_required"])
+        self.assertTrue(result["security_review_required"])
+        self.assertIn("license_not_verified", result["risk_flags"])
+        self.assertFalse(result["automatic_adoption"])
+        triaged = triage_candidates({
+            "candidates": [],
+            "academic_candidates": [],
+            "arxiv_candidates": [],
+            "searxng_candidates": [{
+                "source_key": "searxng:https://example.org/agent",
+                "title": "Agent tool security",
+                "url": "https://example.org/agent",
+                "snippet": "Prompt injection and tool security research",
+            }],
+        }, datetime(2026, 11, 3, tzinfo=timezone.utc))
+        self.assertEqual(triaged["source_counts"]["searxng"], 1)
+        self.assertEqual(triaged["searxng_candidates"][0]["source"], "searxng")
+
+
 if __name__ == "__main__":
     unittest.main()
