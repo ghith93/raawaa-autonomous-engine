@@ -9,6 +9,7 @@ from pathlib import Path
 from engine.agent_runtime import build_task_contract, load_agent_roster
 from engine.lease_heartbeat import LeaseHeartbeat, LeaseHeartbeatLost
 from engine.provider import GenerationRequest
+from engine.model_gateway import ProviderNotCalled
 from engine.task_store import TaskStore
 from engine.live_data_policy import validate_live_payload
 from engine.operating_policy import OperatingPolicyError, load_operating_policy
@@ -129,6 +130,25 @@ def run_once(store: TaskStore, live_gateway=None, environ=None) -> dict | None:
                     "input_tokens": response.input_tokens,
                     "output_tokens": response.output_tokens,
                     "external_writes": 0,
+                }
+            except ProviderNotCalled as exc:
+                # This exception is reserved for paths proven to stop before
+                # adapter.generate(). Delay the retry so a bounded batch cannot
+                # spin on exhausted capacity. Ambiguous failures remain blocked.
+                heartbeat.stop()
+                heartbeat.check()
+                status = store.retry_or_fail(
+                    task["id"],
+                    f"provider_not_called:{exc.reason_code}",
+                    lease_token=task["lease_token"],
+                    retry_after_seconds=exc.retry_after_seconds,
+                )
+                return {
+                    "id": task["id"], "status": status,
+                    "reason": "provider_not_called_retry_scheduled" if status == "pending"
+                              else "provider_not_called_attempts_exhausted",
+                    "retry_after_seconds": exc.retry_after_seconds if status == "pending" else 0,
+                    "recovery": recovery,
                 }
             except Exception as exc:
                 # A provider outcome may be ambiguous. Never send the same task
