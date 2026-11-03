@@ -66,7 +66,7 @@ test("health is read-only and does not require a token", async () => {
   const DB = dbMock();
   const response = await worker.fetch(request("/health", { token: null }), { DB });
   assert.equal(response.status, 200);
-  assert.deepEqual(await response.json(), { ok: true, capabilities: ["task_retry_schedule_v1"] });
+  assert.deepEqual(await response.json(), { ok: true });
   assert.equal(DB.calls.length, 1);
 });
 
@@ -147,44 +147,6 @@ test("finish rejects unsupported terminal states", async () => {
   assert.deepEqual(await response.json(), { error: "invalid_status" });
 });
 
-
-test("retry endpoint persists a bounded next-attempt time", async () => {
-  const DB = dbMock();
-  const response = await worker.fetch(request("/v1/tasks/task-1/retry", {
-    method: "POST",
-    body: { lease_token: "lease-1", error: "provider_not_called:capacity", retry_after_seconds: 600 },
-  }), { DB, ENGINE_API_TOKEN: TOKEN });
-  assert.equal(response.status, 200);
-  const payload = await response.json();
-  assert.equal(payload.ok, true);
-  assert.equal(payload.status, "pending");
-  assert.equal(typeof payload.next_attempt_at, "string");
-  const update = DB.calls.find(x => x.kind === "run" && x.sql.startsWith("UPDATE tasks"));
-  assert.match(update.sql, /next_attempt_at/);
-  assert.equal(update.values[0], "pending");
-  assert.equal(Date.parse(update.values[4]) - Date.parse(update.values[3]), 600000);
-});
-
-test("retry endpoint rejects excessive delay before database writes", async () => {
-  const DB = dbMock();
-  const response = await worker.fetch(request("/v1/tasks/task-1/retry", {
-    method: "POST",
-    body: { lease_token: "lease-1", retry_after_seconds: 86401 },
-  }), { DB, ENGINE_API_TOKEN: TOKEN });
-  assert.equal(response.status, 400);
-  assert.deepEqual(await response.json(), { error: "invalid_retry_delay" });
-  assert.equal(DB.calls.some(x => x.kind === "run"), false);
-});
-
-test("claim endpoint only selects pending tasks whose retry delay has elapsed", async () => {
-  const DB = dbMock();
-  await worker.fetch(request("/v1/tasks/claim", { method: "POST", body: {} }), {
-    DB, ENGINE_API_TOKEN: TOKEN,
-  });
-  const claim = DB.calls.find(x => x.kind === "first" && x.sql.includes("UPDATE tasks SET status='running'"));
-  assert.match(claim.sql, /next_attempt_at IS NULL OR next_attempt_at<=\?/);
-  assert.equal(claim.values[3], claim.values[4]);
-});
 
 test("recover endpoint is authenticated and bounded to stale task selection", async () => {
   const DB = dbMock();
@@ -1000,7 +962,7 @@ test("existing Task Runner retains its fenced retry route", async () => {
     method: "POST", token: TOKEN, body: { lease_token: "lease-1", error: "retry test" },
   }), { DB, ENGINE_API_TOKEN: TOKEN, ENGINE_CODESPACE_TOKEN: CODESPACE_TOKEN });
   assert.equal(response.status, 200);
-  assert.deepEqual(await response.json(), { ok: true, status: "pending", next_attempt_at: null });
+  assert.deepEqual(await response.json(), { ok: true, status: "pending" });
 });
 
 test("Codespace release gate blocks even a weak configured token", async () => {
