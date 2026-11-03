@@ -135,8 +135,8 @@ def main() -> int:
 
     before_routes = {route: _quota(store, route, task_id) for route in ROUTE_IDS}
     gateway = build_live_gateway(
-        db_path(), ROOT / "config" / "policy.json",
-        ROOT / "config" / "provider_profiles.json", environ=os.environ,
+        db_path(), ROOT / "config" / "policy.groq-smoke.json",
+        ROOT / "config" / "provider_profiles.groq-smoke.json", environ=os.environ,
     )
     if gateway is None:
         raise SystemExit("Live gateway failed closed; no provider request was sent.")
