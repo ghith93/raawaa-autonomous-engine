@@ -223,7 +223,7 @@ export async function handleMobileStatus(request, env, url) {
         !details || details.scope !== "scheduled_task_runner_default" ||
         !["engaged", "not_engaged"].includes(details.status) ||
         !["safe_dry_run", "unknown"].includes(details.policy_mode) ||
-        !["disabled", "configured"].includes(details.live_inference_default) ||
+        !["disabled", "enabled", "unknown"].includes(details.live_inference_default) ||
         typeof details.allow_paid_model_calls !== "boolean" ||
         typeof details.paid_fallback_enabled !== "boolean" ||
         typeof details.allow_external_writes !== "boolean" ||
