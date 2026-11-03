@@ -195,7 +195,6 @@ jobs:
       - name: Verify remote Staging D1 monetary ledger
         env:
           RAAWAA_ENGINE_STAGING_URL: https://raawaa-autonomous-engine-staging.ghith-shikhkhaled.workers.dev
-          RAAWAA_ENGINE_STAGING_QUOTA_ADMIN_TOKEN: ${{ env.RAAWAA_ENGINE_STAGING_QUOTA_ADMIN_TOKEN }}
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         run: python scripts/verify_staging_monetary_ledger.py
