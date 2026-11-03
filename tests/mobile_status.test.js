@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import worker from "../worker/index.js";
 
 const TOKEN = "mobile-status-test-token";
-function dbMock(migrationVersions=["0003_durable_quota_ledger","0004_paper_event_ledger","0005_telegram_webhook_receipts"], workerCron={created_at:"2026-11-03T00:00:00.000Z",details_json:JSON.stringify({cron:"*/15 * * * *",requeued:2,failed:1})}, watchdogEvents=[], ciHealthRow=null, killSwitchRow=null, invocationCounts=[], scanRow=null, sourceRows=[]) {
+function dbMock(migrationVersions=["0003_durable_quota_ledger","0004_paper_event_ledger","0005_telegram_webhook_receipts","0009_task_execution_mode"], workerCron={created_at:"2026-11-03T00:00:00.000Z",details_json:JSON.stringify({cron:"*/15 * * * *",requeued:2,failed:1})}, watchdogEvents=[], ciHealthRow=null, killSwitchRow=null, invocationCounts=[], scanRow=null, sourceRows=[]) {
   const calls=[];
   return {
     calls,
@@ -14,6 +14,11 @@ function dbMock(migrationVersions=["0003_durable_quota_ledger","0004_paper_event
         async first(){calls.push({kind:"first",sql,values:this.values});if(sql.includes("worker_cron_tick"))return workerCron;if(sql.includes("ci_health_snapshot"))return ciHealthRow;if(sql.includes("kill_switch_snapshot"))return killSwitchRow;if(sql.includes("research_scan_completed"))return scanRow;if(sql.includes("snapshot_captured"))return {candidate_id:"candidate-2",occurred_at:"2026-11-02T12:30:00.000Z",chain_id:1,block_number:123};return {event_type:"candidate_detected",candidate_id:"candidate-1",occurred_at:"2026-11-02T12:00:00.000Z"};},
         async all(){
           calls.push({kind:"all",sql,values:this.values});
+          if(sql.includes("FROM tasks") && sql.includes("execution_mode")) return {results:[
+            {status:"succeeded",execution_mode:"dry_run",count:2},
+            {status:"succeeded",execution_mode:"live_inference",count:1},
+            {status:"pending",execution_mode:"not_started",count:3},
+          ]};
           if(sql.includes("FROM tasks")) return {results:[{status:"pending",count:2}]};
           if(sql.includes("FROM task_model_invocations")) return {results:invocationCounts};
           if(sql.includes("schema_migrations")) return {results:migrationVersions.map(version=>({version}))};
@@ -56,6 +61,8 @@ test("mobile status page is public static HTML and never embeds an API token",as
  assert.doesNotMatch(body,/api\\.github\\.com/); 
  assert.match(body,/Default Task Runner inference gate/);
  assert.match(body,/Durable task-step invocations/);
+ assert.match(body,/Execution mode &amp; simulation|Execution mode & simulation/);
+ assert.match(body,/Simulated completions/);
  assert.match(body,/unresolved_count/);
 });
 
@@ -64,12 +71,27 @@ test("mobile status endpoint requires the existing Engine bearer token",async()=
  assert.equal(response.status,401);
 });
 
+test("mobile status reports execution-mode metrics unavailable before migration 0009",async()=>{
+ const DB=dbMock(["0003_durable_quota_ledger","0004_paper_event_ledger","0005_telegram_webhook_receipts"]);
+ const response=await worker.fetch(request("/v1/mobile/status"),{DB,ENGINE_API_TOKEN:TOKEN});
+ assert.equal(response.status,200);
+ const body=await response.json();
+ assert.deepEqual(body.task_execution,{available:false,counts:[]});
+ assert.equal(body.unavailable_metrics.execution_mode,"Migration 0009 is not applied to this database");
+ assert.equal(DB.calls.some(call=>call.sql.includes("execution_mode")),false);
+});
+
 test("mobile status endpoint returns read-only D1 metrics and explicit unknowns",async()=>{
  const DB=dbMock();
  const response=await worker.fetch(request("/v1/mobile/status"),{DB,ENGINE_API_TOKEN:TOKEN});
  assert.equal(response.status,200);
  const body=await response.json();
  assert.deepEqual(body.tasks,[{status:"pending",count:2}]);
+ assert.deepEqual(body.task_execution,{available:true,counts:[
+  {status:"succeeded",execution_mode:"dry_run",count:2},
+  {status:"succeeded",execution_mode:"live_inference",count:1},
+  {status:"pending",execution_mode:"not_started",count:3},
+ ]});
  assert.deepEqual(body.paper_events,[{event_type:"candidate_detected",count:4}]);
  assert.equal(body.latest_paper_event.candidate_id,"candidate-1");
  assert.deepEqual(body.latest_market_snapshot,{candidate_id:"candidate-2",occurred_at:"2026-11-02T12:30:00.000Z",chain_id:1,block_number:123});
