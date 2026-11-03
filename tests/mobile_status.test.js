@@ -218,6 +218,9 @@ test("mobile status does not query invocation tables before migration 0007",asyn
  assert.deepEqual(body.task_invocations,{available:false});
  assert.equal(body.unavailable_metrics.task_invocations,"Migration 0007 is not applied to this database");
  assert.equal(DB.calls.some(call=>call.sql.includes("FROM task_model_invocations")),false);
+ assert.deepEqual(body.task_execution_modes,{available:false});
+ assert.equal(body.unavailable_metrics.task_execution_modes,"Migration 0008 is not applied to this database");
+ assert.equal(DB.calls.some(call=>call.sql.includes("GROUP BY execution_mode,status")),false);
 });
 
 
