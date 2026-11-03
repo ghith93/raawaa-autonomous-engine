@@ -129,6 +129,7 @@ class ToolBrokerTests(unittest.TestCase):
         self.assertFalse(decision.allowed)
         self.assertEqual(decision.reason, "external_writes_disabled")
         self.assertEqual(self.calls, [])
+        self.assertEqual(self.events[-1]["event"], "tool_call_denied")
 
     def test_write_requires_trusted_approval_and_idempotency(self):
         policy = {**self.policy, "allow_external_writes": True}
@@ -158,7 +159,7 @@ class ToolBrokerTests(unittest.TestCase):
             action="publish_content", environment="staging",
         )
         broker = ToolBroker(
-            policy, MATRIX, self.adapters, audit_sink=self.events.append,
+            policy, MATRIX, self.adapters, agent_roster=ROSTER, audit_sink=self.events.append,
             approval_verifier=lambda _request: evidence,
         )
         self.assertEqual(broker.execute(req), "published")
