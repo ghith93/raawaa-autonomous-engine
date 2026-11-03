@@ -1,0 +1,106 @@
+name: One-shot Groq Free inference Staging smoke
+# Re-run only when this one-shot workflow is deliberately revised.
+# Diagnostics emit only aggregate usage and route error metadata; never payloads or keys.
+# Wait for Worker deployment and secret propagation before authenticated calls.
+
+on:
+  push:
+    branches: [feat/groq-free-inference-staging-smoke]
+    paths:
+      - .github/workflows/groq-free-inference-staging-smoke.yml
+      - scripts/run_groq_free_inference_smoke.py
+
+permissions:
+  contents: read
+
+concurrency:
+  group: groq-free-inference-staging-smoke
+  cancel-in-progress: false
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Check out the reviewed candidate
+        uses: actions/checkout@v7
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+      - name: Verify isolated Staging target and Free-only policy
+        run: |
+          python -m engine.cli audit
+          python - <<'PY'
+          import json, tomllib
+          from pathlib import Path
+          with Path("wrangler.staging.toml").open("rb") as f: staging = tomllib.load(f)
+          with Path("wrangler.toml").open("rb") as f: production = tomllib.load(f)
+          s = staging.get("d1_databases", [])
+          p = production.get("d1_databases", [])
+          if staging.get("name") != "raawaa-autonomous-engine-staging" or staging.get("workers_dev") is not True or staging.get("routes") or staging.get("route"):
+              raise SystemExit("Refusing: Staging Worker is not isolated on workers.dev")
+          if len(s) != 1 or len(p) != 1 or s[0].get("database_id") != "231dd948-04a0-49e3-ad73-444f77d69477" or p[0].get("database_id") != "f0ffbed3-940f-488d-a7d1-31cbc5fbf742" or s[0].get("database_id") == p[0].get("database_id"):
+              raise SystemExit("Refusing: Staging and Production D1 identities are not the reviewed separate databases")
+          default_policy = json.loads(Path("config/policy.json").read_text())
+          default_routes = json.loads(Path("config/provider_profiles.json").read_text())["routes"]
+          if default_policy.get("mode") != "safe_dry_run" or any(r.get("enabled") for r in default_routes):
+              raise SystemExit("Refusing: repository defaults must remain fail-closed")
+          policy = json.loads(Path("config/policy.groq-smoke.json").read_text())
+          mp = policy["model_policy"]
+          enabled = [r for r in json.loads(Path("config/provider_profiles.groq-smoke.json").read_text())["routes"] if r.get("enabled")]
+          if policy.get("mode") != "live_inference_opt_in" or policy.get("allow_paid_model_calls") is not False or policy.get("allow_external_writes") is not False or mp.get("paid_fallback_enabled") is not False or mp.get("provider_hard_stop_verified") is not True:
+              raise SystemExit("Refusing: Staging Free-only live policy gates are not satisfied")
+          allowed_models = {"openai/gpt-oss-120b", "openai/gpt-oss-20b"}
+          if {r.get("model") for r in enabled} != allowed_models or any(r.get("provider") != "groq" or r.get("input_cost_per_million_usd") != 0 or r.get("output_cost_per_million_usd") != 0 for r in enabled):
+              raise SystemExit("Refusing: only the two verified zero-cost Groq routes may be enabled")
+          print("Staging isolation, fail-closed defaults, and isolated zero-cost Groq smoke policy verified.")
+          PY
+      - name: Validate Cloudflare and Access credentials
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          CF_ACCESS_CLIENT_ID: ${{ secrets.CF_ACCESS_CLIENT_ID }}
+          CF_ACCESS_CLIENT_SECRET: ${{ secrets.CF_ACCESS_CLIENT_SECRET }}
+        run: |
+          test -n "$CLOUDFLARE_API_TOKEN"
+          test -n "$CLOUDFLARE_ACCOUNT_ID"
+          test -n "$CF_ACCESS_CLIENT_ID" || { echo "Missing GitHub secret CF_ACCESS_CLIENT_ID"; exit 1; }
+          test -n "$CF_ACCESS_CLIENT_SECRET" || { echo "Missing GitHub secret CF_ACCESS_CLIENT_SECRET"; exit 1; }
+      - name: Generate ephemeral Staging bearer token
+        shell: bash
+        run: |
+          STAGING_TOKEN="$(python -c 'import secrets; print(secrets.token_urlsafe(48))')"
+          echo "::add-mask::$STAGING_TOKEN"
+          echo "RAAWAA_ENGINE_STAGING_API_TOKEN=$STAGING_TOKEN" >> "$GITHUB_ENV"
+      - name: Deploy isolated Staging Worker
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: npx --yes wrangler@4.156.1 deploy --config wrangler.staging.toml
+      - name: Install ephemeral Staging API token
+        id: install_staging_token
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          test -n "$RAAWAA_ENGINE_STAGING_API_TOKEN" || { echo "Missing ephemeral Staging token"; exit 1; }
+          printf '%s' "$RAAWAA_ENGINE_STAGING_API_TOKEN" | npx --yes wrangler@4.156.1 secret put ENGINE_API_TOKEN --config wrangler.staging.toml
+      - name: Run one bounded Groq Free inference and verify zero spend
+        env:
+          RAAWAA_ENGINE_API_URL: https://raawaa-autonomous-engine-staging.ghith-shikhkhaled.workers.dev
+          RAAWAA_ENGINE_LIVE_INFERENCE: enabled
+          CF_ACCESS_CLIENT_ID: ${{ secrets.CF_ACCESS_CLIENT_ID }}
+          CF_ACCESS_CLIENT_SECRET: ${{ secrets.CF_ACCESS_CLIENT_SECRET }}
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+        run: python scripts/run_groq_free_inference_smoke.py
+      - name: Revoke ephemeral Staging API token
+        if: ${{ always() && steps.install_staging_token.outcome == 'success' }}
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: npx --yes wrangler@4.156.1 secret delete ENGINE_API_TOKEN --config wrangler.staging.toml
