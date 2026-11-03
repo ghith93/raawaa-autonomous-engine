@@ -150,12 +150,51 @@ test("recover endpoint rejects unauthenticated callers", async () => {
 });
 
 
-test("scheduled handler runs bounded stale lease recovery", async () => {
+test("scheduled handler runs bounded stale lease recovery and records a heartbeat", async () => {
   const DB = dbMock();
   await worker.scheduled({ cron: "*/15 * * * *" }, { DB });
   assert.ok(DB.calls.some(x => x.kind === "all" && x.sql.includes("LIMIT 100")));
+  const heartbeat = DB.calls.find(x => x.kind === "run" && x.sql.includes("INSERT INTO audit_log"));
+  assert.ok(heartbeat, "scheduled invocation must be recorded in the audit ledger");
+  assert.equal(heartbeat.values[0], "worker_cron_tick");
+  assert.deepEqual(JSON.parse(heartbeat.values[1]), {
+    cron: "*/15 * * * *", requeued: 0, failed: 0,
+  });
+  assert.ok(Number.isFinite(Date.parse(heartbeat.values[2])));
 });
 
+
+test("scheduled handler fails visibly when the heartbeat audit write fails", async () => {
+  const DB = dbMock();
+  const prepare = DB.prepare.bind(DB);
+  DB.prepare = sql => {
+    const statement = prepare(sql);
+    if (sql.includes("INSERT INTO audit_log")) {
+      statement.run = async () => { throw new Error("audit storage unavailable"); };
+    }
+    return statement;
+  };
+  await assert.rejects(
+    () => worker.scheduled({ cron: "*/15 * * * *" }, { DB }),
+    /audit storage unavailable/,
+  );
+});
+
+test("scheduled handler rejects an unsuccessful D1 heartbeat result", async () => {
+  const DB = dbMock();
+  const prepare = DB.prepare.bind(DB);
+  DB.prepare = sql => {
+    const statement = prepare(sql);
+    if (sql.includes("INSERT INTO audit_log")) {
+      statement.run = async () => ({ success: false });
+    }
+    return statement;
+  };
+  await assert.rejects(
+    () => worker.scheduled({ cron: "*/15 * * * *" }, { DB }),
+    /Worker Cron heartbeat insert failed/,
+  );
+});
 
 test("authenticated POST diagnostic probe confirms application auth without writes", async () => {
   const DB = dbMock();

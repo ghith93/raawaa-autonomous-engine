@@ -43,7 +43,7 @@ h2{font-size:16px;margin:0 0 10px}.rows{display:grid;gap:8px}.item{display:flex;
 <section class="panel"><h2>Paper research events</h2><div id="paper" class="rows"></div></section>
 <section class="panel"><h2>Provider usage · D1</h2><div id="usage" class="rows"></div></section>
 <section class="panel"><h2>Recorded model inference costs · USD</h2><div id="modelCosts" class="rows"></div><p class="muted">Recorded provider costs only; external or unreported spend is not inferred.</p></section>
-<section class="panel"><h2>Latest market snapshot</h2><div id="snapshot" class="muted">—</div></section><section class="panel"><h2>Latest paper event</h2><div id="latest" class="muted">—</div></section><section class="panel"><h2>Telegram control readiness</h2><div id="telegramSchema" class="rows"></div><p class="muted">Schema presence only; webhook activation still requires operator-managed secrets and Telegram configuration.</p></section><section class="panel"><h2>GitHub CI health</h2><div id="ci" class="rows"></div></section>
+<section class="panel"><h2>Latest market snapshot</h2><div id="snapshot" class="muted">—</div></section><section class="panel"><h2>Latest paper event</h2><div id="latest" class="muted">—</div></section><section class="panel"><h2>Telegram control readiness</h2><div id="telegramSchema" class="rows"></div><p class="muted">Schema presence only; webhook activation still requires operator-managed secrets and Telegram configuration.</p></section><section class="panel"><h2>Worker Cron heartbeat</h2><div id="workerCron" class="rows"></div></section><section class="panel"><h2>GitHub CI health</h2><div id="ci" class="rows"></div></section>
 <section class="panel"><h2>Not yet connected to this status feed</h2><div id="gaps" class="rows"></div></section>
 <button id="refresh">Refresh</button><button class="secondary" id="disconnect">Disconnect</button>
 <p class="muted" id="updated"></p>
@@ -90,6 +90,12 @@ async function load() {
   $("snapshot").textContent=data.latest_market_snapshot?data.latest_market_snapshot.candidate_id+" · chain "+(data.latest_market_snapshot.chain_id??"—")+" · block "+(data.latest_market_snapshot.block_number??"—")+" · "+data.latest_market_snapshot.occurred_at:"No market snapshot recorded";
   $("latest").textContent=data.latest_paper_event?data.latest_paper_event.event_type+" · "+data.latest_paper_event.candidate_id+" · "+data.latest_paper_event.occurred_at:"No paper event recorded";
   rows("telegramSchema",[[ "Webhook receipt schema", data.telegram_webhook_schema?.status || "Unknown" ]],"Schema status unavailable");
+  const cron=data.worker_cron;
+  rows("workerCron",cron?[
+    ["Last invocation",cron.last_seen_at],
+    ["Schedule",cron.cron],
+    ["Expired leases requeued / failed",(cron.requeued??"—")+" / "+(cron.failed??"—")]
+  ]:[],data.unavailable_metrics?.worker_cron || "No Worker Cron heartbeat recorded yet");
   await loadCi();
   rows("gaps",Object.entries(data.unavailable_metrics||{}),"No unavailable metrics");
   $("updated").textContent="Snapshot generated: "+data.generated_at;
@@ -117,11 +123,30 @@ export async function handleMobileStatus(request, env, url) {
   if (url.pathname !== "/v1/mobile/status") return null;
   if (request.method !== "GET") return json({ error: "method_not_allowed" }, 405);
   try {
-    const [tasks, migrations] = await Promise.all([
+    const [tasks, migrations, workerCron] = await Promise.all([
       env.DB.prepare("SELECT status,COUNT(*) AS count FROM tasks GROUP BY status").all(),
       env.DB.prepare("SELECT version FROM schema_migrations WHERE version IN ('0003_durable_quota_ledger','0004_paper_event_ledger','0005_telegram_webhook_receipts')").all(),
+      env.DB.prepare("SELECT created_at,details_json FROM audit_log WHERE task_id IS NULL AND event='worker_cron_tick' ORDER BY created_at DESC LIMIT 1").first(),
     ]);
     const applied = new Set((migrations.results || []).map(row => row.version));
+    const workerCronStatus = (() => {
+      const invalid = { value: null, unavailable: "Latest Worker Cron heartbeat metadata is invalid" };
+      if (!workerCron) return { value: null, unavailable: "No Worker Cron heartbeat has been recorded yet" };
+      if (typeof workerCron.created_at !== "string" || !Number.isFinite(Date.parse(workerCron.created_at))) return invalid;
+      let details;
+      try { details = JSON.parse(workerCron.details_json || "{}"); } catch { return invalid; }
+      if (!details || typeof details !== "object" || Array.isArray(details)) return invalid;
+      const count = value => Number.isInteger(value) && value >= 0 ? value : null;
+      return {
+        value: {
+          last_seen_at: workerCron.created_at,
+          cron: typeof details.cron === "string" && details.cron.length <= 100 ? details.cron : null,
+          requeued: count(details.requeued),
+          failed: count(details.failed),
+        },
+        unavailable: null,
+      };
+    })();
     const [paper, latest, snapshot, usage, modelCosts] = await Promise.all([
       applied.has("0004_paper_event_ledger")
         ? env.DB.prepare("SELECT event_type,COUNT(*) AS count FROM paper_events GROUP BY event_type ORDER BY event_type").all()
@@ -157,6 +182,7 @@ export async function handleMobileStatus(request, env, url) {
           ? "Migration 0005 applied; webhook activation remains separately gated"
           : "Migration 0005 is not applied to this database",
       },
+      worker_cron: workerCronStatus.value,
       model_costs_usd: {
         total: (modelCosts.results || []).reduce((sum, row) => sum + (Number(row.cost_usd) || 0), 0),
         by_provider: (modelCosts.results || []).map(row => ({
@@ -173,6 +199,7 @@ export async function handleMobileStatus(request, env, url) {
         source_freshness: "Not yet aggregated from market-data adapters",
         ci_health: "Not yet ingested from GitHub Actions",
         kill_switch: "Engine policy state is not yet mirrored to the Worker",
+        ...(!workerCronStatus.value ? { worker_cron: workerCronStatus.unavailable } : {}),
         paper_ledger: applied.has("0004_paper_event_ledger") ? "Available" : "Migration 0004 is not applied to this database",
         provider_usage: applied.has("0003_durable_quota_ledger") ? "Available" : "Migration 0003 is not applied to this database",
       },
