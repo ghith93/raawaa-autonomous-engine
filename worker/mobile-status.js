@@ -426,8 +426,6 @@ export async function handleMobileStatus(request, env, url) {
         source: "D1 monetary_reservations; integer nano-USD",
       } : { available: false },
       unavailable_metrics: {
-        last_scan: "Scan-run heartbeat is not recorded; the latest captured market snapshot is shown separately",
-        source_freshness: "Not yet aggregated from market-data adapters",
         ...(!researchScan.value ? { last_scan: researchScan.unavailable } : {}),
         ...(sourceFreshness.status === "unknown" ? { source_freshness: "No valid source observations have been recorded" } : {}),
         ...(!ciHealth ? { ci_health: "No fresh validated Engine CI snapshot has been ingested from GitHub Actions" } : {}),
