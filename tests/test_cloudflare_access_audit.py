@@ -11,10 +11,10 @@ class CloudflareAccessAuditTests(unittest.TestCase):
         for filename in ("cloudflare-access-audit.yml", "cloudflare-access-inventory.yml"):
             with self.subTest(filename=filename):
                 workflow = (root / ".github" / "workflows" / filename).read_text(encoding="utf-8")
-                marker = "python - <<'PY'\\n"
+                marker = "python - <<'PY'\n"
                 self.assertIn(marker, workflow)
                 block = workflow.split(marker, 1)[1]
-                source = block.split("\\n          PY", 1)[0]
+                source = block.split("\n          PY", 1)[0]
                 source = textwrap.dedent(source)
                 compile(source, filename + ":python-heredoc", "exec")
 
