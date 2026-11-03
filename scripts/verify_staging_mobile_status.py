@@ -143,6 +143,8 @@ def verify(environ: dict[str, str] | None = None, *, opener=None, readiness_time
             for status in expected_statuses
         ):
             raise RuntimeError("Task execution mode status aggregate is incomplete or invalid")
+        if sum(per_status[status] for status in expected_statuses) != totals[mode]:
+            raise RuntimeError("Task execution mode total does not match status counts")
 
     return {
         "status": "verified",
