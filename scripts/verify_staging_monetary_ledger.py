@@ -66,6 +66,26 @@ def default_policy_nanos() -> tuple[int, int, int]:
     )
 
 
+
+def execute_staging_sql(sql: str) -> None:
+    verify_staging_target()
+    if not os.environ.get("CLOUDFLARE_API_TOKEN") or not os.environ.get("CLOUDFLARE_ACCOUNT_ID"):
+        raise RuntimeError("Cloudflare credentials are required for Staging-only test cleanup")
+    result = subprocess.run(
+        [
+            "npx", "--yes", "wrangler@4.156.1", "d1", "execute",
+            "raawaa-engine-staging", "--remote", "--command", sql,
+            "--config", "wrangler.staging.toml", "--yes",
+        ],
+        check=False, capture_output=True, text=True, timeout=60,
+        env=os.environ.copy(),
+    )
+    if result.returncode != 0:
+        detail = (result.stderr or result.stdout or "unknown Wrangler error")[-1200:]
+        raise RuntimeError("Staging-only test cleanup failed: " + detail)
+
+
+
 def set_staging_policy(daily: int, monthly: int, per_task: int) -> None:
     verify_staging_target()
     if any(type(value) is not int or value < 0 for value in (daily, monthly, per_task)):
@@ -203,6 +223,19 @@ def cleanup_test_reservations() -> None:
             # settlement safely clears its own test-only ambiguous reservations.
             status, _ = action("settle", rid, actual_cost_nanos=0, input_tokens=0, output_tokens=0)
             require(status == 200, "Could not settle a test-only ambiguous reservation")
+
+    # Remove only rows created by this CI harness. These tests never call a
+    # model provider, so deleting their settled/released audit rows is safe.
+    prefix = PREFIX.replace("'", "''")
+    for statement in (
+        f"DELETE FROM monetary_route_quarantines WHERE route_id LIKE '{prefix}%'",
+        f"DELETE FROM monetary_reservations WHERE provider LIKE '{prefix}%'",
+        f"DELETE FROM quota_usage WHERE route_id LIKE '{prefix}%'",
+        f"DELETE FROM quota_cooldowns WHERE route_id LIKE '{prefix}%'",
+        f"DELETE FROM quota_audit_events WHERE route_id LIKE '{prefix}%'",
+        f"DELETE FROM audit_log WHERE task_id LIKE '{prefix}%'",
+    ):
+        execute_staging_sql(statement)
 
 
 def verify_token_quota_concurrency(run_tag: str) -> None:
