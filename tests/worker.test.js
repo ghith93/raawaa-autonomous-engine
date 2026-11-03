@@ -400,14 +400,15 @@ test("quota endpoints require the Worker bearer token", async () => {
   assert.equal(response.status, 401);
 });
 
-test("quota reservation validates all hard limits before touching D1", async () => {
+test("quota reservation rejects unknown routes before touching D1", async () => {
   const DB = dbMock();
   const response = await worker.fetch(request("/v1/quota", {
     method: "POST",
-    body: { action: "reserve", route_id: "groq:main:model", task_id: "task-1",
-      estimated_tokens: 10, daily_request_limit: 1 },
+    body: { action: "reserve", route_id: "groq:unknown:model", task_id: "task-1",
+      estimated_tokens: 10, daily_request_limit: 999999 },
   }), { DB, ENGINE_API_TOKEN: TOKEN });
-  assert.equal(response.status, 400);
+  assert.equal(response.status, 403);
+  assert.deepEqual(await response.json(), { error: "unknown_quota_route" });
   assert.equal(DB.calls.length, 0);
 });
 
@@ -427,21 +428,23 @@ test("quota reservation is one conditional parameterized insert", async () => {
   };
   const response = await worker.fetch(request("/v1/quota", {
     method: "POST",
-    body: { action: "reserve", route_id: "groq:main:model", task_id: "task-1",
-      estimated_tokens: 10, daily_request_limit: 10, daily_token_limit: 1000,
-      monthly_request_limit: 100, monthly_token_limit: 10000,
-      minute_request_limit: 5, minute_token_limit: 1000,
-      per_task_request_limit: 3, per_task_token_limit: 300 },
+    body: { action: "reserve", route_id: "groq:primary:openai/gpt-oss-20b", task_id: "task-1",
+      estimated_tokens: 10, daily_request_limit: 999999, daily_token_limit: 999999999 },
   }), { DB, ENGINE_API_TOKEN: TOKEN });
   assert.equal(response.status, 201);
   const payload = await response.json();
   assert.equal(payload.reservation_id, 77);
+  assert.equal(typeof payload.settlement_key, "string");
+  assert.equal(payload.settlement_key.length > 20, true);
   assert.equal(typeof payload.occurred_at, "string");
   assert.equal(calls.length, 1);
   assert.match(calls[0].sql, /^\s*INSERT INTO quota_usage/);
   assert.match(calls[0].sql, /NOT EXISTS \(SELECT 1 FROM quota_cooldowns/);
   assert.match(calls[0].sql, /RETURNING id/);
-  assert.equal(calls[0].values.length, 32);
+  assert.equal(calls[0].values.length, 33);
+  assert.equal(calls[0].sql.includes("settlement_key"), true);
+  assert.equal(calls[0].values[9], 1000);
+  assert.equal(calls[0].values[13], 200000);
 });
 
 test("quota rejects oversized streaming bodies before buffering them fully", async () => {
@@ -481,12 +484,14 @@ test("quota settlement retries identical usage and rejects conflicting usage", a
     },
   };
   const replay = await worker.fetch(request("/v1/quota", {
-    method: "POST", body: { action: "settle", reservation_id: 5, actual_tokens: 42 },
+    method: "POST", body: { action: "settle", reservation_id: 5, actual_tokens: 42,
+      route_id: "groq:primary:openai/gpt-oss-20b", task_id: "task-1", settlement_key: "opaque-settlement-proof" },
   }), { DB, ENGINE_API_TOKEN: TOKEN });
   assert.equal(replay.status, 200);
   assert.equal((await replay.json()).replay, true);
   const conflict = await worker.fetch(request("/v1/quota", {
-    method: "POST", body: { action: "settle", reservation_id: 5, actual_tokens: 43 },
+    method: "POST", body: { action: "settle", reservation_id: 5, actual_tokens: 43,
+      route_id: "groq:primary:openai/gpt-oss-20b", task_id: "task-1", settlement_key: "opaque-settlement-proof" },
   }), { DB, ENGINE_API_TOKEN: TOKEN });
   assert.equal(conflict.status, 409);
   assert.deepEqual(await conflict.json(), { error: "settlement_conflict" });
