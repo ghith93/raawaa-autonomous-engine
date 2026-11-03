@@ -55,7 +55,8 @@ class ProviderWorkflowSecurityTests(unittest.TestCase):
         source = workflow.read_text(encoding="utf-8")
         marker = "  publish-staging-ops-telemetry:"
         start = source.index(marker)
-        job = source[start:]
+        end = source.index("\\n  staging-mobile-status-verify:", start)
+        job = source[start:end]
         self.assertIn("needs: [test, staging-migrate, staging-worker-verify]", job)
         self.assertIn("github.event_name == 'push'", job)
         self.assertIn("github.ref == 'refs/heads/main'", job)
@@ -67,6 +68,16 @@ class ProviderWorkflowSecurityTests(unittest.TestCase):
         self.assertIn('STAGING_DATABASE_ID = "231dd948-04a0-49e3-ad73-444f77d69477"', script)
         self.assertIn('PRODUCTION_DATABASE_ID = "f0ffbed3-940f-488d-a7d1-31cbc5fbf742"', script)
         self.assertIn("client.query(", script)
+
+    def test_staging_mobile_status_verification_uses_only_ephemeral_token(self):
+        workflow = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+        verify = workflow.split("  staging-mobile-status-verify:", 1)[1]
+        self.assertIn("needs.publish-staging-ops-telemetry.result == 'success'", verify)
+        self.assertIn("needs.staging-worker-verify.result == 'success'", verify)
+        self.assertIn("wrangler secret put ENGINE_API_TOKEN", verify)
+        self.assertIn("wrangler secret delete ENGINE_API_TOKEN", verify)
+        self.assertIn("python scripts/verify_staging_mobile_status.py", verify)
+        self.assertIn("steps.install_staging_token.outcome == 'success'", verify)
 
 if __name__ == "__main__":
     unittest.main()
