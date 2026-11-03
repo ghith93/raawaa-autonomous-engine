@@ -94,6 +94,19 @@ class D1MonetaryLedgerTests(unittest.TestCase):
         self.assertEqual(request.get_header("Authorization"), "Bearer test-token")
 
     @patch("urllib.request.urlopen")
+    def test_global_budget_status_can_be_checked_without_task_context(self, open_url):
+        open_url.return_value = Response({
+            "caps": {"daily_nanos": 400000000, "monthly_nanos": 12000000000, "per_task_nanos": 200000000},
+            "daily": {"settled_usd": 0.1, "pending_usd": 0.0, "total_nanos": 100000000, "over_budget": False},
+            "monthly": {"settled_usd": 0.1, "pending_usd": 0.0, "total_nanos": 100000000, "over_budget": False},
+            "per_task": None, "pending": {"count": 0, "ambiguous_count": 0},
+        })
+        result = self.ledger.budget_status(0.4, 12.0)
+        self.assertFalse(result["daily_over_budget"])
+        self.assertFalse(result["monthly_over_budget"])
+        self.assertFalse(result["per_task_over_budget"])
+
+    @patch("urllib.request.urlopen")
     def test_policy_mismatch_fails_closed(self, open_url):
         open_url.return_value = Response({
             "caps": {"daily_nanos": 400000000, "monthly_nanos": 12000000000, "per_task_nanos": 300000000},
