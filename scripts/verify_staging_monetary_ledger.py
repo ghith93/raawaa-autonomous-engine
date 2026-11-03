@@ -67,22 +67,42 @@ def default_policy_nanos() -> tuple[int, int, int]:
 
 
 
+def _is_safe_staging_cleanup_delete(sql: str) -> bool:
+    normalized = " ".join(sql.strip().split()).lower()
+    return normalized in {
+        "delete from monetary_route_quarantines where route_id like 'staging-verification-%'",
+        "delete from monetary_reservations where provider like 'staging-verification-%'",
+        "delete from quota_usage where route_id like 'staging-verification-%'",
+        "delete from quota_cooldowns where route_id like 'staging-verification-%'",
+        "delete from quota_audit_events where route_id like 'staging-verification-%'",
+        "delete from audit_log where task_id like 'staging-verification-%'",
+    }
+
+
 def execute_staging_sql(sql: str) -> None:
     verify_staging_target()
     if not os.environ.get("CLOUDFLARE_API_TOKEN") or not os.environ.get("CLOUDFLARE_ACCOUNT_ID"):
         raise RuntimeError("Cloudflare credentials are required for Staging-only test cleanup")
-    result = subprocess.run(
-        [
-            "npx", "--yes", "wrangler@4.156.1", "d1", "execute",
-            "raawaa-engine-staging", "--remote", "--command", sql,
-            "--config", "wrangler.staging.toml", "--yes",
-        ],
-        check=False, capture_output=True, text=True, timeout=60,
-        env=os.environ.copy(),
-    )
-    if result.returncode != 0:
+    retry_safe = _is_safe_staging_cleanup_delete(sql)
+    for attempt in range(3):
+        result = subprocess.run(
+            [
+                "npx", "--yes", "wrangler@4.156.1", "d1", "execute",
+                "raawaa-engine-staging", "--remote", "--command", sql,
+                "--config", "wrangler.staging.toml", "--yes",
+            ],
+            check=False, capture_output=True, text=True, timeout=60,
+            env=os.environ.copy(),
+        )
+        if result.returncode == 0:
+            return
         detail = (result.stderr or result.stdout or "unknown Wrangler error")[-1200:]
-        raise RuntimeError("Staging-only test cleanup failed: " + detail)
+        transient_api_error = "[code: 7429]" in detail.lower()
+        if not (retry_safe and transient_api_error and attempt < 2):
+            raise RuntimeError("Staging-only test cleanup failed: " + detail)
+        # Only the exact, idempotent CI-fixture DELETE statements above are
+        # retried. Other D1 writes are never retried after an ambiguous result.
+        time.sleep(2 ** (attempt + 1))
 
 
 
