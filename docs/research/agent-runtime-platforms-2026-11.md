@@ -244,6 +244,24 @@ This supports keeping the minute-4 phase change as a recovery attempt, but it do
 - [Browser Use](https://github.com/browser-use/browser-use).
 - [GitHub Actions workflow troubleshooting](https://docs.github.com/en/actions/how-tos/troubleshoot-workflows) and [workflow syntax](https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax).
 
+## 11. Rust-native self-hosted agent runtimes — GitHub metadata verified 2026-11-03
+
+Two additional projects were checked against their actual GitHub repository metadata, rather than relying on product-site claims alone.
+
+| Project | GitHub evidence at review time | Capabilities claimed by upstream | Decision for Raawaa |
+|---|---|---|---|
+| [Garudust Agent](https://github.com/garudust-org/garudust-agent) | MIT; 31 stars, 10 forks; latest push 2026-07-27; latest release `v0.13.8` on 2026-06-13. | Rust agent runtime; ARM64 Linux release asset; MCP, persistent memory, skill registry, cron, browser/terminal tools, provider routing and REST/WebSocket server. | **Monitor, do not deploy.** The feature overlap is substantial, but its latest release and repository activity are older than the current date. No verified Android/Termux deployment or always-free persistent host was established. |
+| [Ryvos](https://github.com/Ryvos/ryvos) | MIT; 8 stars, 2 forks; latest push 2026-07-25; latest release `v0.9.0` on 2026-04-16. | Rust single-binary runtime; upstream README claims 86+ tools, 18+ providers, MCP, persistent memory, cron, DAG workflows, budget tracking, browser automation and sandboxing. | **Monitor, do not deploy.** Attractive compact-runtime and security concepts, but the small repository footprint, older release cadence, persistent-host requirement, and unverified Android deployment make adoption premature. |
+ 
+### Transferable design ideas
+- Capability-level tool permissions and separate Viewer/Operator/Admin roles.
+- Per-run budgets, explicit stop conditions, checkpoint/resume and watchdogs.
+- MCP adapters as optional integrations, with tool-level schemas and declared permissions.
+- Skills with manifests and validation, rather than executing arbitrary downloaded instructions.
+- Isolated terminal/browser execution with secrets withheld from tool output.
+
+These ideas are references only. The engine must retain its own task ledger, quota controls, zero-budget default, dry-run mode, and approval policy. Do not import a complete second agent runtime or treat upstream security claims as a substitute for an independent threat review.
+
 ## Adoption rule
 
 No framework, agent, plugin, vector database or hosted provider is adopted because it is popular or feature-rich. It must solve a measured limitation, fit zero-spend or have a separately approved budget, preserve policy/quota enforcement, support bounded execution and auditability, have a maintained upstream and clear license, and pass isolated tests before production integration.
