@@ -3,16 +3,44 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 from engine.provider import GenerationRequest, GenerationResponse
 
 
+_SAFE_PROVIDER_ERROR_CODE = re.compile(r"^[A-Za-z0-9_.:-]{1,100}$")
+
+
+def _safe_provider_error_code(raw: bytes) -> str | None:
+    """Extract only a bounded machine code; never retain provider error messages."""
+    try:
+        payload = json.loads(raw.decode("utf-8"))
+        error = payload.get("error") if isinstance(payload, dict) else None
+        if not isinstance(error, dict):
+            return None
+        for candidate in (error.get("code"), error.get("type")):
+            if isinstance(candidate, str) and _SAFE_PROVIDER_ERROR_CODE.fullmatch(candidate):
+                return candidate
+    except (UnicodeDecodeError, json.JSONDecodeError, RecursionError):
+        pass
+    return None
+
+
 class LiveAdapterError(RuntimeError):
-    def __init__(self, message: str, status_code: int | None = None):
+    def __init__(
+        self,
+        message: str,
+        status_code: int | None = None,
+        error_code: str | None = None,
+    ):
         super().__init__(message)
         self.status_code = status_code
+        self.error_code = (
+            error_code if isinstance(error_code, str)
+            and _SAFE_PROVIDER_ERROR_CODE.fullmatch(error_code) else None
+        )
 
 
 def _post_json(url: str, headers: dict, body: dict, timeout: int = 45) -> dict:
@@ -28,8 +56,15 @@ def _post_json(url: str, headers: dict, body: dict, timeout: int = 45) -> dict:
                 raise LiveAdapterError(f"Provider returned HTTP {response.status}")
             payload = json.loads(response.read().decode("utf-8"))
     except HTTPError as exc:
-        # Never include provider response bodies: they can contain request data.
-        raise LiveAdapterError(f"Provider returned HTTP {exc.code}", status_code=exc.code) from exc
+        # Provider messages can contain request data. Read a small bounded body
+        # only to extract a safe machine code; never retain or log the message.
+        raw_error = exc.read(16 * 1024 + 1)
+        error_code = _safe_provider_error_code(raw_error[:16 * 1024])
+        raise LiveAdapterError(
+            f"Provider returned HTTP {exc.code}",
+            status_code=exc.code,
+            error_code=error_code,
+        ) from exc
     except (URLError, TimeoutError, OSError, json.JSONDecodeError) as exc:
         raise LiveAdapterError(f"Provider request failed: {type(exc).__name__}") from exc
     if not isinstance(payload, dict):
