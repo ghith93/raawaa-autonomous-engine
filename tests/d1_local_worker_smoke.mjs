@@ -294,11 +294,11 @@ try {
     body: { action: "start", lease_token: invocationLease, invocation_id: secondInvocationId, route_id: "groq:model-a" },
   });
   assertStatus(ambiguousStart, 200, "start second logical step");
-  const ambiguous = await api(invocationPath, {
+  const invocationAmbiguous = await api(invocationPath, {
     method: "POST",
     body: { action: "ambiguous", lease_token: invocationLease, invocation_id: secondInvocationId },
   });
-  assertStatus(ambiguous, 200, "mark ambiguous provider outcome");
+  assertStatus(invocationAmbiguous, 200, "mark ambiguous provider outcome");
   const replayAmbiguous = await api(invocationPath, {
     method: "POST",
     body: { action: "ambiguous", lease_token: invocationLease, invocation_id: secondInvocationId },
