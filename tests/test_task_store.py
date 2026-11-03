@@ -19,6 +19,7 @@ class TaskStoreTests(unittest.TestCase):
         first = self.store.enqueue("research_brief", "Market scan", idempotency_key="same")
         second = self.store.enqueue("research_brief", "Market scan duplicate", idempotency_key="same")
         self.assertEqual(first["id"], second["id"])
+        self.assertEqual(first["execution_mode"], "not_started")
         self.assertEqual(len(self.store.list_tasks()), 1)
 
     def test_worker_processes_safe_task_as_dry_run(self):
@@ -27,6 +28,7 @@ class TaskStoreTests(unittest.TestCase):
         self.assertEqual(result["status"], "succeeded")
         task = self.store.list_tasks()[0]
         self.assertEqual(task["status"], "succeeded")
+        self.assertEqual(task["execution_mode"], "dry_run")
         self.assertIn("dry_run", task["result_json"])
         self.assertIn('"agent_id": "researcher"', task["result_json"])
         self.assertIn('"execution_started": false', task["result_json"])
