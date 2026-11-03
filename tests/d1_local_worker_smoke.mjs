@@ -265,6 +265,18 @@ try {
     },
   });
   assertStatus(policyMismatch, 409, "caller cannot raise the operator-owned monetary hard cap");
+  const raisedCapAttempt = await api("/v1/monetary-ledger", {
+    method: "POST",
+    body: {
+      ...monetaryBase,
+      daily_budget_nanos: 400_000_001,
+      reservation_id: randomUUID(),
+      idempotency_key: randomUUID(),
+    },
+  });
+  assertStatus(raisedCapAttempt, 409, "runner cannot raise the operator-owned D1 hard cap");
+  assert.equal(raisedCapAttempt.payload.error, "budget_policy_mismatch");
+
   const monetaryAttempts = await Promise.all([1, 2, 3].map(() => {
     const reservation_id = randomUUID();
     return api("/v1/monetary-ledger", {
@@ -460,6 +472,14 @@ try {
   await waitForWorker(server, () => logs);
   const monetaryStatus = await api("/v1/monetary-ledger");
   assertStatus(monetaryStatus, 200, "read durable monetary status");
+  assert.deepEqual(monetaryStatus.payload.budget_policy, {
+    policy_key: "default",
+    daily_budget_nanos: 400_000_000,
+    monthly_budget_nanos: 12_000_000_000,
+    per_task_budget_nanos: 200_000_000,
+    enabled: true,
+    updated_at: monetaryStatus.payload.budget_policy.updated_at,
+  });
   assert.equal(monetaryStatus.payload.snapshot.pending_count, 1);
   assert.equal(monetaryStatus.payload.snapshot.unresolved[0].reservation_id, crashReservation.payload.reservation_id);
   assert.equal(monetaryStatus.payload.quarantined_routes.length, 1);
