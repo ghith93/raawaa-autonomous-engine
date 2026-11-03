@@ -67,6 +67,55 @@ def reservation_params(
     ]
 
 
+def worker_cooldown_sql() -> str:
+    source = (ROOT / "worker" / "quota.js").read_text(encoding="utf-8")
+    match = re.search(
+        r'const cooldown = await env\.DB\.prepare\("(INSERT INTO quota_cooldowns.*?)"\)\.bind\(',
+        source,
+    )
+    if match is None:
+        raise AssertionError("Could not locate the quota cooldown SQL in worker/quota.js")
+    return match.group(1)
+
+
+    def test_worker_cooldown_sql_never_shortens_existing_deadline(self) -> None:
+        connection = self.connect()
+        existing_until = "2099-01-01T00:00:00.000Z"
+        existing_updated = "2026-11-01T00:00:00.000Z"
+        connection.execute(
+            "INSERT INTO quota_cooldowns(route_id,until_at,reason,updated_at) VALUES(?,?,?,?)",
+            ("groq:primary:model", existing_until, "long_backoff", existing_updated),
+        )
+
+        # A later request with a shorter deadline must preserve all existing state.
+        shorter = connection.execute(
+            self.cooldown_sql,
+            ("groq:primary:model", "2098-01-01T00:00:00.000Z", "short_retry", "2026-11-03T00:00:00.000Z"),
+        ).fetchone()
+        self.assertEqual(shorter, (existing_until,))
+        row = connection.execute(
+            "SELECT until_at,reason,updated_at FROM quota_cooldowns WHERE route_id=?",
+            ("groq:primary:model",),
+        ).fetchone()
+        self.assertEqual(row, (existing_until, "long_backoff", existing_updated))
+
+        # A genuinely longer deadline is allowed to extend the cooldown metadata.
+        longer_until = "2100-01-01T00:00:00.000Z"
+        longer = connection.execute(
+            self.cooldown_sql,
+            ("groq:primary:model", longer_until, "new_backoff", "2026-11-04T00:00:00.000Z"),
+        ).fetchone()
+        self.assertEqual(longer, (longer_until,))
+        row = connection.execute(
+            "SELECT until_at,reason,updated_at FROM quota_cooldowns WHERE route_id=?",
+            ("groq:primary:model",),
+        ).fetchone()
+        self.assertEqual(row, (longer_until, "new_backoff", "2026-11-04T00:00:00.000Z"))
+        connection.close()
+
+
+
+
 class D1QuotaSqlIntegrationTests(unittest.TestCase):
     def setUp(self) -> None:
         self.temp = tempfile.TemporaryDirectory()
@@ -77,6 +126,7 @@ class D1QuotaSqlIntegrationTests(unittest.TestCase):
             connection.executescript(migration.read_text(encoding="utf-8"))
         connection.close()
         self.sql = worker_reservation_sql()
+        self.cooldown_sql = worker_cooldown_sql()
 
     def connect(self) -> sqlite3.Connection:
         return sqlite3.connect(self.db_path, timeout=15, isolation_level=None)
