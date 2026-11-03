@@ -47,6 +47,16 @@ class StagingMobileStatusReadbackTests(unittest.TestCase):
                 "paid_fallback_enabled": False, "allow_external_writes": False,
                 "source_sha": "a" * 40, "recorded_at": "2026-11-03T12:57:25+00:00",
             },
+            "execution_modes": {
+                "available": True,
+                "counts": {"not_started": 1, "dry_run": 2, "live_inference": 1, "unknown": 3},
+                "status_counts": {
+                    "not_started": {"pending": 1, "running": 0, "succeeded": 0, "failed": 0, "blocked": 0},
+                    "dry_run": {"pending": 0, "running": 0, "succeeded": 2, "failed": 0, "blocked": 0},
+                    "live_inference": {"pending": 0, "running": 0, "succeeded": 1, "failed": 0, "blocked": 0},
+                    "unknown": {"pending": 0, "running": 0, "succeeded": 3, "failed": 0, "blocked": 0},
+                },
+            },
             "unavailable_metrics": {},
         }
 
@@ -58,6 +68,9 @@ class StagingMobileStatusReadbackTests(unittest.TestCase):
         self.assertEqual(result["ci_health"], "success")
         self.assertEqual(result["kill_switch"], "engaged")
         self.assertFalse(result["paid_model_calls"])
+        self.assertEqual(result["task_execution_modes"], "available")
+        self.assertEqual(result["dry_run_succeeded"], 2)
+        self.assertEqual(result["live_inference_succeeded"], 1)
 
     def test_retries_transient_401_until_ephemeral_token_is_visible(self):
         attempts = 0
@@ -74,6 +87,11 @@ class StagingMobileStatusReadbackTests(unittest.TestCase):
         self.assertEqual(result["status"], "verified")
         self.assertEqual(attempts, 2)
         sleep.assert_called_once_with(2)
+
+    def test_rejects_unavailable_execution_mode_migration(self):
+        self.payload["execution_modes"] = {"available": False}
+        with self.assertRaisesRegex(RuntimeError, "execution mode migration"):
+            verify(self.env, opener=lambda *args, **kwargs: Response(self.payload))
 
     def test_fails_fast_on_non_transient_authenticated_status(self):
         def forbidden(request, timeout=20):
