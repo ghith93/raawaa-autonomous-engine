@@ -19,6 +19,8 @@ class CliTests(unittest.TestCase):
         parser = cli.build_parser()
         commands = [
             ["audit"],
+            ["executive-status"],
+            ["executive-status", "--limit", "5"],
             ["free-models", "--provider", "gemini"],
             ["enqueue", "--type", "research_brief", "--title", "Test"],
             ["list"],
@@ -315,3 +317,20 @@ class CliTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+    def test_executive_status_cli_is_read_only_and_uses_existing_store(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = Path(tmp) / "engine.db"
+            task_store = TaskStore(db_path)
+            task_store.enqueue("system_audit", "Executive audit", idempotency_key="executive-cli-test")
+            output = io.StringIO()
+            with patch.dict(os.environ, {"RAAWAA_ENGINE_DB": str(db_path)}, clear=False):
+                with patch("sys.argv", ["engine", "executive-status"]):
+                    with contextlib.redirect_stdout(output):
+                        self.assertEqual(cli.main(), 0)
+            result = json.loads(output.getvalue())
+            self.assertEqual(result["mode"], "read_only_decision_support")
+            self.assertEqual(result["tasks_inspected"], 1)
+            self.assertEqual(result["next_best_tasks"][0]["task_type"], "system_audit")
+            self.assertEqual(result["side_effects"]["tasks_claimed"], 0)
+            self.assertEqual(len(task_store.list_tasks()), 1)
