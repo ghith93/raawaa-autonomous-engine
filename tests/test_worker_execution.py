@@ -152,7 +152,7 @@ class WorkerExecutionTests(unittest.TestCase):
     def test_live_path_blocks_payload_over_configured_byte_limit(self):
         root = Path(self.temp.name)
         store = TaskStore(root / "oversized.db")
-        store.enqueue("research_brief", "Oversized", {"data_classification": "public", "text": "x" * 7100}, idempotency_key="oversized")
+        store.enqueue("research_brief", "Oversized", {"data_classification": "public", "topic": "Oversized", "source_urls": ["https://example.com/" + "x" * 2000] * 4}, idempotency_key="oversized")
         gateway = Mock()
         result = run_once(store, live_gateway=gateway, environ={"RAAWAA_ENGINE_LIVE_INFERENCE": "enabled"})
         self.assertEqual(result["detail"], "task_payload_too_large")
@@ -160,7 +160,7 @@ class WorkerExecutionTests(unittest.TestCase):
     def test_live_path_blocks_personal_email_values(self):
         root = Path(self.temp.name)
         store = TaskStore(root / "email.db")
-        store.enqueue("research_brief", "Review this contact", {"data_classification": "public", "notes": "Contact user@example.com"}, idempotency_key="email")
+        store.enqueue("research_brief", "Review this contact", {"data_classification": "public", "topic": "Review this contact", "questions": ["Contact user@example.com"]}, idempotency_key="email")
         gateway = Mock()
         result = run_once(store, live_gateway=gateway, environ={"RAAWAA_ENGINE_LIVE_INFERENCE": "enabled"})
         self.assertEqual(result["detail"], "personal_data_detected")
