@@ -15,7 +15,7 @@ An independent, cost-controlled AI operating-system foundation. This repository 
 - GitHub Actions CI and maintenance workflows.
 - An isolated Cloudflare Workflows durability prototype with deterministic local tests; it is not deployed or connected to production D1.
 
-**It is not yet a continuously running autonomous service.** The deployed Cloudflare control Worker is bound to production D1. Production D1 migrations `0001`–`0005` are recorded as applied. The latest migration run applied `0004` and `0005` on reviewed main SHA `e5eb80c395155151417ad82b761e0b7d5829ce6a`; the preceding read-only inventory showed `0001`–`0003` already applied. No dedicated non-production D1 database is configured, so remote concurrency/restart verification remains outstanding; local D1/Workerd tests are not a substitute. Live inference remains disabled.
+**It is not yet a continuously running autonomous service.** The deployed Cloudflare control Worker is bound to production D1. Production D1 migrations `0001`–`0005` are recorded as applied. The latest migration run applied `0004` and `0005` on reviewed main SHA `e5eb80c395155151417ad82b761e0b7d5829ce6a`; the preceding read-only inventory showed `0001`–`0003` already applied. Dedicated non-production D1 has now been created as `raawaa-engine-staging`, with an isolated `wrangler.staging.toml` and read-only inventory workflow. Remote connectivity and migration state have not yet been verified, and no staging migrations have been applied. Local D1/Workerd tests are not a substitute. Live inference remains disabled.
 
 **Task execution and scheduling evidence**
 - GitHub Actions Task Runner is configured for bounded batches every five minutes (maximum five tasks / 60 seconds per invocation). The GitHub `schedule` trigger remains the primary cadence; GitHub scheduled events are best-effort, so the Cloudflare watchdog is an independent fallback rather than a guarantee of uninterrupted execution.
@@ -64,10 +64,10 @@ python -m engine.cli monetary-status
 
 ## Next engineering priorities
 
-1. Verify provider-specific credit settlement semantics and add reconciliation for ambiguous billing outcomes; daily/monthly/per-task atomic spend caps are integrated, but the USD 15 all-in monthly cap is configured, the model allocation is capped at USD 12, paid fallback remains disabled, and non-zero-cost routes remain ineligible.
+1. Implement the durable D1 monetary reservation/settlement ledger in issue #332 and verify provider-specific credit settlement semantics. Existing D1 quota controls meter provider requests/tokens; they are not a durable USD spend ledger. Keep cloud live inference blocked until monetary reservations, ambiguous-outcome reconciliation, concurrency and restart tests pass.
 2. Complete provider-specific data-classification and retention review for each intended workload; keep confidential formulae, credentials, and customer/order data out of unsuitable provider tiers.
 3. Add operation-specific idempotency contracts and explicit approval gates before enabling side-effecting handlers or external writes.
-4. Validate the D1 provider quota ledger against a dedicated non-production D1 database, including applying the migration sequence there, concurrency, restart recovery, and settlement idempotency. Production D1 migrations `0001`–`0005` are already applied; do not enable live inference until the non-production verification gate passes. Memory and model-usage ledgers remain local SQLite.
+4. Verify remote access to `raawaa-engine-staging`, inspect its migration state, then validate the D1 provider quota ledger and the new monetary ledger there with concurrency, restart recovery, ambiguous provider outcomes, and settlement idempotency. Production D1 migrations `0001`–`0005` are already applied; never apply staging migrations to production. Memory and model-usage ledgers remain local SQLite.
 5. Evaluate a genuinely durable, zero-cost execution path without treating scheduled GitHub Actions as a guaranteed always-on service.
 6. Add notifications and external integrations incrementally while preserving the kill switch, quota ledger, and default dry-run posture.
 

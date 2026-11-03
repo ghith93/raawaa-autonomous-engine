@@ -1,3 +1,4 @@
+# Staging-only D1 configuration. Never use this file for production deployment.
 name = "raawaa-autonomous-engine-staging"
 main = "worker/index.js"
 compatibility_date = "2026-10-31"
