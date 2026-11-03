@@ -1,4 +1,5 @@
 import { getTaskRunnerWatchdogReadiness } from "./task-runner-watchdog.js";
+import { readMonetaryBudgetStatus } from "./monetary-ledger.js";
 
 const JSON_HEADERS = { "content-type": "application/json; charset=utf-8", "cache-control": "no-store" };
 
@@ -134,7 +135,7 @@ export async function handleMobileStatus(request, env, url) {
   try {
     const [tasks, migrations, workerCron, watchdogEvents] = await Promise.all([
       env.DB.prepare("SELECT status,COUNT(*) AS count FROM tasks GROUP BY status").all(),
-      env.DB.prepare("SELECT version FROM schema_migrations WHERE version IN ('0003_durable_quota_ledger','0004_paper_event_ledger','0005_telegram_webhook_receipts')").all(),
+      env.DB.prepare("SELECT version FROM schema_migrations WHERE version IN ('0003_durable_quota_ledger','0004_paper_event_ledger','0005_telegram_webhook_receipts','0006_durable_monetary_ledger')").all(),
       env.DB.prepare("SELECT created_at,details_json FROM audit_log WHERE task_id IS NULL AND event='worker_cron_tick' ORDER BY created_at DESC LIMIT 1").first(),
       env.DB.prepare("SELECT event,created_at,details_json FROM audit_log WHERE task_id IS NULL AND event IN ('task_runner_dispatch_requested','task_runner_dispatch_intent') ORDER BY created_at DESC LIMIT 2").all(),
     ]);
@@ -174,7 +175,7 @@ export async function handleMobileStatus(request, env, url) {
         unavailable: null,
       };
     })();
-    const [paper, latest, snapshot, usage, modelCosts] = await Promise.all([
+    const [paper, latest, snapshot, usage, modelCosts, monetaryBudget] = await Promise.all([
       applied.has("0004_paper_event_ledger")
         ? env.DB.prepare("SELECT event_type,COUNT(*) AS count FROM paper_events GROUP BY event_type ORDER BY event_type").all()
         : Promise.resolve({ results: [] }),
@@ -188,6 +189,9 @@ export async function handleMobileStatus(request, env, url) {
         ? env.DB.prepare("SELECT route_id,COUNT(*) AS requests,COALESCE(SUM(tokens),0) AS tokens FROM quota_usage GROUP BY route_id ORDER BY route_id").all()
         : Promise.resolve({ results: [] }),
       env.DB.prepare("SELECT provider,COUNT(*) AS requests,COALESCE(SUM(input_tokens),0) AS input_tokens,COALESCE(SUM(output_tokens),0) AS output_tokens,COALESCE(SUM(cost_usd),0) AS cost_usd FROM model_usage GROUP BY provider ORDER BY provider").all(),
+      applied.has("0006_durable_monetary_ledger")
+        ? readMonetaryBudgetStatus(env.DB)
+        : Promise.resolve(null),
     ]);
     return json({
       generated_at: new Date().toISOString(),
@@ -216,6 +220,7 @@ export async function handleMobileStatus(request, env, url) {
         last_dispatch_requested: lastDispatchRequested,
         last_dispatch_intent_at: lastDispatchIntent?.created_at || null,
       },
+      monetary_budget: monetaryBudget,
       model_costs_usd: {
         total: (modelCosts.results || []).reduce((sum, row) => sum + (Number(row.cost_usd) || 0), 0),
         by_provider: (modelCosts.results || []).map(row => ({
@@ -225,7 +230,7 @@ export async function handleMobileStatus(request, env, url) {
           output_tokens: Number(row.output_tokens) || 0,
           cost_usd: Number(row.cost_usd) || 0,
         })),
-        source: "model_usage D1 ledger; recorded provider costs only",
+        source: "legacy model_usage table; monetary_budget is the durable D1 reservation/settlement ledger",
       },
       unavailable_metrics: {
         last_scan: "Scan-run heartbeat is not recorded; the latest captured market snapshot is shown separately",
@@ -235,6 +240,7 @@ export async function handleMobileStatus(request, env, url) {
         ...(!workerCronStatus.value ? { worker_cron: workerCronStatus.unavailable } : {}),
         paper_ledger: applied.has("0004_paper_event_ledger") ? "Available" : "Migration 0004 is not applied to this database",
         provider_usage: applied.has("0003_durable_quota_ledger") ? "Available" : "Migration 0003 is not applied to this database",
+        ...(!applied.has("0006_durable_monetary_ledger") || !monetaryBudget ? { monetary_budget: "Migration 0006 or the default monetary budget policy is unavailable" } : {}),
       },
     });
   } catch {
