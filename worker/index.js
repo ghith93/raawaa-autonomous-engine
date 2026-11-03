@@ -161,13 +161,16 @@ export default {
   async scheduled(controller, env) {
     const recovery = await recoverStaleTasks(env);
     const occurredAt = new Date().toISOString();
-    await env.DB.prepare(
+    const heartbeat = await env.DB.prepare(
       "INSERT INTO audit_log(task_id,event,details_json,created_at) VALUES(NULL,?,?,?)"
     ).bind("worker_cron_tick", JSON.stringify({
-      cron: typeof controller?.cron === "string" ? controller.cron : null,
+      cron: typeof controller?.cron === "string" ? controller.cron : "unknown",
       requeued: recovery.requeued,
       failed: recovery.failed,
     }), occurredAt).run();
+    if (heartbeat?.success === false) {
+      throw new Error("Worker Cron heartbeat insert failed");
+    }
   },
 
   async fetch(request, env) {
