@@ -5,13 +5,14 @@
 
 ## Executive decision
 
-Raawaa has a policy loader, task model, quota controls, D1-backed state, a Microsoft Agent Framework checkpoint adapter, GitHub Actions, and no required device worker. Adding another full orchestration framework now would duplicate scheduling, persistence, memory and approval logic. Cloudflare Workflows has a local runtime prototype, but production adoption still requires separate D1 durability and recovery validation.
+Raawaa has a policy loader, task model, quota controls, D1-backed state, a Microsoft Agent Framework checkpoint adapter, GitHub Actions, and no required device worker. Adding another full orchestration framework now would duplicate scheduling, persistence, memory and approval logic. Cloudflare Workflows has a local runtime prototype, but production adoption still requires separate D1 durability and recovery validation. The current Cloudflare Agents SDK and Python Workers are useful new candidates, but neither is a drop-in replacement for the existing Python consumer: Agents SDK requires a Worker-native coordinator, while Python Workers are open beta and the Free CPU/threading constraints need an isolated compatibility benchmark.
 
 ## Candidate comparison
 
 | Project | Strength | Fit | Decision |
 |---|---|---|---|
 | Cloudflare Workflows | Durable multi-step Workers, retries, persisted state, pauses and event-driven resume | High: existing Cloudflare Worker/D1 environment; available on Free and Paid plans | **Prototype next** with deterministic fake tasks |
+| Cloudflare Agents SDK | Durable Object agent identities, schedules, fibers, recovery and sub-agent lifecycle | High for a future Worker-native coordinator; low as a direct host for current Python handlers | Do not adopt now; isolated fake-task spike only if a coordinator gap is measured |
 | Cloudflare Python Workers | Python/Pyodide runtime with D1, Cron and other Workers bindings | Medium for thin control-plane tasks; weak for the current batch runner because Free CPU is 10 ms and `threading`/`multiprocessing` are non-functional | Compatibility benchmark only; do not port the runner yet |
 | Pydantic AI | Typed agents/tools, MCP client, StepPersistence, optional durable engines | Medium: useful for a small agent-runtime comparison; true crash recovery still needs an execution engine | Isolated benchmark only |
 | LangGraph | Stateful graph orchestration, checkpoints, pending writes, thread/checkpoint IDs | Medium: strong checkpoint reference, but duplicates the current MAF adapter and task graph | Borrow tests and semantics; do not add to production |
