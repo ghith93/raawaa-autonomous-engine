@@ -82,3 +82,4 @@ All agents must follow [AGENTS.md](AGENTS.md) and the permanent [Master Autonomo
 - [SkillSpector evaluation](docs/research/skillspector-evaluation-2026-11-03.ar.md) — evidence-based candidate review; proposed only, not installed.
 - [Deterministic capability-gap analysis](docs/capability-gap-analysis.md) — offline comparison of research topics with the repository's actual capability baseline; no model calls or automatic task creation.
 - [SearXNG adapter decision](docs/research/searxng-adapter-decision-2026-11-03.md) — optional HTTPS connector, activation requirements, and why no host is currently deployed.
+- [Skill static preflight](docs/skill-static-preflight.md) — deterministic manifest/pattern screening; not a sandbox or permission to install.
