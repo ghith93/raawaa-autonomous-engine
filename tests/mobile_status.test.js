@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import worker from "../worker/index.js";
 
 const TOKEN = "mobile-status-test-token";
-function dbMock(migrationVersions=["0003_durable_quota_ledger","0004_paper_event_ledger","0005_telegram_webhook_receipts","0006_monetary_budget_ledger"], workerCron={created_at:"2026-11-03T00:00:00.000Z",details_json:JSON.stringify({cron:"*/15 * * * *",requeued:2,failed:1})}, watchdogEvents=[], ciHealthRow=null, killSwitchRow=null) {
+function dbMock(migrationVersions=["0003_durable_quota_ledger","0004_paper_event_ledger","0005_telegram_webhook_receipts"], workerCron={created_at:"2026-11-03T00:00:00.000Z",details_json:JSON.stringify({cron:"*/15 * * * *",requeued:2,failed:1})}, watchdogEvents=[], ciHealthRow=null, killSwitchRow=null) {
   const calls=[];
   return {
     calls,
@@ -49,7 +49,7 @@ test("mobile status page is public static HTML and never embeds an API token",as
  assert.equal(response.headers.get("cache-control"),"no-store");
  assert.match(response.headers.get("content-security-policy"),/frame-ancestors/);
  assert.doesNotMatch(response.headers.get("content-security-policy"),/api\\.github\\.com/);
- assert.doesNotMatch(body,/api.github.com\\/repos/); 
+ assert.doesNotMatch(body,/api\\.github\\.com/); 
  assert.match(body,/Default Task Runner inference gate/);
 });
 
