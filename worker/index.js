@@ -216,7 +216,19 @@ export default {
         !/^\/v1\/tasks\/[A-Za-z0-9-]+\/(heartbeat|finish|retry)$/.test(url.pathname)) {
       return json({ error: "not_found" }, 404);
     }
-    if (!(await authorized(request, env))) return json({ error: "unauthorized" }, 401);
+    let quotaAdminRequest = false;
+    if (url.pathname === "/v1/quota" && request.method === "POST" && env.ENGINE_QUOTA_ADMIN_TOKEN) {
+      try {
+        const probe = await request.clone().json();
+        quotaAdminRequest = probe?.action === "cool_down" &&
+          constantTimeEqual(bearer(request), env.ENGINE_QUOTA_ADMIN_TOKEN);
+      } catch {
+        quotaAdminRequest = false;
+      }
+    }
+    if (!(await authorized(request, env)) && !quotaAdminRequest) {
+      return json({ error: "unauthorized" }, 401);
+    }
 
     const mobileStatusResponse = await handleMobileStatus(request, env, url);
     if (mobileStatusResponse) return mobileStatusResponse;
