@@ -33,7 +33,7 @@ class ResearchTriageTests(unittest.TestCase):
             "candidates": [],
             "academic_candidates": [{
                 "doi": "10.1234/skills-security",
-                "title": "Secure Agent Skills and Evaluation Benchmarks",
+                "title": "Agent Skills Security and Evaluation Benchmarks",
                 "url": "https://doi.org/10.1234/skills-security",
                 "published": "2026-10-15",
                 "citation_count": 20,
