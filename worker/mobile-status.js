@@ -210,7 +210,11 @@ export async function handleMobileStatus(request, env, url) {
                 (SELECT COALESCE(SUM(actual_cost_nanos),0) FROM monetary_reservations WHERE status='settled' AND settled_at>=?) AS monthly_spent_nanos,
                 (SELECT COALESCE(SUM(estimated_cost_nanos),0) FROM monetary_reservations WHERE status IN ('reserved','in_flight','ambiguous')) AS pending_reserved_nanos,
                 (SELECT COUNT(*) FROM monetary_reservations WHERE status IN ('reserved','in_flight','ambiguous')) AS pending_count,
-                (SELECT COUNT(*) FROM monetary_route_quarantines) AS quarantined_routes
+                (SELECT COUNT(*) FROM monetary_route_quarantines) AS quarantined_routes,
+                (SELECT daily_budget_nanos FROM monetary_budget_policy WHERE policy_key='default') AS daily_budget_nanos,
+                (SELECT monthly_budget_nanos FROM monetary_budget_policy WHERE policy_key='default') AS monthly_budget_nanos,
+                (SELECT per_task_budget_nanos FROM monetary_budget_policy WHERE policy_key='default') AS per_task_budget_nanos,
+                (SELECT enabled FROM monetary_budget_policy WHERE policy_key='default') AS budget_policy_enabled
             `).bind(day, month).first();
           })()
         : Promise.resolve(null),
@@ -260,6 +264,10 @@ export async function handleMobileStatus(request, env, url) {
         pending_reserved_usd: Number(monetary.pending_reserved_nanos || 0) / 1000000000,
         pending_count: Number(monetary.pending_count || 0),
         quarantined_routes: Number(monetary.quarantined_routes || 0),
+        daily_budget_usd: Number(monetary.daily_budget_nanos || 0) / 1000000000,
+        monthly_budget_usd: Number(monetary.monthly_budget_nanos || 0) / 1000000000,
+        per_task_budget_usd: Number(monetary.per_task_budget_nanos || 0) / 1000000000,
+        budget_policy_enabled: Number(monetary.budget_policy_enabled) === 1,
         unit: "USD",
         source: "D1 monetary_reservations; integer nano-USD",
       } : { available: false },
