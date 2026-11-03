@@ -69,8 +69,10 @@ def run() -> None:
     ]
     if len(matches) != 1:
         if not matches:
-            print("No matching ambiguous reservation remains; no reconciliation action taken.")
-            return
+            if int(ledger["snapshot"].get("task_pending_count", -1)) == 0:
+                print("The exact task has no unresolved reservation; no reconciliation action taken.")
+                return
+            raise RuntimeError("The exact task has unresolved state but no matching Groq reservation; refusing mutation")
         raise RuntimeError("Expected exactly one matching ambiguous reservation; refusing mutation")
     reservation_id = matches[0].get("reservation_id")
     if not isinstance(reservation_id, str) or not reservation_id:
