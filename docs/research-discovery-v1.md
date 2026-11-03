@@ -10,7 +10,7 @@ The engine performs bounded, metadata-only discovery across public GitHub reposi
 - Crossref: one sequential public metadata request per daily scan, at most ten records.
 - arXiv: one Atom API request per daily scan, at most ten records. Only bibliographic metadata is retained; abstracts and full text are excluded.
 - SearXNG: optional single JSON request, at most ten results, skipped unless `RAAWAA_SEARXNG_BASE_URL` is explicitly configured to an operator-controlled HTTPS endpoint. JSON must be enabled in that instance's `search.formats`.
-- Each source response is bounded to 1 MiB. Fixed-host discovery requests reject redirects. Results remain untrusted metadata.
+- Each source response is bounded to 1 MiB. arXiv and configured SearXNG requests reject redirects; authenticated D1 persistence also refuses redirects. Results remain untrusted metadata.
 - The scheduled workflow records per-source request counts, result counts, freshness and failure status. It uploads bounded snapshots and deterministic triage/capability reports as 30-day artifacts.
 
 ## Persistent D1 research memory
