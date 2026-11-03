@@ -91,4 +91,4 @@ At every session start, refresh counts, account/connection status, app permissio
 - Status: implemented on an unmerged branch; CI is being corrected/re-run. Migration 0008 is not applied to any remote database. No Worker deployment has occurred from this branch.
 - Spec Kit remains a deferred optional developer tool; no dependency or runtime asset was added.
 
-- F2 verification: exact-head Engine CI run `41737974145` passed on SHA `2798c6f12e01b392be7a866eb31a5d5428f0bc15`, including local D1 delayed-retry smoke. PR creation and required PR-event CI are the next gates. Remote migration/deployment remains pending.
+- F2 verification: workflow-dispatch CI `41737974145` passed; PR #444 was opened and PR-event CI `41738158606` passed on PR head `23a38b61a387549f33548a58d9815cccfe36d76f`, including local D1 delayed-retry smoke. PR #444 remains open/unmerged. Remote migration/deployment remains pending.
