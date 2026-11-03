@@ -23,5 +23,8 @@
   },
   "academic_query": "large language model agents multi-agent orchestration agent memory tool use coding agents agent skills security evaluation benchmarks",
   "max_academic_results": 10,
-  "academic_source": "Crossref public REST API; one sequential request per daily run"
+  "academic_source": "Crossref public REST API; one sequential request per daily run",
+  "arxiv_query": "all:\"multi-agent\" OR all:\"LLM agents\" OR all:\"agentic workflow\" OR all:\"tool use agents\" OR all:\"coding agents\"",
+  "max_arxiv_results": 10,
+  "arxiv_source": "arXiv Atom API; one bounded request per daily run; no abstracts or full text ingested"
 }
