@@ -95,7 +95,7 @@ class TaskStore:
                 return None
             token = str(uuid.uuid4())
             expires = (now + timedelta(seconds=lease_timeout_seconds)).isoformat()
-            changed = db.execute("""UPDATE tasks SET status='running',attempts=attempts+1,
+            changed = db.execute("""UPDATE tasks SET status='running',attempts=attempts+1,next_attempt_at=NULL,
                          updated_at=?,lease_token=?,lease_expires_at=?
                          WHERE id=? AND status='pending'""",
                          (now.isoformat(), token, expires, row["id"])).rowcount
@@ -139,7 +139,7 @@ class TaskStore:
                 raise KeyError(task_id)
             self._assert_lease(row, lease_token)
             now = utc_now()
-            changed = db.execute("""UPDATE tasks SET status=?,result_json=?,error=?,updated_at=?,
+            changed = db.execute("""UPDATE tasks SET status=?,result_json=?,error=?,updated_at=?,next_attempt_at=NULL,
                 lease_token=NULL,lease_expires_at=NULL
                 WHERE id=? AND status='running' AND lease_token=?""",
                 (status, json.dumps(result, sort_keys=True) if result is not None else None,
