@@ -164,9 +164,10 @@ export async function handleMonetaryLedger(request, env, url) {
       if (row.status === "settled") {
         const same = Number(row.actual_cost_nanos) === input.actual_cost_nanos &&
           Number(row.input_tokens) === input.input_tokens && Number(row.output_tokens) === input.output_tokens;
-        return same ? json({ok:true,settled:true,replay:true}) : json({error:"settlement_conflict"},409);
+        if (!same) return json({error:"settlement_conflict"},409);
+      } else if (!["in_flight","ambiguous"].includes(row.status)) {
+        return json({error:"invalid_reservation_state"},409);
       }
-      if (!["in_flight","ambiguous"].includes(row.status)) return json({error:"invalid_reservation_state"},409);
       const date = new Date(now);
       const day = new Date(Date.UTC(date.getUTCFullYear(),date.getUTCMonth(),date.getUTCDate())).toISOString();
       const month = new Date(Date.UTC(date.getUTCFullYear(),date.getUTCMonth(),1)).toISOString();
@@ -178,19 +179,19 @@ export async function handleMonetaryLedger(request, env, url) {
           .bind(input.actual_cost_nanos,input.input_tokens,input.output_tokens,now,input.reservation_id),
         env.DB.prepare(`
           INSERT INTO monetary_route_quarantines(route_id,reason,reservation_id,quarantined_at)
-          SELECT provider || ':' || model,
-            CASE WHEN actual_cost_nanos > estimated_cost_nanos
+          SELECT r.provider || ':' || r.model,
+            CASE WHEN r.actual_cost_nanos > r.estimated_cost_nanos
               THEN 'actual_cost_exceeded_estimate' ELSE 'monetary_budget_exceeded' END,
-            reservation_id,settled_at
-          FROM monetary_reservations
-          WHERE reservation_id=? AND status='settled' AND (
-            actual_cost_nanos > estimated_cost_nanos
+            r.reservation_id,r.settled_at
+          FROM monetary_reservations r
+          WHERE r.reservation_id=? AND r.status='settled' AND (
+            r.actual_cost_nanos > r.estimated_cost_nanos
             OR (SELECT COALESCE(SUM(actual_cost_nanos),0) FROM monetary_reservations WHERE status='settled' AND settled_at>=?) +
-               (SELECT COALESCE(SUM(estimated_cost_nanos),0) FROM monetary_reservations WHERE ${pending}) > daily_budget_nanos
+               (SELECT COALESCE(SUM(estimated_cost_nanos),0) FROM monetary_reservations WHERE ${pending}) > r.daily_budget_nanos
             OR (SELECT COALESCE(SUM(actual_cost_nanos),0) FROM monetary_reservations WHERE status='settled' AND settled_at>=?) +
-               (SELECT COALESCE(SUM(estimated_cost_nanos),0) FROM monetary_reservations WHERE ${pending}) > monthly_budget_nanos
-            OR (SELECT COALESCE(SUM(actual_cost_nanos),0) FROM monetary_reservations WHERE task_id=monetary_reservations.task_id AND status='settled') +
-               (SELECT COALESCE(SUM(estimated_cost_nanos),0) FROM monetary_reservations WHERE task_id=monetary_reservations.task_id AND ${pending}) > per_task_budget_nanos
+               (SELECT COALESCE(SUM(estimated_cost_nanos),0) FROM monetary_reservations WHERE ${pending}) > r.monthly_budget_nanos
+            OR (SELECT COALESCE(SUM(actual_cost_nanos),0) FROM monetary_reservations WHERE task_id=r.task_id AND status='settled') +
+               (SELECT COALESCE(SUM(estimated_cost_nanos),0) FROM monetary_reservations WHERE task_id=r.task_id AND ${pending}) > r.per_task_budget_nanos
           )
           ON CONFLICT(route_id) DO UPDATE SET reason=excluded.reason,reservation_id=excluded.reservation_id,quarantined_at=excluded.quarantined_at
         `).bind(input.reservation_id,day,month)
