@@ -6,7 +6,6 @@ from pathlib import Path
 from unittest.mock import patch
 
 from engine.d1_monetary_ledger import D1MonetaryLedgerError
-from engine.d1_quota_ledger import D1QuotaLedgerError
 
 from engine.live_runtime import build_live_gateway
 
