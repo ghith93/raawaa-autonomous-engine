@@ -66,7 +66,7 @@ test("health is read-only and does not require a token", async () => {
   const DB = dbMock();
   const response = await worker.fetch(request("/health", { token: null }), { DB });
   assert.equal(response.status, 200);
-  assert.deepEqual(await response.json(), { ok: true });
+  assert.deepEqual(await response.json(), { ok: true, capabilities: ["task_retry_schedule_v1"] });
   assert.equal(DB.calls.length, 1);
 });
 
@@ -155,7 +155,10 @@ test("retry endpoint persists a bounded next-attempt time", async () => {
     body: { lease_token: "lease-1", error: "provider_not_called:capacity", retry_after_seconds: 600 },
   }), { DB, ENGINE_API_TOKEN: TOKEN });
   assert.equal(response.status, 200);
-  assert.deepEqual(await response.json(), { ok: true, status: "pending" });
+  const payload = await response.json();
+  assert.equal(payload.ok, true);
+  assert.equal(payload.status, "pending");
+  assert.equal(typeof payload.next_attempt_at, "string");
   const update = DB.calls.find(x => x.kind === "run" && x.sql.startsWith("UPDATE tasks"));
   assert.match(update.sql, /next_attempt_at/);
   assert.equal(update.values[0], "pending");
