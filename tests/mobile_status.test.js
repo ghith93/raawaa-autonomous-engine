@@ -15,7 +15,7 @@ function dbMock(migrationVersions=["0003_durable_quota_ledger","0004_paper_event
         async all(){
           calls.push({kind:"all",sql,values:this.values});
           if(sql.includes("FROM tasks")) return {results:[{status:"pending",count:2}]};
-          if(sql.includes("task_model_invocations")) return {results:invocationCounts};
+          if(sql.includes("FROM task_model_invocations")) return {results:invocationCounts};
           if(sql.includes("schema_migrations")) return {results:migrationVersions.map(version=>({version}))};
           if(sql.includes("FROM paper_events")) return {results:[{event_type:"candidate_detected",count:4}]};
           if(sql.includes("FROM quota_usage")) return {results:[{route_id:"groq:gpt-oss-20b",requests:3,tokens:1200}]};
