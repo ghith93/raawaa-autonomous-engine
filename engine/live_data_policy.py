@@ -29,7 +29,7 @@ SENSITIVE_CONTENT_PATTERNS = (
         re.IGNORECASE,
     ),
     re.compile(r"\b(?:customers?|clients?|users?)\b.{0,80}\b(?:order|payment|transaction|account|contact|personal|details|records|data|history|email|phone|address)\b", re.IGNORECASE),
-    re.compile(r"\b(?:email|phone|address|contact|order|payment|transaction|account)\b.{0,80}\b(?:customers?|clients?|users?)\b", re.IGNORECASE),
+    re.compile(r"\b(?:emails?|phones?|addresses?|contacts?|orders?|payments?|transactions?|accounts?)\b.{0,80}\b(?:customers?|clients?|users?)\b", re.IGNORECASE),
     re.compile(r"\b(?:password|passphrase|credential|access\s+token|refresh\s+token|api\s+key|secret\s+key)\s*[:=]\s*[^\s,;]+", re.IGNORECASE),
     re.compile(r"\bpersonal\b.{0,80}\b(?:data|details|records|information|email|phone|address)\b", re.IGNORECASE),
 )
