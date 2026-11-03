@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import worker from "../worker/index.js";
 
 const TOKEN = "mobile-status-test-token";
-function dbMock(migrationVersions=["0003_durable_quota_ledger","0004_paper_event_ledger","0005_telegram_webhook_receipts"], workerCron={created_at:"2026-11-03T00:00:00.000Z",details_json:JSON.stringify({cron:"*/15 * * * *",requeued:2,failed:1})}, watchdogEvents=[]) {
+function dbMock(migrationVersions=["0003_durable_quota_ledger","0004_paper_event_ledger","0005_telegram_webhook_receipts","0006_monetary_budget_ledger"], workerCron={created_at:"2026-11-03T00:00:00.000Z",details_json:JSON.stringify({cron:"*/15 * * * *",requeued:2,failed:1})}, watchdogEvents=[], ciHealthRow=null, killSwitchRow=null) {
   const calls=[];
   return {
     calls,
@@ -11,7 +11,7 @@ function dbMock(migrationVersions=["0003_durable_quota_ledger","0004_paper_event
       return {
         sql, values: [],
         bind(...values){this.values=values;return this;},
-        async first(){calls.push({kind:"first",sql,values:this.values});if(sql.includes("worker_cron_tick"))return workerCron;if(sql.includes("snapshot_captured"))return {candidate_id:"candidate-2",occurred_at:"2026-11-02T12:30:00.000Z",chain_id:1,block_number:123};return {event_type:"candidate_detected",candidate_id:"candidate-1",occurred_at:"2026-11-02T12:00:00.000Z"};},
+        async first(){calls.push({kind:"first",sql,values:this.values});if(sql.includes("worker_cron_tick"))return workerCron;if(sql.includes("ci_health_snapshot"))return ciHealthRow;if(sql.includes("kill_switch_snapshot"))return killSwitchRow;if(sql.includes("snapshot_captured"))return {candidate_id:"candidate-2",occurred_at:"2026-11-02T12:30:00.000Z",chain_id:1,block_number:123};return {event_type:"candidate_detected",candidate_id:"candidate-1",occurred_at:"2026-11-02T12:00:00.000Z"};},
         async all(){
           calls.push({kind:"all",sql,values:this.values});
           if(sql.includes("FROM tasks")) return {results:[{status:"pending",count:2}]};
@@ -48,8 +48,9 @@ test("mobile status page is public static HTML and never embeds an API token",as
  assert.doesNotMatch(body,/mobile-status-test-token/);
  assert.equal(response.headers.get("cache-control"),"no-store");
  assert.match(response.headers.get("content-security-policy"),/frame-ancestors/);
- assert.ok(response.headers.get("content-security-policy").includes("https://api.github.com"));
- assert.ok(body.includes("api.github.com/repos/ghith93/raawaa-autonomous-engine/actions/runs"));
+ assert.doesNotMatch(response.headers.get("content-security-policy"),/api\\.github\\.com/);
+ assert.doesNotMatch(body,/api.github.com\\/repos/); 
+ assert.match(body,/Default Task Runner inference gate/);
 });
 
 test("mobile status endpoint requires the existing Engine bearer token",async()=>{
@@ -115,6 +116,54 @@ test("mobile status reports Telegram webhook schema as unavailable until migrati
  const body=await response.json();
  assert.deepEqual(body.telegram_webhook_schema,{available:false,status:"Migration 0005 is not applied to this database"});
  assert.equal(DB.calls.some(call=>call.sql.includes("telegram_update_receipts")),false);
+});
+
+test("mobile status returns fresh validated CI and default inference-gate snapshots",async()=>{
+ const now=new Date().toISOString();
+ const ci={created_at:now,details_json:JSON.stringify({
+  workflow:"Engine CI",run_id:123456,run_number:78,event:"push",branch:"main",
+  head_sha:"a".repeat(40),conclusion:"success",
+  jobs:{test:"success",staging_migrate:"success",staging_worker_verify:"success"},
+ })};
+ const gate={created_at:now,details_json:JSON.stringify({
+  scope:"scheduled_task_runner_default",status:"engaged",policy_mode:"safe_dry_run",
+  live_inference_default:"disabled",allow_paid_model_calls:false,
+  paid_fallback_enabled:false,allow_external_writes:false,source_sha:"a".repeat(40),
+ })};
+ const DB=dbMock(undefined,undefined,[],ci,gate);
+ const response=await worker.fetch(request("/v1/mobile/status"),{DB,ENGINE_API_TOKEN:TOKEN});
+ assert.equal(response.status,200);
+ const body=await response.json();
+ assert.equal(body.ci_health.status,"success");
+ assert.equal(body.ci_health.run_id,123456);
+ assert.equal(body.ci_health.freshness,"fresh");
+ assert.equal(body.kill_switch.status,"engaged");
+ assert.equal(body.kill_switch.live_inference_default,"disabled");
+ assert.equal(body.kill_switch.allow_paid_model_calls,false);
+ assert.equal(body.kill_switch.freshness,"fresh");
+ assert.equal(body.unavailable_metrics.ci_health,undefined);
+ assert.equal(body.unavailable_metrics.kill_switch,undefined);
+});
+
+test("mobile status preserves stale CI and inference-gate snapshots as stale",async()=>{
+ const stale=new Date(Date.now()-25*60*60*1000).toISOString();
+ const ci={created_at:stale,details_json:JSON.stringify({
+  workflow:"Engine CI",run_id:123456,run_number:78,event:"push",branch:"main",
+  head_sha:"b".repeat(40),conclusion:"success",
+  jobs:{test:"success",staging_migrate:"success",staging_worker_verify:"success"},
+ })};
+ const gate={created_at:stale,details_json:JSON.stringify({
+  scope:"scheduled_task_runner_default",status:"engaged",policy_mode:"safe_dry_run",
+  live_inference_default:"disabled",allow_paid_model_calls:false,
+  paid_fallback_enabled:false,allow_external_writes:false,source_sha:"b".repeat(40),
+ })};
+ const DB=dbMock(undefined,undefined,[],ci,gate);
+ const response=await worker.fetch(request("/v1/mobile/status"),{DB,ENGINE_API_TOKEN:TOKEN});
+ const body=await response.json();
+ assert.equal(body.ci_health.status,"stale");
+ assert.equal(body.ci_health.freshness,"stale");
+ assert.equal(body.kill_switch.status,"stale");
+ assert.equal(body.kill_switch.freshness,"stale");
 });
 
 test("mobile status endpoint rejects writes",async()=>{
