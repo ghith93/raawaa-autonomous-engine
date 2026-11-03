@@ -1,6 +1,7 @@
 name: One-shot Groq Free inference Staging smoke
 # Re-run only when this one-shot workflow is deliberately revised.
 # Diagnostics emit only aggregate usage and route error metadata; never payloads or keys.
+# Wait for Worker deployment and secret propagation before authenticated calls.
 
 on:
   push:
