@@ -1,4 +1,5 @@
 import { handleQuota } from "./quota.js";
+import { handleMonetaryLedger } from "./monetary-ledger.js";
 import { handlePaperLedger } from "./paper-ledger.js";
 import { handleTelegramWebhook } from "./telegram-webhook.js";
 import { handleMobilePage, handleMobileStatus } from "./mobile-status.js";
@@ -206,6 +207,7 @@ export default {
         url.pathname !== "/v1/diagnostics/auth" &&
         url.pathname !== "/v1/research/candidates" &&
         url.pathname !== "/v1/quota" &&
+        url.pathname !== "/v1/monetary-ledger" &&
         url.pathname !== "/v1/paper-ledger" &&
         url.pathname !== "/v1/mobile/status" &&
         url.pathname !== "/v1/research/candidates/review" &&
@@ -216,6 +218,9 @@ export default {
 
     const mobileStatusResponse = await handleMobileStatus(request, env, url);
     if (mobileStatusResponse) return mobileStatusResponse;
+
+    const monetaryLedgerResponse = await handleMonetaryLedger(request, env, url);
+    if (monetaryLedgerResponse) return monetaryLedgerResponse;
 
     const quotaResponse = await handleQuota(request, env, url);
     if (quotaResponse) return quotaResponse;
