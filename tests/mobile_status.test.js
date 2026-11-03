@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import worker from "../worker/index.js";
 
 const TOKEN = "mobile-status-test-token";
-function dbMock(migrationVersions=["0003_durable_quota_ledger","0004_paper_event_ledger","0005_telegram_webhook_receipts"], workerCron={created_at:"2026-11-03T00:00:00.000Z",details_json:JSON.stringify({cron:"*/15 * * * *",requeued:2,failed:1})}, watchdogEvents=[], ciHealthRow=null, killSwitchRow=null) {
+function dbMock(migrationVersions=["0003_durable_quota_ledger","0004_paper_event_ledger","0005_telegram_webhook_receipts"], workerCron={created_at:"2026-11-03T00:00:00.000Z",details_json:JSON.stringify({cron:"*/15 * * * *",requeued:2,failed:1})}, watchdogEvents=[], ciHealthRow=null, killSwitchRow=null, lastScanRow=null, sourceObservationRows=[]) {
   const calls=[];
   return {
     calls,
@@ -11,7 +11,7 @@ function dbMock(migrationVersions=["0003_durable_quota_ledger","0004_paper_event
       return {
         sql, values: [],
         bind(...values){this.values=values;return this;},
-        async first(){calls.push({kind:"first",sql,values:this.values});if(sql.includes("worker_cron_tick"))return workerCron;if(sql.includes("ci_health_snapshot"))return ciHealthRow;if(sql.includes("kill_switch_snapshot"))return killSwitchRow;if(sql.includes("snapshot_captured"))return {candidate_id:"candidate-2",occurred_at:"2026-11-02T12:30:00.000Z",chain_id:1,block_number:123};return {event_type:"candidate_detected",candidate_id:"candidate-1",occurred_at:"2026-11-02T12:00:00.000Z"};},
+        async first(){calls.push({kind:"first",sql,values:this.values});if(sql.includes("worker_cron_tick"))return workerCron;if(sql.includes("ci_health_snapshot"))return ciHealthRow;if(sql.includes("kill_switch_snapshot"))return killSwitchRow;if(sql.includes("event='scan_completed'"))return lastScanRow;if(sql.includes("snapshot_captured"))return {candidate_id:"candidate-2",occurred_at:"2026-11-02T12:30:00.000Z",chain_id:1,block_number:123};return {event_type:"candidate_detected",candidate_id:"candidate-1",occurred_at:"2026-11-02T12:00:00.000Z"};},
         async all(){
           calls.push({kind:"all",sql,values:this.values});
           if(sql.includes("FROM tasks")) return {results:[{status:"pending",count:2}]};
@@ -20,6 +20,7 @@ function dbMock(migrationVersions=["0003_durable_quota_ledger","0004_paper_event
           if(sql.includes("FROM quota_usage")) return {results:[{route_id:"groq:gpt-oss-20b",requests:3,tokens:1200}]};
           if(sql.includes("FROM model_usage")) return {results:[{provider:"groq",requests:2,input_tokens:900,output_tokens:300,cost_usd:0.0125}]};
           if(sql.includes("task_runner_dispatch_requested")) return {results:watchdogEvents};
+          if(sql.includes("event='source_observation'")) return {results:sourceObservationRows};
           return {results:[]};
         },
       };
@@ -164,6 +165,78 @@ test("mobile status preserves stale CI and inference-gate snapshots as stale",as
  assert.equal(body.ci_health.freshness,"stale");
  assert.equal(body.kill_switch.status,"stale");
  assert.equal(body.kill_switch.freshness,"stale");
+});
+
+test("mobile status exposes fresh validated research scan and per-source freshness",async()=>{
+ const now=new Date().toISOString();
+ const scan={created_at:now,details_json:JSON.stringify({
+  scan_type:"open_source_research_discovery",scan_id:"4164:1",status:"success",
+  run_id:41640000000,run_number:220,head_sha:"c".repeat(40),completed_at:now,
+  requests_made:3,candidate_count:8,source_count:2,
+ })};
+ const sources=[
+  {created_at:now,details_json:JSON.stringify({
+   scan_id:"4164:1",source_key:"github_public_repository_search",observed_at:now,
+   freshness_threshold_seconds:86400,status:"fresh",requests_made:2,item_count:8,unavailable_count:0,
+  })},
+  {created_at:now,details_json:JSON.stringify({
+   scan_id:"4164:1",source_key:"crossref_public_works_search",observed_at:now,
+   freshness_threshold_seconds:172800,status:"fresh",requests_made:1,item_count:4,unavailable_count:0,
+  })},
+ ];
+ const DB=dbMock(undefined,undefined,[],null,null,scan,sources);
+ const response=await worker.fetch(request("/v1/mobile/status"),{DB,ENGINE_API_TOKEN:TOKEN});
+ assert.equal(response.status,200);
+ const body=await response.json();
+ assert.equal(body.last_scan.status,"success");
+ assert.equal(body.last_scan.freshness,"fresh");
+ assert.equal(body.last_scan.run_id,41640000000);
+ assert.equal(body.source_freshness.status,"fresh");
+ assert.equal(body.source_freshness.source_count,2);
+ assert.deepEqual(body.source_freshness.sources.map(x=>x.source_key),[
+  "crossref_public_works_search","github_public_repository_search"
+ ]);
+ assert.equal(body.unavailable_metrics.last_scan,undefined);
+ assert.equal(body.unavailable_metrics.source_freshness,undefined);
+});
+
+test("mobile status marks stale scans and degraded or unavailable sources honestly",async()=>{
+ const stale=new Date(Date.now()-26*60*60*1000).toISOString();
+ const scan={created_at:stale,details_json:JSON.stringify({
+  scan_type:"open_source_research_discovery",scan_id:"4164:1",status:"partial",
+  run_id:41640000000,run_number:220,head_sha:"d".repeat(40),completed_at:stale,
+  requests_made:3,candidate_count:2,source_count:2,
+ })};
+ const sources=[
+  {created_at:stale,details_json:JSON.stringify({
+   scan_id:"4164:1",source_key:"github_public_repository_search",observed_at:stale,
+   freshness_threshold_seconds:86400,status:"partial",requests_made:2,item_count:2,unavailable_count:1,
+  })},
+  {created_at:stale,details_json:JSON.stringify({
+   scan_id:"4164:1",source_key:"crossref_public_works_search",observed_at:stale,
+   freshness_threshold_seconds:172800,status:"unavailable",requests_made:1,item_count:0,unavailable_count:1,
+  })},
+ ];
+ const DB=dbMock(undefined,undefined,[],null,null,scan,sources);
+ const response=await worker.fetch(request("/v1/mobile/status"),{DB,ENGINE_API_TOKEN:TOKEN});
+ const body=await response.json();
+ assert.equal(body.last_scan.status,"stale");
+ assert.equal(body.last_scan.freshness,"stale");
+ assert.equal(body.source_freshness.status,"stale");
+ assert.equal(body.source_freshness.stale_count,2);
+ assert.equal(body.source_freshness.sources[0].freshness,"stale");
+});
+
+test("mobile status treats malformed scan/source telemetry as unavailable",async()=>{
+ const scan={created_at:"not-a-time",details_json:"{bad"};
+ const sources=[{created_at:new Date().toISOString(),details_json:"{bad"}];
+ const DB=dbMock(undefined,undefined,[],null,null,scan,sources);
+ const response=await worker.fetch(request("/v1/mobile/status"),{DB,ENGINE_API_TOKEN:TOKEN});
+ const body=await response.json();
+ assert.equal(body.last_scan,null);
+ assert.equal(body.source_freshness,null);
+ assert.ok(body.unavailable_metrics.last_scan);
+ assert.ok(body.unavailable_metrics.source_freshness);
 });
 
 test("mobile status endpoint rejects writes",async()=>{
