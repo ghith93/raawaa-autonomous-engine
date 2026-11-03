@@ -97,6 +97,7 @@ class WorkerExecutionTests(unittest.TestCase):
         gateway.generate.assert_not_called()
         saved = self.store.list_tasks(1)[0]
         self.assertEqual(saved["status"], "succeeded")
+        self.assertEqual(saved["execution_mode"], "dry_run")
         stored = json.loads(saved["result_json"])
         self.assertEqual(stored["provider_calls"], 0)
         self.assertIn("operating_policy", stored)
@@ -127,6 +128,7 @@ class WorkerExecutionTests(unittest.TestCase):
         self.assertEqual(quota["daily_tokens_used"], 20)
         saved = self.store.list_tasks(1)[0]
         self.assertEqual(saved["status"], "succeeded")
+        self.assertEqual(saved["execution_mode"], "live_inference")
         stored = json.loads(saved["result_json"])
         self.assertEqual(stored["output"], "A bounded specialist result.")
         self.assertEqual(stored["external_writes"], 0)
@@ -211,6 +213,7 @@ class WorkerExecutionTests(unittest.TestCase):
         self.assertEqual(saved["attempts"], 1)
         self.assertIsNotNone(saved["next_attempt_at"])
         self.assertEqual(saved["error"], "provider_not_called:provider_capacity_unavailable")
+        self.assertEqual(saved["execution_mode"], "live_inference")
 
     def test_live_failure_is_blocked_and_never_auto_retried(self):
         class FailingGateway:
