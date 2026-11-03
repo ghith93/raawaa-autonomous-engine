@@ -16,6 +16,10 @@ function makeDb() {
           calls.push({ sql, values: this.values });
           return { id: 9 };
         },
+        async all() {
+          calls.push({ sql, values: this.values });
+          return { results: [] };
+        },
       };
     },
   };
@@ -31,6 +35,22 @@ async function post(body, DB) {
     body: JSON.stringify(body),
   }), { DB, ENGINE_API_TOKEN: TOKEN });
 }
+
+test("quota task usage telemetry is scoped to both route and task", async () => {
+  const DB = makeDb();
+  const response = await worker.fetch(new Request(
+    "https://engine.example/v1/quota?route_id=groq%3Aprimary%3Amodel-x&task_id=task-42",
+    { headers: { authorization: `Bearer ${TOKEN}` } },
+  ), { DB, ENGINE_API_TOKEN: TOKEN });
+  assert.equal(response.status, 200);
+  const payload = await response.json();
+  assert.deepEqual(payload.usage.task, { requests: 0, tokens: 0 });
+  const taskUsage = DB.calls.find(call =>
+    call.sql.includes("FROM quota_usage WHERE route_id=? AND task_id=?")
+  );
+  assert.ok(taskUsage);
+  assert.deepEqual(taskUsage.values, ["groq:primary:model-x", "task-42"]);
+});
 
 test("quota audit event rejects non-string route and task metadata as client errors", async () => {
   for (const body of [
