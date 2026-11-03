@@ -211,8 +211,29 @@ class QuotaAwareLiveGateway:
                     # An explicit rate-limit response rejects this request, so a
                     # different verified route may be tried safely.
                     continue
+                if (exc.status_code == 403 and exc.error_code in {
+                    "permissions_error",
+                    "model_permission_blocked_org",
+                    "model_permission_blocked_project",
+                }):
+                    # Groq documents these machine codes as model-permission denials.
+                    # The model request was rejected before inference. Settle zero,
+                    # quarantine this exact route, and try another verified-free model.
+                    self.usage_ledger.settle(monetary_reservation_id, 0, 0, 0.0)
+                    self.quota_manager.ledger.cool_down(
+                        profile.route_id, self.cooldown_seconds,
+                        "provider_model_permission_denied",
+                    )
+                    self._audit(
+                        "provider_route_denied", request, profile,
+                        reason="provider_model_permission_denied",
+                        http_status=403,
+                        error_code=exc.error_code,
+                        cooldown_seconds=self.cooldown_seconds,
+                    )
+                    continue
                 # A timeout, transport failure, malformed response, 5xx, or
-                # non-429 HTTP error may follow provider-side processing. Never
+                # unclassified HTTP error may follow provider-side processing. Never
                 # replay or release the reservation in this case.
                 self.usage_ledger.mark_ambiguous(monetary_reservation_id)
                 self._audit(
