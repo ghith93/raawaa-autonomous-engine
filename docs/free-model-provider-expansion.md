@@ -38,6 +38,33 @@ The route must remain disabled until all of the following are completed:
 - Cloudflare Workers AI: listed for evaluation. Its published free allocation is measured in Neurons (10,000/day), not tokens; add a dedicated meter before routing production tasks.
 - Other providers (Mistral, SambaNova, NVIDIA NIM, Cohere, etc.) remain discovery candidates until current account-level quotas, exact endpoints, terms, and commercial permissions are verified.
 
+## Gateway implementation roadmap (planned; not installed)
+
+OmniRoute and LiteLLM are both retained as explicit future evaluation/integration work. Neither is currently installed, running, or a runtime dependency.
+
+### Phase 1 — capability and deployment fit
+- Compare current upstream releases, supported providers, free-tier eligibility signals, model pinning, quota visibility, authentication, data handling, license/terms metadata, and maintenance activity.
+- Verify whether a genuinely free, persistent, isolated cloud runtime is available. Do not assume Cloudflare Workers can host either standalone service unchanged.
+- Define a common acceptance suite: provider allowlisting, zero-cost enforcement, quota hard stops, secret isolation, request logging/redaction, health checks, restart recovery, and latency/failure behavior.
+
+### Phase 2 — isolated proof of concept
+- Deploy OmniRoute and LiteLLM separately in disposable, non-production environments; do not chain them together initially.
+- Use only operator-approved free provider accounts and public, non-sensitive prompts. No paid fallback, OAuth/session scraping, or unapproved no-auth endpoints.
+- Measure actual eligible model routes and quotas rather than relying on catalog or aggregate free-token claims.
+
+### Phase 3 — comparative decision
+- Compare each gateway against the engine's existing provider gateway for reliability, operational cost, quota enforcement, security, and measurable task quality.
+- Select one only if it provides a verified advantage and can preserve the engine's policy, quota ledger, monetary ledger, and kill switch. Otherwise retain the existing gateway and use the projects as references.
+
+### Phase 4 — controlled integration
+- Integrate the selected gateway behind an optional adapter and feature flag, with strict model/provider allowlists and hard zero-cost limits.
+- Run automated tests and staging soak tests before any production consideration. Keep production disabled until explicit operator approval and all deployment/security gates pass.
+
+### Current status
+- OmniRoute: source reviewed; installation and runtime deployment not started.
+- LiteLLM: candidate identified; installation and runtime deployment not started.
+- Next action: complete Phase 1 and produce a side-by-side deployment/feature assessment before installing either service.
+
 ## References
 
 - OmniRoute: https://github.com/cheaper-inference/OmniRoute
