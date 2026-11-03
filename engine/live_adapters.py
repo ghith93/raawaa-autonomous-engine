@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
@@ -10,16 +11,39 @@ from engine.provider import GenerationRequest, GenerationResponse
 
 
 class LiveAdapterError(RuntimeError):
-    def __init__(self, message: str, status_code: int | None = None):
+    def __init__(self, message: str, status_code: int | None = None,
+                 provider_error_code: str | None = None):
         super().__init__(message)
         self.status_code = status_code
+        self.provider_error_code = provider_error_code
+
+
+def _safe_provider_error_code(raw: bytes) -> str | None:
+    """Extract only a short machine-readable code; never retain provider messages."""
+    try:
+        payload = json.loads(raw.decode("utf-8"))
+        error = payload.get("error") if isinstance(payload, dict) else None
+        if not isinstance(error, dict):
+            return None
+        for candidate in (error.get("code"), error.get("type")):
+            if isinstance(candidate, str) and re.fullmatch(r"[A-Za-z0-9_.:-]{1,100}", candidate):
+                return candidate
+    except (UnicodeDecodeError, json.JSONDecodeError, RecursionError):
+        pass
+    return None
+
+
+USER_AGENT = (
+    "RaawaaAutonomousEngine/1.0 "
+    "(+https://github.com/ghith93/raawaa-autonomous-engine)"
+)
 
 
 def _post_json(url: str, headers: dict, body: dict, timeout: int = 45) -> dict:
     request = Request(
         url,
         data=json.dumps(body).encode("utf-8"),
-        headers={**headers, "Content-Type": "application/json"},
+        headers={**headers, "Content-Type": "application/json", "User-Agent": USER_AGENT},
         method="POST",
     )
     try:
@@ -28,8 +52,14 @@ def _post_json(url: str, headers: dict, body: dict, timeout: int = 45) -> dict:
                 raise LiveAdapterError(f"Provider returned HTTP {response.status}")
             payload = json.loads(response.read().decode("utf-8"))
     except HTTPError as exc:
-        # Never include provider response bodies: they can contain request data.
-        raise LiveAdapterError(f"Provider returned HTTP {exc.code}", status_code=exc.code) from exc
+        # Only retain a bounded machine code. Provider messages can echo task data.
+        raw_error = exc.read(16 * 1024 + 1)
+        code = _safe_provider_error_code(raw_error[:16 * 1024])
+        raise LiveAdapterError(
+            f"Provider returned HTTP {exc.code}",
+            status_code=exc.code,
+            provider_error_code=code,
+        ) from None
     except (URLError, TimeoutError, OSError, json.JSONDecodeError) as exc:
         raise LiveAdapterError(f"Provider request failed: {type(exc).__name__}") from exc
     if not isinstance(payload, dict):
