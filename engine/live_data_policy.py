@@ -21,7 +21,13 @@ SENSITIVE_CONTENT_PATTERNS = (
     re.compile(r"\b(?:raawaa|raawa|rawaa)\b.{0,120}\b(?:hair\s+serum\s+)?(?:formula|formulation|ingredients?|composition|blend)\b", re.IGNORECASE),
     re.compile(r"\b(?:formula|formulation|ingredients?|composition|blend)\b.{0,120}\b(?:raawaa|raawa|rawaa)\b", re.IGNORECASE),
     re.compile(r"\b(?:confidential|internal|proprietary|private)\b.{0,80}\b(?:confidential|internal|analysis|report|notes|details|information|data|formula|formulation|ingredients?|composition|blend|records)\b", re.IGNORECASE),
-    re.compile(r"\b(?:customer|client|user)\b.{0,80}\b(?:order|payment|transaction|account|contact|personal|details|records|data|history|email|phone|address)\b", re.IGNORECASE),
+    re.compile(
+        r"\b(?:order\s+(?:details|history|records|status|number|data|information)|"
+        r"payment\s+(?:details|records|information|data)|"
+        r"transaction\s+(?:details|records|data)|"
+        r"account\s+(?:details|records|data))\b",
+        re.IGNORECASE,
+    ),
     re.compile(r"\b(?:order|payment|transaction|account)\b.{0,80}\b(?:customer|client|user|personal|details|records|data|history)\b", re.IGNORECASE),
     re.compile(r"\bpersonal\b.{0,80}\b(?:data|details|records|information|email|phone|address)\b", re.IGNORECASE),
 )
