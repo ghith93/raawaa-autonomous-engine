@@ -264,11 +264,13 @@ def main() -> None:
         finally:
             # Directly force the Staging-only policy off even if the Worker
             # endpoint is temporarily unavailable, then remove only our fixtures.
-            execute_staging_sql(
-                "UPDATE workers_ai_neuron_policy SET enabled=0,updated_at=CURRENT_TIMESTAMP "
-                "WHERE policy_key='default'"
-            )
-            cleanup_test_rows()
+            try:
+                execute_staging_sql(
+                    "UPDATE workers_ai_neuron_policy SET enabled=0,updated_at=CURRENT_TIMESTAMP "
+                    "WHERE policy_key='default'"
+                )
+            finally:
+                cleanup_test_rows()
         status, final = api("GET", "/v1/workers-ai-neurons")
         require(status == 200 and final.get("policy", {}).get("enabled") is False,
                 "Staging Neuron ledger did not finish disabled")
