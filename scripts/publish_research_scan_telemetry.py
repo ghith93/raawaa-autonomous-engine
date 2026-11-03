@@ -81,46 +81,89 @@ def build_payload(snapshot: dict, environ: dict[str, str], now: datetime | None 
     completed = (now or datetime.now(timezone.utc)).astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
     if datetime.fromisoformat(completed.replace("Z", "+00:00")) < datetime.fromisoformat(started.replace("Z", "+00:00")):
         raise ScanTelemetryError("scan completion precedes start")
-    github_requests = snapshot.get("requests_made")
-    crossref_requests = snapshot.get("academic_requests_made")
-    github_unavailable = snapshot.get("unavailable")
+
+    source_specs = (
+        ("github", "requests_made", "candidates", "unavailable", True),
+        ("crossref", "academic_requests_made", "academic_candidates", "academic_unavailable", None),
+        ("arxiv", "arxiv_requests_made", "arxiv_candidates", "arxiv_unavailable", None),
+        ("searxng", "searxng_requests_made", "searxng_candidates", "searxng_unavailable",
+         snapshot.get("searxng_endpoint_configured") is True),
+    )
+    normalized = []
+    for source, request_key, item_key, unavailable_key, configured_override in source_specs:
+        requests = snapshot.get(request_key, 0)
+        items = snapshot.get(item_key, [])
+        unavailable = snapshot.get(unavailable_key)
+        if type(requests) is not int or requests < 0 or not isinstance(items, list):
+            raise ScanTelemetryError("invalid " + source + " source request count or candidate collection")
+        if source == "github" and not isinstance(unavailable, dict):
+            raise ScanTelemetryError("invalid GitHub source result metadata")
+        if source != "github" and unavailable is not None and not isinstance(unavailable, str):
+            raise ScanTelemetryError("invalid " + source + " source result metadata")
+        configured = (
+            configured_override if configured_override is not None
+            else requests > 0 or unavailable is not None
+        )
+        # A missing optional endpoint is explicitly not configured, not a failed scan.
+        if source == "searxng" and unavailable == "endpoint_not_configured":
+            configured = False
+        failed = configured and (requests == 0 or bool(unavailable))
+        state = "not_configured" if not configured else "unavailable" if failed else "fresh"
+        reason = (
+            next(iter(unavailable.values()), None) if source == "github" and isinstance(unavailable, dict)
+            else unavailable if isinstance(unavailable, str) else None
+        )
+        normalized.append({
+            "source": source, "requests": requests, "items": items,
+            "unavailable": unavailable, "configured": configured,
+            "failed": failed, "status": state, "reason": reason,
+        })
+
+    configured_sources = [item for item in normalized if item["configured"]]
+    failed_sources = [item for item in configured_sources if item["failed"]]
+    successful_sources = [item for item in configured_sources if not item["failed"]]
+    status = (
+        "failure" if not successful_sources
+        else "partial" if failed_sources
+        else "success"
+    )
+    github_unavailable = snapshot.get("unavailable", {})
     crossref_unavailable = snapshot.get("academic_unavailable")
-    if type(github_requests) is not int or github_requests < 0 or type(crossref_requests) is not int or crossref_requests < 0:
-        raise ScanTelemetryError("invalid source request count")
-    if not isinstance(github_unavailable, dict) or (crossref_unavailable is not None and not isinstance(crossref_unavailable, str)):
-        raise ScanTelemetryError("invalid source result metadata")
-    candidates = snapshot.get("candidates", [])
-    academic = snapshot.get("academic_candidates", [])
-    if not isinstance(candidates, list) or not isinstance(academic, list):
-        raise ScanTelemetryError("invalid candidate collections")
-    unavailable_count = len(github_unavailable) + int(bool(crossref_unavailable))
-    requested_sources = int(github_requests > 0) + int(crossref_requests > 0)
-    status = "failure" if requested_sources != 2 or unavailable_count == 2 else "partial" if unavailable_count else "success"
+    arxiv_unavailable = snapshot.get("arxiv_unavailable")
+    searxng_unavailable = snapshot.get("searxng_unavailable")
+    unavailable_count = (
+        len(github_unavailable) if isinstance(github_unavailable, dict) else 1
+    ) + sum(bool(value) and value != "endpoint_not_configured"
+            for value in (crossref_unavailable, arxiv_unavailable, searxng_unavailable))
     scan_id = f"{environ['GITHUB_RUN_ID']}:{environ['GITHUB_RUN_ATTEMPT']}"
+    counts = {item["source"]: len(item["items"]) for item in normalized}
     scan = {
-        "scan_id": scan_id, "scan_type": "github_crossref",
+        "scan_id": scan_id, "scan_type": "multi_source_public_research",
         "workflow": "research-discovery.yml",
         "run_id": int(environ["GITHUB_RUN_ID"]),
         "run_number": int(environ["GITHUB_RUN_NUMBER"]),
         "run_attempt": int(environ["GITHUB_RUN_ATTEMPT"]),
         "head_sha": sha, "started_at": started, "completed_at": completed,
-        "status": status, "requests_made": github_requests,
-        "academic_requests_made": crossref_requests,
-        "candidate_count": len(candidates), "academic_candidate_count": len(academic),
+        "status": status,
+        "requests_made": snapshot.get("requests_made", 0),
+        "academic_requests_made": snapshot.get("academic_requests_made", 0),
+        "arxiv_requests_made": snapshot.get("arxiv_requests_made", 0),
+        "searxng_requests_made": snapshot.get("searxng_requests_made", 0),
+        "searxng_endpoint_configured": snapshot.get("searxng_endpoint_configured") is True,
+        "candidate_counts": counts,
+        "total_candidate_count": sum(counts.values()),
+        "configured_source_count": len(configured_sources),
+        "unavailable_source_count": len(failed_sources),
         "unavailable_query_count": unavailable_count,
     }
     observations = []
-    for source, requests, items, unavailable in (
-        ("github", github_requests, candidates, bool(github_unavailable)),
-        ("crossref", crossref_requests, academic, bool(crossref_unavailable)),
-    ):
-        state = "unavailable" if unavailable or requests == 0 else "fresh"
-        reason = crossref_unavailable if source == "crossref" else next(iter(github_unavailable.values()), None)
+    for item in normalized:
+        state = item["status"]
         observations.append({
-            "scan_id": scan_id, "source": source, "status": state,
+            "scan_id": scan_id, "source": item["source"], "status": state,
             "observed_at": completed, "freshness_hours": 24,
-            "request_count": requests, "item_count": len(items),
-            "reason_code": _reason_code(reason) if state == "unavailable" else None,
+            "request_count": item["requests"], "item_count": len(item["items"]),
+            "reason_code": _reason_code(item["reason"]) if state == "unavailable" else None,
         })
     return {"scan": scan, "source_observations": observations}
 
@@ -167,10 +210,10 @@ def publish(payload: dict, environ: dict[str, str], *, root: Path = ROOT, client
                 continue
         scan_rows = [item for event, item in parsed if event == "research_scan_completed"]
         source_rows = [item for event, item in parsed if event == "research_source_observation"]
-        if len(scan_rows) != 1 or len(source_rows) != 2 or {item.get("source") for item in source_rows} != {"github", "crossref"}:
+        if len(scan_rows) != 1 or len(source_rows) != 4 or {item.get("source") for item in source_rows} != {"github", "crossref", "arxiv", "searxng"}:
             raise ScanTelemetryError("Staging D1 readback did not confirm one scan and two source observations")
         return {"status": "recorded", "scan_id": payload["scan"]["scan_id"],
-                "inserted_events": inserted, "verified_events": 3,
+                "inserted_events": inserted, "verified_events": 5,
                 "database_id": STAGING_DATABASE_ID}
     except (D1APIError, D1ConfigurationError) as exc:
         raise ScanTelemetryError("Staging D1 telemetry write/readback failed: " + type(exc).__name__) from None
