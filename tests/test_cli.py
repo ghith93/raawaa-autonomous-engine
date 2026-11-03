@@ -226,15 +226,15 @@ class CliTests(unittest.TestCase):
             status = json.loads(output.getvalue())
             self.assertFalse(status["network_calls_enabled"])
             self.assertFalse(status["paid_calls_enabled"])
-            self.assertEqual(status["budgets"]["per_task_usd"], 0)
+            self.assertEqual(status["budgets"]["per_task_usd"], 0.2)
 
     def test_monetary_status_is_read_only_and_lists_ambiguous_reservations(self):
         with tempfile.TemporaryDirectory() as tmp:
             db_path = os.path.join(tmp, "engine.db")
             ledger = UsageLedger(db_path)
             ledger.reserve(
-                "groq", "openai/gpt-oss-20b", "research", 0.05, 1.0, 1.0,
-                task_id="task-test", per_task_budget_usd=0.10,
+                "groq", "openai/gpt-oss-20b", "research", 0.25, 0.4, 12.0,
+                task_id="task-test", per_task_budget_usd=0.30,
             )
             output = io.StringIO()
             with patch.dict(os.environ, {"RAAWAA_ENGINE_DB": db_path}, clear=True):
@@ -247,10 +247,11 @@ class CliTests(unittest.TestCase):
             self.assertEqual(result["usage"]["pending_reservations"], 1)
             self.assertEqual(result["pending_reservations"][0]["task_id"], "task-test")
             self.assertEqual(result["pending_reservations"][0]["provider"], "groq")
-            self.assertEqual(result["pending_reservations"][0]["estimated_cost_usd"], 0.05)
+            self.assertEqual(result["pending_reservations"][0]["estimated_cost_usd"], 0.25)
             self.assertEqual(result["per_task_usage"][0]["task_id"], "task-test")
             self.assertTrue(result["per_task_usage"][0]["over_budget"])
-            self.assertTrue(result["budget_status"]["daily_over_budget"])
+            self.assertFalse(result["budget_status"]["daily_over_budget"])
+            self.assertFalse(result["budget_status"]["monthly_over_budget"])
             self.assertIn("Legacy usage rows", result["per_task_attribution_note"])
             self.assertIn("Do not release", result["reconciliation_note"])
             self.assertNotIn("gsk_", output.getvalue())
