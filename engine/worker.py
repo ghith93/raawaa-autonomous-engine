@@ -50,13 +50,15 @@ def run_once(store: TaskStore, live_gateway=None, environ=None) -> dict | None:
                 "detail": str(exc)}
 
 
+    live_requested = _live_requested(environ)
+
     # Recover abandoned work before claiming another item.
     recovery = store.recover_stale()
 
     # In live mode, check current free-route capacity before consuming a task lease.
     # This is read-only and deliberately does not reserve quota; generate() repeats
     # the eligibility check and atomically reserves immediately before provider I/O.
-    if _live_requested(environ):
+    if live_requested:
         if live_gateway is None:
             return {"status": "blocked", "reason": "live_gateway_unavailable",
                     "recovery": recovery}
@@ -77,7 +79,9 @@ def run_once(store: TaskStore, live_gateway=None, environ=None) -> dict | None:
             return {"status": "blocked", "reason": "live_capacity_preflight_blocked",
                     "capacity_reason": reason, "recovery": recovery}
 
-    task = store.claim_next()
+    task = store.claim_next(
+        execution_mode="live_inference" if live_requested else "dry_run",
+    )
     if task is None:
         return {"status": "idle", "recovery": recovery} if any(recovery.values()) else None
 
@@ -90,7 +94,7 @@ def run_once(store: TaskStore, live_gateway=None, environ=None) -> dict | None:
     heartbeat = LeaseHeartbeat(store, task["id"], task["lease_token"]).start()
     try:
         contract = build_task_contract(task, load_agent_roster())
-        if _live_requested(environ):
+        if live_requested:
             if live_gateway is None:
                 heartbeat.stop()
                 heartbeat.check()
