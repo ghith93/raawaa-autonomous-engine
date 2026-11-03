@@ -489,6 +489,12 @@ test("quota admin token is restricted to quota admin operations", async () => {
   assert.equal(taskResponse.status, 401);
 });
 
+test("quota admin scope fails closed if configured equal to the shared runner token", async () => {
+  const response = await worker.fetch(request("/v1/quota", { method: "POST", body: { action: "cool_down", route_id: "groq:main:model", seconds: 60 } }),
+    { DB: dbMock(), ENGINE_API_TOKEN: TOKEN, ENGINE_QUOTA_ADMIN_TOKEN: TOKEN });
+  assert.equal(response.status, 403);
+});
+
 test("quota admin token cannot reserve runner quota", async () => {
   const response = await worker.fetch(request("/v1/quota", { method: "POST", token: ADMIN_TOKEN, body: { action: "reserve", route_id: "groq:main:model", task_id: "task-1", estimated_tokens: 1 } }),
     { DB: dbMock(), ENGINE_API_TOKEN: TOKEN, ENGINE_QUOTA_ADMIN_TOKEN: ADMIN_TOKEN, QUOTA_ROUTE_LIMITS_JSON: QUOTA_LIMITS });
