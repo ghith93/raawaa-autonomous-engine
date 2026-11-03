@@ -88,6 +88,23 @@ class SkillsRegistryTests(unittest.TestCase):
         with self.assertRaises(SkillRegistryError):
             load_approved_skill(self.root, "../outside", agent_role="researcher", task_type="research_brief")
 
+    def test_missing_revocation_registry_fails_closed(self):
+        (self.root / "config" / "skills" / "revocations.json").unlink()
+        with self.assertRaisesRegex(SkillRegistryError, "revocation registry is missing"):
+            self.load()
+
+    def test_symlinked_skill_directory_is_rejected(self):
+        link = self.root / "skills" / "linked-skill"
+        try:
+            link.symlink_to(self.skill_dir, target_is_directory=True)
+        except (OSError, NotImplementedError):
+            self.skipTest("symlinks are unavailable on this platform")
+        with self.assertRaises(SkillRegistryError):
+            load_approved_skill(
+                self.root, "linked-skill",
+                agent_role="researcher", task_type="research_brief"
+            )
+
     def test_malformed_manifest_is_rejected(self):
         (self.skill_dir / "skill.json").write_text("[]", encoding="utf-8")
         with self.assertRaises(SkillRegistryError):
