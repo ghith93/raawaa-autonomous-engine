@@ -1,6 +1,11 @@
 name: Cloudflare Workers AI Read-only Catalog Check
 
 on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/cloudflare-workers-ai-inventory.yml"
+      - "docs/provider-free-tier-eligibility.md"
   workflow_dispatch:
 
 permissions:
