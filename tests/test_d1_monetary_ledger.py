@@ -98,12 +98,20 @@ class D1MonetaryLedgerTests(unittest.TestCase):
 
     @patch("urllib.request.urlopen")
     def test_task_totals_url_encodes_task_id(self, open_url):
-        open_url.return_value = Response({"snapshot": {
-            "task_spent_nanos": 4,
-            "task_reserved_nanos": 5,
-            "task_total_nanos": 9,
-            "task_pending_count": 1,
-        }})
+        open_url.return_value = Response({
+            "snapshot": {
+                "task_spent_nanos": 4,
+                "task_reserved_nanos": 5,
+                "task_total_nanos": 9,
+                "task_pending_count": 1,
+            },
+            "budget_policy": {
+                "daily_budget_nanos": 400_000_000,
+                "monthly_budget_nanos": 12_000_000_000,
+                "per_task_budget_nanos": 200_000_000,
+                "enabled": True,
+            },
+        })
         totals = self.ledger.task_totals("task /one")
         self.assertEqual(totals["total_nanos"], 9)
         self.assertEqual(open_url.call_args.args[0].full_url,
