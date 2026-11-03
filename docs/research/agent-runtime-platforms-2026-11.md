@@ -318,10 +318,10 @@ The current production architecture is deliberately framework-light: determinist
 
 | Candidate | Verified current signal | Strength | Main cost / risk in this repository | Decision |
 |---|---|---|---|---|
-| [PydanticAI](https://github.com/pydantic/pydantic-ai) | v2.64.0 released 2026-10-30 | Typed Python agent contracts, structured outputs, provider flexibility, validation and evaluation ecosystem | Must integrate its model calls through the existing quota-aware gateway; otherwise it bypasses budgets, classification and the usage ledger. | **Best next isolated agent-loop candidate**, not a production dependency yet. |
+| [PydanticAI](https://github.com/pydantic/pydantic-ai) | v2.65.0 released 2026-11-03 | Typed Python agent contracts, structured outputs, provider flexibility, validation and evaluation ecosystem | Must integrate its model calls through the existing quota-aware gateway; otherwise it bypasses budgets, classification and the usage ledger. | **Best next isolated agent-loop candidate**, not a production dependency yet. |
 | [OpenAI Agents SDK](https://github.com/openai/openai-agents-python) | v0.24.0 released 2026-10-15 | Small primitives for agents, tools, handoffs, guardrails, sessions, MCP and built-in tracing | OpenAI-first operational path; direct SDK use could bypass the engine gateway. Trace content and tool outputs require redaction and retention review. | Keep as the alternate if first-party OpenAI orchestration is materially better in a measured task. |
 | [LangGraph](https://github.com/langchain-ai/langgraph) | 1.2.19 released 2026-10-30; SQLite checkpoint package 3.1.3 | Explicit state graph, checkpointing, interrupts and recovery for complex branching workflows | Overlaps the existing deterministic planner, D1 task ledger and Workflow spike; more concepts and state adapters to maintain. | Defer until graph complexity exceeds the current DAG planner and a benchmark demonstrates value. |
-| [Temporal Python SDK](https://github.com/temporalio/sdk-python) | 1.34.0 released 2026-09-30 | Mature event-history replay and durable orchestration across services | Requires a Temporal server/Cloud service and operational ownership; this is a second durable scheduler and may add recurring infrastructure cost. | Do not adopt for the current single bounded consumer. Revisit for multi-service long-running workflows. |
+| [Temporal Python SDK](https://github.com/temporalio/sdk-python) | 1.35.0 released 2026-10-28 | Mature event-history replay and durable orchestration across services | Requires a Temporal server/Cloud service and operational ownership; this is a second durable scheduler and may add recurring infrastructure cost. | Do not adopt for the current single bounded consumer. Revisit for multi-service long-running workflows. |
 | [Microsoft Agent Framework](https://github.com/microsoft/agent-framework) | Existing isolated evaluation pins core 1.24.0 and OpenAI 1.18.0 | Parallel workflow branches and checkpoint/resume prototype already tested in this repository | Durable storage is not implemented; its direct provider client can bypass the engine gateway. | Keep the current evaluation; do not expand production scope until a secure D1 adapter and gateway integration pass. |
 | [Cloudflare Agents SDK](https://developers.cloudflare.com/agents/) | Durable Object lifecycle with SQLite-backed state, alarms and fibers | Useful for addressable long-lived agent identities and event-driven sessions | TypeScript/DO runtime and another state store/scheduler would duplicate D1 + current Worker Cron and increase migration surface. | Defer; retain the existing Cloudflare Worker as the narrow control plane. |
 
@@ -360,10 +360,10 @@ The [OWASP Agentic Skills Top 10](https://github.com/OWASP/www-project-agentic-s
 
 ### Research sources checked
 
-- [PydanticAI releases](https://github.com/pydantic/pydantic-ai/releases) — v2.64.0 (2026-10-30).
+- [PydanticAI releases](https://github.com/pydantic/pydantic-ai/releases) — v2.65.0 (2026-11-03).
 - [OpenAI Agents SDK releases](https://github.com/openai/openai-agents-python/releases) — v0.24.0 (2026-10-15).
 - [LangGraph releases](https://github.com/langchain-ai/langgraph/releases) — 1.2.19 (2026-10-30).
-- [Temporal Python SDK releases](https://github.com/temporalio/sdk-python/releases) — 1.34.0 (2026-09-30).
+- [Temporal Python SDK releases](https://github.com/temporalio/sdk-python/releases) — 1.35.0 (2026-10-28).
 - [Agent Skills specification](https://agentskills.io/specification) and [reference repository](https://github.com/agentskills/agentskills).
 - [OWASP Agentic Skills Top 10](https://github.com/OWASP/www-project-agentic-skills-top-10) and [OWASP AI Agent Security Cheat Sheet](https://cheatsheetseries.owasp.org/cheatsheets/AI_Agent_Security_Cheat_Sheet.html).
 
@@ -393,3 +393,5 @@ No framework, agent, plugin, vector database or hosted provider is adopted becau
 - [Letta Agent SDK](https://www.letta.com/agent-sdk/)
 - [Graphiti](https://github.com/getzep/graphiti)
 - [Qdrant installation](https://qdrant.tech/documentation/installation/)
+
+**Release freshness check (2026-11-03):** The latest release tags were verified directly against the GitHub Releases API: PydanticAI `v2.65.0` (published 2026-11-03 01:25 UTC) and Temporal Python SDK `1.35.0` (published 2026-10-28 20:16 UTC). This does not change the adoption decision: evaluate PydanticAI in an isolated prototype only; do not add a production dependency until its quota, retry, policy, and D1 integration are tested.
