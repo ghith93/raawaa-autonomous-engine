@@ -4,6 +4,10 @@
 
 The repository currently contains a Python core, JSON configuration, policy evaluator, task/memory stores, deterministic workflow planner, quota-aware provider routing, opt-in live-runtime wiring, data-classification gate, CLI, unit tests, and GitHub Actions CI. A bounded daily GitHub/Crossref/arXiv/SearXNG discovery workflow is implemented as a proactive research source; its output is unreviewed metadata, not an autonomous research/recommendation agent. Google ARTEMIS is registered as a disabled, read-only-probe integration for future Android UI testing; mobile execution is not yet enabled. The roster and planner remain declarative/deterministic rather than a persistent multi-agent runtime.
 
+## Executive management layer (v1)
+
+`engine.executive_intelligence` adds a deterministic, read-only management view over the existing local SQLite or remote D1 task adapter. It ranks pending tasks with explainable provisional weights, surfaces failed/blocked tasks and expired running leases, and recommends next operational checks. The `executive-status` CLI command has no task, queue, network, or model side effects. It is decision support only: it does not reorder FIFO claims or autonomously enqueue work. See [Executive Intelligence v1](executive-intelligence.md) for scope and staged rollout.
+
 ## Target architecture
 
 1. **Control plane** — task intake, prioritization, approvals, audit log, budgets, and operator dashboard.
