@@ -179,6 +179,14 @@ class D1MonetaryLedger:
         returned = result.get("reservation_id")
         if returned != reservation_id:
             raise D1MonetaryLedgerError("monetary Worker returned a mismatched reservation ID")
+        status = result.get("status")
+        if status != "reserved":
+            # A reservation that has crossed the provider-I/O boundary may already
+            # have been billed. Reusing its ID is safe for accounting, not permission
+            # to repeat the provider request after a worker/task restart.
+            raise D1MonetaryLedgerError(
+                "existing monetary reservation is not pre-I/O; provider replay is blocked"
+            )
         return reservation_id
 
     def mark_started(self, reservation_id: str) -> None:
