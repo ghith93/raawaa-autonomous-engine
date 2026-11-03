@@ -129,7 +129,7 @@ class CodespaceBridgeTests(unittest.TestCase):
             "task_type": "codespace_test",
             "payload_json": '{"operation":"worker_tests"}',
         }, runner=lambda *a, **k: FakeCompleted(1, "x" * 12000))
-        self.assertLessEqual(len(result["stdout"]), 8020)
+        self.assertLessEqual(len(result["stdout"]), 3020)
         self.assertIn("output truncated", result["stdout"])
 
     def test_execution_exception_is_finished_as_blocked(self):
