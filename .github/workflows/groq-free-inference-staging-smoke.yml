@@ -46,14 +46,19 @@ jobs:
               raise SystemExit("Refusing: Staging Worker is not isolated on workers.dev")
           if len(s) != 1 or len(p) != 1 or s[0].get("database_id") != "231dd948-04a0-49e3-ad73-444f77d69477" or p[0].get("database_id") != "f0ffbed3-940f-488d-a7d1-31cbc5fbf742" or s[0].get("database_id") == p[0].get("database_id"):
               raise SystemExit("Refusing: Staging and Production D1 identities are not the reviewed separate databases")
-          policy = json.loads(Path("config/policy.json").read_text())
+          default_policy = json.loads(Path("config/policy.json").read_text())
+          default_routes = json.loads(Path("config/provider_profiles.json").read_text())["routes"]
+          if default_policy.get("mode") != "safe_dry_run" or any(r.get("enabled") for r in default_routes):
+              raise SystemExit("Refusing: repository defaults must remain fail-closed")
+          policy = json.loads(Path("config/policy.groq-smoke.json").read_text())
           mp = policy["model_policy"]
-          enabled = [r for r in json.loads(Path("config/provider_profiles.json").read_text())["routes"] if r.get("enabled")]
+          enabled = [r for r in json.loads(Path("config/provider_profiles.groq-smoke.json").read_text())["routes"] if r.get("enabled")]
           if policy.get("mode") != "live_inference_opt_in" or policy.get("allow_paid_model_calls") is not False or policy.get("allow_external_writes") is not False or mp.get("paid_fallback_enabled") is not False or mp.get("provider_hard_stop_verified") is not True:
-              raise SystemExit("Refusing: Free-only live policy gates are not satisfied")
-          if not enabled or any(r.get("provider") != "groq" or r.get("input_cost_per_million_usd") != 0 or r.get("output_cost_per_million_usd") != 0 for r in enabled):
-              raise SystemExit("Refusing: only verified zero-cost Groq routes may be enabled")
-          print("Staging D1 isolation and zero-cost Groq policy verified.")
+              raise SystemExit("Refusing: Staging Free-only live policy gates are not satisfied")
+          allowed_models = {"openai/gpt-oss-120b", "openai/gpt-oss-20b"}
+          if {r.get("model") for r in enabled} != allowed_models or any(r.get("provider") != "groq" or r.get("input_cost_per_million_usd") != 0 or r.get("output_cost_per_million_usd") != 0 for r in enabled):
+              raise SystemExit("Refusing: only the two verified zero-cost Groq routes may be enabled")
+          print("Staging isolation, fail-closed defaults, and isolated zero-cost Groq smoke policy verified.")
           PY
       - name: Validate Cloudflare and Access credentials
         env:
