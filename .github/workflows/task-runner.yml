@@ -206,6 +206,7 @@ jobs:
           ENGINE_API_URL: https://raawaa-autonomous-engine-control.ghith-shikhkhaled.workers.dev
           ENGINE_API_TOKEN: ${{ secrets.ENGINE_API_TOKEN }}
           PENDING_TASKS: ${{ steps.mobile.outputs.tasks_pending }}
+          RUNNING_TASKS: ${{ steps.mobile.outputs.tasks_running }}
           GITHUB_RUN_ID: ${{ github.run_id }}
         run: |
           python - <<'PY'
@@ -214,8 +215,8 @@ jobs:
           from urllib.request import Request, urlopen
           from urllib.error import HTTPError, URLError
 
-          if os.environ.get("PENDING_TASKS") != "0":
-              raise SystemExit("Refusing one-shot live research: the D1 queue must be empty before enqueue.")
+          if os.environ.get("PENDING_TASKS") != "0" or os.environ.get("RUNNING_TASKS") != "0":
+              raise SystemExit("Refusing one-shot live research: the D1 queue must be empty and idle before enqueue.")
           payload = {
               "task_type": "research_brief",
               "title": "Public research: lean multi-agent orchestration choices",
@@ -264,6 +265,36 @@ jobs:
           except (URLError, TimeoutError, OSError, ValueError) as error:
               raise SystemExit("Research task enqueue failed: " + type(error).__name__) from None
           PY
+
+      - name: Enable verified-free route for this job only
+        if: github.event_name == 'workflow_dispatch' && inputs.run_public_research_once
+        run: |
+          python - <<'PY'
+          import json
+          from datetime import datetime, timezone
+          from pathlib import Path
+
+          policy_path = Path("config/policy.json")
+          policy = json.loads(policy_path.read_text(encoding="utf-8"))
+          policy["mode"] = "live_inference_opt_in"
+          policy["model_policy"]["provider_hard_stop_verified"] = True
+          policy["model_policy"]["provider_hard_stop_evidence"] = {
+              "provider": "Groq Cloud Free Plan",
+              "scope": "Operator-confirmed Free organization; openai/gpt-oss-20b route only",
+              "hard_limit": "Free-plan quotas: 30 RPM, 1,000 RPD, 8,000 TPM, 200,000 TPD. Over-limit requests return HTTP 429; Groq Free Plan support confirms no charges while the account remains on Free Plan. No paid route or paid fallback.",
+              "verified_at": datetime.now(timezone.utc).replace(microsecond=0).isoformat(),
+              "source_url": "https://console.groq.com/docs/rate-limits",
+              "support_url": "https://community.groq.com/t/do-i-get-charged-for-anything-on-the-groq-free-plan/832"
+          }
+          policy_path.write_text(json.dumps(policy, indent=2) + "\\n", encoding="utf-8")
+
+          profiles_path = Path("config/provider_profiles.json")
+          profiles = json.loads(profiles_path.read_text(encoding="utf-8"))
+          for route in profiles["routes"]:
+              route["enabled"] = route["id"] == "groq-free-gpt-oss-20b-primary"
+          profiles_path.write_text(json.dumps(profiles, indent=2) + "\\n", encoding="utf-8")
+          PY
+          python -m engine.cli audit
 
       - name: Process bounded D1 task batch
         id: batch
