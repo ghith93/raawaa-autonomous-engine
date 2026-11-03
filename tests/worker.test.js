@@ -25,6 +25,7 @@ function dbMock() {
         bind(...values) { this.values = values; return this; },
         async first() {
           calls.push({ kind: "first", sql, values: this.values });
+          if (sql.includes("FROM audit_log")) return null;
           if (sql.includes("SELECT 1")) return { ok: 1 };
           if (sql.includes("UPDATE tasks SET status='running'")) return null;
           if (sql.includes("SELECT id,status,attempts")) return {
