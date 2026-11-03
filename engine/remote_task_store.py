@@ -229,6 +229,8 @@ class RemoteTaskStore:
             raise RemoteTaskStoreError("Remote task API returned an invalid retry status")
         if execution_mode is not None and response.get("execution_mode") != execution_mode:
             raise RemoteTaskStoreError("Remote Worker did not confirm the persisted execution mode")
+        if execution_mode is not None and response.get("execution_mode") != execution_mode:
+            raise RemoteTaskStoreError("Remote Worker did not confirm the persisted execution mode")
         if status == "pending" and retry_after_seconds > 0 and not isinstance(response.get("next_attempt_at"), str):
             raise RemoteTaskStoreError(
                 "Remote Worker did not confirm the delayed retry schedule; task runner stopped"
