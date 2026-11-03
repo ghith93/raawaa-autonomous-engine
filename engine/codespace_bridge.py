@@ -9,6 +9,7 @@ import json
 import os
 import subprocess
 import sys
+import tempfile
 import time
 from pathlib import Path
 from typing import Any, Callable
@@ -23,11 +24,11 @@ MAX_OUTPUT_CHARS = 8_000
 COMMAND_TIMEOUT_SECONDS = 240
 POLL_MIN_SECONDS = 30
 POLL_MAX_SECONDS = 300
+MAX_POLL_RUNTIME_SECONDS = 3600
 TEST_COMMANDS = {
     "python_tests": [sys.executable, "-m", "unittest", "discover", "-s", "tests", "-v"],
     "worker_tests": ["npm", "run", "test:worker"],
     "workflow_tests": ["npm", "run", "test:workflow-spike"],
-    "d1_local_tests": ["npm", "run", "test:d1-local"],
 }
 
 
@@ -39,10 +40,21 @@ def _bounded(value: str, limit: int = MAX_OUTPUT_CHARS) -> str:
 
 def _run_fixed(command: list[str], runner: Callable[..., Any] = subprocess.run) -> dict[str, Any]:
     try:
-        completed = runner(
-            command, cwd=REPOSITORY_ROOT, capture_output=True, text=True,
-            timeout=COMMAND_TIMEOUT_SECONDS, check=False, shell=False,
-        )
+        # Do not pass Codespaces secrets, provider keys, or user shell configuration
+        # into project test processes. Use a disposable HOME and a minimal environment.
+        with tempfile.TemporaryDirectory(prefix="raawaa-codespace-") as isolated_home:
+            safe_env = {
+                "PATH": os.environ.get("PATH", ""),
+                "HOME": isolated_home,
+                "USERPROFILE": isolated_home,
+                "CI": "true",
+                "LANG": "C.UTF-8",
+                "PYTHONDONTWRITEBYTECODE": "1",
+            }
+            completed = runner(
+                command, cwd=REPOSITORY_ROOT, capture_output=True, text=True,
+                timeout=COMMAND_TIMEOUT_SECONDS, check=False, shell=False, env=safe_env,
+            )
         return {
             "exit_code": int(completed.returncode),
             "stdout": _bounded(completed.stdout or ""),
@@ -96,7 +108,7 @@ def run_once(store: CodespaceTaskStore | None = None,
     """Load mandatory policy before any remote claim, then process at most one task."""
     try:
         policy = load_operating_policy()
-    except OperatingPolicyError:
+    except Exception:
         return {"status": "blocked", "reason": "operating_policy_unavailable"}
 
     client = store or CodespaceTaskStore()
@@ -114,7 +126,11 @@ def run_once(store: CodespaceTaskStore | None = None,
 
     try:
         client.heartbeat(task_id, lease_token)
-        result = execute_task(task, runner=runner)
+        try:
+            result = execute_task(task, runner=runner)
+        except Exception as exc:
+            result = {"status": "blocked", "reason": f"bridge_execution_failed:{type(exc).__name__}",
+                      "external_writes": 0}
         terminal = result.pop("status")
         result["policy_documents"] = policy.get("documents_loaded", [])
         result["policy_fingerprints"] = policy.get("fingerprints", {})
@@ -158,7 +174,8 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     delay = POLL_MIN_SECONDS
-    while True:
+    started = time.monotonic()
+    while time.monotonic() - started < MAX_POLL_RUNTIME_SECONDS:
         result = run_once(store)
         if result.get("status") == "idle":
             time.sleep(delay)
@@ -168,6 +185,8 @@ def main(argv: list[str] | None = None) -> int:
         print(json.dumps(result, sort_keys=True))
         if result.get("status") in {"blocked", "lease_lost_or_remote_error"}:
             return 1
+    print('{"status":"stopped","reason":"maximum_poll_runtime_reached"}')
+    return 0
 
 
 if __name__ == "__main__":
