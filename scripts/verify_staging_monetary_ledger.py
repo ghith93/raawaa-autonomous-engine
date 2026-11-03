@@ -127,6 +127,56 @@ def cleanup_test_reservations() -> None:
             require(status == 200, "Could not settle a test-only ambiguous reservation")
 
 
+def verify_token_quota_concurrency(run_tag: str) -> None:
+    route_id = f"{PREFIX}{run_tag}-token-quota"
+    task_id = f"{PREFIX}{run_tag}-token-task"
+
+    def attempt(_index: int):
+        status, body = api("POST", "/v1/quota", {
+            "action": "reserve",
+            "route_id": route_id,
+            "task_id": task_id,
+            "estimated_tokens": 10,
+            "daily_request_limit": 2,
+            "daily_token_limit": 20,
+            "monthly_request_limit": 2,
+            "monthly_token_limit": 20,
+            "minute_request_limit": 2,
+            "minute_token_limit": 20,
+            "per_task_request_limit": 2,
+            "per_task_token_limit": 20,
+        })
+        return status, body
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=3) as pool:
+        results = list(pool.map(attempt, range(3)))
+    require(sorted(item[0] for item in results) == [201, 201, 409],
+            "D1 token quota did not enforce concurrent request/token caps")
+    for status, body in results:
+        if status == 201:
+            reservation_id = int(body["reservation_id"])
+            settled, _ = api("POST", "/v1/quota", {
+                "action": "settle", "reservation_id": reservation_id, "actual_tokens": 10,
+            })
+            require(settled == 200, "D1 token quota reservation did not settle")
+            replay, replay_body = api("POST", "/v1/quota", {
+                "action": "settle", "reservation_id": reservation_id, "actual_tokens": 10,
+            })
+            require(replay == 200 and replay_body.get("replay") is True,
+                    "D1 token quota settlement replay was not idempotent")
+        else:
+            require(body.get("error") == "quota_unavailable",
+                    "D1 token quota returned an unexpected concurrent rejection")
+    from urllib.parse import quote
+    query = f"/v1/quota?route_id={quote(route_id, safe='')}&task_id={quote(task_id, safe='')}"
+    status, body = api("GET", query)
+    usage = body.get("usage", {})
+    require(status == 200 and usage.get("daily", {}).get("requests") == 2 and
+            usage.get("daily", {}).get("tokens") == 20 and
+            usage.get("task", {}).get("requests") == 2,
+            "D1 token quota status does not match the two settled reservations")
+
+
 def cap_test(label: str, run_tag: str, cap_kind: str) -> None:
     estimate = 1_000_000  # $0.001 reservation; no provider request is made.
     current = snapshot()
@@ -175,11 +225,14 @@ def run() -> None:
     require(health == 200, f"Staging Worker health returned HTTP {health}")
     unauth, _ = api("GET", "/v1/monetary-ledger", authenticated=False)
     require(unauth == 401, f"Monetary ledger must require authentication (HTTP {unauth})")
+    unauth_quota, _ = api("GET", "/v1/quota", authenticated=False)
+    require(unauth_quota == 401, f"Token quota ledger must require authentication (HTTP {unauth_quota})")
 
     initial = snapshot()
     require(isinstance(initial.get("daily_total_nanos"), int), "D1 monetary totals are missing")
     run_tag = str(uuid.uuid4())
     cleanup_test_reservations()
+    verify_token_quota_concurrency(run_tag)
 
     cap_test("daily", run_tag, "daily")
     cap_test("monthly", run_tag, "monthly")
@@ -296,9 +349,11 @@ def run() -> None:
     require(mobile.get("monetary_ledger", {}).get("available") is True,
             "Mobile status does not report the D1 monetary ledger as available")
     require("model_costs_usd" in mobile, "Mobile status omitted the model cost breakdown")
+    require(mobile.get("unavailable_metrics", {}).get("provider_usage") == "Available",
+            "Mobile status does not report the D1 token quota ledger as available")
 
     cleanup_test_reservations()
-    print("Staging monetary ledger verification passed: global daily/monthly/task concurrency, idempotency, pre-I/O release, ambiguous settlement, over-estimate quarantine, Worker redeploy persistence, and authenticated mobile status. No model provider was called.")
+    print("Staging D1 verification passed: token quota concurrency/settlement, global monetary daily/monthly/task caps, idempotency, pre-I/O release, ambiguous settlement, over-estimate quarantine, Worker redeploy persistence, and authenticated mobile status. No model provider was called.")
 
 
 if __name__ == "__main__":
