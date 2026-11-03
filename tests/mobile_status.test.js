@@ -216,7 +216,7 @@ test("mobile status reports explicit scan and per-source freshness without distu
   {created_at:now,details_json:JSON.stringify({scan_id:"123:1",source:"crossref",status:"unavailable",observed_at:now,freshness_hours:24,request_count:1,item_count:0,reason_code:"http_429"})},
  ];
  const invocations=[{status:"ambiguous",count:1},{status:"settled",count:2}];
- const DB=dbMock(undefined,undefined,[],null,null,invocations,scanRow,sourceRows);
+ const DB=dbMock(["0003_durable_quota_ledger","0004_paper_event_ledger","0005_telegram_webhook_receipts","0006_monetary_budget_ledger","0007_task_model_invocations"],undefined,[],null,null,invocations,scanRow,sourceRows);
  const response=await worker.fetch(request("/v1/mobile/status"),{DB,ENGINE_API_TOKEN:TOKEN});
  assert.equal(response.status,200);
  const body=await response.json();
