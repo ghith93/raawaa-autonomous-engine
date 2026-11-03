@@ -30,8 +30,9 @@
 **Files:** tests/test_triage_research_candidates.py
 
 - [x] Add a test proving a fresh Apache-2.0 repo with 4 stars has a high numeric score but medium priority.
-- [x] Add tests proving missing/NOASSERTION and GPL/AGPL license metadata cannot produce high priority.
+- [x] Add tests proving missing/NOASSERTION, malformed, GPL, and AGPL license metadata cannot produce high priority.
 - [x] Keep the existing well-adopted MIT/Python high-priority test unchanged.
+- [x] Add malformed star-count regressions for null, negative, boolean, string, list, and object values.
 - [x] PR CI #275 verified the red phase: 272 tests ran, with exactly 5 expected failures across the new adoption/license cases.
 
 ## Task 2: Minimal scoring change
@@ -40,11 +41,11 @@
 
 - [x] Derive GitHub priority from score, archived state, stars >= 10, and membership in PERMISSIVE_LICENSES.
 - [x] Do not alter numeric score, candidate output fields, academic priority, or discovery behavior.
-- [ ] Run focused triage tests; expected: all pass.
+- [x] Full Engine CI #41551068394 ran 274 Python tests successfully, including all triage regressions.
 
 ## Task 3: Full validation and PR
 
-- [ ] Run python -m unittest discover -s tests -v and python -m engine.cli audit.
-- [ ] Review exact diff for unchanged numeric scores and no side effects.
-- [ ] Open a PR and require exact-head Engine CI success before merge.
+- [x] Exact-head Engine CI #41551068394 passed the full Python suite, policy/agent audit, Worker tests, Workflows tests, and both local integration smoke tests.
+- [x] Review exact diff: numeric scoring and academic priority are unchanged; no external side effects were introduced.
+- [x] Open PR #275; exact-head validation passed on implementation head cd36663a2f2d542b2d9e6e5a1fa3ecc524fd64f4. Final documentation commit will receive its own exact-head CI.
 
