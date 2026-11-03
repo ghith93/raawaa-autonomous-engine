@@ -22,7 +22,7 @@ The Worker validates the `X-Telegram-Bot-Api-Secret-Token` header, requires a pr
 
 ## Migration and activation
 
-Migration `0005_telegram_webhook_receipts.sql` has been applied to production D1 and its migration ledger was verified by the successful reviewed migration workflow on 2026-11-03. This applies the receipt schema only; it does not configure Telegram secrets, register a Telegram webhook, or activate message delivery. The Worker code for this route remains merged but not yet deployed to production. Do not add production secrets, call Telegram `setWebhook`, or deploy the Worker until the separate production deployment gate is explicitly satisfied.
+Migration `0005_telegram_webhook_receipts.sql` has been applied to production D1 and its migration ledger was verified by the successful reviewed migration workflow. The Worker route code is now included in the deployed production Worker version `ded17c7d-0201-431c-af7f-ad16e1f7f408` (deployed 2026-11-03 at 00:45 UTC). This deployment did not configure `TELEGRAM_WEBHOOK_SECRET`, `TELEGRAM_BOT_TOKEN`, or `TELEGRAM_ALLOWED_CHAT_IDS`, and it did not call Telegram `setWebhook`. The handler remains fail-closed and returns `503 webhook_disabled` unless all required settings are valid. No Telegram webhook registration or message delivery was attempted. Keep activation separate; do not add secrets or call `setWebhook` without the explicit operator decision and private-chat allowlist.
 
 ## Validation
 
