@@ -131,8 +131,8 @@ export async function handleQuota(request, env, url) {
       // One conditional INSERT is the linearization point: concurrent callers
       // cannot both pass the quota predicates and insert beyond a cap.
       const result = await env.DB.prepare(`
-        INSERT INTO quota_usage(route_id,requests,tokens,occurred_at,task_id)
-        SELECT ?,1,?,?,?
+        INSERT INTO quota_usage(route_id,requests,tokens,occurred_at,task_id,settlement_key)
+        SELECT ?,1,?,?,?,?
         WHERE NOT EXISTS (SELECT 1 FROM quota_cooldowns WHERE route_id=? AND until_at>?)
           AND (SELECT COALESCE(SUM(requests),0) FROM quota_usage WHERE route_id=? AND occurred_at>=?) < ?
           AND (SELECT COALESCE(SUM(tokens),0) FROM quota_usage WHERE route_id=? AND occurred_at>=?) + ? <= ?
@@ -144,16 +144,16 @@ export async function handleQuota(request, env, url) {
           AND (SELECT COALESCE(SUM(tokens),0) FROM quota_usage WHERE task_id=?) + ? <= ?
         RETURNING id
       `).bind(
-        input.route_id, input.estimated_tokens, now, input.task_id,
+        input.route_id, input.estimated_tokens, now, input.task_id, reservationKey,
         input.route_id, now,
-        input.route_id, day.toISOString(), input.daily_request_limit,
-        input.route_id, day.toISOString(), input.estimated_tokens, input.daily_token_limit,
-        input.route_id, month.toISOString(), input.monthly_request_limit,
-        input.route_id, month.toISOString(), input.estimated_tokens, input.monthly_token_limit,
-        input.route_id, minute.toISOString(), input.minute_request_limit,
-        input.route_id, minute.toISOString(), input.estimated_tokens, input.minute_token_limit,
-        input.task_id, input.per_task_request_limit,
-        input.task_id, input.estimated_tokens, input.per_task_token_limit
+        input.route_id, day.toISOString(), limits.daily_request_limit,
+        input.route_id, day.toISOString(), input.estimated_tokens, limits.daily_token_limit,
+        input.route_id, month.toISOString(), limits.monthly_request_limit,
+        input.route_id, month.toISOString(), input.estimated_tokens, limits.monthly_token_limit,
+        input.route_id, minute.toISOString(), limits.minute_request_limit,
+        input.route_id, minute.toISOString(), input.estimated_tokens, limits.minute_token_limit,
+        input.task_id, limits.per_task_request_limit,
+        input.task_id, input.estimated_tokens, limits.per_task_token_limit
       ).first();
       if (!result) return json({ error: "quota_unavailable" }, 409);
       return json({ reservation_id: result.id, settlement_key: reservationKey, occurred_at: now }, 201);
