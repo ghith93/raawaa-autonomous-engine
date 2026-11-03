@@ -6,7 +6,6 @@ an adapter never sends a provider request; network I/O begins only on generate()
 from __future__ import annotations
 
 import json
-import math
 import os
 from pathlib import Path
 
@@ -16,6 +15,7 @@ from engine.quota_config import load_provider_profile_registry
 from engine.quota_live_gateway import QuotaAwareLiveGateway
 from engine.quota_manager import QuotaLedger, QuotaManager
 from engine.d1_quota_ledger import D1QuotaLedger
+from engine.budget_policy import validate_budget_policy
 
 
 LIVE_SWITCH = "RAAWAA_ENGINE_LIVE_INFERENCE"
@@ -38,19 +38,9 @@ def build_live_gateway(
         raise ValueError("engine policy must be a JSON object")
     if policy.get("mode") != "live_inference_opt_in":
         return None
-    budgets = (
-        policy.get("daily_budget_usd"),
-        policy.get("monthly_budget_usd"),
-        policy.get("per_task_budget_usd"),
-    )
-    if (
-        policy.get("allow_paid_model_calls") is not False
-        or policy.get("allow_external_writes") is not False
-        or any(
-            type(value) not in (int, float) or not math.isfinite(value) or value != 0
-            for value in budgets
-        )
-    ):
+    if policy.get("allow_external_writes") is not False:
+        return None
+    if validate_budget_policy(policy):
         return None
 
     entries = load_provider_profile_registry(registry_path)
