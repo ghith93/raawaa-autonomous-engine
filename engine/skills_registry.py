@@ -24,7 +24,7 @@ _REQUIRED = {
     "schema_version", "skill_id", "version", "source", "revision", "owner",
     "license", "purpose", "input_schema", "output_schema", "capabilities",
     "allowed_tools", "network_policy", "risk_classification",
-    "content_sha256", "approved",
+    "content_sha256", "permissions", "approved",
 }
 
 
@@ -60,8 +60,12 @@ def _inside(root: Path, candidate: Path) -> Path:
         resolved.relative_to(root.resolve(strict=True))
     except (OSError, RuntimeError, ValueError) as exc:
         raise SkillRegistryError("skill path escapes registry or does not exist") from exc
-    if candidate.is_symlink():
-        raise SkillRegistryError("symlinked skill files are not permitted")
+    current = candidate
+    boundary = root.resolve(strict=True)
+    while current != boundary:
+        if current.is_symlink():
+            raise SkillRegistryError("symlinked skill paths are not permitted")
+        current = current.parent
     if not resolved.is_file():
         raise SkillRegistryError("skill instruction must be a regular file")
     return resolved
@@ -100,6 +104,8 @@ def load_approved_skill(
     for field in ("version", "source", "revision", "owner", "purpose"):
         if not isinstance(manifest[field], str) or not manifest[field].strip():
             raise SkillRegistryError(f"invalid {field}")
+    if not re.fullmatch(r"[a-fA-F0-9]{7,40}", manifest["revision"]):
+        raise SkillRegistryError("revision must be an immutable commit identifier")
     license_info = manifest["license"]
     if not isinstance(license_info, dict) or not all(
         isinstance(license_info.get(key), str) and license_info[key].strip()
@@ -127,9 +133,10 @@ def load_approved_skill(
     if not isinstance(role_tasks, list) or task_type not in role_tasks:
         raise SkillRegistryError("skill is not approved for this role and task type")
 
-    revocations = root / "revocations.json"
+    repository_root = root.parent
+    revocations = repository_root / "config" / "skills" / "revocations.json"
     if revocations.exists():
-        revoked = _json_object(_inside(root, revocations))
+        revoked = _json_object(_inside(repository_root, revocations))
         entries = revoked.get("revoked_skill_ids", [])
         if not isinstance(entries, list) or any(not isinstance(x, str) for x in entries):
             raise SkillRegistryError("invalid revocation registry")
