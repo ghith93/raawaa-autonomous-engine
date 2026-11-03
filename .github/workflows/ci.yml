@@ -193,3 +193,30 @@ jobs:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         run: npx --yes wrangler@4.156.1 secret delete ENGINE_API_TOKEN --config wrangler.staging.toml
+
+  publish-staging-ops-telemetry:
+    name: Publish sanitized CI and inference-gate telemetry to Staging
+    needs: [test, staging-migrate, staging-worker-verify]
+    if: ${{ always() && github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Check out reviewed main
+        uses: actions/checkout@v7
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+      - name: Publish sanitized operational snapshots to Staging D1 only
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          ENGINE_CI_TEST_RESULT: ${{ needs.test.result }}
+          ENGINE_CI_STAGING_MIGRATE_RESULT: ${{ needs.staging-migrate.result }}
+          ENGINE_CI_STAGING_WORKER_RESULT: ${{ needs.staging-worker-verify.result }}
+          RAAWAA_ENGINE_LIVE_INFERENCE: ${{ vars.RAAWAA_ENGINE_LIVE_INFERENCE || 'disabled' }}
+        run: python scripts/publish_staging_ops_telemetry.py
