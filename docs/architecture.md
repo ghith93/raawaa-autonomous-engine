@@ -8,6 +8,10 @@ The repository currently contains a Python core, JSON configuration, policy eval
 
 `engine.executive_intelligence` adds a deterministic, read-only management view over the existing local SQLite or remote D1 task adapter. It ranks pending tasks with explainable provisional weights, surfaces failed/blocked tasks and expired running leases, and recommends next operational checks. The `executive-status` CLI command has no task, queue, network, or model side effects. It is decision support only: it does not reorder FIFO claims or autonomously enqueue work. See [Executive Intelligence v1](executive-intelligence.md) for scope and staged rollout.
 
+## Executive brain and delegation v1
+
+The executive brain is a layered control system, not a single always-on model. The deterministic control plane owns policy, priorities, budget and approvals; model-assisted planning may propose a workflow; the deterministic orchestrator validates the DAG and assigns specialists using the trusted task-to-capability map; bounded workers execute under fenced leases; a separate reviewer checks consequential work. The manager roster entry is declarative, not a running agent. The proposal-only command is `python -m engine.cli workflow-plan --file workflow.json`. It checks enabled specialists, exact capability mapping, acceptance checks, dependencies, cycles, estimated model cost, approval risk, and bounded execution waves. It does not enqueue or execute. The current queue still lacks dependency-aware claim/release semantics, so multi-step plans remain previews until both SQLite and D1 enforce dependencies. See [Executive Brain and Delegation Contract](executive-brain-and-delegation.md).
+
 ## Target architecture
 
 1. **Control plane** — task intake, prioritization, approvals, audit log, budgets, and operator dashboard.
