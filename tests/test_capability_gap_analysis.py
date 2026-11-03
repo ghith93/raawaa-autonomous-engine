@@ -25,6 +25,7 @@ class CapabilityGapAnalysisTests(unittest.TestCase):
             json.dumps({
                 "queries": {"agent_frameworks": "agents"},
                 "academic_source": "Crossref public metadata",
+                "arxiv_source": "arXiv Atom API",
             }), encoding="utf-8"
         )
         (self.root / "engine" / "agent_runtime.py").write_text("# deterministic", encoding="utf-8")
@@ -83,7 +84,7 @@ class CapabilityGapAnalysisTests(unittest.TestCase):
         )
         by_id = {item["capability"]: item for item in result["opportunities"]}
         self.assertEqual(by_id["tool_gateway"]["current_status"], "not_implemented")
-        self.assertEqual(by_id["research_discovery"]["current_status"], "github_plus_academic_metadata")
+        self.assertEqual(by_id["research_discovery"]["current_status"], "github_crossref_arxiv_metadata")
         self.assertEqual(by_id["research_discovery"]["candidate_count"], 0)
 
     def test_malformed_priority_is_treated_as_unknown(self):
