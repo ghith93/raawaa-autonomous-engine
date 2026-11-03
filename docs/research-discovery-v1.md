@@ -18,7 +18,7 @@ The engine performs bounded, metadata-only discovery across public GitHub reposi
 Candidate persistence is separately gated by `RAAWAA_ENGINE_RESEARCH_PERSISTENCE=enabled`; the source code does not prove that this repository variable is enabled.
 
 - The authenticated Worker accepts normalized GitHub and Crossref records today.
-- PR #421 proposes migration `0008_research_source_expansion` plus strict Worker normalizers and persistence/readback support for arXiv and SearXNG. Until that PR is reviewed, merged, and the resulting Staging migration/readback are verified, the deployed D1 API remains limited to GitHub and Crossref.
+- PR #421 proposes migration `0009_research_source_expansion` plus strict Worker normalizers and persistence/readback support for arXiv and SearXNG. Until that PR is reviewed, merged, and the resulting Staging migration/readback are verified, the deployed D1 API remains limited to GitHub and Crossref.
 - Re-ingestion is idempotent by normalized source key. It updates last-seen/discovery count without overwriting prior human review decisions.
 - The Worker stores only bounded allowlisted metadata. It does not fetch SearXNG result URLs, abstracts, or full text.
 - Authenticated listing and explicit review remain available through the existing research-candidate endpoints.
