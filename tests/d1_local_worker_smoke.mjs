@@ -296,7 +296,7 @@ try {
   assertStatus(preGlobalStatus, 200, "pre-global monetary snapshot");
   assert.equal(
     preGlobalStatus.payload.snapshot.pending_reserved_nanos,
-    10_000_000,
+    100_000_000,
     "only the in-flight reservation should remain pending before global-cap concurrency test",
   );
   const globalBase = {
