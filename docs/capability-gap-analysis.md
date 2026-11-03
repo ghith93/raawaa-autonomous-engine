@@ -60,7 +60,7 @@ The triage score is a metadata heuristic, not a security, quality, compatibility
 
 - The baseline is a repository snapshot; it cannot prove live runtime state or external account settings.
 - Crossref and arXiv records are triaged as research candidates but are not automatically mapped to capability gaps because title-only topic inference would be too weak. arXiv abstracts and full text are not ingested.
-- SearXNG endpoint deployment and successful retrieval are not implied by the presence of the optional adapter; the endpoint is not configured in the current repository environment.
+- SearXNG endpoint deployment and successful retrieval are not implied by the presence of the optional adapter. The analyzer cannot inspect the GitHub Actions variable value; actual activation must be established from a scheduled scan artifact and per-source telemetry.
 - A capability may be partially implemented even when the repository contains no corresponding candidate in a scan.
 - The current report ranks by predefined impact band and count of related candidates; it is not a statistically calibrated value model.
 - All opportunities remain `PROPOSED` until primary-source verification, measurable baseline, controlled experiment and independent review.
