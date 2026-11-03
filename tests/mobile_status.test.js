@@ -41,7 +41,9 @@ test("mobile status page is public static HTML and never embeds an API token",as
  assert.match(body,/Recorded model inference costs/);
  assert.match(body,/Telegram control readiness/);
  assert.match(body,/Worker Cron/);
- assert.match(body,/Task Runner watchdog/);\n assert.match(body,/Latest explicit research scan/);\n assert.match(body,/Research source freshness/);
+ assert.match(body,/Task Runner watchdog/);
+ assert.match(body,/Latest explicit research scan/);
+ assert.match(body,/Research source freshness/);
  assert.match(body,/worker_cron/);
  assert.match(body,/model_costs_usd/);
  assert.match(body,/toFixed\(6\)/);
