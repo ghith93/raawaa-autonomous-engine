@@ -25,7 +25,7 @@ class D1QuotaLedgerTests(unittest.TestCase):
 
     @patch("urllib.request.urlopen")
     def test_reserve_uses_authenticated_worker_and_passes_every_limit(self, open_url):
-        open_url.return_value = Response({"reservation_id": 17})
+        open_url.return_value = Response({"reservation_id": 17, "settlement_key": "opaque-proof"})
         result = self.ledger.reserve(
             "groq:main:model", 100, 10, 1000,
             monthly_request_limit=50, monthly_token_limit=5000,
@@ -40,21 +40,26 @@ class D1QuotaLedgerTests(unittest.TestCase):
         payload = json.loads(request.data)
         self.assertEqual(payload["action"], "reserve")
         self.assertEqual(payload["task_id"], "task-1")
-        self.assertEqual(payload["daily_request_limit"], 10)
-        self.assertEqual(payload["minute_token_limit"], 500)
+        self.assertNotIn("daily_request_limit", payload)
+        self.assertNotIn("minute_token_limit", payload)
+        self.assertEqual(payload, {"action": "reserve", "route_id": "groq:main:model", "estimated_tokens": 100, "task_id": "task-1"})
+        self.assertEqual(self.ledger._reservations[17], ("opaque-proof", "groq:main:model", "task-1"))
 
     @patch("urllib.request.urlopen")
     def test_identical_settlement_replay_is_accepted_by_worker(self, open_url):
         open_url.return_value = Response({"ok": True, "settled": True, "replay": True})
+        self.ledger._reservations[17] = ("opaque-proof", "groq:main:model", "task-1")
         self.ledger.settle(17, 88)
         payload = json.loads(open_url.call_args.args[0].data)
         self.assertEqual(payload, {
             "action": "settle", "reservation_id": 17, "actual_tokens": 88,
+            "settlement_key": "opaque-proof", "route_id": "groq:main:model", "task_id": "task-1",
         })
 
     @patch("urllib.request.urlopen")
     def test_worker_conflict_fails_closed(self, open_url):
         from urllib.error import HTTPError
+        self.ledger._reservations[17] = ("opaque-proof", "groq:main:model", "task-1")
         open_url.side_effect = HTTPError(
             "https://engine.example/v1/quota", 409, "conflict", {}, None
         )
@@ -64,6 +69,7 @@ class D1QuotaLedgerTests(unittest.TestCase):
     @patch("urllib.request.urlopen")
     def test_ambiguous_transport_failure_raises_without_local_fallback(self, open_url):
         from urllib.error import URLError
+        self.ledger._reservations[17] = ("opaque-proof", "groq:main:model", "task-1")
         open_url.side_effect = URLError("connection reset")
         with self.assertRaisesRegex(D1QuotaLedgerError, "transport failed"):
             self.ledger.settle(17, 88)
