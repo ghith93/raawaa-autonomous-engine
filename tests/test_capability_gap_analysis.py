@@ -70,7 +70,17 @@ class CapabilityGapAnalysisTests(unittest.TestCase):
         self.assertEqual(result["network_calls"], 0)
         self.assertFalse(result["task_creation"])
         self.assertFalse(result["automatic_adoption"])
-        by_id = {item["capability"]: item for item in result["opportunities"]}
+        self.assertFalse(result["task_creation"])
+        self.assertEqual(result["task_proposal_count"], len(result["opportunities"]))
+        self.assertEqual(len(result["task_proposals"]), len(result["opportunities"]))
+        proposal = next(x for x in result["task_proposals"] if x["capability"] == "skill_security")
+        self.assertEqual(proposal["task_type"], "capability_proposal")
+        self.assertEqual(proposal["status"], "PROPOSED")
+        self.assertTrue(proposal["independent_review_required"])
+        self.assertTrue(proposal["owner_approval_required"])
+        self.assertFalse(proposal["task_store_write"])
+        self.assertFalse(proposal["automatic_execution"])
+        self.assertTrue(proposal["rollback_plan"])        by_id = {item["capability"]: item for item in result["opportunities"]}
         self.assertEqual(by_id["agent_orchestration"]["candidate_count"], 1)
         self.assertEqual(by_id["coding_execution"]["candidate_count"], 1)
         self.assertEqual(by_id["skill_security"]["candidate_count"], 1)
@@ -79,6 +89,9 @@ class CapabilityGapAnalysisTests(unittest.TestCase):
         self.assertEqual(by_id["memory"]["current_status"], "local_memory_with_optional_research_persistence")
         self.assertEqual(by_id["model_routing"]["current_status"], "profiles_staged_disabled")
         self.assertEqual(by_id["skill_security"]["current_status"], "static_preflight_implemented_not_verified")
+        self.assertEqual(by_id["skill_security"]["priority_score"], 4)
+        self.assertEqual(by_id["skill_security"]["priority_band"], "medium")
+        self.assertIn("qualitative heuristic", by_id["skill_security"]["scoring_method"])
         self.assertEqual(by_id["durable_execution"]["current_status"], "bounded_scheduled_runner")
 
     def test_missing_broker_and_research_sources_are_reported_without_guessing(self):
