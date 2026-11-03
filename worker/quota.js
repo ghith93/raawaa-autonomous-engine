@@ -112,8 +112,8 @@ export async function handleQuota(request, env, url) {
       if (!validText(input.route_id, 200) || !positiveInt(input.seconds)) return json({ error: "invalid_cooldown" }, 400);
       const until = new Date(Date.now() + Math.min(input.seconds, 86400) * 1000).toISOString();
       const reason = typeof input.reason === "string" ? input.reason.slice(0,120) : "rate_limited";
-      await env.DB.prepare("INSERT INTO quota_cooldowns(route_id,until_at,reason,updated_at) VALUES(?,?,?,?) ON CONFLICT(route_id) DO UPDATE SET until_at=excluded.until_at,reason=excluded.reason,updated_at=excluded.updated_at").bind(input.route_id,until,reason,now).run();
-      return json({ ok: true, until_at: until });
+      const cooldown = await env.DB.prepare("INSERT INTO quota_cooldowns(route_id,until_at,reason,updated_at) VALUES(?,?,?,?) ON CONFLICT(route_id) DO UPDATE SET until_at=MAX(quota_cooldowns.until_at,excluded.until_at),reason=CASE WHEN excluded.until_at>quota_cooldowns.until_at THEN excluded.reason ELSE quota_cooldowns.reason END,updated_at=CASE WHEN excluded.until_at>quota_cooldowns.until_at THEN excluded.updated_at ELSE quota_cooldowns.updated_at END RETURNING until_at").bind(input.route_id,until,reason,now).first();
+      return json({ ok: true, until_at: cooldown.until_at });
     }
     if (input.action === "audit_event") {
       if (!validText(input.event,80) ||
