@@ -18,10 +18,14 @@ class ResearchPersistenceTests(unittest.TestCase):
                 {"doi": "10.1234/paper", "title": "Research"},
                 {"doi": "10.1234/PAPER", "title": "Duplicate"},
             ],
+            "arxiv_candidates": [
+                {"arxiv_id": "2611.00001v1", "title": "ArXiv paper"},
+                {"arxiv_id": "2611.00001V1", "title": "Duplicate arXiv paper"},
+            ],
         }
         candidates = load_candidates(snapshot)
-        self.assertEqual(len(candidates), 2)
-        self.assertEqual([item["source"] for item in candidates], ["github", "crossref"])
+        self.assertEqual(len(candidates), 3)
+        self.assertEqual([item["source"] for item in candidates], ["github", "crossref", "arxiv"])
 
     def test_empty_snapshot_does_not_need_credentials_or_network(self):
         result = persist_candidates({"candidates": [], "academic_candidates": []}, environ={})
@@ -31,6 +35,10 @@ class ResearchPersistenceTests(unittest.TestCase):
         snapshot = {
             "candidates": [{"full_name": f"org/repo-{i}", "url": f"https://github.com/org/repo-{i}"} for i in range(7)],
             "academic_candidates": [{"doi": "10.1234/paper", "title": "Research"}],
+            "arxiv_candidates": [{
+                "arxiv_id": "2611.00001v1", "title": "Agent research",
+                "url": "https://arxiv.org/abs/2611.00001v1",
+            }],
         }
         calls = []
         def fake_post(base_url, token, batch, access_id, access_secret):
@@ -46,14 +54,14 @@ class ResearchPersistenceTests(unittest.TestCase):
             },
             request_fn=fake_post,
             batch_size=5,
-            verify_fn=lambda *args: {"candidates": [{"source_key": "github:org/repo-" + str(i)} for i in range(7)] + [{"source_key": "crossref:10.1234/paper"}]},
+            verify_fn=lambda *args: {"candidates": [{"source_key": "github:org/repo-" + str(i)} for i in range(7)] + [{"source_key": "crossref:10.1234/paper"}, {"source_key": "arxiv:2611.00001v1"}]},
         )
-        self.assertEqual([call[2] for call in calls], [5, 3])
+        self.assertEqual([call[2] for call in calls], [5, 4])
         self.assertEqual(calls[0], ("https://engine.example", "test-secret", 5, "access-id", "access-secret"))
-        self.assertEqual(result["persisted"], 8)
-        self.assertEqual(result["verified"], 8)
+        self.assertEqual(result["persisted"], 9)
+        self.assertEqual(result["verified"], 9)
         self.assertEqual(result["batches"], 2)
-        self.assertEqual(result["sources"], ["crossref", "github"])
+        self.assertEqual(result["sources"], ["arxiv", "crossref", "github"])
 
     def test_missing_credentials_and_unpaired_access_fail_closed(self):
         snapshot = {"candidates": [{"full_name": "org/repo"}]}
