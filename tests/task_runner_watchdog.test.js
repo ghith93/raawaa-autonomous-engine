@@ -145,6 +145,53 @@ test("no previous schedule also triggers the fixed workflow dispatch", async () 
   assert.equal(calls.length, 3);
 });
 
+test("malformed workflow-run JSON fails closed", async () => {
+  const module = await loadModule();
+  assert.ok(module, "Task Runner watchdog module must exist");
+  const fetchImpl = async url => {
+    if (String(url).includes("/access_tokens")) {
+      return new Response(JSON.stringify({ token: "ghs_short_lived_test_token" }), { status: 201 });
+    }
+    return new Response("not-json", { status: 200 });
+  };
+  await assert.rejects(
+    () => module.dispatchTaskRunnerIfStale({ env: envWith(), fetchImpl, nowMs: NOW }),
+    /task_runner_run_list_invalid/,
+  );
+});
+
+test("accepted dispatch is not reported successful when its audit write fails", async () => {
+  const module = await loadModule();
+  assert.ok(module, "Task Runner watchdog module must exist");
+  const DB = {
+    prepare() {
+      return {
+        bind() { return this; },
+        async run() { throw new Error("PRIVATE_DATABASE_DETAIL"); },
+      };
+    },
+  };
+  const { fetchImpl } = makeFetch({ runs: [], dispatchStatus: 204 });
+  await assert.rejects(
+    () => module.dispatchTaskRunnerIfStale({ env: envWith(DB), fetchImpl, nowMs: NOW }),
+    error => {
+      assert.match(error.message, /task_runner_dispatch_audit_failed/);
+      assert.equal(error.message.includes("PRIVATE_DATABASE_DETAIL"), false);
+      return true;
+    },
+  );
+});
+
+test("workflow run listing is fixed to main and sends only the scoped App token", async () => {
+  const module = await loadModule();
+  assert.ok(module, "Task Runner watchdog module must exist");
+  const { fetchImpl, calls } = makeFetch({ runs: [], dispatchStatus: 204 });
+  await module.dispatchTaskRunnerIfStale({ env: envWith(), fetchImpl, nowMs: NOW });
+  assert.match(calls[1].url, /actions\/workflows\/task-runner\.yml\/runs\?branch=main&per_page=20$/);
+  assert.equal(calls[1].options.headers.Authorization, "Bearer ghs_short_lived_test_token");
+  assert.equal(calls[1].options.headers["X-GitHub-Api-Version"], "2026-03-10");
+});
+
 test("GitHub API failures are sanitized and never persist response bodies", async () => {
   const module = await loadModule();
   assert.ok(module, "Task Runner watchdog module must exist");
