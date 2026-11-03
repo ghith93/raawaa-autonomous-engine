@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import os
+import uuid
 from pathlib import Path
 
 from engine.agent_runtime import build_task_contract, load_agent_roster
@@ -103,6 +104,13 @@ def run_once(store: TaskStore, live_gateway=None, environ=None) -> dict | None:
                 prompt=_build_prompt(contract, operating_policy),
                 max_output_tokens=LIVE_MAX_OUTPUT_TOKENS,
                 task_id=task["id"],
+                # This worker currently performs one durable inference step per task.
+                # Derive its stable identity from the persisted task ID and a versioned
+                # step key so a retry after a lost D1 response replays the same reserve.
+                request_id=str(uuid.uuid5(
+                    uuid.NAMESPACE_URL,
+                    f"raawaa-engine:{task['id']}:step:primary-inference:v1",
+                )),
             )
             try:
                 response = live_gateway.generate(request)
