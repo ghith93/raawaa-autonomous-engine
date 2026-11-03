@@ -34,6 +34,19 @@ def _quota(store: RemoteTaskStore, route_id: str, task_id: str) -> dict:
     return store._request("/v1/quota?" + query)
 
 
+def _diagnostics(store: RemoteTaskStore, task_id: str) -> dict:
+    mobile = store._request("/v1/mobile/status")
+    routes = {route: _quota(store, route, task_id) for route in ROUTE_IDS}
+    return {
+        "task_id": task_id,
+        "task_counts": _counts(mobile),
+        "provider_usage": mobile.get("provider_usage"),
+        "model_costs_usd": mobile.get("model_costs_usd"),
+        "monetary_ledger": mobile.get("monetary_ledger"),
+        "route_usage_and_audit": routes,
+    }
+
+
 def main() -> int:
     if os.environ.get("RAAWAA_ENGINE_LIVE_INFERENCE", "").strip().lower() != "enabled":
         raise SystemExit("Refusing inference: explicit one-shot live switch is missing.")
@@ -80,6 +93,7 @@ def main() -> int:
         }, sort_keys=True))
         return 0
     if task.get("status") != "pending":
+        print(json.dumps({"status": "not_pending_no_replay", "diagnostics": _diagnostics(store, task_id)}, sort_keys=True))
         raise SystemExit("Smoke task is not pending; refusing automatic replay.")
 
     before_routes = {route: _quota(store, route, task_id) for route in ROUTE_IDS}
@@ -99,6 +113,11 @@ def main() -> int:
     result = (batch.get("results") or [{}])[0]
     if (batch.get("tasks_processed") != 1 or result.get("status") != "succeeded"
             or result.get("mode") != "live_inference" or result.get("id") != task_id):
+        print(json.dumps({
+            "status": "batch_failed_no_replay",
+            "batch": batch,
+            "diagnostics": _diagnostics(store, task_id),
+        }, sort_keys=True))
         raise SystemExit("Bounded batch did not complete the expected live-inference task.")
 
     saved = next((item for item in store.list_tasks(100) if item.get("id") == task_id), None)
