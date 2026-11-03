@@ -352,6 +352,23 @@ test("research ingestion stores bounded arXiv metadata without abstracts or full
   assert.equal(metadata.full_text_retrieved, false);
 });
 
+test("research ingestion rejects noncanonical arXiv hosts and ports before writes", async () => {
+  for (const url of [
+    "https://evil.example/abs/2601.01234v2",
+    "https://arxiv.org:444/abs/2601.01234v2",
+  ]) {
+    const DB = dbMock();
+    const response = await worker.fetch(request("/v1/research/candidates", {
+      method: "POST",
+      body: { candidates: [{
+        source: "arxiv", arxiv_id: "2601.01234v2", title: "Agent research", url,
+      }] },
+    }), { DB, ENGINE_API_TOKEN: TOKEN });
+    assert.equal(response.status, 400, url);
+    assert.equal(DB.calls.length, 0, url);
+  }
+});
+
 test("research ingestion stores SearXNG HTTPS metadata and rejects IP-literal URLs", async () => {
   const DB = dbMock();
   const response = await worker.fetch(request("/v1/research/candidates", { method: "POST", body: { candidates: [{
