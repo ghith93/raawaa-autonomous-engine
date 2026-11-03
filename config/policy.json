@@ -98,11 +98,5 @@
       "address"
     ]
   },
-  "parallelism": {
-    "strategy": "auto",
-    "max_parallel_agents": null,
-    "scale_to_ready_work": true,
-    "scale_to_available_worker_capacity": true,
-    "hard_limit": null
-  }
+  "max_parallel_agents": 2
 }
