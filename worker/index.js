@@ -298,10 +298,12 @@ export default {
       const taskTypeFilter = codespaceClaim
         ? `AND task_type IN (${CODESPACE_TASK_SQL})`
         : `AND task_type NOT IN (${CODESPACE_TASK_SQL})`;
-      let claimInput;
-      try { claimInput = await readJson(request); }
-      catch (error) {
-        return json({ error: error.message === "body_too_large" ? "body_too_large" : "invalid_json" }, 400);
+      let claimInput = {};
+      if (request.body !== null) {
+        try { claimInput = await readJson(request); }
+        catch (error) {
+          return json({ error: error.message === "body_too_large" ? "body_too_large" : "invalid_json" }, 400);
+        }
       }
       const executionMode = codespaceClaim ? "codespace" : (claimInput?.execution_mode ?? "unknown");
       if (!["unknown", "dry_run", "live_inference", "codespace"].includes(executionMode) ||
