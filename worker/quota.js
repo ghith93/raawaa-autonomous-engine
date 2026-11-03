@@ -11,9 +11,35 @@ function positiveInt(value) { return Number.isSafeInteger(value) && value > 0; }
 function nonNegativeInt(value) { return Number.isSafeInteger(value) && value >= 0; }
 
 async function body(request) {
-  const raw = await request.text();
-  if (new TextEncoder().encode(raw).byteLength > 8192) return null;
-  try { return JSON.parse(raw); } catch { return null; }
+  const declared = Number(request.headers.get("content-length") || 0);
+  if (Number.isFinite(declared) && declared > 8192) return null;
+  if (!request.body) return null;
+  const reader = request.body.getReader();
+  const chunks = [];
+  let total = 0;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      total += value.byteLength;
+      if (total > 8192) {
+        await reader.cancel();
+        return null;
+      }
+      chunks.push(value);
+    }
+  } catch {
+    return null;
+  } finally {
+    reader.releaseLock();
+  }
+  const bytes = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  try { return JSON.parse(new TextDecoder().decode(bytes)); } catch { return null; }
 }
 function iso(value) {
   if (typeof value !== "string" || !/^\d{4}-\d\d-\d\dT/.test(value)) return false;

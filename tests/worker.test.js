@@ -444,6 +444,30 @@ test("quota reservation is one conditional parameterized insert", async () => {
   assert.equal(calls[0].values.length, 32);
 });
 
+test("quota rejects oversized streaming bodies before buffering them fully", async () => {
+  let canceled = false;
+  const oversized = new ReadableStream({
+    start(controller) {
+      controller.enqueue(new Uint8Array(8193));
+    },
+    cancel() {
+      canceled = true;
+    },
+  });
+  const response = await worker.fetch(new Request("https://engine.example/v1/quota", {
+    method: "POST",
+    headers: {
+      authorization: `Bearer ${TOKEN}`,
+      "content-type": "application/json",
+    },
+    body: oversized,
+    duplex: "half",
+  }), { DB: dbMock(), ENGINE_API_TOKEN: TOKEN });
+  assert.equal(response.status, 400);
+  assert.deepEqual(await response.json(), { error: "invalid_body" });
+  assert.equal(canceled, true, "oversized request stream must be canceled at the limit");
+});
+
 test("quota settlement retries identical usage and rejects conflicting usage", async () => {
   let existing = { tokens: 42, settled_at: "2026-11-02T00:00:00.000Z" };
   const DB = {
