@@ -7,14 +7,14 @@ on:
   push:
     branches: [main]
     paths:
-      - .github/workflows/groq-free-inference-staging-smoke.yml
       - scripts/run_groq_free_inference_smoke.py
 
 permissions:
   contents: read
 
 concurrency:
-  group: groq-free-inference-staging-smoke
+  # Serialize with the main CI Staging Worker verification deployment.
+  group: d1-staging-worker-verification
   cancel-in-progress: false
 
 jobs:
@@ -90,6 +90,10 @@ jobs:
         run: |
           test -n "$RAAWAA_ENGINE_STAGING_API_TOKEN" || { echo "Missing ephemeral Staging token"; exit 1; }
           printf '%s' "$RAAWAA_ENGINE_STAGING_API_TOKEN" | npx --yes wrangler@4.156.1 secret put ENGINE_API_TOKEN --config wrangler.staging.toml
+      - name: Reconcile the previously rejected Staging HTTP 403 reservation
+        env:
+          RAAWAA_ENGINE_API_URL: https://raawaa-autonomous-engine-staging.ghith-shikhkhaled.workers.dev
+        run: python scripts/reconcile_groq_403_staging_reservation.py
       - name: Run one bounded Groq Free inference and verify zero spend
         env:
           RAAWAA_ENGINE_API_URL: https://raawaa-autonomous-engine-staging.ghith-shikhkhaled.workers.dev

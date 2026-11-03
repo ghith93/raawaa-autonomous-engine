@@ -43,11 +43,21 @@ class LiveAdapterError(RuntimeError):
         )
 
 
+USER_AGENT = (
+    "RaawaaAutonomousEngine/1.0 "
+    "(+https://github.com/ghith93/raawaa-autonomous-engine)"
+)
+
+
 def _post_json(url: str, headers: dict, body: dict, timeout: int = 45) -> dict:
     request = Request(
         url,
         data=json.dumps(body).encode("utf-8"),
-        headers={**headers, "Content-Type": "application/json"},
+        headers={
+            **headers,
+            "Content-Type": "application/json",
+            "User-Agent": USER_AGENT,
+        },
         method="POST",
     )
     try:

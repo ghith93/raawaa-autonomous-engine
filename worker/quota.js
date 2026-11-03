@@ -122,7 +122,7 @@ export async function handleQuota(request, env, url) {
           (input.details !== undefined && (!input.details || typeof input.details !== "object" || Array.isArray(input.details)))) {
         return json({ error: "invalid_audit_event" }, 400);
       }
-      const allowed = ["reason","error_type","http_status","estimated_tokens","actual_tokens","cooldown_seconds","cost_usd","cost_basis","profile_estimated_cost_usd","provider_reported_cost_usd","provider_reported_cost_available"];
+      const allowed = ["reason","error_type","http_status","error_code","estimated_tokens","actual_tokens","cooldown_seconds","cost_usd","cost_basis","profile_estimated_cost_usd","provider_reported_cost_usd","provider_reported_cost_available"];
       const safe = {};
       if (input.details && typeof input.details === "object" && !Array.isArray(input.details)) {
         for (const [key,value] of Object.entries(input.details)) if (allowed.includes(key) && (typeof value === "string" || (typeof value === "number" && Number.isFinite(value)) || typeof value === "boolean")) safe[key] = typeof value === "string" ? value.slice(0,100) : value;

@@ -20,6 +20,10 @@ class LiveAdapterTests(unittest.TestCase):
             result=adapter.generate("model-x",GenerationRequest("test","hi",20))
         self.assertEqual(result.text,"hello"); self.assertEqual(result.input_tokens,3)
         self.assertFalse(result.mocked); self.assertIn("/chat/completions",call.call_args.args[0].full_url)
+        self.assertEqual(
+            call.call_args.args[0].get_header("User-agent"),
+            "RaawaaAutonomousEngine/1.0 (+https://github.com/ghith93/raawaa-autonomous-engine)",
+        )
 
     def test_gemini(self):
         body=b'{"candidates":[{"content":{"parts":[{"text":"hello"}]}}],"usageMetadata":{"promptTokenCount":4,"candidatesTokenCount":2}}'

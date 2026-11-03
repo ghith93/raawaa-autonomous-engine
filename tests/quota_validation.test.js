@@ -58,6 +58,7 @@ test("quota audit event accepts bounded metadata and writes parameterized values
       cost_basis: "verified_profile_estimate",
       profile_estimated_cost_usd: 0,
       provider_reported_cost_available: false,
+      error_code: "model_permission_blocked_org",
       secret: "must_not_be_stored",
     },
   }, DB);
@@ -69,5 +70,6 @@ test("quota audit event accepts bounded metadata and writes parameterized values
     cost_basis: "verified_profile_estimate",
     profile_estimated_cost_usd: 0,
     provider_reported_cost_available: false,
+    error_code: "model_permission_blocked_org",
   });
 });
