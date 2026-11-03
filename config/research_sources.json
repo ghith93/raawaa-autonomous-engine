@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "max_queries_per_run": 8,
+  "max_queries_per_run": 9,
   "max_results_per_query": 5,
   "queries": {
     "agent_frameworks": "agent framework orchestration topic:agents archived:false",
@@ -9,8 +9,9 @@
     "mcp_ecosystem": "MCP server tools model context protocol archived:false",
     "model_routing": "LLM model router inference gateway quota archived:false",
     "durable_execution": "durable workflow orchestration agent execution archived:false",
-    "agent_skills_security": "agent skills security archived:false",
-    "agent_evaluation": "agent evaluation benchmark archived:false"
+    "agent_skills_security": "agent skill scanner archived:false",
+    "agent_evaluation": "agent evaluation benchmark harness archived:false",
+    "skill_benchmarks": "skillsbench archived:false"
   },
   "review_policy": {
     "automatic_install": false,
