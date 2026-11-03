@@ -190,7 +190,7 @@ def _normalize_crossref_item(item: dict, retrieved_at: str) -> dict | None:
             "source": "crossref", "discovered_at": retrieved_at, "review_status": "unreviewed",
             "license_verified": False, "abstract_retrieved": False}
 
-def discover_repositories(queries=None, environ=None, max_per_query=5, max_queries=6, request_fn=None, now=None, academic_query=None, max_academic_results=10, academic_request_fn=None):
+def discover_repositories(queries=None, environ=None, max_per_query=5, max_queries=6, request_fn=None, now=None, academic_query=None, max_academic_results=10, academic_request_fn=None, arxiv_query=None, max_arxiv_results=10, arxiv_request_fn=None):
     """Search a bounded set of GitHub topics and return unreviewed candidates."""
     if isinstance(max_per_query, bool) or not isinstance(max_per_query, int) or not 1 <= max_per_query <= 10:
         raise ValueError("max_per_query must be an integer between 1 and 10")
@@ -200,6 +200,10 @@ def discover_repositories(queries=None, environ=None, max_per_query=5, max_queri
         raise ValueError("max_academic_results must be an integer between 1 and 10")
     if academic_query is not None and (not isinstance(academic_query, str) or not academic_query.strip()):
         raise ValueError("academic_query must be a non-empty string when supplied")
+    if arxiv_query is not None and (not isinstance(arxiv_query, str) or not arxiv_query.strip()):
+        raise ValueError("arxiv_query must be a non-empty string when supplied")
+    if isinstance(max_arxiv_results, bool) or not isinstance(max_arxiv_results, int) or not 1 <= max_arxiv_results <= 10:
+        raise ValueError("max_arxiv_results must be an integer between 1 and 10")
     query_map = DEFAULT_QUERIES if queries is None else queries
     if not isinstance(query_map, dict) or not 1 <= len(query_map) <= 10:
         raise ValueError("queries must contain between 1 and 10 named queries")
