@@ -1,6 +1,12 @@
+import contextlib
+import io
+import json
+import tempfile
 import unittest
+from pathlib import Path
 
 from engine.skill_static_gate import scan_skill_bundle
+from scripts.scan_skill_bundle import main
 
 
 def manifest(**overrides):
@@ -103,6 +109,28 @@ class SkillStaticGateTests(unittest.TestCase):
         result = scan_skill_bundle(value, {"SKILL.md": "Safe"})
         self.assertEqual(result["status"], "BLOCKED")
         self.assertIn("MANIFEST_SIZE_LIMIT", {x["rule_id"] for x in result["manifest_errors"]})
+
+
+    def test_cli_emits_json_and_uses_blocked_exit_code(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "bundle.json"
+            path.write_text(json.dumps({
+                "manifest": manifest(),
+                "files": {"SKILL.md": "Safe public metadata instructions."},
+            }), encoding="utf-8")
+            output = io.StringIO()
+            with contextlib.redirect_stdout(output):
+                self.assertEqual(main([str(path)]), 0)
+            self.assertEqual(json.loads(output.getvalue())["status"], "PROPOSED")
+
+            path.write_text(json.dumps({
+                "manifest": manifest(permissions=["shell:execute"]),
+                "files": {"SKILL.md": "Safe description."},
+            }), encoding="utf-8")
+            output = io.StringIO()
+            with contextlib.redirect_stdout(output):
+                self.assertEqual(main([str(path)]), 2)
+            self.assertEqual(json.loads(output.getvalue())["status"], "BLOCKED")
 
 
     def test_missing_license_or_entrypoint_never_becomes_approved(self):
