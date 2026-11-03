@@ -84,3 +84,10 @@ Cloudflare Dashboard: https://dash.cloudflare.com/ . Select the account → Work
 - The authenticated Staging readback returned `status=verified`, `ci_health=success`, `kill_switch=engaged`, `paid_fallback=false`, `paid_model_calls=false`, and `external_writes=false`. Ephemeral Staging bearer and quota-admin tokens were revoked by workflow cleanup.
 - This is isolated Staging evidence only; no Production Worker/D1 deployment or mutation occurred.
 - Task Runner manual dispatch #41733799185 on the same main SHA succeeded with no tasks processed; authenticated D1 status still reports watchdog `not_ready`, missing `GITHUB_APP_WATCHDOG_ENABLED`. As of 22:49 UTC, no new `event=schedule` run was observed after PR #439. The cron refresh remains unverified until a true scheduled event appears.
+
+
+## Codespaces release gate — 2026-11-03 22:48 UTC
+
+- PR #427 was merged to main as `bdaf97006aedd431f051c0fec8a182037ed0320b` at 22:46:14 UTC while the security remediation issue #440 remained open. The current branch includes the opt-in bridge code, but no Codespace process was started by this continuation and no Codespace task was processed; the latest Task Runner readback showed queue pending/running counts 0/0.
+- To prevent accidental activation after a future Worker deployment, PR #442 adds a compile-time fail-closed release constant. Codespace status/claim/heartbeat/finish routes and enqueue for Codespace task types return HTTP 503 until issue #440's adversarial sandbox acceptance criteria pass and the release constant is deliberately changed in a reviewed PR.
+- Do not create `ENGINE_CODESPACE_TOKEN`, set `RAAWAA_ENGINE_CODESPACE_BRIDGE=enabled`, or start a Codespace process while issue #440 is open.
