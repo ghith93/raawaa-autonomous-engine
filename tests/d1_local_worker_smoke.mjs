@@ -181,6 +181,8 @@ try {
   assertStatus(status, 200, "mobile status must query migrated D1");
   assert.equal(status.payload.unavailable_metrics.paper_ledger, "Available");
   assert.equal(status.payload.unavailable_metrics.provider_usage, "Available");
+  assert.equal(status.payload.task_execution_modes.available, true);
+  assert.equal(status.payload.task_execution_modes.counts.dry_run.succeeded, 0);
 
   const taskPayload = {
     task_type: "system_audit",
@@ -196,9 +198,12 @@ try {
   assert.equal(duplicate.payload.task.id, enqueued.payload.task.id);
   assert.equal(duplicate.payload.created, false);
 
-  const claimed = await api("/v1/tasks/claim", { method: "POST", body: {} });
+  const claimed = await api("/v1/tasks/claim", {
+    method: "POST", body: { execution_mode: "dry_run" },
+  });
   assertStatus(claimed, 200, "task claim");
   assert.equal(claimed.payload.task.id, enqueued.payload.task.id);
+  assert.equal(claimed.payload.task.execution_mode, "dry_run");
   assert.equal(typeof claimed.payload.lease_token, "string");
 
   const finished = await api("/v1/tasks/" + enqueued.payload.task.id + "/finish", {
@@ -211,6 +216,10 @@ try {
   });
   assertStatus(finished, 200, "task finish");
   assert.equal(finished.payload.status, "succeeded");
+  status = await api("/v1/mobile/status");
+  assertStatus(status, 200, "mobile status exposes execution-mode totals");
+  assert.equal(status.payload.task_execution_modes.counts.dry_run.succeeded, 1);
+  assert.equal(status.payload.task_execution_modes.counts.live_inference.succeeded, 0);
 
   const staleLease = await api("/v1/tasks/" + enqueued.payload.task.id + "/heartbeat", {
     method: "POST",
