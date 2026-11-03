@@ -102,3 +102,10 @@ At every session start, refresh counts, account/connection status, app permissio
 - Graphify approved for a later code-only local evaluation: official source https://github.com/Graphify-Labs/graphify, Apache-2.0, official PyPI package `graphifyy`, CLI `graphify`. Offline code parsing is local; optional semantic extraction can send docs/media to the configured model backend. Not installed, not run, and not added as a runtime dependency. Security/privacy notes: https://graphify.com/security.
 - Spec Kit remains a deferred optional MIT developer tool; no installation performed. F1/F5 remain pending.
 
+
+## F1 execution-mode field — 2026-11-04
+
+- Proposed additive migration: `migrations/0009_task_execution_mode.sql`; SQLite compatibility migration is in `engine/task_store.py`.
+- Updated D1 Worker task list/claim/finish endpoints and Mobile Status to expose execution-mode aggregates.
+- Values: `not_started`, `dry_run`, `live_inference`, `unknown`. Legacy rows remain `unknown`; new tasks begin `not_started`.
+- Status: implementation on unmerged branch `feat/task-execution-mode`; no migration has been applied to Staging or Production and no Worker deployment has occurred.
