@@ -5,9 +5,9 @@ import re
 from pathlib import Path
 
 MAIN_REF_GUARD = "github.ref == 'refs/heads/main'"
-DISPATCH = re.compile(r"(?m)^  workflow_dispatch\\s*:")
-SECRET = re.compile(r"\\$\\{\\{\\s*secrets\\.")
-JOB_HEADER = re.compile(r"^  ([A-Za-z0-9_-]+):\\s*$")
+DISPATCH = re.compile(r"(?m)^  workflow_dispatch\s*:")
+SECRET = re.compile(r"\$\{\{\s*secrets\.")
+JOB_HEADER = re.compile(r"^  ([A-Za-z0-9_-]+):\s*$")
 
 
 def job_blocks(content: str) -> list[tuple[str, str]]:
@@ -22,13 +22,13 @@ def job_blocks(content: str) -> list[tuple[str, str]]:
         match = JOB_HEADER.match(line)
         if match:
             if name is not None:
-                blocks.append((name, "\\n".join(current)))
+                blocks.append((name, "\n".join(current)))
             name = match.group(1)
             current = []
         elif name is not None:
             current.append(line)
     if name is not None:
-        blocks.append((name, "\\n".join(current)))
+        blocks.append((name, "\n".join(current)))
     return blocks
 
 
@@ -52,7 +52,7 @@ def main() -> int:
     for path in sorted(workflow_dir.glob("*.yml")):
         violations.extend(workflow_violations(str(path.relative_to(root)), path.read_text(encoding="utf-8")))
     if violations:
-        print("\\n".join(violations))
+        print("\n".join(violations))
         return 1
     print("All secret-bearing workflow_dispatch jobs are restricted to refs/heads/main.")
     return 0
