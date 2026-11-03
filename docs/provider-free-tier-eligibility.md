@@ -116,6 +116,18 @@ Sources:
 - Groq rate limits: https://console.groq.com/docs/rate-limits
 - Groq Free-plan billing FAQ: https://community.groq.com/t/do-i-get-charged-for-anything-on-the-groq-free-plan/832
 
+## Cost accounting semantics (2026-11-03)
+
+The OpenAI-compatible and Gemini adapters receive token-usage metadata but do not receive invoice-level billing amounts. They now return `cost_usd: null` rather than presenting `0.0` as a measured charge.
+
+- The quota gateway estimates cost from actual input/output token counts and the selected, verified provider profile's input/output rates.
+- If an adapter later supplies a provider-reported cost, the gateway records the greater of the reported amount and the profile estimate.
+- The durable quota audit event records `cost_basis` as `verified_profile_estimate`, `provider_reported`, or `verified_profile_floor`.
+- A positive provider-reported or profile-estimated amount on a route advertised as free is recorded and quarantines that route before returning a result.
+- A zero profile estimate is **not** an invoice-level guarantee. Reconcile the provider's billing/usage console after any explicitly approved controlled inference test.
+
+All provider profiles remain disabled, all monetary budgets remain $0, and no inference request has been sent. This change improves accounting truthfulness; it does not enable or authorize inference.
+
 ## Required evidence before enabling any route
 
 1. Provider account is accessible and its exact plan/tier is visible.
