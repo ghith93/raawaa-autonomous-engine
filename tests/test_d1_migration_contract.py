@@ -7,6 +7,7 @@ import unittest
 ROOT = Path(__file__).resolve().parents[1]
 MIGRATION = ROOT / "migrations" / "0001_initial.sql"
 MIGRATION_2 = ROOT / "migrations" / "0002_research_candidates.sql"
+MIGRATION_8 = ROOT / "migrations" / "0008_task_execution_mode.sql"
 
 
 class D1MigrationContractTests(unittest.TestCase):
@@ -84,6 +85,33 @@ class D1MigrationContractTests(unittest.TestCase):
                  "unknown", 0, 2, "2026-01-01T00:00:00Z",
                  "2026-01-01T00:00:00Z")
             )
+
+    def test_task_execution_mode_migration_preserves_legacy_as_unknown(self):
+        self.db.executescript(self.sql)
+        self.db.execute("""INSERT INTO tasks
+            (id,idempotency_key,task_type,title,payload_json,status,attempts,max_attempts,created_at,updated_at)
+            VALUES ('legacy-task','legacy-key','research_brief','Legacy success','{}','succeeded',1,2,'2026-01-01','2026-01-01')""")
+        migration = MIGRATION_8.read_text(encoding="utf-8")
+        self.db.executescript(migration)
+        self.db.executescript(migration)
+        columns = {row[1] for row in self.db.execute("PRAGMA table_info(tasks)")}
+        self.assertIn("execution_mode", columns)
+        self.assertEqual(self.db.execute(
+            "SELECT execution_mode FROM tasks WHERE id='legacy-task'"
+        ).fetchone(), ("unknown",))
+        self.db.execute("""INSERT INTO tasks
+            (id,idempotency_key,task_type,title,payload_json,status,execution_mode,attempts,max_attempts,created_at,updated_at)
+            VALUES ('dry-task','dry-key','research_brief','Dry run','{}','succeeded','dry_run',1,2,'2026-01-02','2026-01-02')""")
+        self.db.execute("""INSERT INTO tasks
+            (id,idempotency_key,task_type,title,payload_json,status,execution_mode,attempts,max_attempts,created_at,updated_at)
+            VALUES ('live-task','live-key','research_brief','Live inference','{}','succeeded','live_inference',1,2,'2026-01-03','2026-01-03')""")
+        with self.assertRaises(sqlite3.IntegrityError):
+            self.db.execute("""UPDATE tasks SET execution_mode='pretend_success' WHERE id='legacy-task'""")
+        self.assertEqual(self.db.execute(
+            "SELECT version FROM schema_migrations WHERE version='0008_task_execution_mode'"
+        ).fetchone(), ("0008_task_execution_mode",))
+        indexes = {row[1] for row in self.db.execute("PRAGMA index_list(tasks)")}
+        self.assertIn("idx_tasks_execution_mode_status", indexes)
 
     def test_operations_and_usage_constraints(self):
         self.db.executescript(self.sql)
