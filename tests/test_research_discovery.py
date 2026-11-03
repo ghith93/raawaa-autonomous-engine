@@ -1,9 +1,13 @@
 import unittest
 from unittest.mock import patch
 from datetime import datetime, timezone
-from engine.research_discovery import MAX_RESPONSE_BYTES, ResearchDiscoveryError, _request_crossref, _request_json, discover_repositories
+from engine.research_discovery import DEFAULT_QUERIES, MAX_RESPONSE_BYTES, ResearchDiscoveryError, _request_crossref, _request_json, discover_repositories
 
 class ResearchDiscoveryTests(unittest.TestCase):
+    def test_default_queries_include_skill_security_and_agent_evaluation(self):
+        self.assertIn("agent_skills_security", DEFAULT_QUERIES)
+        self.assertIn("agent_evaluation", DEFAULT_QUERIES)
+
     def test_discovery_returns_metadata_only_candidates_and_deduplicates(self):
         payloads = [
             {"items": [{"full_name": "org/agent-a", "html_url": "https://github.com/org/agent-a", "description": "agent framework", "stargazers_count": 120, "language": "Python", "license": {"spdx_id": "MIT"}, "pushed_at": "2026-10-20T00:00:00Z", "archived": False, "topics": ["agents"]}, {"full_name": "org/shared", "html_url": "https://github.com/org/shared", "stargazers_count": 5, "pushed_at": "2026-10-01T00:00:00Z"}]},

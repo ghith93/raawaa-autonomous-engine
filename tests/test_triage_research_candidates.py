@@ -8,6 +8,44 @@ class ResearchTriageTests(unittest.TestCase):
     def setUp(self):
         self.now = datetime(2026, 11, 1, tzinfo=timezone.utc)
 
+    def test_skill_security_and_agent_evaluation_topics_are_directly_relevant(self):
+        for topic in ("agent_skills_security", "agent_evaluation"):
+            with self.subTest(topic=topic):
+                result = triage_candidates({
+                    "candidates": [{
+                        "full_name": "org/research-project",
+                        "url": "https://github.com/org/research-project",
+                        "license_spdx": "MIT",
+                        "pushed_at": "2026-10-30T00:00:00Z",
+                        "stars": 120,
+                        "language": "Python",
+                        "archived": False,
+                        "description": "Research tooling",
+                        "discovered_via": [topic],
+                    }],
+                    "academic_candidates": [],
+                }, self.now)
+                item = result["github_candidates"][0]
+                self.assertIn("directly_relevant_to_engine_research", item["reasons"])
+
+    def test_security_skills_and_evaluation_terms_rank_relevant_papers(self):
+        result = triage_candidates({
+            "candidates": [],
+            "academic_candidates": [{
+                "doi": "10.1234/skills-security",
+                "title": "Agent Skills Security and Evaluation Benchmarks",
+                "url": "https://doi.org/10.1234/skills-security",
+                "published": "2026-10-15",
+                "citation_count": 20,
+                "license_urls": [],
+            }],
+        }, self.now)
+        item = result["academic_candidates"][0]
+        self.assertIn("skills", item["relevance_terms"])
+        self.assertIn("security", item["relevance_terms"])
+        self.assertIn("evaluation", item["relevance_terms"])
+        self.assertEqual(item["priority"], "high")
+
     def test_recent_permissively_licensed_python_project_ranks_high(self):
         result = triage_candidates({
             "candidates": [{
