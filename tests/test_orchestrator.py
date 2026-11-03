@@ -117,5 +117,22 @@ class OrchestratorTests(unittest.TestCase):
             validate_and_plan(wf, ROSTER)
 
 
+    def test_malformed_workflow_and_roster_fail_closed(self):
+        with self.assertRaisesRegex(WorkflowValidationError, "workflow must be an object"):
+            validate_and_plan([], ROSTER)
+        with self.assertRaisesRegex(WorkflowValidationError, "agent roster"):
+            validate_and_plan(self.workflow(), [])
+
+    def test_non_string_task_type_and_risk_fail_closed(self):
+        wf = self.workflow()
+        wf["steps"][0]["task_type"] = []
+        with self.assertRaisesRegex(WorkflowValidationError, "task type is not allowlisted"):
+            validate_and_plan(wf, ROSTER)
+        wf = self.workflow()
+        wf["steps"][0]["risk"] = []
+        with self.assertRaisesRegex(WorkflowValidationError, "invalid risk level"):
+            validate_and_plan(wf, ROSTER)
+
+
 if __name__ == "__main__":
     unittest.main()
