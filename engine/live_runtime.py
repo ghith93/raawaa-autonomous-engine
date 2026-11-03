@@ -27,6 +27,7 @@ def build_live_gateway(
     policy_path: str | Path,
     registry_path: str | Path,
     environ=None,
+    invocation_store=None,
 ) -> QuotaAwareLiveGateway | None:
     """Build an adapter map only after policy, operator, profile, quota and key checks."""
     source = os.environ if environ is None else environ
@@ -110,4 +111,5 @@ def build_live_gateway(
         daily_budget_usd=policy.get("daily_budget_usd", 0),
         monthly_budget_usd=policy.get("monthly_budget_usd", 0),
         per_task_budget_usd=policy.get("per_task_budget_usd", 0),
+        invocation_store=invocation_store,
     )
