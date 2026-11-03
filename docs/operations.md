@@ -284,3 +284,17 @@ This addendum supersedes earlier operational snapshots and historical statements
 2. Continue the six-phase pilot with the owner-side Codespaces OAuth handoff; do not attempt to bypass the interactive identity step.
 3. Implement the next isolated, public-data-only Execution Manager increment behind a disabled feature gate, reusing D1 task identity, lease fencing, policy loading, and existing quota/audit contracts. Require isolated workspaces, hard process/time/output bounds, kill-on-lease-loss, and a separate reviewer before any CLI execution is connected.
 4. Keep ARTEMIS as a separate, disabled mobile-QA integration; do not revive the retired AndroidHarness/Droid device runner.
+
+
+## Codespace bridge — staged implementation (2026-11-03)
+
+The first isolated Codespace execution slice is implemented on branch `feat/codespace-task-isolation` and remains disabled until an owner configures its distinct secret and starts the process inside the existing Codespace.
+
+- The D1 task table and queue remain canonical; no second queue, database, scheduler, or schema migration is introduced.
+- The legacy `/v1/tasks/claim` query explicitly excludes `codespace_inspect` and `codespace_test`; the Codespace claim endpoint selects only those task types.
+- The bridge uses a distinct `ENGINE_CODESPACE_TOKEN` principal and can access only its read-only preflight, claim, heartbeat, and finish routes only; the bridge has no retry endpoint. It cannot use general task listing/recovery, quota, monetary, provider, or admin routes.
+- Initial operations are read-only repository inspection and fixed local test suites. Arbitrary shell strings, patch application, deployment, inference, external writes, and secret access are not supported.
+- Every run loads the same mandatory operating-policy documents before claiming work. Each task is bounded to one fixed command, 240 seconds, bounded output, and the existing 900-second fenced lease.
+- Runtime opt-in is `RAAWAA_ENGINE_CODESPACE_BRIDGE=enabled`; unset means disabled. The existing Codespace is not created, stopped, upgraded, or automatically kept alive by this change.
+
+Required owner-side activation after review: configure a newly generated, distinct high-entropy `ENGINE_CODESPACE_TOKEN` in the Cloudflare Worker and `RAAWAA_ENGINE_CODESPACE_TOKEN` in the existing Codespace, plus the existing API URL and optional Cloudflare Access credentials. Do not place token values in Git, PR comments, logs, or chat. Run `python -m engine.codespace_bridge --preflight`, then one harmless inspection/test task. Do not enable continuous polling until cost/idle behavior is understood. This code change does not claim the Codespace process is installed or running.
