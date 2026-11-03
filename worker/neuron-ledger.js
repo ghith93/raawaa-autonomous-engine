@@ -244,6 +244,12 @@ async function transition(db, input, action, now) {
   if (action === "mark_in_flight") {
     if (row.status === "in_flight") return json({ reservation_id: row.reservation_id, status: row.status, replay: true });
     if (row.status !== "reserved") return json({ error: "invalid_reservation_transition" }, 409);
+    const policy = await policyRow(db);
+    if (!policy || Number(policy.enabled) !== 1) return json({ error: "neuron_ledger_disabled" }, 403);
+    const quarantine = await db.prepare(
+      "SELECT model_id FROM workers_ai_neuron_quarantines WHERE model_id=?"
+    ).bind(row.model_id).first();
+    if (quarantine) return json({ error: "model_quarantined" }, 409);
     const result = await db.prepare(
       "UPDATE workers_ai_neuron_reservations SET status='in_flight',started_at=? " +
       "WHERE reservation_id=? AND status='reserved'"
