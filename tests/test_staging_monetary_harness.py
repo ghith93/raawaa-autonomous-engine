@@ -44,6 +44,21 @@ class StagingMonetaryHarnessTests(unittest.TestCase):
         self.assertEqual(open_url.call_count, 2)
         sleep.assert_called_once_with(2)
 
+    def test_api_uses_explicit_scoped_token_without_changing_runner_token(self):
+        response = ApiResponse(b'{"ok":true}')
+        with (
+            patch.object(harness, "BASE_URL", "https://example.invalid"),
+            patch.object(harness, "TOKEN", "runner-token"),
+            patch("scripts.verify_staging_monetary_ledger.urllib.request.urlopen",
+                  return_value=response) as open_url,
+        ):
+            status, body = harness.api("GET", "/v1/quota", token="admin-token")
+        self.assertEqual(status, 200)
+        self.assertTrue(body["ok"])
+        request = open_url.call_args.args[0]
+        self.assertEqual(request.get_header("Authorization"), "Bearer admin-token")
+        self.assertEqual(harness.TOKEN, "runner-token")
+
     def test_authenticated_api_does_not_retry_non_auth_4xx(self):
         forbidden = HTTPError(
             "https://example.invalid/v1/monetary-ledger",
