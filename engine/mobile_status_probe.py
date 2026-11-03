@@ -22,6 +22,11 @@ _OUTPUT_KEYS = (
     "paper_ledger",
     "provider_usage",
     "telegram_receipts",
+    "worker_cron_status",
+    "worker_cron_last_seen",
+    "worker_cron_schedule",
+    "worker_cron_requeued",
+    "worker_cron_failed",
     "last_scan",
     "source_freshness",
     "ci_health",
@@ -128,11 +133,71 @@ def summarize_mobile_status(payload: object, http_status: int = 200) -> dict[str
             return "unknown"
         return missing_label if marker in value else "available"
 
+    worker_cron = payload.get("worker_cron")
+    if worker_cron is None:
+        reason = unavailable.get("worker_cron", "")
+        reason_text = reason.lower() if isinstance(reason, str) else ""
+        if "no worker cron heartbeat" in reason_text or "no heartbeat has been recorded" in reason_text:
+            worker_cron_values = {
+                "worker_cron_status": "not_recorded",
+                "worker_cron_last_seen": "unknown",
+                "worker_cron_schedule": "unknown",
+                "worker_cron_requeued": "unknown",
+                "worker_cron_failed": "unknown",
+            }
+        elif "invalid" in reason_text:
+            worker_cron_values = {
+                "worker_cron_status": "invalid",
+                "worker_cron_last_seen": "unknown",
+                "worker_cron_schedule": "unknown",
+                "worker_cron_requeued": "unknown",
+                "worker_cron_failed": "unknown",
+            }
+        else:
+            worker_cron_values = {
+                "worker_cron_status": "unknown",
+                "worker_cron_last_seen": "unknown",
+                "worker_cron_schedule": "unknown",
+                "worker_cron_requeued": "unknown",
+                "worker_cron_failed": "unknown",
+            }
+    else:
+        try:
+            if not isinstance(worker_cron, dict):
+                raise ValueError("worker_cron must be an object")
+            last_seen = worker_cron.get("last_seen_at")
+            if not isinstance(last_seen, str) or not last_seen or len(last_seen) > 40:
+                raise ValueError("invalid Worker Cron timestamp")
+            parsed_last_seen = datetime.fromisoformat(last_seen.replace("Z", "+00:00"))
+            if parsed_last_seen.tzinfo is None or parsed_last_seen.utcoffset() is None:
+                raise ValueError("Worker Cron timestamp must be timezone-aware")
+            cron_expression = worker_cron.get("cron")
+            if not isinstance(cron_expression, str) or not cron_expression or len(cron_expression) > 100:
+                raise ValueError("invalid Worker Cron expression")
+            requeued = _count(worker_cron.get("requeued"))
+            failed = _count(worker_cron.get("failed"))
+            worker_cron_values = {
+                "worker_cron_status": "recorded",
+                "worker_cron_last_seen": last_seen,
+                "worker_cron_schedule": cron_expression,
+                "worker_cron_requeued": str(requeued),
+                "worker_cron_failed": str(failed),
+            }
+        except (TypeError, ValueError, OverflowError):
+            worker_cron_values = {
+                "worker_cron_status": "invalid",
+                "worker_cron_last_seen": "unknown",
+                "worker_cron_schedule": "unknown",
+                "worker_cron_requeued": "unknown",
+                "worker_cron_failed": "unknown",
+            }
+
     return {
         "http": str(http_status),
         "paper_ledger": migration_flag("paper_ledger"),
         "provider_usage": migration_flag("provider_usage"),
         "telegram_receipts": telegram_receipts,
+        **worker_cron_values,
         "last_scan": gap_flag("last_scan", "not recorded", "not_recorded"),
         "source_freshness": gap_flag("source_freshness", "not yet aggregated", "not_aggregated"),
         "ci_health": gap_flag("ci_health", "not yet ingested", "not_ingested"),
