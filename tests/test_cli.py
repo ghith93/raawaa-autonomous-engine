@@ -65,7 +65,7 @@ class CliTests(unittest.TestCase):
         self.assertIn("safe dry-run", output.getvalue())
 
 
-    def test_audit_rejects_nonzero_or_malformed_per_task_budget(self):
+    def test_audit_rejects_budget_overrun_and_malformed_caps(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             (root / "config").mkdir()
@@ -74,12 +74,12 @@ class CliTests(unittest.TestCase):
                 (root / "config" / name).write_text(source.read_text(encoding="utf-8"), encoding="utf-8")
             policy_path = root / "config" / "policy.json"
             policy = json.loads(policy_path.read_text(encoding="utf-8"))
-            policy["per_task_budget_usd"] = 0.01
+            policy["monthly_budget_usd"] = 13.0
             policy_path.write_text(json.dumps(policy), encoding="utf-8")
             output = io.StringIO()
             with patch.object(cli, "ROOT", root), contextlib.redirect_stdout(output):
                 self.assertEqual(cli.audit(), 1)
-            self.assertIn("daily, monthly, and per-task", output.getvalue())
+            self.assertIn("monthly_budget_usd must equal the model monthly hard cap", output.getvalue())
 
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -94,7 +94,7 @@ class CliTests(unittest.TestCase):
             output = io.StringIO()
             with patch.object(cli, "ROOT", root), contextlib.redirect_stdout(output):
                 self.assertEqual(cli.audit(), 1)
-            self.assertIn("daily, monthly, and per-task", output.getvalue())
+            self.assertIn("per_task_budget_usd must be a finite non-negative number", output.getvalue())
 
 
     def test_audit_rejects_invalid_parallel_agent_policy(self):
