@@ -105,7 +105,8 @@ def _request_arxiv(query: str, max_results: int = 10, timeout: int = 20) -> dict
             final_url = response.geturl() if callable(getattr(response, "geturl", None)) else request.full_url
             parsed_url = urlparse(final_url)
             if (parsed_url.scheme != "https" or parsed_url.hostname != "export.arxiv.org"
-                    or parsed_url.port not in (None, 443) or parsed_url.username or parsed_url.password):
+                    or parsed_url.netloc.lower() not in {"export.arxiv.org", "export.arxiv.org:443"}
+                    or parsed_url.username or parsed_url.password):
                 raise ResearchDiscoveryError("arXiv response redirected outside the fixed HTTPS host")
             raw = response.read(MAX_RESPONSE_BYTES + 1)
             if len(raw) > MAX_RESPONSE_BYTES:
