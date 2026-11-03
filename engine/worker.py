@@ -111,6 +111,8 @@ def run_once(store: TaskStore, live_gateway=None, environ=None) -> dict | None:
                     uuid.NAMESPACE_URL,
                     f"raawaa-engine:{task['id']}:step:primary-inference:v1",
                 )),
+                step_key="primary-inference:v1",
+                lease_token=task["lease_token"],
             )
             try:
                 response = live_gateway.generate(request)
