@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import worker from "../worker/index.js";
 
 const TOKEN = "mobile-status-test-token";
-function dbMock(migrationVersions=["0003_durable_quota_ledger","0004_paper_event_ledger","0005_telegram_webhook_receipts"], workerCron={created_at:"2026-11-03T00:00:00.000Z",details_json:JSON.stringify({cron:"*/15 * * * *",requeued:2,failed:1})}, watchdogEvents=[], ciHealthRow=null, killSwitchRow=null) {
+function dbMock(migrationVersions=["0003_durable_quota_ledger","0004_paper_event_ledger","0005_telegram_webhook_receipts"], workerCron={created_at:"2026-11-03T00:00:00.000Z",details_json:JSON.stringify({cron:"*/15 * * * *",requeued:2,failed:1})}, watchdogEvents=[], ciHealthRow=null, killSwitchRow=null, invocationCounts=[]) {
   const calls=[];
   return {
     calls,
@@ -15,6 +15,7 @@ function dbMock(migrationVersions=["0003_durable_quota_ledger","0004_paper_event
         async all(){
           calls.push({kind:"all",sql,values:this.values});
           if(sql.includes("FROM tasks")) return {results:[{status:"pending",count:2}]};
+          if(sql.includes("FROM task_model_invocations")) return {results:invocationCounts};
           if(sql.includes("schema_migrations")) return {results:migrationVersions.map(version=>({version}))};
           if(sql.includes("FROM paper_events")) return {results:[{event_type:"candidate_detected",count:4}]};
           if(sql.includes("FROM quota_usage")) return {results:[{route_id:"groq:gpt-oss-20b",requests:3,tokens:1200}]};
@@ -51,6 +52,8 @@ test("mobile status page is public static HTML and never embeds an API token",as
  assert.doesNotMatch(response.headers.get("content-security-policy"),/api\\.github\\.com/);
  assert.doesNotMatch(body,/api\\.github\\.com/); 
  assert.match(body,/Default Task Runner inference gate/);
+ assert.match(body,/Durable task-step invocations/);
+ assert.match(body,/unresolved_count/);
 });
 
 test("mobile status endpoint requires the existing Engine bearer token",async()=>{
@@ -164,6 +167,37 @@ test("mobile status preserves stale CI and inference-gate snapshots as stale",as
  assert.equal(body.ci_health.freshness,"stale");
  assert.equal(body.kill_switch.status,"stale");
  assert.equal(body.kill_switch.freshness,"stale");
+});
+
+test("mobile status exposes only aggregate durable task invocation lifecycle counts",async()=>{
+ const versions=["0003_durable_quota_ledger","0004_paper_event_ledger","0005_telegram_webhook_receipts","0006_monetary_budget_ledger","0007_task_model_invocations"];
+ const counts=[
+  {status:"prepared",count:2},
+  {status:"in_flight",count:1},
+  {status:"ambiguous",count:3},
+  {status:"settled",count:9},
+ ];
+ const DB=dbMock(versions,undefined,[],null,null,counts);
+ const response=await worker.fetch(request("/v1/mobile/status"),{DB,ENGINE_API_TOKEN:TOKEN});
+ assert.equal(response.status,200);
+ const body=await response.json();
+ assert.deepEqual(body.task_invocations,{
+  available:true,
+  counts:{prepared:2,in_flight:1,ambiguous:3,settled:9},
+  unresolved_count:6,
+ });
+ const serialized=JSON.stringify(body);
+ for(const secret of ["task-123","request-123","lease-secret","prompt text"]) assert.equal(serialized.includes(secret),false);
+});
+
+test("mobile status does not query invocation tables before migration 0007",async()=>{
+ const DB=dbMock(["0003_durable_quota_ledger","0004_paper_event_ledger","0005_telegram_webhook_receipts"]);
+ const response=await worker.fetch(request("/v1/mobile/status"),{DB,ENGINE_API_TOKEN:TOKEN});
+ assert.equal(response.status,200);
+ const body=await response.json();
+ assert.deepEqual(body.task_invocations,{available:false});
+ assert.equal(body.unavailable_metrics.task_invocations,"Migration 0007 is not applied to this database");
+ assert.equal(DB.calls.some(call=>call.sql.includes("FROM task_model_invocations")),false);
 });
 
 test("mobile status endpoint rejects writes",async()=>{

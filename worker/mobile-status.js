@@ -46,6 +46,7 @@ h2{font-size:16px;margin:0 0 10px}.rows{display:grid;gap:8px}.item{display:flex;
 <section class="panel"><h2>Provider usage · D1</h2><div id="usage" class="rows"></div></section>
 <section class="panel"><h2>Recorded model inference costs · USD</h2><div id="modelCosts" class="rows"></div><p class="muted">Recorded provider costs only; external or unreported spend is not inferred.</p></section>
 <section class="panel"><h2>Durable monetary budget ledger · D1</h2><div id="monetaryLedger" class="rows"></div><p class="muted">Unresolved reservations count against all budget windows. A pending reservation is never released automatically.</p></section>
+<section class="panel"><h2>Durable task-step invocations · D1</h2><div id="taskInvocations" class="rows"></div><p class="muted">Aggregate lifecycle counts only. Prompts, task IDs, request IDs and lease tokens are never exposed.</p></section>
 <section class="panel"><h2>Latest market snapshot</h2><div id="snapshot" class="muted">—</div></section><section class="panel"><h2>Latest paper event</h2><div id="latest" class="muted">—</div></section><section class="panel"><h2>Telegram control readiness</h2><div id="telegramSchema" class="rows"></div><p class="muted">Schema presence only; webhook activation still requires operator-managed secrets and Telegram configuration.</p></section><section class="panel"><h2>Worker Cron heartbeat</h2><div id="workerCron" class="rows"></div></section><section class="panel"><h2>Task Runner watchdog</h2><div id="watchdog" class="rows"></div><p class="muted">Readiness only; secret values are never returned. Dispatch history is read from the D1 audit ledger.</p></section><section class="panel"><h2>GitHub CI health · Staging snapshot</h2><div id="ci" class="rows"></div></section>
 <section class="panel"><h2>Default Task Runner inference gate</h2><div id="killSwitch" class="rows"></div><p class="muted">This reports the committed default Task Runner policy, not one-off Staging smoke workflows.</p></section>
 <section class="panel"><h2>Not yet connected to this status feed</h2><div id="gaps" class="rows"></div></section>
@@ -93,6 +94,15 @@ async function load() {
     ["Quarantined routes",money.quarantined_routes||0],
     ["Hard-cap policy enabled",money.budget_policy_enabled?"Yes":"No"]
   ]:[],data.unavailable_metrics?.monetary_ledger||"D1 monetary ledger unavailable");
+  const invocations=data.task_invocations||{};
+  const invocationCounts=invocations.counts||{};
+  rows("taskInvocations",invocations.available?[
+    ["Prepared",invocationCounts.prepared||0],
+    ["In flight",invocationCounts.in_flight||0],
+    ["Ambiguous",invocationCounts.ambiguous||0],
+    ["Settled",invocationCounts.settled||0],
+    ["Unresolved",invocations.unresolved_count||0]
+  ]:[],data.unavailable_metrics?.task_invocations||"D1 invocation lifecycle unavailable");
   $("snapshot").textContent=data.latest_market_snapshot?data.latest_market_snapshot.candidate_id+" · chain "+(data.latest_market_snapshot.chain_id??"—")+" · block "+(data.latest_market_snapshot.block_number??"—")+" · "+data.latest_market_snapshot.occurred_at:"No market snapshot recorded";
   $("latest").textContent=data.latest_paper_event?data.latest_paper_event.event_type+" · "+data.latest_paper_event.candidate_id+" · "+data.latest_paper_event.occurred_at:"No paper event recorded";
   rows("telegramSchema",[[ "Webhook receipt schema", data.telegram_webhook_schema?.status || "Unknown" ]],"Schema status unavailable");
@@ -155,13 +165,35 @@ export async function handleMobileStatus(request, env, url) {
   try {
     const [tasks, migrations, workerCron, watchdogEvents, ciHealthRow, killSwitchRow] = await Promise.all([
       env.DB.prepare("SELECT status,COUNT(*) AS count FROM tasks GROUP BY status").all(),
-      env.DB.prepare("SELECT version FROM schema_migrations WHERE version IN ('0003_durable_quota_ledger','0004_paper_event_ledger','0005_telegram_webhook_receipts','0006_monetary_budget_ledger')").all(),
+      env.DB.prepare("SELECT version FROM schema_migrations WHERE version IN ('0003_durable_quota_ledger','0004_paper_event_ledger','0005_telegram_webhook_receipts','0006_monetary_budget_ledger','0007_task_model_invocations')").all(),
       env.DB.prepare("SELECT created_at,details_json FROM audit_log WHERE task_id IS NULL AND event='worker_cron_tick' ORDER BY created_at DESC LIMIT 1").first(),
       env.DB.prepare("SELECT event,created_at,details_json FROM audit_log WHERE task_id IS NULL AND event IN ('task_runner_dispatch_requested','task_runner_dispatch_intent') ORDER BY created_at DESC LIMIT 2").all(),
       env.DB.prepare("SELECT created_at,details_json FROM audit_log WHERE task_id IS NULL AND event='ci_health_snapshot' ORDER BY created_at DESC LIMIT 1").first(),
       env.DB.prepare("SELECT created_at,details_json FROM audit_log WHERE task_id IS NULL AND event='kill_switch_snapshot' ORDER BY created_at DESC LIMIT 1").first(),
     ]);
     const applied = new Set((migrations.results || []).map(row => row.version));
+    let taskInvocations = null;
+    if (applied.has("0007_task_model_invocations")) {
+      try {
+        const result = await env.DB.prepare(
+          "SELECT status,COUNT(*) AS count FROM task_model_invocations GROUP BY status"
+        ).all();
+        const counts = { prepared: 0, in_flight: 0, ambiguous: 0, settled: 0 };
+        for (const row of result.results || []) {
+          if (!Object.hasOwn(counts, row.status) || !Number.isSafeInteger(Number(row.count)) || Number(row.count) < 0) {
+            throw new Error("invalid_invocation_aggregate");
+          }
+          counts[row.status] = Number(row.count);
+        }
+        taskInvocations = {
+          available: true,
+          counts,
+          unresolved_count: counts.prepared + counts.in_flight + counts.ambiguous,
+        };
+      } catch {
+        taskInvocations = { available: false };
+      }
+    }
     const watchdogReadiness = getTaskRunnerWatchdogReadiness(env);
     const watchdogHistory = (watchdogEvents.results || []).map(row => {
       if (!["task_runner_dispatch_requested", "task_runner_dispatch_intent"].includes(row.event)
@@ -337,6 +369,7 @@ export async function handleMobileStatus(request, env, url) {
         total: (modelCosts.results || []).reduce((sum, row) => sum + (Number(row.cost_usd) || 0), 0),
         source: applied.has("0006_monetary_budget_ledger") ? "D1 monetary_reservations; legacy model_usage costs backfilled" : "model_usage D1 ledger; recorded provider costs only",
       },
+      task_invocations: taskInvocations || { available: false },
       monetary_ledger: monetary ? {
         available: true,
         daily_spent_usd: Number(monetary.daily_spent_nanos || 0) / 1000000000,
@@ -361,6 +394,8 @@ export async function handleMobileStatus(request, env, url) {
         paper_ledger: applied.has("0004_paper_event_ledger") ? "Available" : "Migration 0004 is not applied to this database",
         provider_usage: applied.has("0003_durable_quota_ledger") ? "Available" : "Migration 0003 is not applied to this database",
         monetary_ledger: applied.has("0006_monetary_budget_ledger") ? "Available" : "Migration 0006 is not applied to this database",
+        ...(!applied.has("0007_task_model_invocations") ? { task_invocations: "Migration 0007 is not applied to this database" } :
+          !taskInvocations?.available ? { task_invocations: "D1 invocation lifecycle aggregate is unavailable" } : {}),
       },
     });
   } catch {
