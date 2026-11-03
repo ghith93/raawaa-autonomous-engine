@@ -200,7 +200,14 @@ jobs:
       - name: Process bounded D1 task batch
         id: batch
         env:
+          # Provider credentials are scoped to the bounded worker process only.
+          # The gateway still fails closed unless repository policy, provider
+          # verification, quota evidence, and the operator switch all permit use.
           RAAWAA_ENGINE_LIVE_INFERENCE: ${{ vars.RAAWAA_ENGINE_LIVE_INFERENCE }}
+          RAAWAA_ENGINE_API_URL: https://raawaa-autonomous-engine-control.ghith-shikhkhaled.workers.dev
+          RAAWAA_ENGINE_API_TOKEN: ${{ secrets.ENGINE_API_TOKEN }}
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
         run: |
           python - <<'PY'
           import json
