@@ -113,7 +113,7 @@ function normalizeResearchCandidate(item) {
         || parsed.hostname.endsWith(".local") || parsed.hostname.endsWith(".internal")) return null;
     const host = parsed.hostname.toLowerCase();
     // Research links are stored, never fetched; reject all IP-literal hosts conservatively.
-    if (/^(?:\\d{1,3}\\.){3}\\d{1,3}$/.test(host) || host.includes(":")) return null;
+    if (/^(?:\d{1,3}\.){3}\d{1,3}$/.test(host) || host.includes(":")) return null;
     const sourceKey = "searxng:" + item.url.slice(0, 900);
     const metadata = {
       snippet: typeof item.snippet === "string" ? item.snippet.slice(0, 500) : "",
