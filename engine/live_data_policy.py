@@ -17,6 +17,13 @@ SECRET_PATTERNS = (
     re.compile(r"\bBearer\s+[A-Za-z0-9._~+/-]{16,}", re.IGNORECASE),
 )
 EMAIL_PATTERN = re.compile(r"\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b", re.IGNORECASE)
+SENSITIVE_CONTENT_PATTERNS = (
+    re.compile(r"\b(?:confidential|proprietary|non[-\s]public|internal[-\s]only)\b", re.IGNORECASE),
+    re.compile(r"\b(?:formula|ingredients?|composition)\b", re.IGNORECASE),
+    re.compile(r"\b(?:customer|client|order|payment|bank account|card number|cvv|national id|passport|medical record)\b", re.IGNORECASE),
+    re.compile(r"\b(?:personal data|personal information|email address|phone number|street address|home address|contact details)\b", re.IGNORECASE),
+    re.compile(r"\b(?:password|passphrase|api key|access token|refresh token|private key|credential|authorization header)\b", re.IGNORECASE),
+)
 BASE_BLOCKED_KEY_FRAGMENTS = (
     "password", "passwd", "secret", "apikey", "access_token", "refresh_token",
     "authorization", "privatekey", "credential", "customer", "personaldata",
@@ -116,10 +123,14 @@ def validate_live_payload(
         elif isinstance(current, list):
             stack.extend(current)
         elif isinstance(current, str):
+            if any(pattern.search(current) for pattern in SENSITIVE_CONTENT_PATTERNS):
+                return False, "sensitive_content_detected"
             if EMAIL_PATTERN.search(current):
                 return False, "personal_data_detected"
             if any(pattern.search(current) for pattern in SECRET_PATTERNS):
                 return False, "secret_pattern_detected"
+    if any(pattern.search(title) for pattern in SENSITIVE_CONTENT_PATTERNS):
+        return False, "sensitive_content_detected"
     if EMAIL_PATTERN.search(title):
         return False, "personal_data_detected"
     if any(pattern.search(title) for pattern in SECRET_PATTERNS):
