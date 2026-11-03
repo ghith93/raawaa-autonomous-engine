@@ -34,8 +34,8 @@ function dbMock(options = {}) {
           if (sql.includes("UPDATE tasks SET status='running'")) {
             return sql.includes("task_type IN") ? (options.codespaceClaim || null) : (options.normalClaim || null);
           }
-          if (sql.includes("SELECT id,status,attempts")) return options.currentTask || {
-            id: "task-1", status: "running", attempts: 1, max_attempts: 2,
+          if (sql.includes("SELECT id,status,execution_mode")) return options.currentTask || {
+            id: "task-1", status: "running", execution_mode: "not_started", attempts: 1, max_attempts: 2,
             task_type: "research_brief", lease_token: "lease-1",
             lease_expires_at: "2999-01-01T00:00:00.000Z",
           };
@@ -66,7 +66,7 @@ test("health is read-only and does not require a token", async () => {
   const DB = dbMock();
   const response = await worker.fetch(request("/health", { token: null }), { DB });
   assert.equal(response.status, 200);
-  assert.deepEqual(await response.json(), { ok: true, capabilities: ["task_retry_schedule_v1"] });
+  assert.deepEqual(await response.json(), { ok: true, capabilities: ["task_retry_schedule_v1", "task_execution_mode_v1"] });
   assert.equal(DB.calls.length, 1);
 });
 
@@ -152,17 +152,46 @@ test("retry endpoint persists a bounded next-attempt time", async () => {
   const DB = dbMock();
   const response = await worker.fetch(request("/v1/tasks/task-1/retry", {
     method: "POST",
-    body: { lease_token: "lease-1", error: "provider_not_called:capacity", retry_after_seconds: 600 },
+    body: { lease_token: "lease-1", error: "provider_not_called:capacity", retry_after_seconds: 600, execution_mode: "live_inference" },
   }), { DB, ENGINE_API_TOKEN: TOKEN });
   assert.equal(response.status, 200);
   const payload = await response.json();
   assert.equal(payload.ok, true);
   assert.equal(payload.status, "pending");
   assert.equal(typeof payload.next_attempt_at, "string");
+  assert.equal(payload.execution_mode, "live_inference");
   const update = DB.calls.find(x => x.kind === "run" && x.sql.startsWith("UPDATE tasks"));
   assert.match(update.sql, /next_attempt_at/);
   assert.equal(update.values[0], "pending");
   assert.equal(Date.parse(update.values[4]) - Date.parse(update.values[3]), 600000);
+  assert.equal(update.values[5], "live_inference");
+});
+
+test("finish endpoint persists dry-run mode separately from terminal success", async () => {
+  const DB = dbMock();
+  const response = await worker.fetch(request("/v1/tasks/task-1/finish", {
+    method: "POST",
+    body: { lease_token: "lease-1", status: "succeeded",
+      result: { mode: "dry_run", execution_started: false } },
+  }), { DB, ENGINE_API_TOKEN: TOKEN });
+  assert.equal(response.status, 200);
+  const payload = await response.json();
+  assert.equal(payload.status, "succeeded");
+  assert.equal(payload.execution_mode, "dry_run");
+  const update = DB.calls.find(x => x.kind === "run" && x.sql.startsWith("UPDATE tasks"));
+  assert.match(update.sql, /execution_mode=COALESCE/);
+  assert.equal(update.values[5], "dry_run");
+});
+
+test("finish endpoint rejects unknown execution modes", async () => {
+  const DB = dbMock();
+  const response = await worker.fetch(request("/v1/tasks/task-1/finish", {
+    method: "POST",
+    body: { lease_token: "lease-1", status: "succeeded", execution_mode: "simulated_success" },
+  }), { DB, ENGINE_API_TOKEN: TOKEN });
+  assert.equal(response.status, 400);
+  assert.deepEqual(await response.json(), { error: "invalid_execution_mode" });
+  assert.equal(DB.calls.some(x => x.kind === "run"), false);
 });
 
 test("retry endpoint rejects excessive delay before database writes", async () => {
