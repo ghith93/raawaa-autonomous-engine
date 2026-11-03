@@ -298,7 +298,7 @@ def discover_repositories(queries=None, environ=None, max_per_query=5, max_queri
         except ResearchDiscoveryError as exc:
             arxiv_unavailable = str(exc)
     return {
-        "schema_version": 1, "discovery_only": True, "source": "github_public_repository_search",
+        "schema_version": 1, "discovery_only": True, "source": "multi_source_public_research_metadata",
         "retrieved_at": retrieved_at, "queries_attempted": len(query_items),
         "requests_made": requests_made, "academic_requests_made": academic_requests_made,
         "total_requests_made": requests_made + academic_requests_made + arxiv_requests_made,
@@ -306,6 +306,8 @@ def discover_repositories(queries=None, environ=None, max_per_query=5, max_queri
         "arxiv_candidates": arxiv_candidates, "arxiv_unavailable": arxiv_unavailable,
         "arxiv_requests_made": arxiv_requests_made,
         "generation_requests": 0, "code_execution": False,
-        "installation_or_cloning": False, "candidate_count": len(ordered), "candidates": ordered,
+        "installation_or_cloning": False, "candidate_count": len(ordered),
+        "total_metadata_candidate_count": len(ordered) + len(academic_candidates) + len(arxiv_candidates),
+        "candidates": ordered,
         "unavailable": unavailable, "review_required": True,
     }
