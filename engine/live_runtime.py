@@ -9,7 +9,7 @@ import json
 import os
 from pathlib import Path
 
-from engine.live_adapters import OpenAICompatibleAdapter
+from engine.live_adapters import GeminiAdapter, OpenAICompatibleAdapter
 from engine.model_gateway import UsageLedger
 from engine.d1_monetary_ledger import D1MonetaryLedger
 from engine.d1_quota_ledger import D1QuotaLedger
@@ -79,12 +79,21 @@ def build_live_gateway(
             continue
         if not manager.eligible(profile, estimated_tokens=1):
             continue
-        adapter = OpenAICompatibleAdapter(
-            provider=profile.provider,
-            base_url=profile.endpoint_url,
-            api_key_env=entry.api_key_env,
-            environ=source,
-        )
+        # Select only explicitly supported provider protocols and exact endpoints.
+        # Unknown providers/endpoints fail closed rather than being sent to an
+        # arbitrary OpenAI-compatible URL from a profile.
+        if profile.provider == "groq" and profile.endpoint_url == "https://api.groq.com/openai/v1":
+            adapter = OpenAICompatibleAdapter(
+                provider=profile.provider,
+                base_url=profile.endpoint_url,
+                api_key_env=entry.api_key_env,
+                environ=source,
+            )
+        elif (profile.provider == "gemini"
+              and profile.endpoint_url == "https://generativelanguage.googleapis.com/v1beta"):
+            adapter = GeminiAdapter(api_key_env=entry.api_key_env, environ=source)
+        else:
+            continue
         adapters[profile.route_id] = adapter
         eligible_profiles.append(profile)
 

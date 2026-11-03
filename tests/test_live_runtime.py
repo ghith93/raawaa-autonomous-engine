@@ -95,6 +95,51 @@ class LiveRuntimeFactoryTests(unittest.TestCase):
         self.assertIn("groq:primary:openai/gpt-oss-20b", gateway.adapters)
         # Factory construction is local only; no adapter.generate/network call is made.
 
+    def test_native_gemini_profile_selects_gemini_adapter_without_network_io(self):
+        route = dict(self.registry["routes"][0])
+        route.update({
+            "id": "gemini-free-flash-primary",
+            "provider": "gemini",
+            "account": "primary",
+            "model": "gemini-2.5-flash",
+            "api_key_env": "GEMINI_API_KEY",
+            "endpoint_url": "https://generativelanguage.googleapis.com/v1beta",
+            "pricing_source_url": "https://ai.google.dev/gemini-api/docs/pricing",
+            "quota_source_url": "https://ai.google.dev/gemini-api/docs/rate-limits",
+            "terms_source_url": "https://ai.google.dev/gemini-api/terms",
+            "model_terms_source_url": "https://ai.google.dev/gemini-api/terms",
+            "verified_at": datetime.now(timezone.utc).isoformat(),
+            "enabled": True,
+        })
+        self.registry["routes"] = [route]
+        self.write_files()
+        gateway = build_live_gateway(
+            self.db_path, self.policy_path, self.registry_path,
+            environ={"RAAWAA_ENGINE_LIVE_INFERENCE": "enabled", "GEMINI_API_KEY": "test-key"},
+        )
+        self.assertIsNotNone(gateway)
+        adapter = gateway.adapters["gemini:primary:gemini-2.5-flash"]
+        from engine.live_adapters import GeminiAdapter
+        self.assertIsInstance(adapter, GeminiAdapter)
+        # Construction must not send an inference request.
+
+    def test_unknown_provider_and_arbitrary_endpoint_fail_closed(self):
+        route = dict(self.registry["routes"][0])
+        route.update({
+            "id": "unknown-provider-route",
+            "provider": "unknown-provider",
+            "api_key_env": "UNKNOWN_PROVIDER_KEY",
+            "endpoint_url": "https://attacker.example/v1",
+            "enabled": True,
+        })
+        self.registry["routes"] = [route]
+        self.write_files()
+        gateway = build_live_gateway(
+            self.db_path, self.policy_path, self.registry_path,
+            environ={"RAAWAA_ENGINE_LIVE_INFERENCE": "enabled", "UNKNOWN_PROVIDER_KEY": "test-key"},
+        )
+        self.assertIsNone(gateway)
+
     def test_cloud_mode_requires_d1_token_and_never_uses_local_sqlite(self):
         with self.assertRaises(D1MonetaryLedgerError):
             build_live_gateway(
