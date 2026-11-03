@@ -20,6 +20,10 @@ function makeDb() {
           calls.push({ sql, values: this.values });
           return { results: [] };
         },
+        async run() {
+          calls.push({ sql, values: this.values });
+          return { meta: { changes: 1 } };
+        },
       };
     },
   };
@@ -92,4 +96,64 @@ test("quota audit event accepts bounded metadata and writes parameterized values
     provider_reported_cost_available: false,
     error_code: "model_permission_blocked_org",
   });
+});
+
+
+const ROUTE = "groq:primary:openai/gpt-oss-20b";
+
+test("quota reserve uses server-owned profile limits and returns an opaque settlement key", async () => {
+  const DB = makeDb();
+  const response = await post({
+    action: "reserve", route_id: ROUTE, task_id: "task-42", estimated_tokens: 12,
+    daily_request_limit: 999999, daily_token_limit: 999999999,
+    monthly_request_limit: 999999, monthly_token_limit: 999999999,
+    minute_request_limit: 999999, minute_token_limit: 999999999,
+    per_task_request_limit: 999999, per_task_token_limit: 999999999,
+  }, DB);
+  assert.equal(response.status, 201);
+  const payload = await response.json();
+  assert.equal(payload.reservation_id, 9);
+  assert.equal(typeof payload.settlement_key, "string");
+  assert.ok(payload.settlement_key.length > 20);
+  const insert = DB.calls.find(call => call.sql.includes("INSERT INTO quota_usage"));
+  assert.ok(insert.sql.includes("settlement_key"));
+  assert.equal(insert.values[8], 1000); // profile daily request cap
+  assert.equal(insert.values[12], 200000); // profile daily token cap
+  assert.equal(insert.values[15], 10000); // profile monthly request cap
+  assert.equal(insert.values[19], 2000000); // profile monthly token cap
+  assert.equal(insert.values[22], 30); // profile rolling-minute request cap
+  assert.equal(insert.values[26], 8000); // profile rolling-minute token cap
+  assert.equal(insert.values[28], 3); // profile per-task request cap
+  assert.equal(insert.values[31], 16000); // profile per-task token cap
+});
+
+test("quota reserve rejects unknown routes even when caller supplies permissive limits", async () => {
+  const DB = makeDb();
+  const response = await post({
+    action: "reserve", route_id: "attacker:unlisted:model", task_id: "task-42",
+    estimated_tokens: 1, daily_request_limit: 999999,
+  }, DB);
+  assert.equal(response.status, 403);
+  assert.deepEqual(await response.json(), { error: "unknown_quota_route" });
+  assert.equal(DB.calls.length, 0);
+});
+
+test("quota settlement requires route, task, and opaque reservation proof", async () => {
+  const DB = makeDb();
+  const response = await post({
+    action: "settle", reservation_id: 9, actual_tokens: 1,
+  }, DB);
+  assert.equal(response.status, 400);
+  assert.deepEqual(await response.json(), { error: "invalid_settlement" });
+  assert.equal(DB.calls.length, 0);
+});
+
+test("direct quota record mutation is disabled", async () => {
+  const DB = makeDb();
+  const response = await post({
+    action: "record", route_id: ROUTE, tokens: 999999,
+  }, DB);
+  assert.equal(response.status, 403);
+  assert.deepEqual(await response.json(), { error: "unsupported_action" });
+  assert.equal(DB.calls.length, 0);
 });
