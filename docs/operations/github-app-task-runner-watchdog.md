@@ -17,7 +17,7 @@ The watchdog requires three Cloudflare Worker secrets and one explicit non-secre
 - GITHUB_APP_INSTALLATION_ID
 - GITHUB_APP_PRIVATE_KEY
 
-The explicit non-secret activation variable GITHUB_APP_WATCHDOG_ENABLED=enabled is now version-controlled in wrangler.toml and deployed with the Worker. Do not add a duplicate dashboard variable. The three GitHub App secrets remain required; if any is absent, the handler returns disabled before D1 or network access.
+Also add the non-secret Cloudflare Worker variable GITHUB_APP_WATCHDOG_ENABLED with the exact value enabled only after verifying the GitHub App installation, repository scope, and all three secrets. This is a separate activation switch; the App secrets alone do not start the watchdog. The variable is intentionally not stored in wrangler.toml.
 
 The private key is never needed in ChatGPT and must never be pasted into a conversation, issue, pull request, log, or source file.
 
@@ -39,7 +39,7 @@ The Worker requests an installation token narrowed again to repository ID 144135
 2. Go to Workers & Pages and select raawaa-autonomous-engine-control.
 3. Open Settings, then Variables and Secrets.
 4. Add GITHUB_APP_ID, GITHUB_APP_INSTALLATION_ID, and GITHUB_APP_PRIVATE_KEY as Secrets. Paste the App ID and installation ID into their matching fields; paste the PEM contents only into GITHUB_APP_PRIVATE_KEY.
-5. Save the three Secrets. Do not send the private key to ChatGPT.
+5. Save the three Secrets. Add GITHUB_APP_WATCHDOG_ENABLED as a plain-text Worker Variable with the exact value enabled only after verifying the App installation and all three secrets. Do not send the private key to ChatGPT.
 
 No GitHub Actions secret is required for this integration. No D1 migration is required.
 
@@ -70,7 +70,7 @@ If the dispatch fails, inspect Cloudflare Worker Cron Events for the sanitized f
 - A D1 dispatch-intent row is written before the GitHub side effect; it suppresses another attempt for 10 minutes even if the post-dispatch audit write fails.
 - GitHub's workflow concurrency group and D1 atomic task claims remain the duplicate-execution controls.
 - Live inference, external writes, trading, and Telegram delivery remain disabled.
-- Missing App secrets cause a no-op. The explicit activation variable is version-controlled; recurring GitHub API calls remain disabled until all three App secrets are present.
+- Missing App secrets or the explicit activation variable cause a no-op. No recurring GitHub API calls or D1 access occur until all four settings are present.
 
 ## Disable or roll back
 
