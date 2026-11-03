@@ -110,7 +110,8 @@ class RemoteTaskStore:
             if 500 <= exc.code <= 599 or exc.code == 408:
                 raise RemoteTaskStoreError(f"Remote task API temporarily unavailable (HTTP {exc.code})",
                                            http_status=exc.code) from None
-            raise RemoteTaskStoreError(f"Remote task API returned HTTP {exc.code}") from None
+            raise RemoteTaskStoreError(f"Remote task API returned HTTP {exc.code}",
+                                       http_status=exc.code) from None
         except (URLError, TimeoutError, OSError, json.JSONDecodeError, UnicodeDecodeError):
             raise RemoteTaskStoreError("Remote task API is unavailable or returned invalid JSON") from None
 
