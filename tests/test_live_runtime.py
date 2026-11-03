@@ -148,6 +148,32 @@ class LiveRuntimeFactoryTests(unittest.TestCase):
         self.assertIsNotNone(gateway)
         self.assertIn("openrouter:primary:openrouter/free", gateway.adapters)
 
+    def test_openrouter_pinned_nemotron_free_model_builds_gateway_without_network_io(self):
+        route = dict(self.registry["routes"][0])
+        route.update({
+            "id": "openrouter-nemotron-test",
+            "provider": "openrouter",
+            "account": "primary",
+            "model": "nvidia/nemotron-3-ultra-550b-a55b:free",
+            "api_key_env": "OPENROUTER_API_KEY",
+            "endpoint_url": "https://openrouter.ai/api/v1",
+            "pricing_source_url": "https://openrouter.ai/nvidia/nemotron-3-ultra-550b-a55b:free",
+            "quota_source_url": "https://openrouter.ai/docs/api-reference/limits",
+            "terms_source_url": "https://openrouter.ai/terms",
+            "model_terms_source_url": "https://docs.api.nvidia.com/nim/reference/nvidia-nemotron-3-ultra-550b-a55b",
+            "verified_at": datetime.now(timezone.utc).isoformat(),
+            "enabled": True,
+        })
+        self.registry["routes"] = [route]
+        self.write_files()
+        gateway = build_live_gateway(
+            self.db_path, self.policy_path, self.registry_path,
+            environ={"RAAWAA_ENGINE_LIVE_INFERENCE": "enabled", "OPENROUTER_API_KEY": "test-key"},
+        )
+        self.assertIsNotNone(gateway)
+        self.assertIn("openrouter:primary:nvidia/nemotron-3-ultra-550b-a55b:free", gateway.adapters)
+        # Construction is local only; no inference request is sent.
+
     def test_openrouter_paid_or_unpinned_model_fails_closed(self):
         route = dict(self.registry["routes"][0])
         route.update({
