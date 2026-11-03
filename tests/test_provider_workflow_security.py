@@ -38,5 +38,17 @@ class ProviderWorkflowSecurityTests(unittest.TestCase):
             self.assertNotIn(f'echo "${{{variable}}}"', source)
             self.assertNotIn(f'output.write(f"{variable}=', source)
 
+    def test_groq_key_is_scoped_only_to_read_only_catalog_step(self):
+        workflow = ROOT / ".github" / "workflows" / "groq-connection-check.yml"
+        source = workflow.read_text(encoding="utf-8")
+        step_name = "      - name: Verify Groq API authentication and Free model catalog (read only)"
+        start = source.index(step_name)
+        step = source[start:]
+        expression = "${{ secrets.GROQ_API_KEY }}"
+        self.assertIn("GROQ_API_KEY: " + expression, step)
+        self.assertEqual(source.count(expression), 1)
+        self.assertNotIn("    env:\\n      GROQ_API_KEY:", source)
+        self.assertIn("python scripts/groq_connection_check.py", step)
+
 if __name__ == "__main__":
     unittest.main()
