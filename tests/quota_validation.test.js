@@ -117,14 +117,14 @@ test("quota reserve uses server-owned profile limits and returns an opaque settl
   assert.ok(payload.settlement_key.length > 20);
   const insert = DB.calls.find(call => call.sql.includes("INSERT INTO quota_usage"));
   assert.ok(insert.sql.includes("settlement_key"));
-  assert.equal(insert.values[8], 1000); // profile daily request cap
-  assert.equal(insert.values[12], 200000); // profile daily token cap
-  assert.equal(insert.values[15], 10000); // profile monthly request cap
-  assert.equal(insert.values[19], 2000000); // profile monthly token cap
-  assert.equal(insert.values[22], 30); // profile rolling-minute request cap
-  assert.equal(insert.values[26], 8000); // profile rolling-minute token cap
-  assert.equal(insert.values[28], 3); // profile per-task request cap
-  assert.equal(insert.values[31], 16000); // profile per-task token cap
+  assert.equal(insert.values[9], 1000); // profile daily request cap
+  assert.equal(insert.values[13], 200000); // profile daily token cap
+  assert.equal(insert.values[16], 10000); // profile monthly request cap
+  assert.equal(insert.values[20], 2000000); // profile monthly token cap
+  assert.equal(insert.values[23], 30); // profile rolling-minute request cap
+  assert.equal(insert.values[27], 8000); // profile rolling-minute token cap
+  assert.equal(insert.values[29], 3); // profile per-task request cap
+  assert.equal(insert.values[33], 16000); // profile per-task token cap
 });
 
 test("quota reserve rejects unknown routes even when caller supplies permissive limits", async () => {
