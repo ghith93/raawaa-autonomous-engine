@@ -63,6 +63,11 @@ CAPABILITY_DEFINITIONS = {
         "impact": "medium",
         "next_step": "Create a small versioned synthetic benchmark with fixed expected outcomes, cost limits and regression thresholds.",
     },
+    "research_discovery": {
+        "title": "Broader, source-verified research discovery",
+        "impact": "medium",
+        "next_step": "Add one source family at a time (official documentation/releases, security advisories, model hubs or additional academic indexes), with rate limits, freshness and provenance tests.",
+    },
 }
 
 def _read_json(path: Path) -> dict[str, Any]:
