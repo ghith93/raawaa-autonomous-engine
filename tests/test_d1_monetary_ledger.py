@@ -25,7 +25,7 @@ class D1MonetaryLedgerTests(unittest.TestCase):
 
     @patch("urllib.request.urlopen")
     def test_reserve_uses_stable_caller_identities_and_integer_nano_usd(self, open_url):
-        open_url.return_value = Response({"reservation_id": "00000000-0000-4000-8000-000000000001"})
+        open_url.return_value = Response({"reservation_id": "00000000-0000-4000-8000-000000000001", "status": "reserved"})
         result = self.ledger.reserve(
             "groq", "model-a", "research", 0.0123456781,
             0.4, 12.0, task_id="task-1", per_task_budget_usd=0.2,
@@ -52,7 +52,7 @@ class D1MonetaryLedgerTests(unittest.TestCase):
         reservation = "00000000-0000-4000-8000-000000000021"
         open_url.side_effect = [
             URLError("response lost after remote commit"),
-            Response({"reservation_id": reservation, "replay": True}),
+            Response({"reservation_id": reservation, "status": "reserved", "replay": True}),
         ]
         kwargs = dict(
             provider="groq", model="model-a", task_kind="research",
@@ -70,6 +70,20 @@ class D1MonetaryLedgerTests(unittest.TestCase):
         self.assertEqual(first_payload, second_payload)
         self.assertEqual(second_payload["idempotency_key"], key)
         self.assertEqual(second_payload["reservation_id"], reservation)
+
+    @patch("urllib.request.urlopen")
+    def test_started_reservation_replay_blocks_second_provider_attempt(self, open_url):
+        open_url.return_value = Response({
+            "reservation_id": "00000000-0000-4000-8000-000000000031",
+            "status": "in_flight", "replay": True,
+        })
+        with self.assertRaisesRegex(D1MonetaryLedgerError, "provider replay is blocked"):
+            self.ledger.reserve(
+                "groq", "model-a", "research", 0.01, 0.4, 12.0,
+                task_id="task-restart", per_task_budget_usd=0.2,
+                idempotency_key="00000000-0000-4000-8000-000000000032",
+                reservation_id="00000000-0000-4000-8000-000000000031",
+            )
 
     @patch("urllib.request.urlopen")
     def test_start_ambiguous_release_and_settle_use_lifecycle_actions(self, open_url):
