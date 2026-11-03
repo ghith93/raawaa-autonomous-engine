@@ -23,13 +23,17 @@ class RemoteTaskStoreTests(unittest.TestCase):
 
     @patch("engine.remote_task_store.urlopen")
     def test_claim_returns_server_lease_token(self, open_url):
-        open_url.return_value = FakeResponse({
-            "task": {"id": "task-1", "payload_json": "{}", "status": "running"},
-            "lease_token": "lease-1",
-        })
+        open_url.side_effect = [
+            FakeResponse({"ok": True, "capabilities": ["task_retry_schedule_v1"]}),
+            FakeResponse({
+                "task": {"id": "task-1", "payload_json": "{}", "status": "running",
+                         "next_attempt_at": None},
+                "lease_token": "lease-1",
+            }),
+        ]
         task = self.store.claim_next()
         self.assertEqual(task["lease_token"], "lease-1")
-        request = open_url.call_args.args[0]
+        request = open_url.call_args_list[-1].args[0]
         self.assertEqual(request.full_url, "https://engine.example/v1/tasks/claim")
         self.assertEqual(request.get_method(), "POST")
         self.assertEqual(request.get_header("Authorization"), "Bearer secret-test-token")
@@ -38,14 +42,17 @@ class RemoteTaskStoreTests(unittest.TestCase):
 
     @patch("engine.remote_task_store.urlopen")
     def test_optional_cloudflare_access_service_token_headers(self, open_url):
-        open_url.return_value = FakeResponse({"task": None})
+        open_url.side_effect = [
+            FakeResponse({"ok": True, "capabilities": ["task_retry_schedule_v1"]}),
+            FakeResponse({"task": None}),
+        ]
         store = RemoteTaskStore(
             "https://engine.example", "app-bearer",
             access_client_id="access-client-id",
             access_client_secret="access-client-secret",
         )
         self.assertIsNone(store.claim_next())
-        request = open_url.call_args.args[0]
+        request = open_url.call_args_list[-1].args[0]
         self.assertEqual(request.get_header("Cf-access-client-id"), "access-client-id")
         self.assertEqual(request.get_header("Cf-access-client-secret"), "access-client-secret")
         self.assertEqual(request.get_header("Authorization"), "Bearer app-bearer")
@@ -59,7 +66,10 @@ class RemoteTaskStoreTests(unittest.TestCase):
 
     @patch("engine.remote_task_store.urlopen")
     def test_empty_claim_returns_none(self, open_url):
-        open_url.return_value = FakeResponse({"task": None})
+        open_url.side_effect = [
+            FakeResponse({"ok": True, "capabilities": ["task_retry_schedule_v1"]}),
+            FakeResponse({"task": None}),
+        ]
         self.assertIsNone(self.store.claim_next())
 
     @patch("engine.remote_task_store.urlopen")
@@ -72,7 +82,10 @@ class RemoteTaskStoreTests(unittest.TestCase):
 
     @patch("engine.remote_task_store.urlopen")
     def test_retry_sends_bounded_delay_to_remote_queue(self, open_url):
-        open_url.return_value = FakeResponse({"ok": True, "status": "pending"})
+        open_url.return_value = FakeResponse({
+            "ok": True, "status": "pending",
+            "next_attempt_at": "2026-11-04T00:00:00Z",
+        })
         status = self.store.retry_or_fail(
             "task-1", "provider_not_called:provider_capacity_unavailable",
             lease_token="lease-1", retry_after_seconds=600,
@@ -82,6 +95,15 @@ class RemoteTaskStoreTests(unittest.TestCase):
         self.assertEqual(request.full_url, "https://engine.example/v1/tasks/task-1/retry")
         payload = json.loads(request.data)
         self.assertEqual(payload["retry_after_seconds"], 600)
+        self.assertEqual(open_url.return_value.value["next_attempt_at"], "2026-11-04T00:00:00Z")
+
+    @patch("engine.remote_task_store.urlopen")
+    def test_claim_fails_closed_before_claim_if_worker_lacks_retry_schedule(self, open_url):
+        open_url.return_value = FakeResponse({"ok": True})
+        with self.assertRaisesRegex(RemoteTaskStoreError, "task_retry_schedule_v1"):
+            self.store.claim_next()
+        self.assertEqual(open_url.call_count, 1)
+        self.assertEqual(open_url.call_args.args[0].full_url, "https://engine.example/health")
 
     def test_retry_rejects_unbounded_delay(self):
         with self.assertRaises(ValueError):
