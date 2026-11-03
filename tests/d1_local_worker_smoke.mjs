@@ -51,6 +51,27 @@ function runMigrations() {
   console.log("Local D1 migrations applied successfully.");
 }
 
+function executeLocalSql(sql) {
+  const result = spawnSync("npx", [
+    ...WRANGLER, "d1", "execute", "raawaa-autonomous-e",
+    "--local", "--command", sql, "--config", "wrangler.toml",
+    "--persist-to", stateDir,
+  ], {
+    cwd: process.cwd(),
+    env: safeEnvironment(),
+    encoding: "utf8",
+    timeout: 30_000,
+    maxBuffer: 1024 * 1024,
+  });
+  if (result.error || result.status !== 0) {
+    throw new Error(
+      "Local-only D1 policy setup failed. No Cloudflare credentials are available.\n" +
+      (result.stdout || "") + "\n" + (result.stderr || "") +
+      (result.error ? "\n" + result.error.message : ""),
+    );
+  }
+}
+
 async function api(path, { method = "GET", body, token = TOKEN } = {}) {
   const headers = { accept: "application/json" };
   if (token) headers.authorization = "Bearer " + token;
@@ -332,10 +353,15 @@ try {
     assertStatus(releasedGlobal, 200, "release global-cap test reservation before I/O");
   }
 
+  // Mutate only the isolated local D1 policy to exercise the monthly cap
+  // independently. This test never receives or uses Cloudflare credentials.
+  executeLocalSql("UPDATE monetary_budget_policy SET monthly_budget_nanos=300000000 WHERE policy_key='default'");
   const monthlyBase = {
     ...globalBase,
-    daily_budget_nanos: 100_000_000,
-    monthly_budget_nanos: 30_000_000,
+    estimated_cost_nanos: 100_000_000,
+    daily_budget_nanos: 400_000_000,
+    monthly_budget_nanos: 300_000_000,
+    per_task_budget_nanos: 200_000_000,
   };
   const monthlyAttempts = await Promise.all([1, 2, 3].map(index => {
     const reservation_id = randomUUID();
@@ -362,6 +388,7 @@ try {
     });
     assertStatus(releasedMonthly, 200, "release monthly-cap test reservation before I/O");
   }
+  executeLocalSql("UPDATE monetary_budget_policy SET monthly_budget_nanos=12000000000 WHERE policy_key='default'");
 
   const started = await api("/v1/monetary-ledger", {
     method: "POST", body: { action: "start", reservation_id: inFlight },
