@@ -3,8 +3,12 @@ from __future__ import annotations
 
 import json
 import os
+import sys
 from pathlib import Path
 from urllib.parse import urlencode
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
 
 from engine.batch_runner import run_batch
 from engine.cli import db_path
@@ -12,7 +16,6 @@ from engine.live_runtime import build_live_gateway
 from engine.remote_task_store import RemoteTaskStore
 from engine.worker import run_once
 
-ROOT = Path(__file__).resolve().parents[1]
 IDEMPOTENCY_KEY = "groq-free-inference-staging-smoke-2026-11-03-v1"
 ROUTE_IDS = (
     "groq:primary:openai/gpt-oss-120b",
