@@ -31,9 +31,15 @@ def _wait_for_authenticated_worker(store: RemoteTaskStore, timeout_seconds: int 
     last_error = "worker_not_ready"
     while time.monotonic() < deadline:
         try:
+            headers = {"Accept": "application/json"}
+            client_id = os.environ.get("CF_ACCESS_CLIENT_ID", "").strip()
+            client_secret = os.environ.get("CF_ACCESS_CLIENT_SECRET", "").strip()
+            if client_id and client_secret:
+                headers["CF-Access-Client-Id"] = client_id
+                headers["CF-Access-Client-Secret"] = client_secret
             request = urllib.request.Request(
                 os.environ["RAAWAA_ENGINE_API_URL"].rstrip("/") + "/health",
-                headers={"Accept": "application/json"},
+                headers=headers,
             )
             with urllib.request.urlopen(request, timeout=5) as response:
                 if response.status == 200:
@@ -82,6 +88,8 @@ def main() -> int:
     store = RemoteTaskStore(
         base_url=os.environ.get("RAAWAA_ENGINE_API_URL"),
         token=os.environ.get("RAAWAA_ENGINE_STAGING_API_TOKEN"),
+        access_client_id=os.environ.get("CF_ACCESS_CLIENT_ID"),
+        access_client_secret=os.environ.get("CF_ACCESS_CLIENT_SECRET"),
     )
     before_mobile = _wait_for_authenticated_worker(store)
     counts = _counts(before_mobile)
