@@ -6,6 +6,7 @@
     "test:worker": "node --test tests/*.test.js",
     "test:workflow-spike": "node --test tests/cloudflare_workflows_spike.test.js",
     "test:workflow-local": "node tests/cloudflare_workflow_local_smoke.mjs",
-    "test:d1-local": "node tests/d1_local_worker_smoke.mjs"
+    "test:d1-local": "node tests/d1_local_worker_smoke.mjs && node tests/d1_local_monetary_smoke.mjs",
+    "test:d1-staging-monetary": "node tests/d1_staging_monetary_smoke.mjs"
   }
 }
