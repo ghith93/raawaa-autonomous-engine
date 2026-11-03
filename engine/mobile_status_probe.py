@@ -38,6 +38,11 @@ _OUTPUT_KEYS = (
     "kill_switch",
     "tasks_pending",
     "tasks_running",
+    "task_execution_modes",
+    "tasks_dry_run_succeeded",
+    "tasks_live_inference_succeeded",
+    "tasks_codespace_succeeded",
+    "tasks_unknown_succeeded",
     "paper_events",
 )
 
@@ -221,6 +226,39 @@ def summarize_mobile_status(payload: object, http_status: int = 200) -> dict[str
 
     watchdog_values = _watchdog_values(payload)
 
+    mode_values = {
+        "task_execution_modes": "unknown",
+        "tasks_dry_run_succeeded": "unknown",
+        "tasks_live_inference_succeeded": "unknown",
+        "tasks_codespace_succeeded": "unknown",
+        "tasks_unknown_succeeded": "unknown",
+    }
+    execution_modes = payload.get("task_execution_modes")
+    if isinstance(execution_modes, dict) and execution_modes.get("available") is False:
+        mode_values["task_execution_modes"] = "not_available"
+    elif isinstance(execution_modes, dict) and execution_modes.get("available") is True:
+        counts = execution_modes.get("counts")
+        modes = ("dry_run", "live_inference", "codespace", "unknown")
+        statuses = ("pending", "running", "succeeded", "failed", "blocked")
+        try:
+            if not isinstance(counts, dict):
+                raise ValueError("invalid execution-mode counts")
+            validated = {}
+            for mode in modes:
+                per_status = counts.get(mode)
+                if not isinstance(per_status, dict):
+                    raise ValueError("missing execution mode")
+                validated[mode] = {status: _count(per_status.get(status)) for status in statuses}
+            mode_values = {
+                "task_execution_modes": "available",
+                "tasks_dry_run_succeeded": str(validated["dry_run"]["succeeded"]),
+                "tasks_live_inference_succeeded": str(validated["live_inference"]["succeeded"]),
+                "tasks_codespace_succeeded": str(validated["codespace"]["succeeded"]),
+                "tasks_unknown_succeeded": str(validated["unknown"]["succeeded"]),
+            }
+        except (TypeError, ValueError):
+            mode_values["task_execution_modes"] = "invalid"
+
     def gap_flag(key: str, marker: str, missing_label: str) -> str:
         value = text_value(key)
         if not value:
@@ -327,6 +365,7 @@ def summarize_mobile_status(payload: object, http_status: int = 200) -> dict[str
         ),
         "tasks_pending": str(task_counts.get("pending", 0)),
         "tasks_running": str(task_counts.get("running", 0)),
+        **mode_values,
         "paper_events": str(paper_event_count),
     }
 
@@ -373,6 +412,11 @@ def probe_mobile_status(
             "kill_switch": "route_not_deployed",
             "tasks_pending": "unknown",
             "tasks_running": "unknown",
+            "task_execution_modes": "route_not_deployed",
+            "tasks_dry_run_succeeded": "route_not_deployed",
+            "tasks_live_inference_succeeded": "route_not_deployed",
+            "tasks_codespace_succeeded": "route_not_deployed",
+            "tasks_unknown_succeeded": "route_not_deployed",
             "paper_events": "unknown",
         }
     return summarize_mobile_status(payload, status)
