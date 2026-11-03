@@ -81,6 +81,49 @@ function normalizeResearchCandidate(item) {
     };
     return { source_key: "crossref:" + doi.toLowerCase(), source: "crossref", title: item.title, url: "https://doi.org/" + doi, metadata_json: JSON.stringify(metadata), now };
   }
+  if (item.source === "arxiv") {
+    const arxivId = item.arxiv_id;
+    const validId = typeof arxivId === "string"
+      && /^(?:\d{4}\.\d{4,5}(?:v\d+)?|[a-z-]+(?:\.[A-Z]{2})?\/\d{7}(?:v\d+)?)$/i.test(arxivId);
+    if (!validId || !safeResearchString(item.title, 1000)) return null;
+    let parsed;
+    try { parsed = new URL(item.url); } catch { return null; }
+    if (parsed.protocol !== "https:" || parsed.hostname !== "arxiv.org"
+        || parsed.pathname !== "/abs/" + arxivId || parsed.search || parsed.hash
+        || parsed.username || parsed.password) return null;
+    const metadata = {
+      authors: Array.isArray(item.authors) ? item.authors.filter(x => typeof x === "string").slice(0, 8).map(x => x.slice(0, 200)) : [],
+      published: typeof item.published === "string" ? item.published.slice(0, 40) : null,
+      updated: typeof item.updated === "string" ? item.updated.slice(0, 40) : null,
+      categories: Array.isArray(item.categories) ? item.categories.filter(x => typeof x === "string").slice(0, 8).map(x => x.slice(0, 80)) : [],
+      primary_category: typeof item.primary_category === "string" ? item.primary_category.slice(0, 80) : null,
+      doi: typeof item.doi === "string" ? item.doi.slice(0, 160) : null,
+      abstract_retrieved: false,
+      full_text_retrieved: false,
+      license_verified: false,
+    };
+    return { source_key: "arxiv:" + arxivId.toLowerCase(), source: "arxiv", title: item.title, url: "https://arxiv.org/abs/" + arxivId, metadata_json: JSON.stringify(metadata), now };
+  }
+  if (item.source === "searxng") {
+    if (!safeResearchString(item.title, 1000) || !safeResearchString(item.url, 1000)) return null;
+    let parsed;
+    try { parsed = new URL(item.url); } catch { return null; }
+    if (parsed.protocol !== "https:" || !parsed.hostname || parsed.username || parsed.password
+        || parsed.search || parsed.hash || parsed.hostname === "localhost"
+        || parsed.hostname.endsWith(".local") || parsed.hostname.endsWith(".internal")) return null;
+    const host = parsed.hostname.toLowerCase();
+    if (/^(?:\d{1,3}\.){3}\d{1,3}$/.test(host)
+        || (host.startsWith("[") && !host.endsWith("]"))) return null;
+    const sourceKey = "searxng:" + item.url.slice(0, 900);
+    const metadata = {
+      snippet: typeof item.snippet === "string" ? item.snippet.slice(0, 500) : "",
+      engines: Array.isArray(item.engines) ? item.engines.filter(x => typeof x === "string").slice(0, 5).map(x => x.slice(0, 80)) : [],
+      category: typeof item.category === "string" ? item.category.slice(0, 80) : null,
+      license_verified: false,
+      content_fetched: false,
+    };
+    return { source_key: sourceKey, source: "searxng", title: item.title.slice(0, 1000), url: item.url, metadata_json: JSON.stringify(metadata), now };
+  }
   return null;
 }
 
