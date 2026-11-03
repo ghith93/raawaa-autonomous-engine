@@ -6,9 +6,10 @@ from __future__ import annotations
 
 import json
 import os
+import time
 import urllib.error
 import urllib.request
-from urllib.parse import quote
+from urllib.parse import quote, urlsplit
 
 BASE_URL = os.environ.get(
     "RAAWAA_ENGINE_API_URL",
@@ -51,13 +52,33 @@ def api(method: str, path: str, payload: dict | None = None) -> tuple[int, dict]
     return status, body
 
 
+def api_readonly(path: str, timeout_seconds: int = 90) -> tuple[int, dict]:
+    """Retry only safe GETs while a newly installed Worker secret propagates."""
+    deadline = time.monotonic() + timeout_seconds
+    last = (0, {})
+    while True:
+        last = api("GET", path)
+        status, _ = last
+        if status == 200 or status not in (401, 500, 502, 503, 504):
+            return last
+        if time.monotonic() >= deadline:
+            return last
+        time.sleep(2)
+
+
 def run() -> None:
-    if not BASE_URL.startswith("https://") or "raawaa-autonomous-engine-staging" not in BASE_URL:
+    parsed = urlsplit(BASE_URL)
+    if (
+        parsed.scheme != "https"
+        or parsed.hostname != "raawaa-autonomous-engine-staging.ghith-shikhkhaled.workers.dev"
+        or parsed.username or parsed.password or parsed.port
+        or parsed.path not in ("", "/") or parsed.query or parsed.fragment
+    ):
         raise RuntimeError("Refusing reconciliation outside the exact Staging Worker")
     if not TOKEN:
         raise RuntimeError("Staging API token is unavailable")
 
-    status, ledger = api("GET", "/v1/monetary-ledger?task_id=" + quote(TASK_ID, safe=""))
+    status, ledger = api_readonly("/v1/monetary-ledger?task_id=" + quote(TASK_ID, safe=""))
     if status != 200 or not isinstance(ledger.get("snapshot"), dict):
         raise RuntimeError("Could not read the exact Staging monetary ledger record")
     matches = [
@@ -73,8 +94,7 @@ def run() -> None:
     if not matches and int(ledger["snapshot"].get("task_pending_count", -1)) != 0:
         raise RuntimeError("The exact task has unresolved state but no matching ambiguous Groq reservation; refusing mutation")
 
-    status, quota = api(
-        "GET",
+    status, quota = api_readonly(
         "/v1/quota?route_id=" + quote(ROUTE_ID, safe="") + "&task_id=" + quote(TASK_ID, safe=""),
     )
     if status != 200:
@@ -115,7 +135,7 @@ def run() -> None:
     if status != 200 or cooled.get("ok") is not True:
         raise RuntimeError("Zero-cost reconciliation succeeded but route quarantine failed")
 
-    status, after = api("GET", "/v1/monetary-ledger?task_id=" + quote(TASK_ID, safe=""))
+    status, after = api_readonly("/v1/monetary-ledger?task_id=" + quote(TASK_ID, safe=""))
     if status != 200 or int(after.get("snapshot", {}).get("task_pending_count", -1)) != 0:
         raise RuntimeError("Reconciliation did not clear the exact task's unresolved reservation")
     print(json.dumps({

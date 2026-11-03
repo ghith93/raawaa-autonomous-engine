@@ -8,12 +8,37 @@ class Groq403StagingReconciliationTests(unittest.TestCase):
     def setUp(self):
         self.base_url = reconcile.BASE_URL
         self.token = reconcile.TOKEN
-        reconcile.BASE_URL = "https://raawaa-autonomous-engine-staging.example.workers.dev"
+        reconcile.BASE_URL = "https://raawaa-autonomous-engine-staging.ghith-shikhkhaled.workers.dev"
         reconcile.TOKEN = "test-token"
 
     def tearDown(self):
         reconcile.BASE_URL = self.base_url
         reconcile.TOKEN = self.token
+
+    def test_read_only_calls_retry_transient_401_after_secret_install(self):
+        with patch.object(reconcile, "api", side_effect=[
+            (401, {"error": "unauthorized"}),
+            (200, {"snapshot": {}}),
+        ]) as api:
+            with patch.object(reconcile.time, "sleep") as sleep:
+                status, body = reconcile.api_readonly("/v1/monetary-ledger", timeout_seconds=10)
+        self.assertEqual(status, 200)
+        self.assertIn("snapshot", body)
+        self.assertEqual(api.call_count, 2)
+        sleep.assert_called_once_with(2)
+
+    def test_read_only_calls_fail_fast_on_non_transient_403(self):
+        with patch.object(reconcile, "api", return_value=(403, {"error": "forbidden"})) as api:
+            with patch.object(reconcile.time, "sleep") as sleep:
+                status, _ = reconcile.api_readonly("/v1/monetary-ledger", timeout_seconds=10)
+        self.assertEqual(status, 403)
+        api.assert_called_once()
+        sleep.assert_not_called()
+
+    def test_refuses_any_non_exact_staging_hostname(self):
+        reconcile.BASE_URL = "https://example.invalid/raawaa-autonomous-engine-staging"
+        with self.assertRaisesRegex(RuntimeError, "exact Staging Worker"):
+            reconcile.run()
 
     def test_reconciles_only_exact_ambiguous_403_and_quarantines_route(self):
         reservation = {
