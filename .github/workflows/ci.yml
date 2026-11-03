@@ -106,3 +106,26 @@ jobs:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         run: npx --yes wrangler@4.156.1 d1 migrations list raawaa-engine-staging --remote --config wrangler.staging.toml
+
+  staging-monetary-tests:
+    name: Test monetary ledger against remote Staging D1
+    needs: staging-migrate
+    if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    concurrency:
+      group: d1-staging-monetary-tests
+      cancel-in-progress: false
+    steps:
+      - name: Check out the exact main commit that passed CI
+        uses: actions/checkout@v7
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+      - name: Run remote D1 monetary concurrency and recovery tests
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          D1_DATABASE_ID: "231dd948-04a0-49e3-ad73-444f77d69477"
+        run: npm run test:d1-staging-monetary
