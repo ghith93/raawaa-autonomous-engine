@@ -149,7 +149,9 @@ export async function dispatchTaskRunnerIfStale({
   nowMs = Date.now(),
   scheduledTime,
 }) {
-  if (appConfiguration(env).length) {
+  // Credentials alone must never activate an external dispatch path.
+  // The owner must set this exact opt-in value after reviewing the GitHub App.
+  if (env?.GITHUB_APP_WATCHDOG_ENABLED !== "true" || appConfiguration(env).length) {
     return { status: "disabled", reason: "missing_configuration" };
   }
   if (!auditBindingAvailable(env)) {
