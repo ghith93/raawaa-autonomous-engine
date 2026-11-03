@@ -56,6 +56,11 @@ class BudgetPolicyTests(unittest.TestCase):
         self.policy["monthly_budget_usd"] = True
         self.assertTrue(validate_budget_policy(self.policy))
 
+    def test_malformed_policy_objects_fail_closed(self):
+        self.assertTrue(validate_budget_policy(None))
+        self.policy["model_policy"].pop("strategy")
+        self.assertTrue(validate_budget_policy(self.policy))
+
 
 if __name__ == "__main__":
     unittest.main()
