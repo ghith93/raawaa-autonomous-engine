@@ -2,8 +2,10 @@ import json
 import unittest
 import xml.etree.ElementTree as ET
 from unittest.mock import patch
+from urllib.error import HTTPError
+from urllib.request import Request
 from datetime import datetime, timezone
-from engine.research_discovery import DEFAULT_QUERIES, MAX_RESPONSE_BYTES, ResearchDiscoveryError, _request_arxiv, _request_crossref, _request_json, _request_searxng, _validate_searxng_base_url, discover_repositories
+from engine.research_discovery import DEFAULT_QUERIES, MAX_RESPONSE_BYTES, ResearchDiscoveryError, _request_arxiv, _request_crossref, _request_json, _request_searxng, _validate_searxng_base_url, _RejectRedirects, discover_repositories
 
 class ResearchDiscoveryTests(unittest.TestCase):
     def test_default_queries_target_skill_scanners_and_evaluation_benchmarks(self):
@@ -129,7 +131,7 @@ class ResearchDiscoveryTests(unittest.TestCase):
             def __enter__(self): return self
             def __exit__(self, *args): return False
             def read(self, limit): return atom
-        with patch("engine.research_discovery.urlopen", return_value=Response()):
+        with patch("engine.research_discovery._open_without_redirects", return_value=Response()):
             payload = _request_arxiv('all:"multi-agent"', 5)
         self.assertEqual(len(payload["entries"]), 1)
         from engine.research_discovery import _normalize_arxiv_entry
@@ -155,9 +157,34 @@ class ResearchDiscoveryTests(unittest.TestCase):
             (b"<feed>", "malformed Atom XML"),
             (b"x" * (MAX_RESPONSE_BYTES + 1), "1 MiB"),
         ):
-            with patch("engine.research_discovery.urlopen", return_value=Response(body)):
+            with patch("engine.research_discovery._open_without_redirects", return_value=Response(body)):
                 with self.assertRaisesRegex(ResearchDiscoveryError, expected):
                     _request_arxiv("all:agents", 5)
+
+    def test_fixed_host_discovery_refuses_redirects_before_following(self):
+        handler = _RejectRedirects()
+        request = Request("https://export.arxiv.org/api/query")
+        with self.assertRaises(HTTPError):
+            handler.redirect_request(
+                request, None, 302, "Found", {},
+                "https://169.254.169.254/latest/meta-data",
+            )
+
+    def test_arxiv_rejects_non_utf8_payloads_and_wrong_response_host(self):
+        class Response:
+            status = 200
+            def __init__(self, body, url="https://export.arxiv.org/api/query"):
+                self.body, self.url = body, url
+            def __enter__(self): return self
+            def __exit__(self, *args): return False
+            def geturl(self): return self.url
+            def read(self, limit): return self.body
+        with patch("engine.research_discovery._open_without_redirects", return_value=Response("<feed/>".encode("utf-16"))):
+            with self.assertRaisesRegex(ResearchDiscoveryError, "valid UTF-8"):
+                _request_arxiv("all:agents", 5)
+        with patch("engine.research_discovery._open_without_redirects", return_value=Response(b"<feed/>", "https://evil.example/")):
+            with self.assertRaisesRegex(ResearchDiscoveryError, "fixed HTTPS host"):
+                _request_arxiv("all:agents", 5)
 
     def test_arxiv_discovery_is_one_bounded_request_and_failure_is_nonfatal(self):
         calls = []
@@ -226,7 +253,7 @@ class ResearchDiscoveryTests(unittest.TestCase):
             def __exit__(self, *args): return False
             def geturl(self): return "https://search.example.org/search?q=agents&format=json"
             def read(self, limit): return payload
-        with patch("engine.research_discovery.urlopen", return_value=Response()) as opened:
+        with patch("engine.research_discovery._open_without_redirects", return_value=Response()) as opened:
             result = _request_searxng("agent security", "https://search.example.org", 5)
         request = opened.call_args.args[0]
         self.assertIn("format=json", request.full_url)
