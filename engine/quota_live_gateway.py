@@ -230,6 +230,8 @@ class QuotaAwareLiveGateway:
                 actual_tokens=actual_tokens,
                 cost_usd=settled_cost_usd,
                 cost_basis=cost_basis,
+                profile_estimated_cost_usd=profile_estimated_cost_usd,
+                provider_reported_cost_available=reported_cost_usd is not None,
                 provider_reported_cost_usd=reported_cost_usd,
             )
             if (response.input_tokens > estimated_input_tokens
@@ -263,7 +265,7 @@ class QuotaAwareLiveGateway:
                     cost_basis=cost_basis,
                 )
                 raise ProviderUnavailable(
-                    "Non-zero cost detected for a verified-free route; route quarantined."
+                    "Provider or profile non-zero cost detected for a verified-free route; route quarantined."
                 )
             budget_status = self.usage_ledger.budget_status(
                 self.daily_budget_usd, self.monthly_budget_usd,
