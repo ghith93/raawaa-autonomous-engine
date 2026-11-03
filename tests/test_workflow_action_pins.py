@@ -13,7 +13,7 @@ class WorkflowActionPinTests(unittest.TestCase):
             workflow.parent.mkdir(parents=True)
             workflow.write_text(
                 "steps:\n"
-                "  - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1\n"
+                "  uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1\n"
                 "  - uses: ./.github/actions/local\n"
                 "  - uses: $/.github/actions/reusable\n",
                 encoding="utf-8",
