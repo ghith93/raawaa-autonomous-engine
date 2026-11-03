@@ -92,11 +92,15 @@ async function load() {
   ],"No recorded model inference costs");
   const money=data.monetary_ledger||{};
   rows("monetaryLedger",money.available?[
+    ["Daily hard cap","$"+Number(money.daily_budget_usd||0).toFixed(2)],
     ["Daily settled spend","$"+Number(money.daily_spent_usd||0).toFixed(9)],
+    ["Monthly hard cap","$"+Number(money.monthly_budget_usd||0).toFixed(2)],
     ["Monthly settled spend","$"+Number(money.monthly_spent_usd||0).toFixed(9)],
+    ["Per-task hard cap","$"+Number(money.per_task_budget_usd||0).toFixed(2)],
     ["Pending / ambiguous reserve","$"+Number(money.pending_reserved_usd||0).toFixed(9)],
     ["Unresolved reservations",money.pending_count||0],
-    ["Quarantined routes",money.quarantined_routes||0]
+    ["Quarantined routes",money.quarantined_routes||0],
+    ["Hard-cap policy enabled",money.budget_policy_enabled?"Yes":"No"]
   ]:[],data.unavailable_metrics?.monetary_ledger||"D1 monetary ledger unavailable");
   $("snapshot").textContent=data.latest_market_snapshot?data.latest_market_snapshot.candidate_id+" · chain "+(data.latest_market_snapshot.chain_id??"—")+" · block "+(data.latest_market_snapshot.block_number??"—")+" · "+data.latest_market_snapshot.occurred_at:"No market snapshot recorded";
   $("latest").textContent=data.latest_paper_event?data.latest_paper_event.event_type+" · "+data.latest_paper_event.candidate_id+" · "+data.latest_paper_event.occurred_at:"No paper event recorded";
