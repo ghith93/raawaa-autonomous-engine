@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import json
 import os
+import secrets
 import urllib.error
 import urllib.request
 from datetime import datetime, timezone
@@ -22,6 +23,7 @@ class D1QuotaLedger:
         self.base_url = (base_url or os.getenv("RAAWAA_ENGINE_API_URL", "")).rstrip("/")
         self.token = token or os.getenv("RAAWAA_ENGINE_API_TOKEN", "")
         self.timeout = timeout
+        self._reservations: dict[int, tuple[str, str, str]] = {}
         if not self.base_url.startswith("https://") or not self.token:
             raise D1QuotaLedgerError(
                 "RAAWAA_ENGINE_API_URL (HTTPS) and RAAWAA_ENGINE_API_TOKEN are required"
@@ -101,28 +103,35 @@ class D1QuotaLedger:
                 per_task_token_limit: int | None = None,
                 minute_request_limit: int | None = None,
                 minute_token_limit: int | None = None) -> int:
-        required = (monthly_request_limit, monthly_token_limit, task_id,
-                    per_task_request_limit, per_task_token_limit,
-                    minute_request_limit, minute_token_limit)
-        if any(value is None for value in required):
-            raise ValueError("all daily, monthly, minute, and per-task limits plus task_id are required")
+        if (type(estimated_tokens) is not int or estimated_tokens < 1 or
+                not isinstance(route_id, str) or not route_id.strip() or
+                not isinstance(task_id, str) or not task_id.strip()):
+            raise ValueError("route_id, task_id and positive estimated_tokens are required")
+        # The Worker resolves every limit from its deployed provider-profile policy.
+        # Caller-provided limit parameters remain accepted for API compatibility but
+        # are deliberately never serialized or trusted.
         result = self._request("POST", "/v1/quota", {
-            "action": "reserve", "route_id": route_id, "estimated_tokens": estimated_tokens,
-            "daily_request_limit": request_limit, "daily_token_limit": token_limit,
-            "monthly_request_limit": monthly_request_limit,
-            "monthly_token_limit": monthly_token_limit, "task_id": task_id,
-            "per_task_request_limit": per_task_request_limit,
-            "per_task_token_limit": per_task_token_limit,
-            "minute_request_limit": minute_request_limit,
-            "minute_token_limit": minute_token_limit,
+            "action": "reserve", "route_id": route_id,
+            "estimated_tokens": estimated_tokens, "task_id": task_id,
         })
-        return int(result["reservation_id"])
+        reservation_id = int(result["reservation_id"])
+        settlement_key = result.get("settlement_key")
+        if not isinstance(settlement_key, str) or not settlement_key:
+            raise D1QuotaLedgerError("quota Worker omitted reservation settlement proof")
+        self._reservations[reservation_id] = (settlement_key, route_id, task_id)
+        return reservation_id
 
     def settle(self, reservation_id: int, actual_tokens: int) -> None:
         if type(reservation_id) is not int or reservation_id < 1 or type(actual_tokens) is not int or actual_tokens < 0:
             raise ValueError("invalid reservation settlement")
+        reservation = self._reservations.get(reservation_id)
+        if reservation is None:
+            raise D1QuotaLedgerError("reservation settlement proof is unavailable; refusing unbound settlement")
+        settlement_key, route_id, task_id = reservation
         self._request("POST", "/v1/quota", {
-            "action": "settle", "reservation_id": reservation_id, "actual_tokens": actual_tokens
+            "action": "settle", "reservation_id": reservation_id,
+            "actual_tokens": actual_tokens, "settlement_key": settlement_key,
+            "route_id": route_id, "task_id": task_id,
         })
 
     def record(self, route_id: str, tokens: int, now: datetime | None = None) -> None:
