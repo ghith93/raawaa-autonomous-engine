@@ -19,6 +19,12 @@ def status_payload():
             "available": True,
             "status": "Migration 0005 applied; webhook activation remains separately gated",
         },
+        "worker_cron": {
+            "last_seen_at": "2026-11-03T00:45:00.000Z",
+            "cron": "*/15 * * * *",
+            "requeued": 2,
+            "failed": 1,
+        },
         "unavailable_metrics": {
             "paper_ledger": "Available",
             "provider_usage": "Available",
@@ -65,6 +71,11 @@ class MobileStatusProbeTests(unittest.TestCase):
             "paper_ledger": "available",
             "provider_usage": "available",
             "telegram_receipts": "available",
+            "worker_cron_status": "recorded",
+            "worker_cron_last_seen": "2026-11-03T00:45:00.000Z",
+            "worker_cron_schedule": "*/15 * * * *",
+            "worker_cron_requeued": "2",
+            "worker_cron_failed": "1",
             "last_scan": "not_recorded",
             "source_freshness": "not_aggregated",
             "ci_health": "not_ingested",
@@ -85,6 +96,50 @@ class MobileStatusProbeTests(unittest.TestCase):
         self.assertEqual(result["source_freshness"], "unknown")
         self.assertEqual(result["ci_health"], "unknown")
         self.assertEqual(result["kill_switch"], "unknown")
+
+    def test_missing_worker_cron_heartbeat_is_reported_as_not_recorded(self):
+        result = probe.summarize_mobile_status({
+            "worker_cron": None,
+            "unavailable_metrics": {
+                "worker_cron": "No Worker Cron heartbeat has been recorded yet",
+            },
+        })
+        self.assertEqual(result["worker_cron_status"], "not_recorded")
+        self.assertEqual(result["worker_cron_last_seen"], "unknown")
+        self.assertEqual(result["worker_cron_schedule"], "unknown")
+
+    def test_invalid_worker_cron_metadata_is_not_reported_as_a_valid_heartbeat(self):
+        result = probe.summarize_mobile_status({
+            "worker_cron": {
+                "last_seen_at": "not-a-date",
+                "cron": "*/15 * * * *",
+                "requeued": -1,
+                "failed": 0,
+            },
+        })
+        self.assertEqual(result["worker_cron_status"], "invalid")
+        self.assertEqual(result["worker_cron_last_seen"], "unknown")
+        self.assertEqual(result["worker_cron_requeued"], "unknown")
+
+    def test_worker_cron_metadata_rejects_control_characters(self):
+        for field, value in (
+            ("cron", "*/15 * * * *\nINJECTED=value"),
+            ("last_seen_at", "2026-11-03\n00:45:00+00:00"),
+        ):
+            payload = {
+                "worker_cron": {
+                    "last_seen_at": "2026-11-03T00:45:00.000Z",
+                    "cron": "*/15 * * * *",
+                    "requeued": 0,
+                    "failed": 0,
+                    field: value,
+                },
+            }
+            with self.subTest(field=field):
+                result = probe.summarize_mobile_status(payload)
+                self.assertEqual(result["worker_cron_status"], "invalid")
+                self.assertEqual(result["worker_cron_schedule"], "unknown")
+                self.assertEqual(result["worker_cron_last_seen"], "unknown")
 
     def test_telegram_receipt_schema_absence_is_reported_without_enabling_webhook(self):
         payload = status_payload()
@@ -131,6 +186,7 @@ class MobileStatusProbeTests(unittest.TestCase):
         self.assertEqual(result["http"], "404")
         self.assertEqual(result["paper_ledger"], "route_not_deployed")
         self.assertEqual(result["last_scan"], "route_not_deployed")
+        self.assertEqual(result["worker_cron_status"], "route_not_deployed")
         self.assertEqual(result["tasks_pending"], "unknown")
 
     def test_non_404_http_errors_still_fail_closed(self):
@@ -180,6 +236,9 @@ class MobileStatusProbeTests(unittest.TestCase):
             self.assertEqual(parsed["http"], "200")
             self.assertEqual(parsed["paper_ledger"], "available")
             self.assertEqual(parsed["telegram_receipts"], "available")
+            self.assertEqual(parsed["worker_cron_status"], "recorded")
+            self.assertEqual(parsed["worker_cron_last_seen"], "2026-11-03T00:45:00.000Z")
+            self.assertEqual(parsed["worker_cron_requeued"], "2")
             self.assertEqual(parsed["tasks_pending"], "2")
             self.assertEqual(parsed["paper_events"], "7")
             self.assertNotIn(TOKEN, stdout.getvalue())
