@@ -139,12 +139,24 @@ class RemoteTaskStore:
     def claim_next(self, lease_timeout_seconds: int = 900) -> dict[str, Any] | None:
         if not 1 <= int(lease_timeout_seconds) <= 900:
             raise ValueError("remote lease timeout must be between 1 and 900 seconds")
+        # Do not claim from an older Worker that ignores retry_after_seconds.
+        # This prevents the new runner from creating a hot loop during rollout.
+        health = self._request("/health")
+        capabilities = health.get("capabilities")
+        if not isinstance(capabilities, list) or "task_retry_schedule_v1" not in capabilities:
+            raise RemoteTaskStoreError(
+                "Remote Worker lacks task_retry_schedule_v1; apply migration 0008 and deploy the updated Worker before claiming tasks"
+            )
         result = self._request("/v1/tasks/claim", "POST", {})
         task = result.get("task")
         if task is None:
             return None
         if not isinstance(task, dict) or not result.get("lease_token"):
             raise RemoteTaskStoreError("Remote task API returned an invalid lease")
+        if "next_attempt_at" not in task:
+            raise RemoteTaskStoreError(
+                "Remote Worker claimed a task without retry-schedule metadata; task was not executed"
+            )
         task["lease_token"] = result["lease_token"]
         return task
 
@@ -181,6 +193,10 @@ class RemoteTaskStore:
         status = response.get("status")
         if status not in {"pending", "failed"}:
             raise RemoteTaskStoreError("Remote task API returned an invalid retry status")
+        if retry_after_seconds > 0 and not isinstance(response.get("next_attempt_at"), str):
+            raise RemoteTaskStoreError(
+                "Remote Worker did not confirm the delayed retry schedule; task runner stopped"
+            )
         return status
 
     def recover_stale(self, lease_timeout_seconds: int = 900) -> dict[str, int]:
