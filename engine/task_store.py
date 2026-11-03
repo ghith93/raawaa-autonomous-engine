@@ -37,7 +37,9 @@ class TaskStore:
               status TEXT NOT NULL CHECK(status IN ('pending','running','succeeded','failed','blocked')),
               attempts INTEGER NOT NULL DEFAULT 0, max_attempts INTEGER NOT NULL DEFAULT 2,
               created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
-              result_json TEXT, error TEXT, lease_token TEXT, lease_expires_at TEXT
+              result_json TEXT, error TEXT, lease_token TEXT, lease_expires_at TEXT,
+              execution_mode TEXT NOT NULL DEFAULT 'unknown'
+                CHECK(execution_mode IN ('unknown','not_started','dry_run','live_inference'))
             );
             CREATE INDEX IF NOT EXISTS idx_tasks_status_created ON tasks(status, created_at);
             CREATE TABLE IF NOT EXISTS audit_log (
@@ -52,6 +54,10 @@ class TaskStore:
                 db.execute("ALTER TABLE tasks ADD COLUMN lease_token TEXT")
             if "lease_expires_at" not in columns:
                 db.execute("ALTER TABLE tasks ADD COLUMN lease_expires_at TEXT")
+            if "execution_mode" not in columns:
+                db.execute("""ALTER TABLE tasks ADD COLUMN execution_mode TEXT NOT NULL
+                    DEFAULT 'unknown' CHECK(execution_mode IN
+                    ('unknown','not_started','dry_run','live_inference'))""")
 
     def _audit(self, db, task_id: str | None, event: str, details: dict[str, Any]):
         db.execute("INSERT INTO audit_log(task_id,event,details_json,created_at) VALUES(?,?,?,?)",
@@ -69,16 +75,19 @@ class TaskStore:
             if existing:
                 return dict(existing)
             db.execute("""INSERT INTO tasks(id,idempotency_key,task_type,title,payload_json,status,
-                       attempts,max_attempts,created_at,updated_at)
-                       VALUES(?,?,?,?,?,'pending',0,?,?,?)""",
+                       attempts,max_attempts,created_at,updated_at,execution_mode)
+                       VALUES(?,?,?,?,?,'pending',0,?,?,?,'not_started')""",
                        (task_id, key, task_type, title, json.dumps(payload or {}, sort_keys=True),
                         max_attempts, now, now))
             self._audit(db, task_id, "task_enqueued", {"task_type": task_type, "title": title})
             return dict(db.execute("SELECT * FROM tasks WHERE id=?", (task_id,)).fetchone())
 
-    def claim_next(self, lease_timeout_seconds: int = 900) -> dict[str, Any] | None:
+    def claim_next(self, lease_timeout_seconds: int = 900,
+                   execution_mode: str = "unknown") -> dict[str, Any] | None:
         if lease_timeout_seconds < 1:
             raise ValueError("lease_timeout_seconds must be positive")
+        if execution_mode not in {"unknown", "dry_run", "live_inference"}:
+            raise ValueError("invalid execution_mode")
         with self._connect() as db:
             db.execute("BEGIN IMMEDIATE")
             row = db.execute("SELECT * FROM tasks WHERE status='pending' ORDER BY created_at,id LIMIT 1").fetchone()
@@ -88,9 +97,9 @@ class TaskStore:
             token = str(uuid.uuid4())
             expires = (now + timedelta(seconds=lease_timeout_seconds)).isoformat()
             changed = db.execute("""UPDATE tasks SET status='running',attempts=attempts+1,
-                         updated_at=?,lease_token=?,lease_expires_at=?
+                         execution_mode=?,updated_at=?,lease_token=?,lease_expires_at=?
                          WHERE id=? AND status='pending'""",
-                         (now.isoformat(), token, expires, row["id"])).rowcount
+                         (execution_mode, now.isoformat(), token, expires, row["id"])).rowcount
             if changed != 1:
                 return None
             self._audit(db, row["id"], "task_claimed", {"attempt": row["attempts"] + 1,
