@@ -13,3 +13,7 @@ The following are intentionally shown as unavailable rather than guessed: scan-r
 Security headers include no-store, no-referrer, nosniff, and a restrictive Content Security Policy. CI health is ingested by a main-only GitHub Actions job into the dedicated Staging D1 audit ledger. The publisher verifies the Staging and production database IDs differ, writes only two sanitized metadata events, and reads them back. It does not write to production D1 or expose provider credentials. The page stores no access token persistently.
 
 The CI telemetry publisher is currently Staging-only. The production Worker and production D1 are unchanged; promoting the new dashboard fields to production remains a separately gated deployment decision. The telemetry job does not apply migrations, change secrets, enable inference, or enable external actions.
+
+## Execution mode and simulation reporting
+
+The “Executed successfully” headline counts only succeeded tasks whose final `execution_mode` is `live_inference`. “Dry-run simulations” counts succeeded tasks whose final mode is `dry_run` and is explicitly excluded from executed work. The mode panel also shows `not_started` tasks, live-inference running/failed/blocked counts, and legacy `unknown` successes separately. Live inference indicates that the live path was selected; it is not by itself proof that a provider request completed. The aggregate is unavailable until migration `0009_task_execution_mode` is present; it never guesses the mode of legacy rows.
