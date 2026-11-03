@@ -40,10 +40,7 @@ class TaskInvocationStore:
             if not isinstance(invocation.get(key), str):
                 raise RemoteTaskStoreError("Invocation API returned an invalid identity")
         if invocation["status"] != "prepared":
-            raise RemoteTaskStoreError(
-                "Invocation is not in the prepared state",
-                error_code="invocation_replay_blocked",
-            )
+            raise RemoteTaskStoreError("Invocation is not in the prepared state")
         return {
             "invocation_id": invocation["invocation_id"],
             "request_id": invocation["request_id"],
