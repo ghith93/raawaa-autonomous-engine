@@ -9,7 +9,7 @@ from pathlib import Path
 
 from scripts.publish_staging_ops_telemetry import (
     TelemetryPublishError,
-    build_telemetry_sql,
+    build_telemetry_statement,
     publish_staging_telemetry,
 )
 
@@ -67,6 +67,23 @@ def valid_env(**changes):
     return env
 
 
+class FakeD1Client:
+    def __init__(self, *, account_id, database_id, api_token, changes=2, rows=None):
+        self.configuration = (account_id, database_id, api_token)
+        self.changes = changes
+        self.rows = rows or [
+            {"event": "ci_health_snapshot", "created_at": "2026-11-03T12:40:00+00:00"},
+            {"event": "kill_switch_snapshot", "created_at": "2026-11-03T12:40:00+00:00"},
+        ]
+        self.calls = []
+
+    def query(self, sql, params=None):
+        self.calls.append((sql, params))
+        if sql.startswith("INSERT"):
+            return {"meta": {"changes": self.changes}}
+        return {"results": self.rows}
+
+
 class StagingOpsTelemetryTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
@@ -77,25 +94,28 @@ class StagingOpsTelemetryTests(unittest.TestCase):
     def tearDown(self):
         self.temp.cleanup()
 
-    def test_builds_two_sanitized_staging_events_and_default_kill_switch(self):
-        sql, summary = build_telemetry_sql(valid_env(), self.root, self.now)
-        self.assertIn("'ci_health_snapshot'", sql)
-        self.assertIn("'kill_switch_snapshot'", sql)
-        self.assertIn("raawaa-engine-staging", sql)
-        self.assertEqual(summary["conclusion"], "success")
+    def test_builds_parameterized_staging_events_and_default_kill_switch(self):
+        sql, params, summary = build_telemetry_statement(valid_env(), self.root, self.now)
+        self.assertIn("VALUES(NULL,?,?,?),(NULL,?,?,?)", sql)
+        self.assertEqual(params[0], "ci_health_snapshot")
+        self.assertEqual(params[3], "kill_switch_snapshot")
+        ci = json.loads(params[1])
+        gate = json.loads(params[4])
+        self.assertEqual(ci["conclusion"], "success")
+        self.assertEqual(gate["status"], "engaged")
         self.assertEqual(summary["kill_switch"], "engaged")
-        self.assertNotIn("not-a-real-token", sql)
-        self.assertNotIn("account-placeholder", sql)
+        self.assertNotIn("not-a-real-token", json.dumps(params))
+        self.assertNotIn("account-placeholder", json.dumps(params))
 
     def test_ci_failure_is_persisted_as_failure_not_success(self):
-        sql, summary = build_telemetry_sql(
+        _, params, summary = build_telemetry_statement(
             valid_env(ENGINE_CI_STAGING_WORKER_RESULT="failure"), self.root, self.now
         )
         self.assertEqual(summary["conclusion"], "failure")
-        self.assertIn('"conclusion":"failure"', sql)
+        self.assertEqual(json.loads(params[1])["conclusion"], "failure")
 
     def test_skipped_staging_jobs_produce_incomplete_result(self):
-        _, summary = build_telemetry_sql(
+        _, params, summary = build_telemetry_statement(
             valid_env(
                 ENGINE_CI_STAGING_MIGRATE_RESULT="skipped",
                 ENGINE_CI_STAGING_WORKER_RESULT="skipped",
@@ -104,19 +124,22 @@ class StagingOpsTelemetryTests(unittest.TestCase):
             self.now,
         )
         self.assertEqual(summary["conclusion"], "incomplete")
+        self.assertEqual(json.loads(params[1])["conclusion"], "incomplete")
 
     def test_enabled_live_inference_disengages_gate(self):
-        _, summary = build_telemetry_sql(
+        _, params, summary = build_telemetry_statement(
             valid_env(RAAWAA_ENGINE_LIVE_INFERENCE="enabled"), self.root, self.now
         )
         self.assertEqual(summary["kill_switch"], "not_engaged")
+        self.assertEqual(json.loads(params[4])["live_inference_default"], "enabled")
 
-    def test_wrong_database_id_fails_before_runner(self):
+    def test_wrong_database_id_fails_before_client_creation(self):
         write_fixture(self.root, staging_id="f0ffbed3-940f-488d-a7d1-31cbc5fbf742")
         called = []
         with self.assertRaisesRegex(TelemetryPublishError, "identity mismatch"):
             publish_staging_telemetry(
-                valid_env(), root=self.root, runner=lambda *a, **k: called.append(a)
+                valid_env(), root=self.root,
+                client_factory=lambda **kwargs: called.append(kwargs),
             )
         self.assertEqual(called, [])
 
@@ -128,27 +151,41 @@ class StagingOpsTelemetryTests(unittest.TestCase):
         ):
             with self.subTest(changes=changes):
                 with self.assertRaises(TelemetryPublishError):
-                    build_telemetry_sql(valid_env(**changes), self.root, self.now)
+                    build_telemetry_statement(valid_env(**changes), self.root, self.now)
 
-    def test_runner_targets_only_staging_d1_and_uses_pinned_wrangler(self):
-        seen = {}
+    def test_writes_and_reads_back_only_staging_d1_events(self):
+        clients = []
 
-        def fake_runner(command, **kwargs):
-            seen["command"] = command
-            seen["kwargs"] = kwargs
-            return None
+        def factory(**kwargs):
+            client = FakeD1Client(**kwargs)
+            clients.append(client)
+            return client
 
         result = publish_staging_telemetry(
-            valid_env(), root=self.root, runner=fake_runner, now=self.now
+            valid_env(), root=self.root, client_factory=factory, now=self.now
         )
-        command = seen["command"]
         self.assertEqual(result["published_events"], 2)
-        self.assertEqual(command[:4], ["npx", "--yes", "wrangler@4.156.1", "d1"])
-        self.assertIn("raawaa-engine-staging", command)
-        self.assertIn("--remote", command)
-        self.assertIn("wrangler.staging.toml", command)
-        self.assertNotIn("wrangler.toml", command)
-        self.assertEqual(seen["kwargs"]["timeout"], 120)
+        self.assertEqual(result["verified_events"], 2)
+        self.assertEqual(result["database"], "raawaa-engine-staging")
+        self.assertEqual(len(clients), 1)
+        self.assertEqual(clients[0].configuration[1], "231dd948-04a0-49e3-ad73-444f77d69477")
+        self.assertEqual(len(clients[0].calls), 2)
+
+    def test_fails_if_d1_does_not_confirm_both_inserts(self):
+        with self.assertRaisesRegex(TelemetryPublishError, "did not confirm both telemetry inserts"):
+            publish_staging_telemetry(
+                valid_env(), root=self.root,
+                client_factory=lambda **kwargs: FakeD1Client(**kwargs, changes=1),
+                now=self.now,
+            )
+
+    def test_fails_if_d1_readback_is_incomplete(self):
+        with self.assertRaisesRegex(TelemetryPublishError, "readback did not confirm"):
+            publish_staging_telemetry(
+                valid_env(), root=self.root,
+                client_factory=lambda **kwargs: FakeD1Client(**kwargs, rows=[]),
+                now=self.now,
+            )
 
 
 if __name__ == "__main__":
