@@ -63,13 +63,14 @@ class LiveRuntimeFactoryTests(unittest.TestCase):
         self.assertIn("groq:primary:openai/gpt-oss-20b", gateway.adapters)
         # Factory construction is local only; no adapter.generate/network call is made.
 
-    def test_cloud_mode_requires_durable_worker_credentials_and_never_falls_back(self):
-        with self.assertRaisesRegex(RuntimeError, "RAAWAA_ENGINE_API_TOKEN"):
+    def test_cloud_mode_blocks_until_durable_monetary_ledger_exists(self):
+        with self.assertRaisesRegex(RuntimeError, "durable D1 monetary ledger"):
             build_live_gateway(
                 self.db_path, self.policy_path, self.registry_path,
                 environ={
                     "RAAWAA_ENGINE_LIVE_INFERENCE": "enabled",
                     "RAAWAA_ENGINE_API_URL": "https://engine.example",
+                    "RAAWAA_ENGINE_API_TOKEN": "test-token",
                     "GROQ_API_KEY": "test-key",
                 },
             )
