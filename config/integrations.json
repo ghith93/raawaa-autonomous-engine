@@ -15,10 +15,10 @@
         "mobile_web_quality_assurance"
       ],
       "implemented_probe_operations": [
-        "GET /api/status",
         "GET /api/devices"
       ],
       "blocked_operations": [
+        "GET /api/status (may start queue dispatcher and run pending tasks)",
         "POST /api/run",
         "POST /api/stop",
         "ADB shell",
