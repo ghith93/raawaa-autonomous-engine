@@ -13,3 +13,8 @@ This phase adds opt-in HTTP adapters for Gemini and OpenAI-compatible providers 
 Gemini uses the Google Generative Language generateContent endpoint. Groq, Cerebras, and OpenRouter can use the OpenAI-compatible chat completions endpoint with an explicit base URL.
 
 Next: integrate with QuotaManager and ModelGateway, reserve quota before calls, record usage, and cool down on HTTP 429. Live execution remains disabled by default.
+
+
+## Data policy boundary
+
+The live data gate is public-only and task-specific: `research_brief` is the sole allowlisted task type. The payload schema accepts only a topic, optional bounded questions, optional public HTTPS source URLs, and an explicit `data_classification=public`. All other task types and classifications fail closed before provider I/O. This gate does not detect every possible proprietary fact in free text; task authors must never mark confidential formulae, customer data, or credentials as public.
