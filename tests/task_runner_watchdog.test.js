@@ -96,6 +96,7 @@ test("missing D1 audit binding fails before any GitHub network call", async () =
   await assert.rejects(
     () => module.dispatchTaskRunnerIfStale({
       env: {
+        GITHUB_APP_WATCHDOG_ENABLED: "enabled",
         GITHUB_APP_ID: "12345",
         GITHUB_APP_INSTALLATION_ID: "67890",
         GITHUB_APP_PRIVATE_KEY: privateKeyPem,
