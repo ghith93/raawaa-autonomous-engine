@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 import os
+from datetime import datetime
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlsplit
 from urllib.request import HTTPRedirectHandler, Request, build_opener
@@ -166,13 +167,23 @@ def summarize_mobile_status(payload: object, http_status: int = 200) -> dict[str
             if not isinstance(worker_cron, dict):
                 raise ValueError("worker_cron must be an object")
             last_seen = worker_cron.get("last_seen_at")
-            if not isinstance(last_seen, str) or not last_seen or len(last_seen) > 40:
+            if (
+                not isinstance(last_seen, str)
+                or not last_seen
+                or len(last_seen) > 40
+                or any(ord(char) < 32 or ord(char) == 127 for char in last_seen)
+            ):
                 raise ValueError("invalid Worker Cron timestamp")
             parsed_last_seen = datetime.fromisoformat(last_seen.replace("Z", "+00:00"))
             if parsed_last_seen.tzinfo is None or parsed_last_seen.utcoffset() is None:
                 raise ValueError("Worker Cron timestamp must be timezone-aware")
             cron_expression = worker_cron.get("cron")
-            if not isinstance(cron_expression, str) or not cron_expression or len(cron_expression) > 100:
+            if (
+                not isinstance(cron_expression, str)
+                or not cron_expression
+                or len(cron_expression) > 100
+                or any(ord(char) < 32 or ord(char) == 127 for char in cron_expression)
+            ):
                 raise ValueError("invalid Worker Cron expression")
             requeued = _count(worker_cron.get("requeued"))
             failed = _count(worker_cron.get("failed"))
@@ -235,6 +246,11 @@ def probe_mobile_status(
             "http": "404",
             "paper_ledger": "route_not_deployed",
             "provider_usage": "route_not_deployed",
+            "worker_cron_status": "route_not_deployed",
+            "worker_cron_last_seen": "route_not_deployed",
+            "worker_cron_schedule": "route_not_deployed",
+            "worker_cron_requeued": "route_not_deployed",
+            "worker_cron_failed": "route_not_deployed",
             "last_scan": "route_not_deployed",
             "source_freshness": "route_not_deployed",
             "ci_health": "route_not_deployed",
