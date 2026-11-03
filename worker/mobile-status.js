@@ -46,7 +46,7 @@ h2{font-size:16px;margin:0 0 10px}.rows{display:grid;gap:8px}.item{display:flex;
 <section class="panel"><h2>Provider usage · D1</h2><div id="usage" class="rows"></div></section>
 <section class="panel"><h2>Recorded model inference costs · USD</h2><div id="modelCosts" class="rows"></div><p class="muted">Recorded provider costs only; external or unreported spend is not inferred.</p></section>
 <section class="panel"><h2>Durable monetary budget ledger · D1</h2><div id="monetaryLedger" class="rows"></div><p class="muted">Unresolved reservations count against all budget windows. A pending reservation is never released automatically.</p></section>
-<section class="panel"><h2>Latest market snapshot</h2><div id="snapshot" class="muted">—</div></section><section class="panel"><h2>Latest paper event</h2><div id="latest" class="muted">—</div></section><section class="panel"><h2>Telegram control readiness</h2><div id="telegramSchema" class="rows"></div><p class="muted">Schema presence only; webhook activation still requires operator-managed secrets and Telegram configuration.</p></section><section class="panel"><h2>Worker Cron heartbeat</h2><div id="workerCron" class="rows"></div></section><section class="panel"><h2>Task Runner watchdog</h2><div id="watchdog" class="rows"></div><p class="muted">Readiness only; secret values are never returned. Dispatch history is read from the D1 audit ledger.</p></section><section class="panel"><h2>GitHub CI health · Staging snapshot</h2><div id="ci" class="rows"></div></section>
+<section class="panel"><h2>Latest market snapshot</h2><div id="snapshot" class="muted">—</div></section><section class="panel"><h2>Latest explicit scan</h2><div id="lastScan" class="rows"></div></section><section class="panel"><h2>Research source freshness</h2><div id="sourceFreshness" class="rows"></div></section><section class="panel"><h2>Latest paper event</h2><div id="latest" class="muted">—</div></section><section class="panel"><h2>Telegram control readiness</h2><div id="telegramSchema" class="rows"></div><p class="muted">Schema presence only; webhook activation still requires operator-managed secrets and Telegram configuration.</p></section><section class="panel"><h2>Worker Cron heartbeat</h2><div id="workerCron" class="rows"></div></section><section class="panel"><h2>Task Runner watchdog</h2><div id="watchdog" class="rows"></div><p class="muted">Readiness only; secret values are never returned. Dispatch history is read from the D1 audit ledger.</p></section><section class="panel"><h2>GitHub CI health · Staging snapshot</h2><div id="ci" class="rows"></div></section>
 <section class="panel"><h2>Default Task Runner inference gate</h2><div id="killSwitch" class="rows"></div><p class="muted">This reports the committed default Task Runner policy, not one-off Staging smoke workflows.</p></section>
 <section class="panel"><h2>Not yet connected to this status feed</h2><div id="gaps" class="rows"></div></section>
 <button id="refresh">Refresh</button><button class="secondary" id="disconnect">Disconnect</button>
@@ -94,6 +94,25 @@ async function load() {
     ["Hard-cap policy enabled",money.budget_policy_enabled?"Yes":"No"]
   ]:[],data.unavailable_metrics?.monetary_ledger||"D1 monetary ledger unavailable");
   $("snapshot").textContent=data.latest_market_snapshot?data.latest_market_snapshot.candidate_id+" · chain "+(data.latest_market_snapshot.chain_id??"—")+" · block "+(data.latest_market_snapshot.block_number??"—")+" · "+data.latest_market_snapshot.occurred_at:"No market snapshot recorded";
+  const scan=data.last_scan||null;
+  rows("lastScan",scan?[
+    ["Status",scan.status+" · "+scan.freshness],
+    ["Type",scan.scan_type],
+    ["Run","#"+scan.run_number+" ("+scan.run_id+")"],
+    ["Commit",String(scan.head_sha||"").slice(0,8)],
+    ["Completed",scan.completed_at],
+    ["Requests / candidates",(scan.requests_made??"—")+" / "+(scan.candidate_count??"—")]
+  ]:[],data.unavailable_metrics?.last_scan||"No explicit scan recorded");
+  const freshness=data.source_freshness||null;
+  const sourceRows=freshness?[
+    ["Overall",freshness.status],
+    ...((freshness.sources||[]).flatMap(source=>[
+      [source.source_key,source.freshness+" · "+source.status],
+      [source.source_key+" observed",source.observed_at],
+      [source.source_key+" items",source.item_count]
+    ]))
+  ]:[];
+  rows("sourceFreshness",sourceRows,data.unavailable_metrics?.source_freshness||"No research source observations recorded");
   $("latest").textContent=data.latest_paper_event?data.latest_paper_event.event_type+" · "+data.latest_paper_event.candidate_id+" · "+data.latest_paper_event.occurred_at:"No paper event recorded";
   rows("telegramSchema",[[ "Webhook receipt schema", data.telegram_webhook_schema?.status || "Unknown" ]],"Schema status unavailable");
   const cron=data.worker_cron;
