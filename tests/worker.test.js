@@ -167,7 +167,7 @@ test("scheduled handler runs bounded stale lease recovery and records a heartbea
 test("Task Runner watchdog Cron is dormant without App settings and does not run lease recovery", async () => {
   const DB = dbMock();
   await worker.scheduled(
-    { cron: "2,7,12,17,22,27,32,37,42,47,52,57 * * * *", scheduledTime: 1_800_000_000_000 },
+    { cron: "1,6,11,16,21,26,31,36,41,46,51,56 * * * *", scheduledTime: 1_800_000_000_000 },
     { DB },
   );
   assert.equal(DB.calls.length, 0);
