@@ -17,7 +17,7 @@ The watchdog requires three Cloudflare Worker secrets and one explicit non-secre
 - GITHUB_APP_INSTALLATION_ID
 - GITHUB_APP_PRIVATE_KEY
 
-Also add the non-secret Cloudflare Worker variable GITHUB_APP_WATCHDOG_ENABLED with the exact value enabled only after verifying the GitHub App installation, repository scope, and all three secrets. This is a separate activation switch; the App secrets alone do not start the watchdog. The variable is intentionally not stored in wrangler.toml.
+Also add the non-secret Cloudflare Worker variable GITHUB_APP_WATCHDOG_ENABLED with the exact value enabled only after verifying the GitHub App installation, repository scope, and all three secrets. This is a separate activation switch; the App secrets alone do not start the watchdog. The variable is intentionally not stored in wrangler.toml. The production deployment workflow must pass Wrangler's `--keep-vars` flag so this dashboard-managed activation switch survives code deployments. The deployment verification must fail if `task_runner_watchdog.ready` is false.
 
 The private key is never needed in ChatGPT and must never be pasted into a conversation, issue, pull request, log, or source file.
 
@@ -88,3 +88,14 @@ This closes the one-time GitHub App setup and dispatch verification. Continue mo
 ## Disable or roll back
 
 Remove the watchdog Cron expression from wrangler.toml and revert the watchdog handler/import through a reviewed pull request. To disable without a code change, remove or change GITHUB_APP_WATCHDOG_ENABLED; the watchdog immediately returns disabled. Keep the 15-minute stale-lease recovery Cron intact.
+
+
+## Deployment configuration regression — 2026-11-03 21:43 UTC
+
+Production deployment run [#41723367620](https://github.com/ghith93/raawaa-autonomous-engine/actions/runs/41723367620) succeeded, but the subsequent Task Runner mobile-status read in [#41724349887](https://github.com/ghith93/raawaa-autonomous-engine/actions/runs/41724349887) reported `watchdog_ready=not_ready` and `watchdog_missing=GITHUB_APP_WATCHDOG_ENABLED`. The deployment log had warned that the dashboard variable differed from `wrangler.toml` and would be overridden. The immediate post-deploy probe reported ready, but the later independent read is the current evidence and shows the activation variable is missing.
+
+The corrective deployment contract is:
+
+- Use `wrangler deploy --config wrangler.toml --keep-vars` to preserve dashboard-managed variables while keeping secrets in Cloudflare's secret store.
+- Fail the deployment verification if `task_runner_watchdog.ready` is false; a successful Worker upload alone is not a healthy release.
+- Do not add the GitHub App private key or other secret values to Wrangler configuration. Keep the activation variable in the dashboard and preserve it with `--keep-vars`.
