@@ -44,12 +44,12 @@ async function readJson(request) {
 
 function safeScanText(value, max = 120) {
   return typeof value === "string" && value.length > 0 && value.length <= max &&
-    !/[\\u0000-\\u001f\\u007f]/.test(value);
+    !/[\u0000-\u001f\u007f]/.test(value);
 }
 
 function scanReasonCode(value) {
   if (typeof value !== "string") return "source_unavailable";
-  const match = value.match(/HTTP (\\d{3})/);
+  const match = value.match(/HTTP (\d{3})/);
   if (match) return "http_" + match[1];
   if (value.includes("rate_limit")) return "rate_limited";
   if (value.includes("Timeout")) return "timeout";
@@ -69,7 +69,7 @@ async function recordResearchScan(request, env) {
     if (!safeScanText(value, 40)) return false;
     const date = new Date(value);
     return Number.isFinite(date.getTime()) && date.toISOString() === new Date(date.getTime()).toISOString() &&
-      /(?:Z|[+-]\\d{2}:\\d{2})$/.test(value);
+      /(?:Z|[+-]\d{2}:\d{2})$/.test(value);
   };
   const nonnegative = value => Number.isSafeInteger(value) && value >= 0;
   if (!safeScanText(scan.scan_id, 160) || !["github_crossref"].includes(scan.scan_type) ||
