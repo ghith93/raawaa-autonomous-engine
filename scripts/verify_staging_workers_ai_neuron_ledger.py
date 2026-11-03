@@ -64,18 +64,24 @@ def execute_staging_sql(sql: str) -> None:
     verify_staging_target()
     if not os.environ.get("CLOUDFLARE_API_TOKEN") or not os.environ.get("CLOUDFLARE_ACCOUNT_ID"):
         raise RuntimeError("Cloudflare credentials are required for Staging-only test cleanup")
-    result = subprocess.run(
-        [
-            "npx", "--yes", "wrangler@4.156.1", "d1", "execute",
-            "raawaa-engine-staging", "--remote", "--command", sql,
-            "--config", "wrangler.staging.toml", "--yes",
-        ],
-        check=False, capture_output=True, text=True, timeout=60,
-        env=os.environ.copy(),
-    )
-    if result.returncode != 0:
+    for attempt in range(3):
+        result = subprocess.run(
+            [
+                "npx", "--yes", "wrangler@4.156.1", "d1", "execute",
+                "raawaa-engine-staging", "--remote", "--command", sql,
+                "--config", "wrangler.staging.toml", "--yes",
+            ],
+            check=False, capture_output=True, text=True, timeout=60,
+            env=os.environ.copy(),
+        )
+        if result.returncode == 0:
+            return
         detail = (result.stderr or result.stdout or "unknown Wrangler error")[-1000:]
-        raise RuntimeError("Staging-only Neuron-ledger cleanup failed: " + detail)
+        if "[code: 7429]" not in detail.lower() or attempt == 2:
+            raise RuntimeError("Staging-only Neuron-ledger cleanup failed: " + detail)
+        # UPDATE/DELETE cleanup statements are idempotent; retry only D1's
+        # transient overloaded-database error, never an uncertain provider call.
+        time.sleep(2 ** (attempt + 1))
 
 
 def api(method: str, path: str, payload: dict[str, Any] | None = None,
@@ -256,6 +262,12 @@ def main() -> None:
         try:
             post({"action": "disable"}, admin=True)
         finally:
+            # Directly force the Staging-only policy off even if the Worker
+            # endpoint is temporarily unavailable, then remove only our fixtures.
+            execute_staging_sql(
+                "UPDATE workers_ai_neuron_policy SET enabled=0,updated_at=CURRENT_TIMESTAMP "
+                "WHERE policy_key='default'"
+            )
             cleanup_test_rows()
         status, final = api("GET", "/v1/workers-ai-neurons")
         require(status == 200 and final.get("policy", {}).get("enabled") is False,
