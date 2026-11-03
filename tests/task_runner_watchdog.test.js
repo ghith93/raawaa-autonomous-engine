@@ -79,6 +79,25 @@ test("missing GitHub App settings disable the watchdog without network or D1 wri
   assert.equal(DB.calls.length, 0);
 });
 
+test("missing D1 audit binding fails before any GitHub network call", async () => {
+  const module = await loadModule();
+  assert.ok(module, "Task Runner watchdog module must exist");
+  let calls = 0;
+  await assert.rejects(
+    () => module.dispatchTaskRunnerIfStale({
+      env: {
+        GITHUB_APP_ID: "12345",
+        GITHUB_APP_INSTALLATION_ID: "67890",
+        GITHUB_APP_PRIVATE_KEY: privateKeyPem,
+      },
+      fetchImpl: async () => { calls += 1; throw new Error("network must not run"); },
+      nowMs: NOW,
+    }),
+    /task_runner_dispatch_audit_unavailable/,
+  );
+  assert.equal(calls, 0);
+});
+
 test("an active Task Runner run suppresses dispatch", async () => {
   const module = await loadModule();
   assert.ok(module, "Task Runner watchdog module must exist");
