@@ -84,7 +84,7 @@ The issue is not complete until:
 1. This branch is reviewed and merged.
 2. Migration 0006 is applied to the isolated Staging D1 database by the existing green-main CI migration gate.
 3. The CI-gated `staging-worker-verify` job deploys an isolated Staging Worker after successful tests and Staging migrations, installs a per-run ephemeral `ENGINE_API_TOKEN` that is masked and not stored in GitHub, and runs remote verification. No production Worker deployment is implied.
-4. Remote Staging tests verify cross-runner concurrency, crash/restart persistence, duplicate settlement, ambiguous provider outcomes, and over-cap behavior.
+4. Remote Staging tests verify concurrent-client reservations against shared D1, Worker redeploy persistence, duplicate settlement, ambiguous provider outcomes, and over-cap behavior. They do not yet run two independent GitHub Actions runners concurrently.
 5. The dedicated `monetary_ledger` section of authenticated mobile status reports aggregate D1 totals, policy caps, pending/ambiguous counts, and quarantined-route count; it omits reservation IDs, task IDs, and model names. The separate legacy `model_costs_usd` panel remains grouped by provider with aggregate request/token/cost totals. The authenticated operator ledger endpoint returns bounded unresolved reservation metadata for internal reconciliation. No credentials are returned.
 6. Provider-side hard-stop semantics are independently verified. The Cloudflare spend-policy endpoint previously returned HTTP 404, so account-wide infrastructure spend blocking remains unverified.
 
