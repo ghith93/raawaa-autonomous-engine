@@ -133,6 +133,7 @@ def _baseline(root: Path) -> dict[str, dict[str, Any]]:
     query_map = research.get("queries", {})
     query_names = sorted(name for name in query_map if isinstance(name, str)) if isinstance(query_map, dict) else []
     academic_source = research.get("academic_source") if isinstance(research.get("academic_source"), str) else None
+    arxiv_source = research.get("arxiv_source") if isinstance(research.get("arxiv_source"), str) else None
     persistence_is_optional = "RAAWAA_ENGINE_RESEARCH_PERSISTENCE" in workflow_text and "== 'enabled'" in workflow_text
 
     return {
@@ -177,11 +178,12 @@ def _baseline(root: Path) -> dict[str, dict[str, Any]]:
             "evidence": "Unit tests validate code behavior; they do not by themselves measure agent task quality or skill utility.",
         },
         "research_discovery": {
-            "status": "github_plus_academic_metadata" if query_names and academic_source else ("github_metadata_only" if query_names else "not_configured"),
+            "status": "github_crossref_arxiv_metadata" if query_names and academic_source and arxiv_source else ("github_plus_academic_metadata" if query_names and academic_source else ("github_metadata_only" if query_names else "not_configured")),
             "evidence_paths": ["config/research_sources.json", "engine/research_discovery.py"],
-            "evidence": "Current configured discovery sources are limited to the listed GitHub topics and the configured academic metadata source.",
+            "evidence": "Configured discovery includes the listed GitHub topics and the named academic metadata adapters; source configuration does not prove successful retrieval in the latest run.",
             "configured_topics": query_names,
             "academic_source": academic_source,
+            "arxiv_source": arxiv_source,
         },
     }
 
