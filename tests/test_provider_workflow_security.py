@@ -18,7 +18,7 @@ class ProviderWorkflowSecurityTests(unittest.TestCase):
         }
         for variable, expression in expected.items():
             self.assertIn(variable + ": " + expression, batch)
-            self.assertEqual(source.count(variable), 1, f"{variable} leaked outside the batch step")
+            self.assertEqual(source.count(expression), 1, f"{variable} secret reference leaked outside the batch step")
         self.assertIn(
             "RAAWAA_ENGINE_API_URL: https://raawaa-autonomous-engine-control.ghith-shikhkhaled.workers.dev",
             batch,
