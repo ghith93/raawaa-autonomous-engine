@@ -17,6 +17,7 @@ function envWith(db = dbMock()) {
     GITHUB_APP_ID: "12345",
     GITHUB_APP_INSTALLATION_ID: "67890",
     GITHUB_APP_PRIVATE_KEY: privateKeyPem,
+    GITHUB_APP_WATCHDOG_ENABLED: "true",
   };
 }
 
@@ -88,6 +89,23 @@ test("missing GitHub App settings disable the watchdog without network or D1 wri
   assert.equal(DB.calls.length, 0);
 });
 
+test("GitHub App credentials without explicit watchdog opt-in remain dormant", async () => {
+  const module = await loadModule();
+  assert.ok(module, "Task Runner watchdog module must exist");
+  const DB = dbMock();
+  const env = envWith(DB);
+  delete env.GITHUB_APP_WATCHDOG_ENABLED;
+  let calls = 0;
+  const result = await module.dispatchTaskRunnerIfStale({
+    env,
+    fetchImpl: async () => { calls += 1; throw new Error("network must not run"); },
+    nowMs: NOW,
+  });
+  assert.deepEqual(result, { status: "disabled", reason: "missing_configuration" });
+  assert.equal(calls, 0);
+  assert.equal(DB.calls.length, 0);
+});
+
 test("missing D1 audit binding fails before any GitHub network call", async () => {
   const module = await loadModule();
   assert.ok(module, "Task Runner watchdog module must exist");
@@ -98,6 +116,7 @@ test("missing D1 audit binding fails before any GitHub network call", async () =
         GITHUB_APP_ID: "12345",
         GITHUB_APP_INSTALLATION_ID: "67890",
         GITHUB_APP_PRIVATE_KEY: privateKeyPem,
+        GITHUB_APP_WATCHDOG_ENABLED: "true",
       },
       fetchImpl: async () => { calls += 1; throw new Error("network must not run"); },
       nowMs: NOW,
