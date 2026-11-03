@@ -93,7 +93,6 @@ class D1MigrationContractTests(unittest.TestCase):
             VALUES ('legacy-task','legacy-key','research_brief','Legacy success','{}','succeeded',1,2,'2026-01-01','2026-01-01')""")
         migration = MIGRATION_8.read_text(encoding="utf-8")
         self.db.executescript(migration)
-        self.db.executescript(migration)
         columns = {row[1] for row in self.db.execute("PRAGMA table_info(tasks)")}
         self.assertIn("execution_mode", columns)
         self.assertEqual(self.db.execute(
