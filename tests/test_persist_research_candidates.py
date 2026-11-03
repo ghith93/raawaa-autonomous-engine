@@ -95,7 +95,7 @@ class ResearchPersistenceTests(unittest.TestCase):
              "accepted", "reviewed before source expansion", "2026-01-01", "2026-01-02",
              "2026-01-02", 3, "2026-01-02"),
         )
-        connection.executescript((root / "migrations" / "0008_research_source_expansion.sql").read_text(encoding="utf-8"))
+        connection.executescript((root / "migrations" / "0009_research_source_expansion.sql").read_text(encoding="utf-8"))
         existing = connection.execute(
             "SELECT source,review_status,review_note,first_seen_at,last_seen_at,reviewed_at,discovery_count FROM research_candidates WHERE source_key=?",
             ("github:org/agent",),
