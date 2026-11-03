@@ -197,7 +197,11 @@ def _validate_searxng_base_url(base_url: str) -> str:
     """Accept only an operator-configured public HTTPS SearXNG origin/path."""
     if not isinstance(base_url, str) or not base_url.strip() or len(base_url) > 500:
         raise ResearchDiscoveryError("SearXNG endpoint is missing or malformed")
-    parsed = urlsplit(base_url.strip())
+    try:
+        parsed = urlsplit(base_url.strip())
+        _ = parsed.port
+    except ValueError:
+        raise ResearchDiscoveryError("SearXNG endpoint URL is malformed") from None
     host = parsed.hostname
     if (parsed.scheme != "https" or not host or parsed.username or parsed.password
             or parsed.query or parsed.fragment):
@@ -231,7 +235,7 @@ def _request_searxng(query: str, base_url: str, max_results: int = 10, timeout: 
                 raise ResearchDiscoveryError(f"SearXNG returned HTTP {response.status}")
             final_url = response.geturl() if callable(getattr(response, "geturl", None)) else request_url
             final = urlsplit(final_url)
-            if final.scheme != "https" or final.hostname != parsed.hostname:
+            if final.scheme != "https" or final.netloc != parsed.netloc:
                 raise ResearchDiscoveryError("SearXNG redirected outside the configured HTTPS host")
             content_type = response.headers.get("Content-Type", "") if getattr(response, "headers", None) else ""
             if content_type and "json" not in content_type.lower():
@@ -254,7 +258,8 @@ def _normalize_searxng_result(item: dict, retrieved_at: str) -> dict | None:
     if not isinstance(title, str) or not title.strip() or not isinstance(url, str):
         return None
     parsed = urlsplit(url)
-    if parsed.scheme not in {"http", "https"} or not parsed.hostname or parsed.username or parsed.password:
+    if (parsed.scheme not in {"http", "https"} or not parsed.hostname or parsed.username
+            or parsed.password or len(url) > 1000):
         return None
     engines = item.get("engines", [])
     if not isinstance(engines, list):
