@@ -963,3 +963,12 @@ test("Codespace principal has no retry route", async () => {
   }), { DB: dbMock(), ENGINE_API_TOKEN: TOKEN, ENGINE_CODESPACE_TOKEN: "separate-codespace-token" });
   assert.equal(response.status, 404);
 });
+
+test("existing Task Runner retains its fenced retry route", async () => {
+  const DB = dbMock();
+  const response = await worker.fetch(request("/v1/tasks/task-1/retry", {
+    method: "POST", token: TOKEN, body: { lease_token: "lease-1", error: "retry test" },
+  }), { DB, ENGINE_API_TOKEN: TOKEN, ENGINE_CODESPACE_TOKEN: "separate-codespace-token" });
+  assert.equal(response.status, 200);
+  assert.deepEqual(await response.json(), { ok: true, status: "pending" });
+});
