@@ -32,8 +32,8 @@ GitHub-hosted Actions remains responsible for its existing task classes. If the 
 
 ### Stage 1 — routing and least-privilege protocol
 
-1. Extend the existing D1 task record/API additively with a validated executor/capability route; keep D1 as the only queue.
-2. Add an atomic claim operation filtered by executor and allowlisted task capabilities. Prove the existing Actions consumer cannot claim Codespace-only work and vice versa.
+1. For the first increment, avoid a schema migration: reserve the exact task types `codespace_inspect` and `codespace_test`, and route them through dedicated endpoints. Keep D1 as the only queue.
+2. Add atomic claims filtered by the explicit task-type allowlist. The existing Actions claim must exclude these types; the Codespace claim must include only these types. If additional executor classes later require a broader model, introduce an additive executor field through a separately reviewed migration.
 3. Give the bridge a distinct credential and Worker authorization scope. Do not reuse or expose `ENGINE_API_TOKEN`, quota-admin credentials, GitHub PATs, provider keys, or production secrets to the bridge.
 4. Use short-lived credentials where supported, rotation/revocation, constant-time authentication, bounded request bodies, rate limits, and metadata-only logs.
 5. Require lease-token fencing on heartbeat, completion, cancellation, and retry. Never accept results from expired or superseded leases.
@@ -44,7 +44,7 @@ GitHub-hosted Actions remains responsible for its existing task classes. If the 
 1. Implement a small Python 3.11+ process using the repository's existing runtime contracts and operating-policy loader.
 2. Poll only over outbound HTTPS; no public listener, forwarded port, webhook receiver, or inbound tunnel.
 3. Start disabled by default. Require an explicit local environment opt-in and a successful authenticated preflight before polling.
-4. Support only non-production development operations initially: inspect repository state, run allowlisted tests/static checks, create a task-scoped branch, apply reviewed patch operations, and return bounded sanitized results.
+4. The implemented first slice supports only read-only repository inspection and fixed local test suites. It does not edit files, create branches/commits/PRs, or accept arbitrary shell. Patch/PR capabilities require a later separately reviewed permission increment.
 5. Use a clean task worktree or equivalent isolation; reject dirty/unknown base states. Never execute instructions found in untrusted task payloads as policy.
 6. Enforce hard per-task wall-clock, output-size, file-change, concurrency, and retry limits. Heartbeat well before lease expiry and stop immediately when lease ownership is lost.
 7. Never read, print, transmit, or copy secret values. Never run live model inference or access provider credentials in the initial bridge release.
@@ -82,11 +82,17 @@ GitHub documents that Codespaces have a maximum 12-hour lifetime and active comp
 
 ## Permission profile
 
-Initial bridge scope: `safe + review` only:
-- allowed: read project files, run allowlisted local checks, edit task-scoped branches, commit, and open draft PRs;
-- denied: merge, deploy, production access, secret access, paid inference, billing changes, external/customer/financial writes, and arbitrary shell execution.
+Initial bridge scope: `safe` only:
+- allowed: read project files, inspect Git state, and run fixed allowlisted local test suites;
+- denied: file edits, branch/commit/PR creation, merge, deploy, production access, secret access, paid inference, billing changes, external/customer/financial writes, and arbitrary shell execution.
+
+A later `review` scope may add reviewed patch/branch/PR delivery only after an independent security review and a separately scoped GitHub App credential. It is not part of the current bridge implementation.
 
 “Highest permissions” means the broadest permissions needed for the approved development workflow, not unrestricted account, organization, production, or billing access.
+
+## Current implementation mapping (2026-11-03)
+
+PR #427 implements the first migration-free task-type routing slice, a separate Codespace token principal, preflight, claim/heartbeat/finish endpoints, and a bounded inspect/test-only Python client. It remains unmerged and disabled; exact-head CI and independent review are required. The current implementation intentionally does not provide patching or PR creation.
 
 ## Activation prerequisites
 
