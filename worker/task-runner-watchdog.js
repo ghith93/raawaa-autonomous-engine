@@ -28,6 +28,11 @@ function appConfiguration(env) {
   return missing;
 }
 
+export function getTaskRunnerWatchdogReadiness(env) {
+  const missing = appConfiguration(env);
+  return { ready: missing.length === 0, missing };
+}
+
 function auditBindingAvailable(env) {
   return Boolean(env?.DB && typeof env.DB.prepare === "function");
 }
@@ -153,7 +158,7 @@ export async function dispatchTaskRunnerIfStale({
   nowMs = Date.now(),
   scheduledTime,
 }) {
-  if (appConfiguration(env).length) {
+  if (!getTaskRunnerWatchdogReadiness(env).ready) {
     return { status: "disabled", reason: "missing_configuration" };
   }
   if (!auditBindingAvailable(env)) {
