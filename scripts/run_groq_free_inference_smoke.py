@@ -26,7 +26,7 @@ ROUTE_IDS = (
 )
 
 
-def _wait_for_authenticated_worker(store: RemoteTaskStore, timeout_seconds: int = 45) -> dict:
+def _wait_for_authenticated_worker(store: RemoteTaskStore, timeout_seconds: int = 120) -> dict:
     deadline = time.monotonic() + timeout_seconds
     last_error = "worker_not_ready"
     while time.monotonic() < deadline:
@@ -41,6 +41,8 @@ def _wait_for_authenticated_worker(store: RemoteTaskStore, timeout_seconds: int 
                         return store._request("/v1/mobile/status")
                     except Exception as exc:
                         last_error = type(exc).__name__
+        except urllib.error.HTTPError as exc:
+            last_error = f"HTTP_{exc.code}"
         except (urllib.error.URLError, TimeoutError, OSError) as exc:
             last_error = type(exc).__name__
         time.sleep(2)
