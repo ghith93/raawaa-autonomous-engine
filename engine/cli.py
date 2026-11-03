@@ -19,6 +19,8 @@ from engine.research_discovery import discover_repositories
 from engine.budget_policy import validate_budget_policy
 from engine.tool_broker import validate_permission_matrix
 from engine.artemis_gateway import probe_artemis
+from engine.executive_intelligence import executive_status
+from engine.orchestrator import validate_and_plan
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -148,6 +150,10 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Raawaa Autonomous Engine")
     sub = parser.add_subparsers(dest="command", required=True)
     sub.add_parser("audit")
+    executive = sub.add_parser("executive-status", help="Read-only executive portfolio snapshot and explainable task priorities")
+    executive.add_argument("--limit", type=int, default=10)
+    workflow_plan = sub.add_parser("workflow-plan", help="Validate a delegated workflow DAG without enqueuing or executing it")
+    workflow_plan.add_argument("--file", required=True, help="Path to a JSON workflow proposal")
     sub.add_parser("artemis-status", help="Read-only ARTEMIS daemon/device probe; never submits a mobile task")
 
     discovery = sub.add_parser(
@@ -212,6 +218,13 @@ def main() -> int:
 
     if args.command == "audit":
         return audit()
+    elif args.command == "executive-status":
+        print(json.dumps(executive_status(store(), limit=args.limit), indent=2, ensure_ascii=False))
+    elif args.command == "workflow-plan":
+        proposal = load_json(Path(args.file))
+        roster = load_json(ROOT / "config" / "agents.json")
+        policy = load_json(ROOT / "config" / "policy.json")
+        print(json.dumps(validate_and_plan(proposal, roster, policy).as_dict(), indent=2, ensure_ascii=False))
     elif args.command == "artemis-status":
         print(json.dumps(probe_artemis(os.environ), indent=2, ensure_ascii=False))
     elif args.command == "free-models":
