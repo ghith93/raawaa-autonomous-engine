@@ -8,6 +8,7 @@ import json
 import os
 import urllib.error
 import urllib.request
+from urllib.parse import quote
 import uuid
 from typing import Any
 
