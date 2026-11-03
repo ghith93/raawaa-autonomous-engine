@@ -17,3 +17,10 @@
 - The enabled Daily Ops automation is **not proven scheduler-live** while `next_run_time` remains null. A manual `run_now` inline execution is not the same as a completed scheduled run.
 - Do not create a duplicate ChatGPT automation to compensate. The existing automation was updated in place. Use GitHub Actions and the existing Activepieces flow for engine execution, while ChatGPT automation is the cross-connector inventory/review layer.
 - Refresh this table after any automation change. Record the exact prompt purpose, timezone, schedule, enabled state, last/next run, and whether execution was inline or background.
+
+
+## Revalidation — 2026-11-03 22:33 UTC
+
+- `Raawaa Engine Daily Ops` remains enabled with the same daily 19:00 America/New_York schedule. Reapplying the existing schedule and toggling the existing automation off/on did not restore `next_run_time`; it remains null. The last recorded scheduled run remains failed on 2026-11-02.
+- A manual `run_now` request succeeded only by returning an `inline_run` instruction for execution in the current conversation. This is not a background run and does not prove recurring scheduler liveness. No duplicate automation was created.
+- The three marketing/market/serum automations remain paused; their state was not changed.
