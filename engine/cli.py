@@ -17,6 +17,7 @@ from engine.quota_manager import QuotaLedger, QuotaManager
 from engine.live_runtime import build_live_gateway
 from engine.research_discovery import discover_repositories
 from engine.budget_policy import validate_budget_policy
+from engine.tool_broker import validate_permission_matrix
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -52,7 +53,9 @@ def build_gateway_for_task_store(task_store):
 def audit() -> int:
     policy = load_json(ROOT / "config" / "policy.json")
     roster = load_json(ROOT / "config" / "agents.json")
+    tool_permissions = load_json(ROOT / "config" / "tool_permissions.json")
     errors = []
+    errors.extend(validate_permission_matrix(tool_permissions, roster))
     try:
         provider_profiles = load_provider_profile_registry(ROOT / "config" / "provider_profiles.json")
     except (OSError, ValueError, KeyError, TypeError) as exc:
@@ -85,7 +88,8 @@ def audit() -> int:
             print(f"FAIL: {error}")
         return 1
     mode_label = "safe dry-run" if mode == "safe_dry_run" else "live opt-in configured; operator kill switch still required"
-    print("Audit passed: " + str(len(ids)) + " agent roles; " + str(len(provider_profiles)) + " provider profiles; " + mode_label + "; hybrid/free-first; model cap USD " + format(policy["monthly_budget_usd"], ".2f") + "/month; all-in hard cap USD " + format(policy["budget_envelope"]["monthly_total_hard_cap_usd"], ".2f") + "/month; paid fallback and infrastructure overages disabled; external writes disabled.")
+    tool_count = len(tool_permissions.get("tools", {}))
+    print("Audit passed: " + str(len(ids)) + " agent roles; " + str(len(provider_profiles)) + " provider profiles; " + str(tool_count) + " deny-by-default tool definitions; " + mode_label + "; hybrid/free-first; model cap USD " + format(policy["monthly_budget_usd"], ".2f") + "/month; all-in hard cap USD " + format(policy["budget_envelope"]["monthly_total_hard_cap_usd"], ".2f") + "/month; paid fallback and infrastructure overages disabled; external writes disabled.")
     return 0
 
 
