@@ -20,6 +20,7 @@ function dbMock(migrationVersions=["0003_durable_quota_ledger","0004_paper_event
         async all(){
           calls.push({kind:"all",sql,values:this.values});
           if(sql.includes("GROUP BY execution_mode,status")) return {results:executionModeStatusCounts};
+          if(sql.includes("GROUP BY execution_mode,status")) return {results:executionModeStatusCounts};
           if(sql.includes("FROM tasks")) return {results:[{status:"pending",count:2}]};
           if(sql.includes("FROM task_model_invocations")) return {results:invocationCounts};
           if(sql.includes("schema_migrations")) return {results:migrationVersions.map(version=>({version}))};
@@ -85,6 +86,16 @@ test("mobile status endpoint returns read-only D1 metrics and explicit unknowns"
  assert.equal(JSON.stringify(body).includes('"provider":"groq"'),false);
  assert.equal(JSON.stringify(body).includes("reservation_id"),false);
  assert.deepEqual(body.telegram_webhook_schema,{available:true,status:"Migration 0005 applied; webhook activation remains separately gated"});
+ assert.deepEqual(body.execution_modes,{
+  available:true,
+  counts:{not_started:3,dry_run:2,live_inference:1,unknown:4},
+  status_counts:{
+   not_started:{pending:3,running:0,succeeded:0,failed:0,blocked:0},
+   dry_run:{pending:0,running:0,succeeded:2,failed:0,blocked:0},
+   live_inference:{pending:0,running:0,succeeded:1,failed:0,blocked:0},
+   unknown:{pending:0,running:0,succeeded:4,failed:0,blocked:0},
+  },
+ });
  assert.deepEqual(body.execution_modes,{
   available:true,
   counts:{not_started:3,dry_run:2,live_inference:1,unknown:4},
@@ -165,6 +176,16 @@ test("mobile status returns fresh validated CI and default inference-gate snapsh
  assert.equal(body.kill_switch.freshness,"fresh");
  assert.equal(body.unavailable_metrics.ci_health,undefined);
  assert.equal(body.unavailable_metrics.kill_switch,undefined);
+});
+
+test("mobile status separates dry-run and legacy successes from live execution",async()=>{
+ const DB=dbMock();
+ const response=await worker.fetch(request("/v1/mobile/status"),{DB,ENGINE_API_TOKEN:TOKEN});
+ assert.equal(response.status,200);
+ const body=await response.json();
+ assert.equal(body.execution_modes.status_counts.dry_run.succeeded,2);
+ assert.equal(body.execution_modes.status_counts.live_inference.succeeded,1);
+ assert.equal(body.execution_modes.status_counts.unknown.succeeded,4);
 });
 
 test("mobile status separates dry-run and legacy successes from live execution",async()=>{
