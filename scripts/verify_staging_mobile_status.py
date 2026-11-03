@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import time
 import urllib.error
 import urllib.request
 from datetime import datetime
@@ -27,7 +28,7 @@ def _timestamp(value: object) -> datetime:
     return parsed
 
 
-def verify(environ: dict[str, str] | None = None, *, opener=None) -> dict:
+def verify(environ: dict[str, str] | None = None, *, opener=None, readiness_timeout_seconds: int = 90) -> dict:
     env = os.environ if environ is None else environ
     base = env.get("RAAWAA_ENGINE_API_URL", "").rstrip("/")
     token = env.get("RAAWAA_ENGINE_STAGING_API_TOKEN", "")
@@ -56,15 +57,28 @@ def verify(environ: dict[str, str] | None = None, *, opener=None) -> dict:
         method="GET",
     )
     open_url = opener or urllib.request.build_opener(RejectRedirects()).open
-    try:
-        with open_url(request, timeout=20) as response:
-            if int(response.status) != 200:
-                raise RuntimeError("Staging mobile status returned non-200")
-            raw = response.read(MAX_RESPONSE_BYTES + 1)
-    except urllib.error.HTTPError as exc:
-        raise RuntimeError("Staging mobile status returned HTTP " + str(exc.code)) from None
-    except (urllib.error.URLError, TimeoutError, OSError) as exc:
-        raise RuntimeError("Staging mobile status request failed: " + type(exc).__name__) from None
+    if type(readiness_timeout_seconds) is not int or not 1 <= readiness_timeout_seconds <= 180:
+        raise ValueError("readiness timeout must be an integer between 1 and 180 seconds")
+    deadline = time.monotonic() + readiness_timeout_seconds
+    last_status = None
+    while True:
+        try:
+            with open_url(request, timeout=20) as response:
+                last_status = int(response.status)
+                if last_status != 200:
+                    raise RuntimeError("Staging mobile status returned HTTP " + str(last_status))
+                raw = response.read(MAX_RESPONSE_BYTES + 1)
+                break
+        except urllib.error.HTTPError as exc:
+            last_status = exc.code
+            # Wrangler confirms the secret upload before Cloudflare's Worker
+            # isolates consistently observe the new value. Retry only the
+            # authenticated, read-only status GET during this bounded window.
+            if exc.code not in (401, 500, 502, 503, 504) or time.monotonic() >= deadline:
+                raise RuntimeError("Staging mobile status returned HTTP " + str(exc.code)) from None
+        except (urllib.error.URLError, TimeoutError, OSError) as exc:
+            raise RuntimeError("Staging mobile status request failed: " + type(exc).__name__) from None
+        time.sleep(2)
     if len(raw) > MAX_RESPONSE_BYTES:
         raise RuntimeError("Staging mobile status response exceeded its bound")
     try:
