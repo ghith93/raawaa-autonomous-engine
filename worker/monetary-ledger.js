@@ -91,7 +91,9 @@ export async function handleMonetaryLedger(request, env, url) {
       const day = new Date(Date.UTC(date.getUTCFullYear(),date.getUTCMonth(),date.getUTCDate())).toISOString();
       const month = new Date(Date.UTC(date.getUTCFullYear(),date.getUTCMonth(),1)).toISOString();
       const pending = "status IN ('reserved','in_flight','ambiguous')";
-      const row = await env.DB.prepare(`
+      let row;
+      try {
+        row = await env.DB.prepare(`
         INSERT INTO monetary_reservations(
           reservation_id,idempotency_key,provider,model,task_kind,task_id,status,
           estimated_cost_nanos,daily_budget_nanos,monthly_budget_nanos,per_task_budget_nanos,created_at
@@ -114,7 +116,15 @@ export async function handleMonetaryLedger(request, env, url) {
         day,input.estimated_cost_nanos,input.daily_budget_nanos,
         month,input.estimated_cost_nanos,input.monthly_budget_nanos,
         input.task_id,input.task_id,input.estimated_cost_nanos,input.per_task_budget_nanos
-      ).first();
+        ).first();
+      } catch {
+        // A concurrent retry with the same idempotency key may win the unique insert.
+        const raced = await env.DB.prepare("SELECT * FROM monetary_reservations WHERE idempotency_key=?").bind(input.idempotency_key).first();
+        if (raced) return sameReservation(raced,input)
+          ? json({reservation_id:raced.reservation_id,status:raced.status,replay:true})
+          : json({error:"idempotency_conflict"},409);
+        throw new Error("monetary_reservation_insert_failed");
+      }
       if (row) return json({reservation_id:row.reservation_id,status:row.status,replay:false},201);
       const raced = await env.DB.prepare("SELECT * FROM monetary_reservations WHERE idempotency_key=?").bind(input.idempotency_key).first();
       if (raced) return sameReservation(raced,input)
