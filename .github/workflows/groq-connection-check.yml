@@ -21,14 +21,14 @@ jobs:
   verify-connection:
     runs-on: ubuntu-latest
     timeout-minutes: 2
-    env:
-      GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
     steps:
       - name: Check out reviewed main
         uses: actions/checkout@v7
       - name: Set up Python
         uses: actions/setup-python@v7
         with:
-          python-version: "3.11"
-      - name: Verify Groq API authentication and model catalog (no inference)
+          python-version: "3.12"
+      - name: Verify Groq API authentication and Free model catalog (read only)
+        env:
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
         run: python scripts/groq_connection_check.py
