@@ -244,19 +244,39 @@ async function transition(db, input, action, now) {
   if (action === "mark_in_flight") {
     if (row.status === "in_flight") return json({ reservation_id: row.reservation_id, status: row.status, replay: true });
     if (row.status !== "reserved") return json({ error: "invalid_reservation_transition" }, 409);
-    const policy = await policyRow(db);
+    // Policy/quarantine checks are part of the same conditional UPDATE as the
+    // state transition, so a concurrent disable/quarantine cannot race a start.
+    const result = await db.prepare(`
+      UPDATE workers_ai_neuron_reservations SET status='in_flight',started_at=?
+      WHERE reservation_id=? AND status='reserved'
+        AND EXISTS (
+          SELECT 1 FROM workers_ai_neuron_policy
+          WHERE policy_key='default' AND enabled=1 AND daily_cap_neurons=10000
+            AND allowed_model_id=workers_ai_neuron_reservations.model_id
+        )
+        AND NOT EXISTS (
+          SELECT 1 FROM workers_ai_neuron_quarantines
+          WHERE model_id=workers_ai_neuron_reservations.model_id
+        )
+    `).bind(now, input.reservation_id).run();
+    if (Number(result.meta?.changes || 0) === 1) {
+      return json({ reservation_id: row.reservation_id, status: "in_flight", replay: false });
+    }
+    const [current, policy, quarantine] = await Promise.all([
+      db.prepare(
+        "SELECT reservation_id,status FROM workers_ai_neuron_reservations WHERE reservation_id=?"
+      ).bind(input.reservation_id).first(),
+      policyRow(db),
+      db.prepare(
+        "SELECT model_id FROM workers_ai_neuron_quarantines WHERE model_id=?"
+      ).bind(row.model_id).first(),
+    ]);
+    if (current?.status === "in_flight") {
+      return json({ reservation_id: row.reservation_id, status: "in_flight", replay: true });
+    }
     if (!policy || Number(policy.enabled) !== 1) return json({ error: "neuron_ledger_disabled" }, 403);
-    const quarantine = await db.prepare(
-      "SELECT model_id FROM workers_ai_neuron_quarantines WHERE model_id=?"
-    ).bind(row.model_id).first();
     if (quarantine) return json({ error: "model_quarantined" }, 409);
-    const result = await db.prepare(
-      "UPDATE workers_ai_neuron_reservations SET status='in_flight',started_at=? " +
-      "WHERE reservation_id=? AND status='reserved'"
-    ).bind(now, input.reservation_id).run();
-    return Number(result.meta?.changes || 0) === 1
-      ? json({ reservation_id: row.reservation_id, status: "in_flight", replay: false })
-      : json({ error: "reservation_transition_conflict" }, 409);
+    return json({ error: "reservation_transition_conflict" }, 409);
   }
 
   if (action === "ambiguous") {
@@ -347,17 +367,22 @@ export async function handleWorkersAiNeuronLedger(request, env, url) {
   if (input.action === "enable" || input.action === "disable") {
     if (!adminCaller) return json({ error: "forbidden_operation_scope" }, 403);
     try {
-      if (input.action === "enable") {
-        const quarantine = await env.DB.prepare(
-          "SELECT model_id FROM workers_ai_neuron_quarantines WHERE model_id=?"
-        ).bind(MODEL_ID).first();
-        if (quarantine) return json({ error: "model_quarantined" }, 409);
-      }
       const result = await env.DB.prepare(
         "UPDATE workers_ai_neuron_policy SET enabled=?,updated_at=? " +
-        "WHERE policy_key='default' AND daily_cap_neurons=10000 AND allowed_model_id=?"
-      ).bind(input.action === "enable" ? 1 : 0, now, MODEL_ID).run();
-      if (Number(result.meta?.changes || 0) !== 1) return json({ error: "neuron_policy_unavailable" }, 503);
+        "WHERE policy_key='default' AND daily_cap_neurons=10000 AND allowed_model_id=? " +
+        (input.action === "enable"
+          ? "AND NOT EXISTS (SELECT 1 FROM workers_ai_neuron_quarantines WHERE model_id=?)"
+          : "")
+      ).bind(...(input.action === "enable" ? [1, now, MODEL_ID, MODEL_ID] : [0, now, MODEL_ID])).run();
+      if (Number(result.meta?.changes || 0) !== 1) {
+        if (input.action === "enable") {
+          const quarantine = await env.DB.prepare(
+            "SELECT model_id FROM workers_ai_neuron_quarantines WHERE model_id=?"
+          ).bind(MODEL_ID).first();
+          if (quarantine) return json({ error: "model_quarantined" }, 409);
+        }
+        return json({ error: "neuron_policy_unavailable" }, 503);
+      }
       return json({ enabled: input.action === "enable", daily_cap_neurons: DAILY_CAP_NEURONS });
     } catch {
       return json({ error: "storage_unavailable" }, 503);
