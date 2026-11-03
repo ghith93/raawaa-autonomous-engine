@@ -2,7 +2,7 @@
 
 ## Current implementation
 
-The repository currently contains a Python core, JSON configuration, policy evaluator, task/memory stores, deterministic workflow planner, quota-aware provider routing, opt-in live-runtime wiring, data-classification gate, CLI, unit tests, and GitHub Actions CI. A bounded daily GitHub repository discovery workflow is implemented as the first proactive research source; its output is unreviewed metadata, not an autonomous research/recommendation agent. The roster and planner remain declarative/deterministic rather than a persistent multi-agent runtime.
+The repository currently contains a Python core, JSON configuration, policy evaluator, task/memory stores, deterministic workflow planner, quota-aware provider routing, opt-in live-runtime wiring, data-classification gate, CLI, unit tests, and GitHub Actions CI. A bounded daily GitHub/Crossref/arXiv/SearXNG discovery workflow is implemented as a proactive research source; its output is unreviewed metadata, not an autonomous research/recommendation agent. Google ARTEMIS is registered as a disabled, read-only-probe integration for future Android UI testing; mobile execution is not yet enabled. The roster and planner remain declarative/deterministic rather than a persistent multi-agent runtime.
 
 ## Target architecture
 
