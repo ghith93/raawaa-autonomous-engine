@@ -1,3 +1,10 @@
+import providerProfiles from "../config/provider_profiles.json" with { type: "json" };
+
+const QUOTA_ROUTES = new Map((providerProfiles.routes || []).map(profile => [
+  `${profile.provider}:${profile.account}:${profile.model}`,
+  profile,
+]));
+
 function json(data, status = 200) {
   return new Response(JSON.stringify(data), {
     status, headers: { "content-type": "application/json; charset=utf-8", "cache-control": "no-store" }
@@ -85,8 +92,24 @@ export async function handleQuota(request, env, url) {
   const now = new Date().toISOString();
   try {
     if (input.action === "reserve") {
-      const fields = ["estimated_tokens","daily_request_limit","daily_token_limit","monthly_request_limit","monthly_token_limit","minute_request_limit","minute_token_limit","per_task_request_limit","per_task_token_limit"];
-      if (!validText(input.route_id, 200) || !validText(input.task_id, 200) || fields.some(k => !positiveInt(input[k]))) return json({ error: "invalid_reservation" }, 400);
+      if (!validText(input.route_id, 200) || !validText(input.task_id, 200) ||
+          !positiveInt(input.estimated_tokens)) return json({ error: "invalid_reservation" }, 400);
+      const profile = QUOTA_ROUTES.get(input.route_id);
+      if (!profile) return json({ error: "unknown_quota_route" }, 403);
+      const limits = {
+        daily_request_limit: profile.daily_request_limit,
+        daily_token_limit: profile.daily_token_limit,
+        monthly_request_limit: profile.monthly_request_limit,
+        monthly_token_limit: profile.monthly_token_limit,
+        minute_request_limit: profile.minute_request_limit,
+        minute_token_limit: profile.minute_token_limit,
+        per_task_request_limit: profile.per_task_request_limit,
+        per_task_token_limit: profile.per_task_token_limit,
+      };
+      if (Object.values(limits).some(value => !positiveInt(value))) {
+        return json({ error: "quota_policy_unavailable" }, 503);
+      }
+      const reservationKey = crypto.randomUUID();
       const day = new Date(now); day.setUTCHours(0,0,0,0);
       const month = new Date(Date.UTC(day.getUTCFullYear(), day.getUTCMonth(), 1));
       const minute = new Date(Date.now() - 60000);
@@ -118,25 +141,30 @@ export async function handleQuota(request, env, url) {
         input.task_id, input.estimated_tokens, input.per_task_token_limit
       ).first();
       if (!result) return json({ error: "quota_unavailable" }, 409);
-      return json({ reservation_id: result.id, occurred_at: now }, 201);
+      return json({ reservation_id: result.id, reservation_key: reservationKey, occurred_at: now }, 201);
     }
     if (input.action === "settle") {
-      if (!positiveInt(input.reservation_id) || !nonNegativeInt(input.actual_tokens)) return json({ error: "invalid_settlement" }, 400);
-      const updated = await env.DB.prepare("UPDATE quota_usage SET tokens=?,settled_at=? WHERE id=? AND settled_at IS NULL").bind(input.actual_tokens, now, input.reservation_id).run();
+      if (!positiveInt(input.reservation_id) || !nonNegativeInt(input.actual_tokens) ||
+          !validText(input.route_id, 200) || !validText(input.task_id, 200) ||
+          !validText(input.reservation_key, 100)) return json({ error: "invalid_settlement" }, 400);
+      if (!QUOTA_ROUTES.has(input.route_id)) return json({ error: "unknown_quota_route" }, 403);
+      const updated = await env.DB.prepare(
+        "UPDATE quota_usage SET tokens=?,settled_at=? WHERE id=? AND route_id=? AND task_id=? AND reservation_key=? AND settled_at IS NULL"
+      ).bind(input.actual_tokens, now, input.reservation_id, input.route_id, input.task_id, input.reservation_key).run();
       if (updated.meta?.changes === 1) return json({ ok: true, settled: true });
-      const existing = await env.DB.prepare("SELECT tokens,settled_at FROM quota_usage WHERE id=?").bind(input.reservation_id).first();
+      const existing = await env.DB.prepare(
+        "SELECT tokens,settled_at FROM quota_usage WHERE id=? AND route_id=? AND task_id=? AND reservation_key=?"
+      ).bind(input.reservation_id, input.route_id, input.task_id, input.reservation_key).first();
       if (!existing) return json({ error: "reservation_not_found" }, 404);
       if (existing.settled_at && Number(existing.tokens) === input.actual_tokens) return json({ ok: true, settled: true, replay: true });
       return json({ error: "settlement_conflict" }, 409);
     }
     if (input.action === "record") {
-      if (!validText(input.route_id, 200) || !nonNegativeInt(input.tokens)) return json({ error: "invalid_record" }, 400);
-      const result = await env.DB.prepare("INSERT INTO quota_usage(route_id,requests,tokens,occurred_at,settled_at,task_id) VALUES(?,1,?,?,?,?) RETURNING id").bind(input.route_id,input.tokens,now,now,validText(input.task_id,200)?input.task_id:null).first();
-      return json({ id: result.id }, 201);
+      return json({ error: "unsupported_action" }, 403);
     }
     if (input.action === "cool_down") {
-      if (!validText(input.route_id, 200) || !positiveInt(input.seconds)) return json({ error: "invalid_cooldown" }, 400);
-      const until = new Date(Date.now() + Math.min(input.seconds, 86400) * 1000).toISOString();
+      if (!validText(input.route_id, 200) || !QUOTA_ROUTES.has(input.route_id) || !positiveInt(input.seconds)) return json({ error: "invalid_cooldown" }, 400);
+      const until = new Date(Date.now() + Math.min(input.seconds, 3600) * 1000).toISOString();
       const reason = typeof input.reason === "string" ? input.reason.slice(0,120) : "rate_limited";
       await env.DB.prepare("INSERT INTO quota_cooldowns(route_id,until_at,reason,updated_at) VALUES(?,?,?,?) ON CONFLICT(route_id) DO UPDATE SET until_at=excluded.until_at,reason=excluded.reason,updated_at=excluded.updated_at").bind(input.route_id,until,reason,now).run();
       return json({ ok: true, until_at: until });
