@@ -271,6 +271,9 @@ try {
   });
   assertStatus(idemRelease, 200, "release idempotent reservation before I/O");
 
+  const preGlobalStatus = await api("/v1/monetary-ledger");
+  assertStatus(preGlobalStatus, 200, "pre-global monetary snapshot");
+  console.log("Pre-global monetary snapshot:", JSON.stringify(preGlobalStatus.payload.snapshot));
   const globalBase = {
     ...monetaryBase,
     estimated_cost_nanos: 10_000_000,
@@ -295,7 +298,7 @@ try {
   assert.deepEqual(
     globalAttempts.map(item => item.status).sort((a,b) => a-b),
     [201, 201, 409],
-    "daily monetary cap must be global across providers and concurrent tasks",
+    "daily monetary cap must be global across providers and concurrent tasks; responses=" + JSON.stringify(globalAttempts.map(item => ({status:item.status,payload:item.payload}))),
   );
   for (const item of globalAttempts.filter(item => item.status === 201)) {
     const releasedGlobal = await api("/v1/monetary-ledger", {
