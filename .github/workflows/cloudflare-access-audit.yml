@@ -59,10 +59,9 @@ jobs:
               return text[:300]
 
           failures = []
-          access_disabled = False
+          access_state = {"disabled": False}
 
           def fetch_all(label, path):
-              nonlocal access_disabled
               collected = []
               page = 1
               while page <= 20:
@@ -82,7 +81,7 @@ jobs:
                       details = body.get("errors") or []
                       print(f"{label}: HTTP {error.code}; CF-RAY={safe_text(error.headers.get('CF-RAY', 'not supplied'))}.")
                       if is_access_not_enabled(error.code, details):
-                          access_disabled = True
+                          access_state["disabled"] = True
                           print("Cloudflare Access is not enabled for this account; this is an optional product state, not a token permission failure.")
                           return []
                       if details:
@@ -127,7 +126,7 @@ jobs:
               "access_applications": "not_applicable",
               "access_service_tokens": "not_applicable",
               "other_failures": failures,
-          } if access_disabled else {
+          } if access_state["disabled"] else {
               "access_status": "enabled_or_unknown",
               "access_applications": "failed" if apps is None else f"ok; records={len(apps)}",
               "access_service_tokens": "failed" if service_tokens is None else f"ok; records={len(service_tokens)}",
@@ -135,11 +134,11 @@ jobs:
           with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
               output.write("summary=" + json.dumps(summary, separators=(",", ":")) + "\n")
 
-          if access_disabled:
+          if access_state["disabled"]:
               print("\nCloudflare Access is not enabled for this account. No Access applications or service tokens are available to audit.")
               print("The engine's authenticated Worker API routes continue to enforce ENGINE_API_TOKEN directly; no Cloudflare Access configuration was changed.")
           print("\n--- Access application summary ---")
-          if not apps and not access_disabled:
+          if not apps and not access_state["disabled"]:
               print("No Access applications returned for this account.")
           for app in apps or []:
               name = app.get("name") or "unnamed"
@@ -158,7 +157,7 @@ jobs:
                   for policy in policies:
                       print(f"    policy: {policy.get('name') or 'unnamed'}; decision={policy.get('decision') or policy.get('action') or 'not reported'}")
           print("\n--- Access service-token summary ---")
-          if not service_tokens and not access_disabled:
+          if not service_tokens and not access_state["disabled"]:
               print("No Access service tokens returned for this account.")
           for item in service_tokens or []:
               name = item.get("name") or "unnamed"
