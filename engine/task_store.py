@@ -157,7 +157,7 @@ class TaskStore:
                  error, now, execution_mode, task_id, lease_token)).rowcount
             if changed != 1:
                 raise ValueError("lease ownership lost")
-            audit_details = {"error": error} if error else (result or {})
+            audit_details = {"error": error} if error else dict(result or {})
             if execution_mode is not None:
                 audit_details["execution_mode"] = execution_mode
             self._audit(db, task_id, "task_" + status, audit_details)
