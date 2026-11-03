@@ -254,7 +254,7 @@ jobs:
               with urlopen(request, timeout=15) as response:
                   result = json.loads(response.read().decode("utf-8"))
                   task = result.get("task") or {}
-                  if response.status != 200 or not task.get("id"):
+                  if response.status not in (200, 201) or not task.get("id"):
                       raise SystemExit("Research task enqueue returned no task identity.")
                   print("Public research task enqueued; created=" + str(result.get("created")) + ".")
                   print("Task status: " + str(task.get("status", "unknown")) + ".")
