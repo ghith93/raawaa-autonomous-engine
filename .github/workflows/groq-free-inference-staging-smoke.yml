@@ -55,7 +55,7 @@ jobs:
           enabled = [r for r in json.loads(Path("config/provider_profiles.groq-smoke.json").read_text())["routes"] if r.get("enabled")]
           if policy.get("mode") != "live_inference_opt_in" or policy.get("allow_paid_model_calls") is not False or policy.get("allow_external_writes") is not False or mp.get("paid_fallback_enabled") is not False or mp.get("provider_hard_stop_verified") is not True:
               raise SystemExit("Refusing: Staging Free-only live policy gates are not satisfied")
-          allowed_models = {"openai/gpt-oss-120b", "openai/gpt-oss-20b"}
+          allowed_models = {"openai/gpt-oss-20b"}
           if {r.get("model") for r in enabled} != allowed_models or any(r.get("provider") != "groq" or r.get("input_cost_per_million_usd") != 0 or r.get("output_cost_per_million_usd") != 0 for r in enabled):
               raise SystemExit("Refusing: only the two verified zero-cost Groq routes may be enabled")
           print("Staging isolation, fail-closed defaults, and isolated zero-cost Groq smoke policy verified.")
