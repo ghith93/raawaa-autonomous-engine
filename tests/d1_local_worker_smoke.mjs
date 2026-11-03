@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { randomUUID } from "node:crypto";
 import { spawn, spawnSync } from "node:child_process";
 import { mkdtempSync, mkdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -195,6 +196,99 @@ try {
   assert.equal(quota.payload.usage.minute.requests, 2);
   assert.equal(quota.payload.usage.minute.tokens, 6);
 
+  const monetaryBase = {
+    action: "reserve",
+    provider: "d1-local-provider",
+    model: "d1-local-model",
+    task_kind: "integration_test",
+    task_id: "d1-local-monetary-cap-task",
+    estimated_cost_nanos: 10_000_000,
+    daily_budget_nanos: 1_000_000_000,
+    monthly_budget_nanos: 2_000_000_000,
+    per_task_budget_nanos: 20_000_000,
+  };
+  const monetaryAttempts = await Promise.all([1, 2, 3].map(() => {
+    const reservation_id = randomUUID();
+    return api("/v1/monetary-ledger", {
+      method: "POST",
+      body: { ...monetaryBase, reservation_id, idempotency_key: randomUUID() },
+    });
+  }));
+  assert.deepEqual(
+    monetaryAttempts.map(item => item.status).sort((a,b) => a-b),
+    [201, 201, 409],
+    "D1 monetary reservations must enforce the per-task hard cap across concurrent callers",
+  );
+  const acceptedMoney = monetaryAttempts.filter(item => item.status === 201);
+  const preCall = acceptedMoney[0].payload.reservation_id;
+  const inFlight = acceptedMoney[1].payload.reservation_id;
+  const released = await api("/v1/monetary-ledger", {
+    method: "POST", body: { action: "release", reservation_id: preCall },
+  });
+  assertStatus(released, 200, "pre-provider-I/O release");
+  const started = await api("/v1/monetary-ledger", {
+    method: "POST", body: { action: "start", reservation_id: inFlight },
+  });
+  assertStatus(started, 200, "mark provider I/O started");
+  const forbiddenRelease = await api("/v1/monetary-ledger", {
+    method: "POST", body: { action: "release", reservation_id: inFlight },
+  });
+  assertStatus(forbiddenRelease, 409, "release after provider I/O must be forbidden");
+  const ambiguous = await api("/v1/monetary-ledger", {
+    method: "POST", body: { action: "ambiguous", reservation_id: inFlight },
+  });
+  assertStatus(ambiguous, 200, "persist ambiguous provider outcome");
+  const settledMoney = await api("/v1/monetary-ledger", {
+    method: "POST",
+    body: {
+      action: "settle", reservation_id: inFlight,
+      actual_cost_nanos: 25_000_000, input_tokens: 11, output_tokens: 7,
+    },
+  });
+  assertStatus(settledMoney, 200, "settle actual monetary cost");
+  assert.equal(settledMoney.payload.over_budget, true, "actual spend above estimate/task cap must trigger quarantine");
+  const duplicateSettlement = await api("/v1/monetary-ledger", {
+    method: "POST",
+    body: {
+      action: "settle", reservation_id: inFlight,
+      actual_cost_nanos: 25_000_000, input_tokens: 11, output_tokens: 7,
+    },
+  });
+  assertStatus(duplicateSettlement, 200, "duplicate settlement is idempotent");
+  assert.equal(duplicateSettlement.payload.replay, true);
+  const quarantinedAttempt = await api("/v1/monetary-ledger", {
+    method: "POST",
+    body: { ...monetaryBase, reservation_id: randomUUID(), idempotency_key: randomUUID() },
+  });
+  assertStatus(quarantinedAttempt, 409, "quarantined route cannot reserve again");
+
+  const crashBase = {
+    ...monetaryBase,
+    task_id: "d1-local-crash-recovery-task",
+    provider: "d1-local-crash-provider",
+    model: "d1-local-crash-model",
+    estimated_cost_nanos: 3_000_000,
+    per_task_budget_nanos: 20_000_000,
+  };
+  const crashReservation = await api("/v1/monetary-ledger", {
+    method: "POST",
+    body: { ...crashBase, reservation_id: randomUUID(), idempotency_key: randomUUID() },
+  });
+  assertStatus(crashReservation, 201, "create restart recovery reservation");
+  const crashStarted = await api("/v1/monetary-ledger", {
+    method: "POST", body: { action: "start", reservation_id: crashReservation.payload.reservation_id },
+  });
+  assertStatus(crashStarted, 200, "start restart recovery reservation");
+  const crashAmbiguous = await api("/v1/monetary-ledger", {
+    method: "POST", body: { action: "ambiguous", reservation_id: crashReservation.payload.reservation_id },
+  });
+  assertStatus(crashAmbiguous, 200, "mark restart recovery reservation ambiguous");
+  const monetaryStatus = await api("/v1/monetary-ledger");
+  assertStatus(monetaryStatus, 200, "read durable monetary status");
+  assert.equal(monetaryStatus.payload.snapshot.pending_count, 1);
+  assert.equal(monetaryStatus.payload.snapshot.unresolved[0].reservation_id, crashReservation.payload.reservation_id);
+  assert.equal(monetaryStatus.payload.quarantined_routes.length, 1);
+
   const event = {
     candidate_id: "d1-local-candidate",
     event_id: "d1-local-event-1",
@@ -226,6 +320,8 @@ try {
   assertStatus(status, 200, "mobile status after D1 writes");
   assert.equal(status.payload.paper_events.find(row => row.event_type === "candidate_detected")?.count, 1);
   assert.equal(status.payload.tasks.find(row => row.status === "succeeded")?.count, 1);
+  assert.equal(status.payload.monetary_ledger.available, true);
+  assert.equal(status.payload.monetary_ledger.pending_count, 1);
 
   const webhookDisabled = await api("/v1/telegram/webhook", {
     method: "POST",
@@ -235,7 +331,7 @@ try {
 
   console.log(
     "Local D1 integration passed: migrations, authenticated status, task enqueue/idempotency/lease fencing, " +
-    "concurrent quota caps/settlement, append-only paper ledger/hash replay, and disabled Telegram webhook.",
+    "concurrent token and monetary caps, pre-I/O-only release, ambiguous reservations, idempotent settlement, quarantine, mobile monetary status, append-only paper ledger/hash replay, and disabled Telegram webhook.",
   );
 } catch (error) {
   throw new Error(String(error?.stack || error) + "\nWrangler logs:\n" + logs);
