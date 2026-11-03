@@ -66,6 +66,7 @@ class WorkerExecutionTests(unittest.TestCase):
     def test_missing_operating_policy_fails_closed_before_claim_or_provider_io(self):
         from engine.operating_policy import OperatingPolicyError
         gateway = Mock()
+        gateway.preflight_capacity.return_value = {"eligible": True, "reason": "verified_free_route_available"}
         with patch("engine.worker.load_operating_policy", side_effect=OperatingPolicyError("missing policy")):
             result = run_once(self.store, live_gateway=gateway, environ={"RAAWAA_ENGINE_LIVE_INFERENCE": "enabled"})
         self.assertEqual(result["status"], "blocked")
@@ -92,6 +93,7 @@ class WorkerExecutionTests(unittest.TestCase):
 
     def test_default_path_is_dry_run_and_never_calls_gateway(self):
         gateway = Mock()
+        gateway.preflight_capacity.return_value = {"eligible": True, "reason": "verified_free_route_available"}
         result = run_once(self.store, live_gateway=gateway, environ={})
         self.assertEqual(result["mode"], "dry_run")
         gateway.generate.assert_not_called()
@@ -167,6 +169,7 @@ class WorkerExecutionTests(unittest.TestCase):
         store = TaskStore(root / "oversized.db")
         store.enqueue("research_brief", "Oversized", {"data_classification": "public", "topic": "Oversized", "source_urls": ["https://example.com/" + "x" * 2000] * 4}, idempotency_key="oversized")
         gateway = Mock()
+        gateway.preflight_capacity.return_value = {"eligible": True, "reason": "verified_free_route_available"}
         result = run_once(store, live_gateway=gateway, environ={"RAAWAA_ENGINE_LIVE_INFERENCE": "enabled"})
         self.assertEqual(result["detail"], "task_payload_too_large")
         gateway.generate.assert_not_called()
@@ -175,6 +178,7 @@ class WorkerExecutionTests(unittest.TestCase):
         store = TaskStore(root / "email.db")
         store.enqueue("research_brief", "Review this contact", {"data_classification": "public", "topic": "Review this contact", "questions": ["Contact user@example.com"]}, idempotency_key="email")
         gateway = Mock()
+        gateway.preflight_capacity.return_value = {"eligible": True, "reason": "verified_free_route_available"}
         result = run_once(store, live_gateway=gateway, environ={"RAAWAA_ENGINE_LIVE_INFERENCE": "enabled"})
         self.assertEqual(result["detail"], "personal_data_detected")
         gateway.generate.assert_not_called()
