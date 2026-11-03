@@ -11,7 +11,7 @@ import xml.etree.ElementTree as ET
 from datetime import datetime, timezone
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode, urlparse
-from urllib.request import Request, urlopen
+from urllib.request import HTTPRedirectHandler, Request, build_opener, urlopen
 
 API = "https://api.github.com/search/repositories"
 MAX_RESPONSE_BYTES = 1048576
@@ -34,6 +34,17 @@ DEFAULT_QUERIES = {
 
 class ResearchDiscoveryError(RuntimeError):
     """A bounded research metadata request failed safely."""
+
+
+class _RejectRedirects(HTTPRedirectHandler):
+    """Do not follow redirects for fixed-host academic metadata endpoints."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        raise HTTPError(req.full_url, code, "redirects are disabled for fixed-host metadata requests", headers, fp)
+
+
+def _open_without_redirects(request: Request, timeout: int):
+    return build_opener(_RejectRedirects).open(request, timeout=timeout)
 
 
 def _request_json(query: str, token: str = "", timeout: int = 15) -> dict:
@@ -99,7 +110,7 @@ def _request_arxiv(query: str, max_results: int = 10, timeout: int = 20) -> dict
                       headers={"Accept": "application/atom+xml", "User-Agent": USER_AGENT},
                       method="GET")
     try:
-        with urlopen(request, timeout=timeout) as response:
+        with _open_without_redirects(request, timeout) as response:
             if response.status != 200:
                 raise ResearchDiscoveryError(f"arXiv returned HTTP {response.status}")
             final_url = response.geturl() if callable(getattr(response, "geturl", None)) else request.full_url
