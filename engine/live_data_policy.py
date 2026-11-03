@@ -17,6 +17,13 @@ SECRET_PATTERNS = (
     re.compile(r"\bBearer\s+[A-Za-z0-9._~+/-]{16,}", re.IGNORECASE),
 )
 EMAIL_PATTERN = re.compile(r"\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b", re.IGNORECASE)
+SENSITIVE_CONTENT_PATTERN = re.compile(
+    r"\b(?:formula|ingredients?|composition|proprietary|confidential|internal|"
+    r"customer|payment|password|secret|credential|access\s+token|refresh\s+token|"
+    r"personal\s+data|private\s+data)\b",
+    re.IGNORECASE,
+)
+
 BASE_BLOCKED_KEY_FRAGMENTS = (
     "password", "passwd", "secret", "apikey", "access_token", "refresh_token",
     "authorization", "privatekey", "credential", "customer", "personaldata",
@@ -120,10 +127,14 @@ def validate_live_payload(
                 return False, "personal_data_detected"
             if any(pattern.search(current) for pattern in SECRET_PATTERNS):
                 return False, "secret_pattern_detected"
+            if SENSITIVE_CONTENT_PATTERN.search(current):
+                return False, "sensitive_content_detected"
     if EMAIL_PATTERN.search(title):
         return False, "personal_data_detected"
     if any(pattern.search(title) for pattern in SECRET_PATTERNS):
         return False, "secret_pattern_detected"
+    if SENSITIVE_CONTENT_PATTERN.search(title):
+        return False, "sensitive_content_detected"
 
     if set(payload) - set(allowed_payload_keys) or not REQUIRED_PAYLOAD_KEYS.issubset(payload):
         return False, "payload_schema_invalid"
