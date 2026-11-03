@@ -19,6 +19,12 @@ def status_payload():
             "available": True,
             "status": "Migration 0005 applied; webhook activation remains separately gated",
         },
+        "task_runner_watchdog": {
+            "ready": False,
+            "missing": ["GITHUB_APP_ID", "GITHUB_APP_INSTALLATION_ID", "GITHUB_APP_PRIVATE_KEY", "GITHUB_APP_WATCHDOG_ENABLED"],
+            "last_dispatch_requested": None,
+            "last_dispatch_intent_at": None,
+        },
         "worker_cron": {
             "last_seen_at": "2026-11-03T00:45:00.000Z",
             "cron": "*/15 * * * *",
@@ -71,6 +77,10 @@ class MobileStatusProbeTests(unittest.TestCase):
             "paper_ledger": "available",
             "provider_usage": "available",
             "telegram_receipts": "available",
+            "watchdog_ready": "not_ready",
+            "watchdog_missing": "GITHUB_APP_ID,GITHUB_APP_INSTALLATION_ID,GITHUB_APP_PRIVATE_KEY,GITHUB_APP_WATCHDOG_ENABLED",
+            "watchdog_last_dispatch_requested": "none",
+            "watchdog_last_dispatch_intent_at": "none",
             "worker_cron_status": "recorded",
             "worker_cron_last_seen": "2026-11-03T00:45:00.000Z",
             "worker_cron_schedule": "*/15 * * * *",
@@ -86,6 +96,52 @@ class MobileStatusProbeTests(unittest.TestCase):
         })
         self.assertNotIn("model_costs", result)
         self.assertNotIn("99.99", json.dumps(result))
+
+    def test_watchdog_readiness_reports_missing_setting_names_only(self):
+        result = probe.summarize_mobile_status(status_payload())
+        self.assertEqual(result["watchdog_ready"], "not_ready")
+        self.assertEqual(
+            result["watchdog_missing"],
+            "GITHUB_APP_ID,GITHUB_APP_INSTALLATION_ID,GITHUB_APP_PRIVATE_KEY,GITHUB_APP_WATCHDOG_ENABLED",
+        )
+        self.assertEqual(result["watchdog_last_dispatch_requested"], "none")
+        self.assertEqual(result["watchdog_last_dispatch_intent_at"], "none")
+        self.assertNotIn("PRIVATE_KEY_NEVER_RETURN", json.dumps(result))
+
+    def test_ready_watchdog_exposes_only_sanitized_dispatch_metadata(self):
+        payload = status_payload()
+        payload["task_runner_watchdog"] = {
+            "ready": True,
+            "missing": [],
+            "last_dispatch_requested": {
+                "event": "task_runner_dispatch_requested",
+                "created_at": "2026-11-03T01:10:00.000Z",
+                "workflow": "task-runner.yml",
+                "ref": "main",
+                "http_status": 204,
+            },
+            "last_dispatch_intent_at": "2026-11-03T01:09:59.000Z",
+        }
+        result = probe.summarize_mobile_status(payload)
+        self.assertEqual(result["watchdog_ready"], "ready")
+        self.assertEqual(result["watchdog_missing"], "none")
+        self.assertEqual(result["watchdog_last_dispatch_requested"], "2026-11-03T01:10:00.000Z")
+        self.assertEqual(result["watchdog_last_dispatch_intent_at"], "2026-11-03T01:09:59.000Z")
+
+    def test_invalid_watchdog_readiness_fails_closed(self):
+        payload = status_payload()
+        payload["task_runner_watchdog"] = {
+            "ready": True,
+            "missing": ["PRIVATE_KEY_NEVER_RETURN"],
+            "last_dispatch_requested": {"created_at": "not-a-date"},
+            "last_dispatch_intent_at": "not-a-date",
+        }
+        result = probe.summarize_mobile_status(payload)
+        self.assertEqual(result["watchdog_ready"], "invalid")
+        self.assertEqual(result["watchdog_missing"], "unknown")
+        self.assertEqual(result["watchdog_last_dispatch_requested"], "unknown")
+        self.assertEqual(result["watchdog_last_dispatch_intent_at"], "unknown")
+        self.assertNotIn("PRIVATE_KEY_NEVER_RETURN", json.dumps(result))
 
     def test_missing_status_fields_remain_unknown_not_available(self):
         result = probe.summarize_mobile_status({})
