@@ -235,9 +235,10 @@ export async function handleMobileStatus(request, env, url) {
         candidate_id: snapshot.candidate_id, occurred_at: snapshot.occurred_at,
         chain_id: snapshot.chain_id, block_number: snapshot.block_number,
       } : null,
-      provider_usage: (usage.results || []).map(row => ({
-        route_id: row.route_id, requests: Number(row.requests) || 0, tokens: Number(row.tokens) || 0,
-      })),
+      provider_usage: {
+        requests: (usage.results || []).reduce((sum, row) => sum + (Number(row.requests) || 0), 0),
+        tokens: (usage.results || []).reduce((sum, row) => sum + (Number(row.tokens) || 0), 0),
+      },
       telegram_webhook_schema: {
         available: applied.has("0005_telegram_webhook_receipts"),
         status: applied.has("0005_telegram_webhook_receipts")
@@ -253,13 +254,6 @@ export async function handleMobileStatus(request, env, url) {
       },
       model_costs_usd: {
         total: (modelCosts.results || []).reduce((sum, row) => sum + (Number(row.cost_usd) || 0), 0),
-        by_provider: (modelCosts.results || []).map(row => ({
-          provider: row.provider,
-          requests: Number(row.requests) || 0,
-          input_tokens: Number(row.input_tokens) || 0,
-          output_tokens: Number(row.output_tokens) || 0,
-          cost_usd: Number(row.cost_usd) || 0,
-        })),
         source: applied.has("0006_monetary_budget_ledger") ? "D1 monetary_reservations; legacy model_usage costs backfilled" : "model_usage D1 ledger; recorded provider costs only",
       },
       monetary_ledger: monetary ? {
