@@ -221,6 +221,16 @@ class UsageLedger:
             "per_task_over_budget": task_total > task_cap,
         }
 
+    def mark_started(self, reservation_id: int) -> None:
+        """Local SQLite reservations are already durable for this process; no state transition is needed."""
+        if type(reservation_id) is not int or reservation_id < 1:
+            raise ValueError("invalid monetary reservation ID")
+
+    def mark_ambiguous(self, reservation_id: int) -> None:
+        """Keep the unsettled local reservation counted after a possibly executed provider call."""
+        if type(reservation_id) is not int or reservation_id < 1:
+            raise ValueError("invalid monetary reservation ID")
+
     def release(self, reservation_id: int) -> None:
         """Release only a pre-call reservation when no provider request was sent."""
         with self._connect() as db:
@@ -244,8 +254,15 @@ class UsageLedger:
                 estimated_cost_usd: float, daily_budget_usd: float,
                 monthly_budget_usd: float, now: datetime | None = None,
                 task_id: str | None = None,
-                per_task_budget_usd: float = 0.0) -> int:
-        """Atomically reserve estimated spend before a provider call."""
+                per_task_budget_usd: float = 0.0, *,
+                idempotency_key: str | None = None,
+                reservation_id: str | None = None) -> int:
+        """Atomically reserve estimated spend before a provider call.
+
+        The local SQLite implementation is a single-process development ledger;
+        stable remote replay identities are accepted for interface compatibility
+        and enforced by D1MonetaryLedger in cloud execution.
+        """
         if not all(isinstance(value, str) and value.strip()
                    for value in (provider, model, task_kind)):
             raise ValueError("provider, model and task_kind are required")

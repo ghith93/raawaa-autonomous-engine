@@ -30,7 +30,7 @@ class QuotaAwareGatewayTests(unittest.TestCase):
         root = Path(self.tmp.name)
         self.quota = QuotaLedger(root / "quota.db")
         self.usage = UsageLedger(root / "usage.db")
-        self.request = GenerationRequest("research", "hello world", 20, task_id="task-1")
+        self.request = GenerationRequest("research", "hello world", 20, task_id="task-1", request_id="00000000-0000-4000-8000-000000000010")
         self._previous_kill_switch = os.environ.get("RAAWAA_ENGINE_LIVE_INFERENCE")
         os.environ["RAAWAA_ENGINE_LIVE_INFERENCE"] = "enabled"
 

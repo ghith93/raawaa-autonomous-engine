@@ -10,6 +10,9 @@ class GenerationRequest:
     prompt: str
     max_output_tokens: int = 512
     task_id: str | None = None
+    # Stable UUID created and persisted by the task-step owner before first inference.
+    # Reuse it only when replaying the same logical model call after an ambiguous result.
+    request_id: str | None = None
 
 
 @dataclass(frozen=True)

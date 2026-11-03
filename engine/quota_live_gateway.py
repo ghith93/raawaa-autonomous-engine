@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import math
 import os
+import uuid
 
 from engine.live_adapters import LiveAdapterError
 from engine.model_gateway import BudgetExceeded, ProviderUnavailable, UsageLedger
@@ -57,6 +58,16 @@ class QuotaAwareLiveGateway:
             raise ValueError("prompt is required")
         if not isinstance(request.task_id, str) or not request.task_id.strip():
             raise ProviderUnavailable("A task ID is required for per-task quota enforcement.")
+        if not isinstance(request.request_id, str) or not request.request_id.strip():
+            raise ProviderUnavailable(
+                "A stable request_id is required; persist it with the task step before inference."
+            )
+        try:
+            request_uuid = uuid.UUID(request.request_id)
+        except (ValueError, TypeError, AttributeError):
+            raise ProviderUnavailable("request_id must be a valid UUID.") from None
+        if str(request_uuid) != request.request_id.lower():
+            raise ProviderUnavailable("request_id must use canonical UUID form.")
         if not 1 <= request.max_output_tokens <= 4096:
             raise ValueError("max_output_tokens must be between 1 and 4096")
 
@@ -93,12 +104,21 @@ class QuotaAwareLiveGateway:
                 estimated_input_tokens * input_price
                 + request.max_output_tokens * output_price
             ) / 1_000_000
+            # Route-scoped deterministic identities make a retry of the same
+            # logical request return the original D1 reservation even if the first
+            # HTTP response was lost after commit. A different route gets a distinct
+            # reservation if an explicit HTTP 429 permits safe route rotation.
+            identity_scope = f"raawaa-engine:{request.request_id}:{profile.route_id}"
+            idempotency_key = str(uuid.uuid5(uuid.NAMESPACE_URL, identity_scope + ":idem"))
+            reservation_id = str(uuid.uuid5(uuid.NAMESPACE_URL, identity_scope + ":reservation"))
             try:
                 monetary_reservation_id = self.usage_ledger.reserve(
                     profile.provider, profile.model, request.task_kind,
                     estimated_cost_usd, self.daily_budget_usd, self.monthly_budget_usd,
                     task_id=request.task_id,
                     per_task_budget_usd=self.per_task_budget_usd,
+                    idempotency_key=idempotency_key,
+                    reservation_id=reservation_id,
                 )
             except BudgetExceeded as exc:
                 last_error = exc
@@ -137,6 +157,18 @@ class QuotaAwareLiveGateway:
                 estimated_tokens=estimated_tokens,
             )
             try:
+                self.usage_ledger.mark_started(monetary_reservation_id)
+            except Exception as exc:
+                self._audit(
+                    "monetary_start_failed", request, profile,
+                    error_type=type(exc).__name__, reason="provider_not_called",
+                )
+                # The start response may have been lost. Leave the reservation counted;
+                # do not call the provider and do not attempt an unsafe release.
+                raise ProviderUnavailable(
+                    "Could not confirm durable monetary reservation start; provider was not called."
+                ) from exc
+            try:
                 response = adapter.generate(profile.model, request)
                 if response.provider != profile.provider or response.model != profile.model:
                     raise ValueError("adapter response route does not match reserved profile")
@@ -165,8 +197,9 @@ class QuotaAwareLiveGateway:
                 # reservation conservatively; request count is already consumed.
                 self.quota_manager.ledger.settle(reservation_id, estimated_tokens)
                 if exc.status_code == 429:
-                    # An explicit 429 rejects the request; no provider charge is expected.
-                    self.usage_ledger.release(monetary_reservation_id)
+                    # A 429 is after provider I/O began, so it is settled at zero rather
+                    # than released. Release is reserved strictly for pre-I/O failures.
+                    self.usage_ledger.settle(monetary_reservation_id, 0, 0, 0.0)
                     self.quota_manager.ledger.cool_down(
                         profile.route_id, self.cooldown_seconds, "http_429"
                     )
@@ -179,7 +212,8 @@ class QuotaAwareLiveGateway:
                     continue
                 # A timeout, transport failure, malformed response, 5xx, or
                 # non-429 HTTP error may follow provider-side processing. Never
-                # replay the same request against another route in this case.
+                # replay or release the reservation in this case.
+                self.usage_ledger.mark_ambiguous(monetary_reservation_id)
                 self._audit(
                     "provider_failure_stopped", request, profile,
                     reason="non_429_no_route_rotation",
@@ -193,6 +227,7 @@ class QuotaAwareLiveGateway:
                 # Unknown adapter failures have ambiguous remote execution status.
                 # Keep the reservation rather than making possibly-used quota reusable.
                 self.quota_manager.ledger.settle(reservation_id, estimated_tokens)
+                self.usage_ledger.mark_ambiguous(monetary_reservation_id)
                 self._audit(
                     "adapter_failure", request, profile,
                     error_type=type(exc).__name__, reason="ambiguous_adapter_failure",

@@ -81,6 +81,16 @@ def validate_budget_policy(policy: dict[str, Any]) -> list[str]:
         errors.append("paid fallback must require a provider-enforced hard cap")
     if model.get("paid_fallback_requires_prepaid_or_provider_enforced_cap") is not True:
         errors.append("paid fallback must require prepaid balance or provider-enforced spend blocking")
+    if type(model.get("provider_hard_stop_verified")) is not bool:
+        errors.append("provider_hard_stop_verified must be an explicit boolean")
+    if model.get("provider_hard_stop_verified") is True:
+        evidence = model.get("provider_hard_stop_evidence")
+        required_evidence = ("provider", "scope", "hard_limit", "verified_at", "source_url")
+        if not isinstance(evidence, dict) or any(
+            not isinstance(evidence.get(field), str) or not evidence[field].strip()
+            for field in required_evidence
+        ) or not evidence.get("source_url", "").startswith("https://"):
+            errors.append("live inference requires auditable provider hard-stop evidence")
     if model.get("no_automatic_plan_upgrade") is not True:
         errors.append("automatic provider plan upgrades must remain disabled")
     if policy.get("allow_paid_model_calls") is not False:

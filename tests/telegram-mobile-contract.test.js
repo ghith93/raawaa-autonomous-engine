@@ -85,7 +85,7 @@ test("mobile status remains explicit when optional D1 migrations are absent", as
   assert.equal(response.status, 200);
   const payload = await response.json();
   assert.deepEqual(payload.paper_events, []);
-  assert.deepEqual(payload.provider_usage, []);
+  assert.deepEqual(payload.provider_usage, { requests: 0, tokens: 0 });
   assert.match(payload.unavailable_metrics.paper_ledger, /Migration 0004 is not applied/);
   assert.match(payload.unavailable_metrics.provider_usage, /Migration 0003 is not applied/);
   assert.ok(calls.some(sql => sql.includes("schema_migrations")));
