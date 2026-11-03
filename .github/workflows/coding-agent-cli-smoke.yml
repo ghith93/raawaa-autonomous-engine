@@ -30,8 +30,10 @@ jobs:
         with:
           node-version: "22"
 
-      - name: Validate Codespaces bootstrap script
-        run: bash -n .devcontainer/post-create.sh
+      - name: Validate Codespaces configuration and bootstrap script
+        run: |
+          python -m json.tool .devcontainer/devcontainer.json >/dev/null
+          bash -n .devcontainer/post-create.sh
 
       - name: Install coding-agent CLIs using the Codespaces bootstrap script
         shell: bash
