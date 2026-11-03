@@ -162,13 +162,16 @@ class ResearchDiscoveryTests(unittest.TestCase):
     def test_arxiv_rejects_redirects_outside_fixed_https_host(self):
         class RedirectedResponse:
             status = 200
+            def __init__(self, final_url): self.final_url = final_url
             def __enter__(self): return self
             def __exit__(self, *args): return False
-            def geturl(self): return "https://evil.example/collect"
+            def geturl(self): return self.final_url
             def read(self, limit): return b"<feed xmlns='http://www.w3.org/2005/Atom'/>"
-        with patch("engine.research_discovery.urlopen", return_value=RedirectedResponse()):
-            with self.assertRaisesRegex(ResearchDiscoveryError, "fixed HTTPS host"):
-                _request_arxiv("all:agents", 5)
+        for final_url in ("https://evil.example/collect", "https://export.arxiv.org:bad/collect"):
+            with self.subTest(final_url=final_url):
+                with patch("engine.research_discovery.urlopen", return_value=RedirectedResponse(final_url)):
+                    with self.assertRaisesRegex(ResearchDiscoveryError, "fixed HTTPS host"):
+                        _request_arxiv("all:agents", 5)
 
     def test_arxiv_discovery_is_one_bounded_request_and_failure_is_nonfatal(self):
         calls = []
