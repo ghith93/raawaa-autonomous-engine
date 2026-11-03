@@ -6,19 +6,21 @@ from engine.cloudflare_access_audit import is_access_not_enabled
 
 
 class CloudflareAccessAuditTests(unittest.TestCase):
-    def test_workflow_inline_python_is_syntactically_valid(self):
+    def test_access_workflow_inline_python_is_syntactically_valid(self):
         root = Path(__file__).resolve().parents[1]
-        workflow = (root / ".github" / "workflows" / "cloudflare-access-audit.yml").read_text(encoding="utf-8")
-        marker = "        run: |\n"
-        self.assertIn(marker, workflow)
-        block = workflow.split(marker, 1)[1]
-        lines = []
-        for line in block.splitlines():
-            if line and len(line) - len(line.lstrip()) <= 8:
-                break
-            lines.append(line)
-        source = textwrap.dedent("\n".join(lines))
-        compile(source, "cloudflare-access-audit.yml:run", "exec")
+        for filename in ("cloudflare-access-audit.yml", "cloudflare-access-inventory.yml"):
+            with self.subTest(filename=filename):
+                workflow = (root / ".github" / "workflows" / filename).read_text(encoding="utf-8")
+                marker = "        run: |\n"
+                self.assertIn(marker, workflow)
+                block = workflow.split(marker, 1)[1]
+                lines = []
+                for line in block.splitlines():
+                    if line and len(line) - len(line.lstrip()) <= 8:
+                        break
+                    lines.append(line)
+                source = textwrap.dedent("\n".join(lines))
+                compile(source, filename + ":run", "exec")
 
     def test_account_level_access_not_enabled_is_an_optional_state(self):
         self.assertTrue(is_access_not_enabled(403, [{
