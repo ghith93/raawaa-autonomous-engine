@@ -8,6 +8,7 @@ ROOT = Path(__file__).resolve().parents[1]
 MIGRATION = ROOT / "migrations" / "0001_initial.sql"
 MIGRATION_2 = ROOT / "migrations" / "0002_research_candidates.sql"
 MIGRATION_8 = ROOT / "migrations" / "0008_task_retry_schedule.sql"
+MIGRATION_9 = ROOT / "migrations" / "0009_task_execution_mode.sql"
 
 
 class D1MigrationContractTests(unittest.TestCase):
@@ -116,6 +117,32 @@ class D1MigrationContractTests(unittest.TestCase):
             "SELECT version FROM schema_migrations WHERE version='0008_task_retry_schedule'"
         ).fetchone()
         self.assertEqual(version, ("0008_task_retry_schedule",))
+
+    def test_execution_mode_migration_preserves_legacy_rows_and_constrains_values(self):
+        self.db.executescript(self.sql)
+        self.db.executescript(MIGRATION_8.read_text(encoding="utf-8"))
+        self.db.execute("""INSERT INTO tasks
+            (id,idempotency_key,task_type,title,payload_json,status,attempts,max_attempts,created_at,updated_at)
+            VALUES ('legacy-mode-task','legacy-mode-key','research_brief','Legacy mode','{}','succeeded',1,2,'2026-01-01','2026-01-01')""")
+        self.db.executescript(MIGRATION_9.read_text(encoding="utf-8"))
+        columns = {row[1] for row in self.db.execute("PRAGMA table_info(tasks)")}
+        self.assertIn("execution_mode", columns)
+        self.assertEqual(self.db.execute(
+            "SELECT execution_mode FROM tasks WHERE id='legacy-mode-task'"
+        ).fetchone()[0], "not_started")
+        self.db.execute(
+            "UPDATE tasks SET execution_mode='dry_run' WHERE id='legacy-mode-task'"
+        )
+        self.assertEqual(self.db.execute(
+            "SELECT execution_mode FROM tasks WHERE id='legacy-mode-task'"
+        ).fetchone()[0], "dry_run")
+        with self.assertRaises(sqlite3.IntegrityError):
+            self.db.execute(
+                "UPDATE tasks SET execution_mode='simulated_success' WHERE id='legacy-mode-task'"
+            )
+        self.assertEqual(self.db.execute(
+            "SELECT version FROM schema_migrations WHERE version='0009_task_execution_mode'"
+        ).fetchone(), ("0009_task_execution_mode",))
 
     def test_operations_and_usage_constraints(self):
         self.db.executescript(self.sql)
