@@ -38,6 +38,10 @@ _OUTPUT_KEYS = (
     "kill_switch",
     "tasks_pending",
     "tasks_running",
+    "task_execution_modes",
+    "tasks_dry_run_succeeded",
+    "tasks_live_inference_succeeded",
+    "tasks_unknown_succeeded",
     "paper_events",
 )
 
@@ -239,6 +243,39 @@ def summarize_mobile_status(payload: object, http_status: int = 200) -> dict[str
         status = snapshot.get("status")
         return status if isinstance(status, str) and status in allowed else "unknown"
 
+    mode_values = {
+        "task_execution_modes": "unknown",
+        "tasks_dry_run_succeeded": "unknown",
+        "tasks_live_inference_succeeded": "unknown",
+        "tasks_unknown_succeeded": "unknown",
+    }
+    execution_modes = payload.get("execution_modes")
+    if isinstance(execution_modes, dict) and execution_modes.get("available") is False:
+        mode_values["task_execution_modes"] = "not_available"
+    elif isinstance(execution_modes, dict) and execution_modes.get("available") is True:
+        totals = execution_modes.get("counts")
+        statuses_by_mode = execution_modes.get("status_counts")
+        modes = ("not_started", "dry_run", "live_inference", "unknown")
+        statuses = ("pending", "running", "succeeded", "failed", "blocked")
+        try:
+            if not isinstance(totals, dict) or not isinstance(statuses_by_mode, dict):
+                raise ValueError("invalid execution-mode aggregate")
+            for mode in modes:
+                _count(totals.get(mode))
+                per_status = statuses_by_mode.get(mode)
+                if not isinstance(per_status, dict):
+                    raise ValueError("missing execution-mode status aggregate")
+                for status in statuses:
+                    _count(per_status.get(status))
+            mode_values = {
+                "task_execution_modes": "available",
+                "tasks_dry_run_succeeded": str(statuses_by_mode["dry_run"]["succeeded"]),
+                "tasks_live_inference_succeeded": str(statuses_by_mode["live_inference"]["succeeded"]),
+                "tasks_unknown_succeeded": str(statuses_by_mode["unknown"]["succeeded"]),
+            }
+        except (TypeError, ValueError):
+            mode_values["task_execution_modes"] = "invalid"
+
     worker_cron = payload.get("worker_cron")
     if worker_cron is None:
         reason = unavailable.get("worker_cron", "")
@@ -327,6 +364,7 @@ def summarize_mobile_status(payload: object, http_status: int = 200) -> dict[str
         ),
         "tasks_pending": str(task_counts.get("pending", 0)),
         "tasks_running": str(task_counts.get("running", 0)),
+        **mode_values,
         "paper_events": str(paper_event_count),
     }
 
@@ -373,6 +411,10 @@ def probe_mobile_status(
             "kill_switch": "route_not_deployed",
             "tasks_pending": "unknown",
             "tasks_running": "unknown",
+            "task_execution_modes": "route_not_deployed",
+            "tasks_dry_run_succeeded": "route_not_deployed",
+            "tasks_live_inference_succeeded": "route_not_deployed",
+            "tasks_unknown_succeeded": "route_not_deployed",
             "paper_events": "unknown",
         }
     return summarize_mobile_status(payload, status)
