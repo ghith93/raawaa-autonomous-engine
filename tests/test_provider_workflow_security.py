@@ -55,7 +55,7 @@ class ProviderWorkflowSecurityTests(unittest.TestCase):
         source = workflow.read_text(encoding="utf-8")
         marker = "  publish-staging-ops-telemetry:"
         start = source.index(marker)
-        end = source.index("\\n  staging-mobile-status-verify:", start)
+        end = source.index("\n  staging-mobile-status-verify:", start)
         job = source[start:end]
         self.assertIn("needs: [test, staging-migrate, staging-worker-verify]", job)
         self.assertIn("github.event_name == 'push'", job)
