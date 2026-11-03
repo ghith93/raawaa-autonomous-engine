@@ -85,7 +85,7 @@ def _manifest_errors(manifest: Any, files: dict[str, str]) -> list[dict]:
         if denied:
             errors.append({"rule_id": "MANIFEST_PERMISSION_ESCALATION", "severity": "critical", "summary": "Requested permissions exceed the static preflight allowlist: " + ",".join(value[:100] for value in denied[:8])})
     capabilities = manifest.get("capabilities")
-    if not isinstance(capabilities, list) or not capabilities or any(not isinstance(x, str) or not x.strip() or len(x) > 100 for x in capabilities):
+    if not isinstance(capabilities, list) or not capabilities or len(capabilities) > 50 or any(not isinstance(x, str) or not x.strip() or len(x) > 100 for x in capabilities):
         errors.append({"rule_id": "MANIFEST_CAPABILITIES_INVALID", "severity": "high", "summary": "Capabilities must be a non-empty list of bounded strings."})
     return errors
 
@@ -102,7 +102,8 @@ def scan_skill_bundle(manifest: Any, files: Any) -> dict:
     if len(files) > MAX_FILES:
         errors.append({"rule_id": "BUNDLE_FILE_COUNT_LIMIT", "severity": "critical", "summary": f"Bundle exceeds {MAX_FILES} files."})
     for raw_path, content in list(files.items())[:MAX_FILES]:
-        if not isinstance(raw_path, str) or len(raw_path) > MAX_PATH_CHARS or "\\" in raw_path:
+        if (not isinstance(raw_path, str) or len(raw_path) > MAX_PATH_CHARS or "\\" in raw_path
+                or any(ord(char) < 32 for char in raw_path)):
             errors.append({"rule_id": "BUNDLE_PATH_INVALID", "severity": "critical", "summary": "Bundle contains an invalid or overlong path."})
             continue
         path = PurePosixPath(raw_path)
@@ -116,6 +117,9 @@ def scan_skill_bundle(manifest: Any, files: Any) -> dict:
         seen_paths.add(folded)
         if not isinstance(content, str):
             errors.append({"rule_id": "BUNDLE_BINARY_FILE_UNSUPPORTED", "severity": "medium", "summary": "Binary or non-text files require a separate controlled scanner."})
+            continue
+        if len(content) > MAX_FILE_BYTES:
+            errors.append({"rule_id": "BUNDLE_FILE_SIZE_LIMIT", "severity": "critical", "summary": f"A file exceeds {MAX_FILE_BYTES} characters."})
             continue
         encoded = content.encode("utf-8")
         if len(encoded) > MAX_FILE_BYTES:
