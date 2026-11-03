@@ -239,7 +239,7 @@ try {
     body: {
       lease_token: deferredClaim.payload.lease_token,
       error: "provider_not_called:provider_capacity_unavailable",
-      retry_after_seconds: 3600,
+      retry_after_seconds: 5,
     },
   });
   assertStatus(deferred, 200, "schedule delayed retry");
@@ -252,9 +252,7 @@ try {
   const prematureClaim = await api("/v1/tasks/claim", { method: "POST", body: {} });
   assertStatus(prematureClaim, 200, "claim while retry is deferred");
   assert.equal(prematureClaim.payload.task, null, "deferred task must not be claimed early");
-  executeLocalSql(
-    "UPDATE tasks SET next_attempt_at='2000-01-01T00:00:00.000Z' WHERE id='" + deferredId + "'",
-  );
+  await delay(5100);
   const resumedClaim = await api("/v1/tasks/claim", { method: "POST", body: {} });
   assertStatus(resumedClaim, 200, "claim after retry becomes due");
   assert.equal(resumedClaim.payload.task.id, deferredId);
