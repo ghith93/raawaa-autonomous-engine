@@ -408,7 +408,7 @@ export default {
           "INSERT INTO audit_log(task_id,event,details_json,created_at) VALUES(?,?,?,?)"
         ).bind(taskId, action === "retry" ? (status === "pending" ? "task_retry_scheduled" : "task_failed") : "task_" + status,
           JSON.stringify({ error }), nowIso).run();
-        return json({ ok: true, status });
+        return json({ ok: true, status, next_attempt_at: nextAttemptAt });
       } catch {
         return json({ error: "storage_unavailable" }, 503);
       }
