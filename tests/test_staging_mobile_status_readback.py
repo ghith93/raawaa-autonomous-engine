@@ -88,6 +88,11 @@ class StagingMobileStatusReadbackTests(unittest.TestCase):
         self.assertEqual(attempts, 2)
         sleep.assert_called_once_with(2)
 
+    def test_rejects_inconsistent_execution_mode_totals(self):
+        self.payload["execution_modes"]["counts"]["dry_run"] = 99
+        with self.assertRaisesRegex(RuntimeError, "does not match status counts"):
+            verify(self.env, opener=lambda *args, **kwargs: Response(self.payload))
+
     def test_rejects_unavailable_execution_mode_migration(self):
         self.payload["execution_modes"] = {"available": False}
         with self.assertRaisesRegex(RuntimeError, "execution mode migration"):
