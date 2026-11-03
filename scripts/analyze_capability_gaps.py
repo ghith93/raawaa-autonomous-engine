@@ -169,9 +169,9 @@ def _baseline(root: Path) -> dict[str, dict[str, Any]]:
             "evidence": "The remote task store plus scheduled runner indicate bounded, resumable batch execution; they do not constitute an always-on process or guarantee 24/7 execution.",
         },
         "skill_security": {
-            "status": "scanner_candidate_only" if _exists(root, "docs/research/skillspector-evaluation-2026-11-03.ar.md") else "not_implemented",
-            "evidence_paths": ["docs/research/skillspector-evaluation-2026-11-03.ar.md", "engine/skill_security_gate.py"],
-            "evidence": "Research on a scanner is not an implemented security gate, sandbox, signing system or revocation mechanism.",
+            "status": "static_preflight_implemented_not_verified" if _exists(root, "engine/skill_static_gate.py") else ("scanner_candidate_only" if _exists(root, "docs/research/skillspector-evaluation-2026-11-03.ar.md") else "not_implemented"),
+            "evidence_paths": ["engine/skill_static_gate.py", "scripts/scan_skill_bundle.py", "tests/test_skill_static_gate.py", "docs/research/skillspector-evaluation-2026-11-03.ar.md"],
+            "evidence": "A deterministic manifest/static-pattern preflight exists, but it is not a sandbox and does not verify dependencies, signatures, runtime behavior, independent review or revocation.",
         },
         "evaluation": {
             "status": "unit_tests_no_agent_benchmark" if _exists(root, "tests") and not (root / "benchmarks").exists() else ("benchmark_directory_present_unverified" if (root / "benchmarks").exists() else "not_verified"),
