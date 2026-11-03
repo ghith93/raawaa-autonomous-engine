@@ -39,7 +39,8 @@ h2{font-size:16px;margin:0 0 10px}.rows{display:grid;gap:8px}.item{display:flex;
 <div class="grid">
 <div class="metric"><span>Pending tasks</span><strong id="pending">—</strong></div>
 <div class="metric"><span>Running tasks</span><strong id="running">—</strong></div>
-<div class="metric"><span>Completed tasks</span><strong id="succeeded">—</strong></div>
+<div class="metric"><span>Executed successfully</span><strong id="succeeded">—</strong></div>
+<div class="metric"><span>Dry-run simulations</span><strong id="simulated">—</strong></div>
 <div class="metric"><span>Failed / blocked</span><strong id="failed">—</strong></div>
 </div>
 <section class="panel"><h2>Task execution mode</h2><div id="executionModes" class="rows"></div><p class="muted">Dry run is simulation, not completed live work. Live inference means the live path was selected; it does not by itself prove a provider request completed.</p></section>
@@ -76,12 +77,24 @@ async function load() {
   $("pending").textContent=tasks.pending||0;$("running").textContent=tasks.running||0;$("succeeded").textContent=tasks.succeeded||0;
   $("failed").textContent=(tasks.failed||0)+(tasks.blocked||0);
   const executionModes=data.execution_modes||{};
-  rows("executionModes",executionModes.available?[
-    ["Not started",executionModes.counts.not_started||0],
-    ["Dry run · simulation",executionModes.counts.dry_run||0],
-    ["Live inference path selected",executionModes.counts.live_inference||0],
-    ["Unknown · legacy",executionModes.counts.unknown||0]
-  ]:[],data.unavailable_metrics?.execution_modes||"Execution-mode migration is not available");
+  const modeStatuses=executionModes.status_counts||{};
+  const modeSucceeded=mode=>Number(modeStatuses[mode]?.succeeded||0);
+  if(executionModes.available){
+    $("succeeded").textContent=modeSucceeded("live_inference");
+    $("simulated").textContent=modeSucceeded("dry_run");
+    rows("executionModes",[
+      ["Not started / not yet claimed",executionModes.counts.not_started||0],
+      ["Dry-run simulation succeeded · not executed",modeSucceeded("dry_run")],
+      ["Live inference completed",modeSucceeded("live_inference")],
+      ["Live inference running",Number(modeStatuses.live_inference?.running||0)],
+      ["Live inference failed / blocked",Number(modeStatuses.live_inference?.failed||0)+Number(modeStatuses.live_inference?.blocked||0)],
+      ["Legacy / unknown successes",modeSucceeded("unknown")],
+      ["Legacy / unknown total",executionModes.counts.unknown||0]
+    ],"No task execution modes recorded");
+  }else{
+    $("succeeded").textContent="—";$("simulated").textContent="—";
+    rows("executionModes",[],data.unavailable_metrics?.execution_modes||"Execution-mode migration is not available");
+  }
   rows("paper",(data.paper_events||[]).map(x=>[x.event_type,x.count]),"No paper events recorded");
   const usage=data.provider_usage||{};
   rows("usage",[
@@ -192,17 +205,24 @@ export async function handleMobileStatus(request, env, url) {
     if (applied.has("0009_task_execution_mode")) {
       try {
         const result = await env.DB.prepare(
-          "SELECT execution_mode,COUNT(*) AS count FROM tasks GROUP BY execution_mode"
+          "SELECT execution_mode,status,COUNT(*) AS count FROM tasks GROUP BY execution_mode,status"
         ).all();
-        const counts = { not_started: 0, dry_run: 0, live_inference: 0, unknown: 0 };
+        const modes = ["not_started", "dry_run", "live_inference", "unknown"];
+        const statuses = ["pending", "running", "succeeded", "failed", "blocked"];
+        const counts = Object.fromEntries(modes.map(mode => [mode, 0]));
+        const statusCounts = Object.fromEntries(modes.map(mode => [
+          mode, Object.fromEntries(statuses.map(status => [status, 0])),
+        ]));
         for (const row of result.results || []) {
-          if (!Object.hasOwn(counts, row.execution_mode) ||
-              !Number.isSafeInteger(Number(row.count)) || Number(row.count) < 0) {
+          const count = Number(row.count);
+          if (!Object.hasOwn(counts, row.execution_mode) || !statuses.includes(row.status) ||
+              !Number.isSafeInteger(count) || count < 0) {
             throw new Error("invalid_execution_mode_aggregate");
           }
-          counts[row.execution_mode] = Number(row.count);
+          counts[row.execution_mode] += count;
+          statusCounts[row.execution_mode][row.status] = count;
         }
-        executionModes = { available: true, counts };
+        executionModes = { available: true, counts, status_counts: statusCounts };
       } catch {
         executionModes = { available: false };
       }
