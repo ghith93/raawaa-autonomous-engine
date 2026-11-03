@@ -550,8 +550,8 @@ test("quota cooldown cannot shorten an existing cooldown", async () => {
   }), { DB, ENGINE_API_TOKEN: TOKEN });
   assert.equal(response.status, 200);
   assert.equal((await response.json()).until_at, existingUntil);
-  assert.match(sql, /until_at=MAX\\(quota_cooldowns\\.until_at,excluded\\.until_at\\)/);
-  assert.match(sql, /CASE WHEN excluded\\.until_at>quota_cooldowns\\.until_at THEN excluded\\.reason ELSE quota_cooldowns\\.reason END/);
+  assert.match(sql, /until_at=MAX\(quota_cooldowns\.until_at,excluded\.until_at\)/);
+  assert.match(sql, /CASE WHEN excluded\.until_at>quota_cooldowns\.until_at THEN excluded\.reason ELSE quota_cooldowns\.reason END/);
   assert.match(sql, /RETURNING until_at/);
 });
 
