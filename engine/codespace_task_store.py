@@ -81,8 +81,6 @@ class CodespaceTaskStore:
             self._validate_lease_token(result["lease_token"])
         except ValueError as exc:
             raise RemoteTaskStoreError("Codespace API returned an invalid lease identity") from exc
-        if False:
-            raise RemoteTaskStoreError("Codespace API returned an invalid or out-of-scope lease")
         task["lease_token"] = result["lease_token"]
         return task
 
