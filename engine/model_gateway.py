@@ -221,6 +221,16 @@ class UsageLedger:
             "per_task_over_budget": task_total > task_cap,
         }
 
+    def mark_started(self, reservation_id: int) -> None:
+        """Local SQLite reservations are already durable for this process; no state transition is needed."""
+        if type(reservation_id) is not int or reservation_id < 1:
+            raise ValueError("invalid monetary reservation ID")
+
+    def mark_ambiguous(self, reservation_id: int) -> None:
+        """Keep the unsettled local reservation counted after a possibly executed provider call."""
+        if type(reservation_id) is not int or reservation_id < 1:
+            raise ValueError("invalid monetary reservation ID")
+
     def release(self, reservation_id: int) -> None:
         """Release only a pre-call reservation when no provider request was sent."""
         with self._connect() as db:
