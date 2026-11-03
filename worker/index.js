@@ -217,7 +217,7 @@ export default {
       return json({ error: "not_found" }, 404);
     }
     const quotaAdminAccess = url.pathname === "/v1/quota" &&
-      Boolean(env.ENGINE_QUOTA_ADMIN_TOKEN) &&
+      Boolean(env.ENGINE_QUOTA_ADMIN_TOKEN) && env.ENGINE_QUOTA_ADMIN_TOKEN !== env.ENGINE_API_TOKEN &&
       constantTimeEqual(bearer(request), env.ENGINE_QUOTA_ADMIN_TOKEN);
     if (!(await authorized(request, env)) && !quotaAdminAccess) {
       return json({ error: "unauthorized" }, 401);
