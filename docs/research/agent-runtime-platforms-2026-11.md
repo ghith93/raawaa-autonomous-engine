@@ -207,6 +207,63 @@ The current engine already owns the canonical task state, D1 audit trail, agent 
 - [OmniGent repository](https://github.com/omnigent-ai/omnigent), [Cloudflare deployment guide](https://github.com/omnigent-ai/omnigent/blob/main/deploy/cloudflare/README.md), and [security policy](https://github.com/omnigent-ai/omnigent/blob/main/SECURITY.md).
 - [Aeon repository](https://github.com/aeonfun/aeon), [core architecture](https://github.com/aeonfun/aeon/blob/main/docs/CORE.md), [configuration](https://github.com/aeonfun/aeon/blob/main/aeon.yml), and [security policy](https://github.com/aeonfun/aeon/blob/main/.github/SECURITY.md).
 
+## 10. Cloudflare-native durable agents and browser automation — reviewed 2026-11-03
+
+### Cloudflare Agents SDK
+
+Cloudflare's official Agents documentation (updated 2026-10-29) describes each Agent as a Durable Object with a Lifecycle runtime. The Lifecycle owns startup, event dispatch, a durable job queue and the object's single alarm. Optional capabilities include durable scheduling (delayed, dated, cron and interval), shared state, WebSockets, MCP connection management and observability; Streams and Sessions are marked experimental. The official scheduler persists tasks in SQLite and wakes the Durable Object through alarms.
+
+**Decision: do not migrate the current engine to Agents SDK now.** The current Worker already has a narrow Cron Trigger and D1 audit heartbeat; the engine already has a D1 task ledger, Python task consumer, and bounded GitHub Actions runner. Introducing Durable Objects, a second SQLite scheduler, and a new lifecycle would duplicate state and increase migration surface without solving the present blocker: GitHub Actions has not yet emitted a post-resync `schedule` event for the Python Task Runner. Reconsider only if a measured need for durable per-agent sessions, WebSocket state, or long-lived agent jobs emerges. Keep D1 as the canonical task/audit ledger unless a migration plan proves otherwise.
+
+### Browser automation replacement decision
+
+| Option | Verified facts | Operational fit | Decision |
+|---|---|---|---|
+| [Microsoft Playwright MCP](https://github.com/microsoft/playwright-mcp) | Open-source MCP server; release v0.0.84 was published 2026-10-31. Its release notes include isolated browser contexts for separate accounts. | Can run in an ephemeral GitHub Actions Linux runner; browser install and runner minutes still consume compute. No hosted browser account is required for local execution. Authenticated profiles must not be committed to the repository. | **Preferred deterministic browser fallback** when an API does not exist. Keep optional and run only for a specific task. |
+| [Stagehand](https://github.com/browserbase/stagehand) | MIT-licensed browser-agent SDK; combines semantic `act`, `observe`, `extract`, and `agent` with local Chromium. Browserbase-hosted sessions are optional. | Local execution avoids hosted-browser fees, but semantic actions invoke a model and therefore may incur inference cost; deterministic Playwright controls remain cheaper and easier to audit. | Use only for a site where DOM changes make deterministic automation demonstrably brittle, and only with a verified zero-cost model route. |
+| [Browser Use](https://github.com/browser-use/browser-use) | Open-source Python browser agent built on Playwright. | Agentic browser actions still need an inference route and browser compute; persistent browser state needs secure storage. | Monitor; do not add a second browser stack while Playwright is sufficient. |
+
+**Control policy for any future browser runner**
+- API-first remains the default: GitHub API/connector for repository operations, Cloudflare Worker API for engine state, and direct provider APIs where supported.
+- Browser automation is a last-mile adapter, not a replacement for APIs or the task ledger.
+- Start with read-only navigation and extraction; allow writes only when a task contract explicitly permits them.
+- Isolate browser contexts by account; do not log cookies, credentials, tokens, or private page contents.
+- Do not store authenticated browser profiles in Git, Actions artifacts, or unencrypted D1.
+- Use deterministic selectors/accessibility snapshots for stable tasks; use semantic model-driven actions only when needed and after checking the model budget.
+- Never use browser automation to bypass authentication, rate limits, CAPTCHAs, or access controls.
+
+### Scheduling reliability finding
+
+GitHub's current workflow troubleshooting guidance confirms scheduled events are best-effort: high-load periods can delay or drop queued jobs, and a schedule can stop while manual dispatch still works. GitHub also documents that a schedule may need a cron-definition commit to restart after the associated actor is suspended, deleted or deprovisioned.
+
+This supports keeping the minute-4 phase change as a recovery attempt, but it does not establish that the Task Runner schedule has recovered. The first new successful `schedule`-triggered Task Runner run is still the acceptance criterion. A Worker Cron heartbeat is separate evidence and must not be conflated with Python task processing.
+
+### Sources checked
+- [Cloudflare Agents getting started](https://developers.cloudflare.com/agents/getting-started/) and [runtime](https://developers.cloudflare.com/agents/runtime/).
+- [Cloudflare Agents scheduler implementation](https://github.com/cloudflare/agents/blob/main/docs/agents/scheduling.md).
+- [Playwright MCP releases](https://github.com/microsoft/playwright-mcp/releases).
+- [Stagehand](https://github.com/browserbase/stagehand).
+- [Browser Use](https://github.com/browser-use/browser-use).
+- [GitHub Actions workflow troubleshooting](https://docs.github.com/en/actions/how-tos/troubleshoot-workflows) and [workflow syntax](https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax).
+
+## 11. Rust-native self-hosted agent runtimes — GitHub metadata verified 2026-11-03
+
+Two additional projects were checked against their actual GitHub repository metadata, rather than relying on product-site claims alone.
+
+| Project | GitHub evidence at review time | Capabilities claimed by upstream | Decision for Raawaa |
+|---|---|---|---|
+| [Garudust Agent](https://github.com/garudust-org/garudust-agent) | MIT; 31 stars, 10 forks; latest push 2026-07-27; latest release `v0.13.8` on 2026-06-13. | Rust agent runtime; ARM64 Linux release asset; MCP, persistent memory, skill registry, cron, browser/terminal tools, provider routing and REST/WebSocket server. | **Monitor, do not deploy.** The feature overlap is substantial, but its latest release and repository activity are older than the current date. No verified Android/Termux deployment or always-free persistent host was established. |
+| [Ryvos](https://github.com/Ryvos/ryvos) | MIT; 8 stars, 2 forks; latest push 2026-07-25; latest release `v0.9.0` on 2026-04-16. | Rust single-binary runtime; upstream README claims 86+ tools, 18+ providers, MCP, persistent memory, cron, DAG workflows, budget tracking, browser automation and sandboxing. | **Monitor, do not deploy.** Attractive compact-runtime and security concepts, but the small repository footprint, older release cadence, persistent-host requirement, and unverified Android deployment make adoption premature. |
+ 
+### Transferable design ideas
+- Capability-level tool permissions and separate Viewer/Operator/Admin roles.
+- Per-run budgets, explicit stop conditions, checkpoint/resume and watchdogs.
+- MCP adapters as optional integrations, with tool-level schemas and declared permissions.
+- Skills with manifests and validation, rather than executing arbitrary downloaded instructions.
+- Isolated terminal/browser execution with secrets withheld from tool output.
+
+These ideas are references only. The engine must retain its own task ledger, quota controls, zero-budget default, dry-run mode, and approval policy. Do not import a complete second agent runtime or treat upstream security claims as a substitute for an independent threat review.
+
 ## Adoption rule
 
 No framework, agent, plugin, vector database or hosted provider is adopted because it is popular or feature-rich. It must solve a measured limitation, fit zero-spend or have a separately approved budget, preserve policy/quota enforcement, support bounded execution and auditability, have a maintained upstream and clear license, and pass isolated tests before production integration.
