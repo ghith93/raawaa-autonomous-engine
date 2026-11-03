@@ -95,9 +95,12 @@ def build_live_gateway(
             adapter = GeminiAdapter(api_key_env=entry.api_key_env, environ=source)
         elif (profile.provider == "openrouter"
               and profile.endpoint_url == "https://openrouter.ai/api/v1"
-              and profile.model == "openrouter/free"):
-            # The fixed OpenRouter free router alias is the only allowed model
-            # on this endpoint; arbitrary model IDs could select paid inference.
+              and profile.model in {
+                  "openrouter/free",
+                  "nvidia/nemotron-3-ultra-550b-a55b:free",
+              }):
+            # Only explicit free aliases/models are allowed on this endpoint;
+            # arbitrary model IDs could select paid inference.
             adapter = OpenAICompatibleAdapter(
                 provider=profile.provider,
                 base_url=profile.endpoint_url,
