@@ -12,6 +12,7 @@ TASK_AGENT_CONTRACTS = {
     "code_review": ("reviewer", "review"),
     "content_draft": ("marketer", "draft_content"),
     "system_audit": ("operator", "monitor"),
+    "mobile_test": ("mobile_tester", "android_ui_testing"),
 }
 
 

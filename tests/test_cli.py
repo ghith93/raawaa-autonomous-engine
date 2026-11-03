@@ -34,11 +34,24 @@ class CliTests(unittest.TestCase):
             ["provider-profile-status"],
             ["research-discover"],
             ["quota-status"],
+            ["artemis-status"],
         ]
         for command in commands:
             with self.subTest(command=command):
                 self.assertEqual(parser.parse_args(command).command, command[0])
 
+
+    def test_artemis_status_is_offline_when_no_endpoint_is_configured(self):
+        output = io.StringIO()
+        with patch.dict(os.environ, {}, clear=True):
+            with patch("sys.argv", ["engine", "artemis-status"]):
+                with contextlib.redirect_stdout(output):
+                    self.assertEqual(cli.main(), 0)
+        result = json.loads(output.getvalue())
+        self.assertEqual(result["integration"], "google_artemis")
+        self.assertEqual(result["status"], "NOT_CONFIGURED")
+        self.assertEqual(result["network_calls"], 0)
+        self.assertFalse(result["task_submission_enabled"])
 
     def test_provider_profile_status_is_read_only_and_keeps_groq_disabled(self):
         output = io.StringIO()
@@ -68,11 +81,27 @@ class CliTests(unittest.TestCase):
         self.assertIn("safe dry-run", output.getvalue())
 
 
+    def test_audit_rejects_enabled_artemis_integration(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "config").mkdir()
+            for name in ("policy.json", "agents.json", "provider_profiles.json", "tool_permissions.json", "integrations.json"):
+                source = Path(cli.ROOT) / "config" / name
+                (root / "config" / name).write_text(source.read_text(encoding="utf-8"), encoding="utf-8")
+            integrations_path = root / "config" / "integrations.json"
+            integrations = json.loads(integrations_path.read_text(encoding="utf-8"))
+            integrations["integrations"]["google_artemis"]["enabled"] = True
+            integrations_path.write_text(json.dumps(integrations), encoding="utf-8")
+            output = io.StringIO()
+            with patch.object(cli, "ROOT", root), contextlib.redirect_stdout(output):
+                self.assertEqual(cli.audit(), 1)
+            self.assertIn("Google ARTEMIS must remain disabled", output.getvalue())
+
     def test_audit_rejects_budget_overrun_and_malformed_caps(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             (root / "config").mkdir()
-            for name in ("policy.json", "agents.json", "provider_profiles.json", "tool_permissions.json"):
+            for name in ("policy.json", "agents.json", "provider_profiles.json", "tool_permissions.json", "integrations.json"):
                 source = Path(cli.ROOT) / "config" / name
                 (root / "config" / name).write_text(source.read_text(encoding="utf-8"), encoding="utf-8")
             policy_path = root / "config" / "policy.json"
@@ -87,7 +116,7 @@ class CliTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             (root / "config").mkdir()
-            for name in ("policy.json", "agents.json", "provider_profiles.json", "tool_permissions.json"):
+            for name in ("policy.json", "agents.json", "provider_profiles.json", "tool_permissions.json", "integrations.json"):
                 source = Path(cli.ROOT) / "config" / name
                 (root / "config" / name).write_text(source.read_text(encoding="utf-8"), encoding="utf-8")
             policy_path = root / "config" / "policy.json"
@@ -104,7 +133,7 @@ class CliTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             (root / "config").mkdir()
-            for name in ("policy.json", "agents.json", "provider_profiles.json", "tool_permissions.json"):
+            for name in ("policy.json", "agents.json", "provider_profiles.json", "tool_permissions.json", "integrations.json"):
                 source = Path(cli.ROOT) / "config" / name
                 (root / "config" / name).write_text(source.read_text(encoding="utf-8"), encoding="utf-8")
             policy_path = root / "config" / "policy.json"
@@ -157,7 +186,7 @@ class CliTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             (root / "config").mkdir()
-            for name in ("policy.json", "agents.json", "provider_profiles.json", "tool_permissions.json"):
+            for name in ("policy.json", "agents.json", "provider_profiles.json", "tool_permissions.json", "integrations.json"):
                 source = Path(cli.ROOT) / "config" / name
                 (root / "config" / name).write_text(source.read_text(encoding="utf-8"), encoding="utf-8")
             profiles = json.loads((root / "config" / "provider_profiles.json").read_text(encoding="utf-8"))

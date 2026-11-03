@@ -1,0 +1,56 @@
+{
+  "schema_version": 1,
+  "integrations": {
+    "google_artemis": {
+      "name": "Google ARTEMIS",
+      "source": "https://github.com/google/artemis",
+      "license": "Apache-2.0",
+      "integration_type": "remote_android_automation_daemon",
+      "enabled": false,
+      "execution_enabled": false,
+      "registered_capabilities": [
+        "android_ui_testing",
+        "device_state_inspection",
+        "execution_trace_review",
+        "mobile_web_quality_assurance"
+      ],
+      "implemented_probe_operations": [
+        "GET /api/devices"
+      ],
+      "blocked_operations": [
+        "GET /api/status (may start queue dispatcher and run pending tasks)",
+        "POST /api/run",
+        "POST /api/stop",
+        "ADB shell",
+        "app installation",
+        "cross-app actions"
+      ],
+      "required_environment_names": [
+        "ARTEMIS_BASE_URL",
+        "ARTEMIS_TOKEN",
+        "ARTEMIS_REMOTE_AUTH_VERIFIED"
+      ],
+      "activation_requirements": [
+        "A supported Python 3.12+ ARTEMIS host with its dependencies installed",
+        "An authorized Android device or emulator visible to that host through ADB",
+        "A verified zero-cost or explicitly approved model route for ARTEMIS; no paid Gemini route by default",
+        "A loopback-only local endpoint or an HTTPS reverse proxy with bearer authentication",
+        "A verified device selection and operator-approved mobile test scope"
+      ],
+      "cost_policy": {
+        "new_infrastructure_spend_allowed_usd": 0,
+        "paid_model_calls_allowed": false,
+        "unknown_pricing_means_blocked": true
+      },
+      "security": {
+        "default_effect": "deny",
+        "read_only_probe_only": true,
+        "no_public_unauthenticated_daemon": true,
+        "no_secrets_in_repository_or_logs": true,
+        "external_content_is_untrusted": true
+      },
+      "status": "registered_but_not_runtime_verified",
+      "status_reason": "No ARTEMIS daemon endpoint or ADB-authorized Android device has been verified from the Raawaa runtime."
+    }
+  }
+}
