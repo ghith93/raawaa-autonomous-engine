@@ -5,7 +5,7 @@ name: One-shot Groq Free inference Staging smoke
 
 on:
   push:
-    branches: [feat/groq-free-inference-staging-smoke]
+    branches: [main]
     paths:
       - .github/workflows/groq-free-inference-staging-smoke.yml
       - scripts/run_groq_free_inference_smoke.py
@@ -71,6 +71,7 @@ jobs:
           test -n "$CLOUDFLARE_ACCOUNT_ID"
           test -n "$CF_ACCESS_CLIENT_ID" || { echo "Missing GitHub secret CF_ACCESS_CLIENT_ID"; exit 1; }
           test -n "$CF_ACCESS_CLIENT_SECRET" || { echo "Missing GitHub secret CF_ACCESS_CLIENT_SECRET"; exit 1; }
+          test -n "${{ secrets.GROQ_API_KEY }}" || { echo "Missing GitHub secret GROQ_API_KEY"; exit 1; }
       - name: Generate ephemeral Staging bearer token
         shell: bash
         run: |
@@ -96,6 +97,11 @@ jobs:
           RAAWAA_ENGINE_LIVE_INFERENCE: enabled
           CF_ACCESS_CLIENT_ID: ${{ secrets.CF_ACCESS_CLIENT_ID }}
           CF_ACCESS_CLIENT_SECRET: ${{ secrets.CF_ACCESS_CLIENT_SECRET }}
+          # D1 ledgers read these canonical names; RemoteTaskStore receives the
+          # Staging token explicitly under RAAWAA_ENGINE_STAGING_API_TOKEN.
+          RAAWAA_ENGINE_API_TOKEN: ${{ env.RAAWAA_ENGINE_STAGING_API_TOKEN }}
+          RAAWAA_ENGINE_CF_ACCESS_CLIENT_ID: ${{ secrets.CF_ACCESS_CLIENT_ID }}
+          RAAWAA_ENGINE_CF_ACCESS_CLIENT_SECRET: ${{ secrets.CF_ACCESS_CLIENT_SECRET }}
           GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
         run: python scripts/run_groq_free_inference_smoke.py
       - name: Revoke ephemeral Staging API token
