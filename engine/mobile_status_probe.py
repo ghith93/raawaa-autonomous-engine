@@ -124,8 +124,14 @@ def _watchdog_values(payload: dict) -> dict[str, str]:
     watchdog = payload.get("task_runner_watchdog")
     if watchdog is None:
         return unknown
+    invalid = {
+        "watchdog_ready": "invalid",
+        "watchdog_missing": "unknown",
+        "watchdog_last_dispatch_requested": "unknown",
+        "watchdog_last_dispatch_intent_at": "unknown",
+    }
     if not isinstance(watchdog, dict):
-        return {key: "invalid" for key in unknown}
+        return invalid
     ready = watchdog.get("ready")
     missing = watchdog.get("missing")
     if (
@@ -136,7 +142,7 @@ def _watchdog_values(payload: dict) -> dict[str, str]:
         or (ready and missing)
         or (not ready and not missing)
     ):
-        return {key: "invalid" for key in unknown}
+        return invalid
 
     requested = watchdog.get("last_dispatch_requested")
     if requested is None:
