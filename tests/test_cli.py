@@ -19,6 +19,9 @@ class CliTests(unittest.TestCase):
         parser = cli.build_parser()
         commands = [
             ["audit"],
+            ["executive-status"],
+            ["executive-status", "--limit", "5"],
+            ["workflow-plan", "--file", "workflow.json"],
             ["free-models", "--provider", "gemini"],
             ["enqueue", "--type", "research_brief", "--title", "Test"],
             ["list"],
@@ -311,6 +314,49 @@ class CliTests(unittest.TestCase):
                     self.assertEqual(cli.main(), 0)
         discover_all.assert_called_once_with()
         self.assertEqual(json.loads(output.getvalue()), expected)
+
+
+    def test_executive_status_cli_is_read_only_and_uses_existing_store(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = Path(tmp) / "engine.db"
+            task_store = TaskStore(db_path)
+            task_store.enqueue("system_audit", "Executive audit", idempotency_key="executive-cli-test")
+            output = io.StringIO()
+            with patch.dict(os.environ, {"RAAWAA_ENGINE_DB": str(db_path), "RAAWAA_ENGINE_API_URL": ""}, clear=False):
+                with patch("sys.argv", ["engine", "executive-status"]):
+                    with contextlib.redirect_stdout(output):
+                        self.assertEqual(cli.main(), 0)
+            result = json.loads(output.getvalue())
+            self.assertEqual(result["mode"], "read_only_decision_support")
+            self.assertEqual(result["tasks_inspected"], 1)
+            self.assertEqual(result["next_best_tasks"][0]["task_type"], "system_audit")
+            self.assertEqual(result["side_effects"]["tasks_claimed"], 0)
+            self.assertEqual(len(task_store.list_tasks()), 1)
+
+
+    def test_workflow_plan_cli_validates_and_does_not_enqueue(self):
+        proposal = {
+            "id": "cli_plan",
+            "steps": [
+                {"id": "audit", "task_type": "system_audit", "title": "Inspect system",
+                 "acceptance_checks": ["Audit report is returned"]},
+                {"id": "review", "task_type": "code_review", "title": "Review changes",
+                 "depends_on": ["audit"], "acceptance_checks": ["Findings are recorded"]},
+            ],
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            proposal_path = Path(tmp) / "workflow.json"
+            proposal_path.write_text(json.dumps(proposal), encoding="utf-8")
+            output = io.StringIO()
+            with patch("sys.argv", ["engine", "workflow-plan", "--file", str(proposal_path)]):
+                with contextlib.redirect_stdout(output):
+                    self.assertEqual(cli.main(), 0)
+            result = json.loads(output.getvalue())
+            self.assertEqual(result["order"], ["audit", "review"])
+            self.assertEqual(result["assignments"], {"audit": "operator", "review": "reviewer"})
+            self.assertFalse(result["dispatch_authorized"])
+            self.assertEqual(result["provider_calls"], 0)
+            self.assertEqual(result["external_writes"], 0)
 
 
 if __name__ == "__main__":
