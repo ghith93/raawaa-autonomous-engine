@@ -1,5 +1,5 @@
 {
-  "mode": "safe_dry_run",
+  "mode": "live_inference_opt_in",
   "daily_budget_usd": 0.4,
   "monthly_budget_usd": 12,
   "per_task_budget_usd": 0.2,
@@ -18,8 +18,14 @@
     "paid_fallback_monthly_cap_usd": 12,
     "no_automatic_plan_upgrade": true,
     "no_trial_or_promotional_credit_as_permanent_capacity": true,
-    "provider_hard_stop_verified": false,
-    "provider_hard_stop_evidence": null
+    "provider_hard_stop_verified": true,
+    "provider_hard_stop_evidence": {
+      "provider": "Groq Cloud Free Plan",
+      "scope": "Operator-confirmed Free organization; openai/gpt-oss-20b route only",
+      "hard_limit": "Free-plan quotas for this model: 30 RPM, 1,000 RPD, 8,000 TPM, 200,000 TPD. Requests over quota are rejected with HTTP 429; Groq Free Plan support confirms no charges while the account remains on Free Plan. No Developer-tier upgrade, paid route, or paid fallback is enabled.",
+      "verified_at": "2026-11-04T00:00:00Z",
+      "source_url": "https://console.groq.com/docs/rate-limits"
+    }
   },
   "budget_envelope": {
     "currency": "USD",
