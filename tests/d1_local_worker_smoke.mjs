@@ -171,6 +171,9 @@ try {
   server = launchWorker();
 
   await waitForWorker(server, () => logs);
+  const health = await api("/health", { token: null });
+  assertStatus(health, 200, "Worker health capability readback");
+  assert.ok(health.payload.capabilities.includes("task_retry_schedule_v1"));
 
   const unauthenticated = await api("/v1/mobile/status", { token: null });
   assertStatus(unauthenticated, 401, "mobile status must require bearer auth");
