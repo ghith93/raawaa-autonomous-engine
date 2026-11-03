@@ -153,13 +153,15 @@ export async function handleMobileStatus(request, env, url) {
   if (url.pathname !== "/v1/mobile/status") return null;
   if (request.method !== "GET") return json({ error: "method_not_allowed" }, 405);
   try {
-    const [tasks, migrations, workerCron, watchdogEvents, ciHealthRow, killSwitchRow] = await Promise.all([
+    const [tasks, migrations, workerCron, watchdogEvents, ciHealthRow, killSwitchRow, lastScanRow, sourceObservationRows] = await Promise.all([
       env.DB.prepare("SELECT status,COUNT(*) AS count FROM tasks GROUP BY status").all(),
       env.DB.prepare("SELECT version FROM schema_migrations WHERE version IN ('0003_durable_quota_ledger','0004_paper_event_ledger','0005_telegram_webhook_receipts','0006_monetary_budget_ledger')").all(),
       env.DB.prepare("SELECT created_at,details_json FROM audit_log WHERE task_id IS NULL AND event='worker_cron_tick' ORDER BY created_at DESC LIMIT 1").first(),
       env.DB.prepare("SELECT event,created_at,details_json FROM audit_log WHERE task_id IS NULL AND event IN ('task_runner_dispatch_requested','task_runner_dispatch_intent') ORDER BY created_at DESC LIMIT 2").all(),
       env.DB.prepare("SELECT created_at,details_json FROM audit_log WHERE task_id IS NULL AND event='ci_health_snapshot' ORDER BY created_at DESC LIMIT 1").first(),
       env.DB.prepare("SELECT created_at,details_json FROM audit_log WHERE task_id IS NULL AND event='kill_switch_snapshot' ORDER BY created_at DESC LIMIT 1").first(),
+      env.DB.prepare("SELECT created_at,details_json FROM audit_log WHERE task_id IS NULL AND event='scan_completed' ORDER BY created_at DESC,id DESC LIMIT 1").first(),
+      env.DB.prepare("SELECT created_at,details_json FROM audit_log WHERE task_id IS NULL AND event='source_observation' ORDER BY created_at DESC,id DESC LIMIT 20").all(),
     ]);
     const applied = new Set((migrations.results || []).map(row => row.version));
     const watchdogReadiness = getTaskRunnerWatchdogReadiness(env);
@@ -248,6 +250,87 @@ export async function handleMobileStatus(request, env, url) {
         freshness: age > 24 * 60 * 60 * 1000 ? "stale" : "fresh",
       };
     })();
+    const lastScan = (() => {
+      const age = telemetryAge(lastScanRow);
+      if (age === null) return null;
+      let details;
+      try { details = JSON.parse(lastScanRow.details_json || "{}"); } catch { return null; }
+      if (
+        !details || details.scan_type !== "open_source_research_discovery" ||
+        !["success", "partial", "failed"].includes(details.status) ||
+        typeof details.scan_id !== "string" || details.scan_id.length > 80 ||
+        !Number.isSafeInteger(details.run_id) || !Number.isSafeInteger(details.run_number) ||
+        typeof details.head_sha !== "string" || !/^[0-9a-f]{40,64}$/.test(details.head_sha) ||
+        typeof details.completed_at !== "string" || !Number.isFinite(Date.parse(details.completed_at)) ||
+        !Number.isSafeInteger(details.requests_made) || details.requests_made < 0 ||
+        !Number.isSafeInteger(details.candidate_count) || details.candidate_count < 0
+      ) return null;
+      const freshness = age > 24 * 60 * 60 * 1000 ? "stale" : "fresh";
+      return {
+        available: true,
+        status: freshness === "stale" ? "stale" : details.status,
+        scan_type: details.scan_type,
+        run_id: details.run_id,
+        run_number: details.run_number,
+        head_sha: details.head_sha,
+        completed_at: details.completed_at,
+        requests_made: details.requests_made,
+        candidate_count: details.candidate_count,
+        source_count: Number.isSafeInteger(details.source_count) ? details.source_count : 0,
+        recorded_at: lastScanRow.created_at,
+        freshness,
+      };
+    })();
+    const sourceFreshness = (() => {
+      const latestBySource = new Map();
+      for (const row of sourceObservationRows.results || []) {
+        if (!row || typeof row.created_at !== "string" || !Number.isFinite(Date.parse(row.created_at))) continue;
+        let details;
+        try { details = JSON.parse(row.details_json || "{}"); } catch { continue; }
+        const sourceKey = details?.source_key;
+        if (!["github_public_repository_search", "crossref_public_works_search"].includes(sourceKey)
+            || latestBySource.has(sourceKey)
+            || typeof details.observed_at !== "string" || !Number.isFinite(Date.parse(details.observed_at))
+            || !Number.isSafeInteger(details.freshness_threshold_seconds)
+            || details.freshness_threshold_seconds < 60 || details.freshness_threshold_seconds > 604800
+            || !["fresh", "partial", "unavailable"].includes(details.status)
+            || !Number.isSafeInteger(details.requests_made) || details.requests_made < 0
+            || !Number.isSafeInteger(details.item_count) || details.item_count < 0
+            || !Number.isSafeInteger(details.unavailable_count) || details.unavailable_count < 0) continue;
+        const age = Date.now() - Date.parse(details.observed_at);
+        if (age < 0) continue;
+        const freshness = age > details.freshness_threshold_seconds * 1000
+          ? "stale" : details.status;
+        latestBySource.set(sourceKey, {
+          source_key: sourceKey,
+          status: details.status,
+          freshness,
+          observed_at: details.observed_at,
+          age_seconds: Math.floor(age / 1000),
+          freshness_threshold_seconds: details.freshness_threshold_seconds,
+          requests_made: details.requests_made,
+          item_count: details.item_count,
+          unavailable_count: details.unavailable_count,
+        });
+      }
+      const sources = [...latestBySource.values()].sort((a, b) => a.source_key.localeCompare(b.source_key));
+      if (!sources.length) return null;
+      const freshCount = sources.filter(source => source.freshness === "fresh").length;
+      const staleCount = sources.filter(source => source.freshness === "stale").length;
+      const unavailableCount = sources.filter(source => source.freshness === "unavailable").length;
+      const partialCount = sources.filter(source => source.freshness === "partial").length;
+      return {
+        available: true,
+        scope: "open_source_research_discovery",
+        status: staleCount ? "stale" : freshCount === sources.length ? "fresh" : "degraded",
+        source_count: sources.length,
+        fresh_count: freshCount,
+        partial_count: partialCount,
+        unavailable_count: unavailableCount,
+        stale_count: staleCount,
+        sources,
+      };
+    })();
     const workerCronStatus = (() => {
       const invalid = { value: null, unavailable: "Latest Worker Cron heartbeat metadata is invalid" };
       if (!workerCron) return { value: null, unavailable: "No Worker Cron heartbeat has been recorded yet" };
@@ -327,6 +410,8 @@ export async function handleMobileStatus(request, env, url) {
       worker_cron: workerCronStatus.value,
       ci_health: ciHealth,
       kill_switch: killSwitch,
+      last_scan: lastScan,
+      source_freshness: sourceFreshness,
       task_runner_watchdog: {
         ready: watchdogReadiness.ready,
         missing: watchdogReadiness.missing,
@@ -353,8 +438,8 @@ export async function handleMobileStatus(request, env, url) {
         source: "D1 monetary_reservations; integer nano-USD",
       } : { available: false },
       unavailable_metrics: {
-        last_scan: "Scan-run heartbeat is not recorded; the latest captured market snapshot is shown separately",
-        source_freshness: "Not yet aggregated from market-data adapters",
+        ...(!lastScan ? { last_scan: "No validated explicit scan-run event has been recorded" } : {}),
+        ...(!sourceFreshness ? { source_freshness: "No validated research source observations have been recorded" } : {}),
         ...(!ciHealth ? { ci_health: "No fresh validated Engine CI snapshot has been ingested from GitHub Actions" } : {}),
         ...(!killSwitch ? { kill_switch: "No fresh validated default Task Runner inference-gate snapshot has been ingested" } : {}),
         ...(!workerCronStatus.value ? { worker_cron: workerCronStatus.unavailable } : {}),
