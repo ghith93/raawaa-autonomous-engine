@@ -16,6 +16,8 @@ The scanner applies deterministic patterns for prompt override, secret exfiltrat
 
 The CLI is `python scripts/scan_skill_bundle.py <bundle.json>`. It reads at most 2 MiB and returns `BLOCKED` with exit code 2 for invalid or risky bundles. A clean result is only `PROPOSED`, never `VERIFIED`.
 
+A synthetic regression corpus is available via `python scripts/evaluate_skill_static_gate.py`. It currently contains seven hand-authored cases: five malicious fixtures detected, one benign fixture accepted, and one benign documentation quote falsely blocked. This intentionally exposes a false positive rather than hiding it. The benchmark is synthetic only and does not measure real-world malware-detection accuracy.
+
 ## Mandatory limits
 
 - The scanner makes zero network calls, model calls, filesystem writes or code-execution calls.
