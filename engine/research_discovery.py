@@ -277,8 +277,18 @@ def _normalize_searxng_result(item: dict, retrieved_at: str) -> dict | None:
     if not isinstance(title, str) or not title.strip() or not isinstance(url, str):
         return None
     parsed = urlsplit(url)
-    if (parsed.scheme not in {"http", "https"} or not parsed.hostname or parsed.username
-            or parsed.password or len(url) > 1000):
+    if (parsed.scheme != "https" or not parsed.hostname or parsed.username
+            or parsed.password or parsed.fragment or len(url) > 1000):
+        return None
+    hostname = parsed.hostname.lower()
+    if hostname == "localhost" or hostname.endswith((".local", ".internal", ".localhost")):
+        return None
+    try:
+        parsed.port
+        ipaddress.ip_address(hostname)
+    except ValueError:
+        pass
+    else:
         return None
     engines = item.get("engines", [])
     if not isinstance(engines, list):
