@@ -95,6 +95,38 @@
       "verification_note": "Groq Free plan, Qwen model visibility and account quotas were operator-confirmed. Qwen model weights are Apache-2.0 and Groq's Services Agreement permits Customer Application integration subject to model terms. Groq lists this model as Preview/evaluation-only, so production_use_allowed=false. Free-plan usage is fee-free within limits; Developer tier rates are not Free-plan charges. Keep disabled until evaluation-only task allowlisting is implemented and approved.",
       "production_use_allowed": false,
       "model_stage": "preview"
+    },
+    {
+      "id": "openrouter-free-router-evaluation",
+      "enabled": false,
+      "provider": "openrouter",
+      "account": "primary",
+      "account_tier": "free",
+      "model": "openrouter/free",
+      "api_key_env": "OPENROUTER_API_KEY",
+      "endpoint_url": "https://openrouter.ai/api/v1",
+      "free_verified": true,
+      "commercial_use_allowed": false,
+      "minute_request_limit": 20,
+      "minute_token_limit": 4000,
+      "daily_request_limit": 50,
+      "daily_token_limit": 50000,
+      "monthly_request_limit": 1500,
+      "monthly_token_limit": 1500000,
+      "per_task_request_limit": 2,
+      "per_task_token_limit": 8000,
+      "max_output_tokens": 512,
+      "input_cost_per_million_usd": 0,
+      "output_cost_per_million_usd": 0,
+      "pricing_source_url": "https://openrouter.ai/collections/free-models",
+      "quota_source_url": "https://openrouter.ai/docs/api-reference/limits",
+      "terms_source_url": "https://openrouter.ai/terms",
+      "verified_at": "2026-11-03T00:00:00Z",
+      "verification_note": "OpenRouter documents openrouter/free as routing to free models and documents 20 RPM / 50 RPD for free variants. Internal token/month/task caps here are conservative engine guardrails, not provider-published quotas. Dynamic routing can select models with differing licenses and data policies; commercial_use_allowed remains false and the route must stay disabled until a specific model/provider and its terms are pinned and reviewed.",
+      "production_use_allowed": false,
+      "model_stage": "evaluation",
+      "priority": 50,
+      "model_terms_source_url": "https://openrouter.ai/collections/free-models"
     }
   ]
 }
