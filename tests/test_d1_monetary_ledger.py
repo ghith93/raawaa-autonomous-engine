@@ -91,6 +91,19 @@ class D1MonetaryLedgerTests(unittest.TestCase):
         self.assertEqual(totals["pending_reservations"], 1)
         self.assertEqual(self.ledger.pending_reservations()[0]["status"], "ambiguous")
 
+    @patch("urllib.request.urlopen")
+    def test_task_totals_url_encodes_task_id(self, open_url):
+        open_url.return_value = Response({"snapshot": {
+            "task_spent_nanos": 4,
+            "task_reserved_nanos": 5,
+            "task_total_nanos": 9,
+            "task_pending_count": 1,
+        }})
+        totals = self.ledger.task_totals("task /one")
+        self.assertEqual(totals["total_nanos"], 9)
+        self.assertEqual(open_url.call_args.args[0].full_url,
+                         "https://engine.example/v1/monetary-ledger?task_id=task%20%2Fone")
+
     def test_requires_https_and_token(self):
         for url, token in (("http://engine.example", "token"), ("https://engine.example", "")):
             with self.subTest(url=url, has_token=bool(token)):
