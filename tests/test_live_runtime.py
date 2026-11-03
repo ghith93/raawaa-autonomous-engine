@@ -3,6 +3,9 @@ import tempfile
 import unittest
 from datetime import datetime, timezone
 from pathlib import Path
+from unittest.mock import patch
+
+from engine.d1_monetary_ledger import D1MonetaryLedgerError
 
 from engine.live_runtime import build_live_gateway
 
@@ -63,9 +66,26 @@ class LiveRuntimeFactoryTests(unittest.TestCase):
         self.assertIn("groq:primary:openai/gpt-oss-20b", gateway.adapters)
         # Factory construction is local only; no adapter.generate/network call is made.
 
-    def test_cloud_mode_blocks_until_durable_monetary_ledger_exists(self):
-        with self.assertRaisesRegex(RuntimeError, "durable D1 monetary ledger"):
+    def test_cloud_mode_requires_d1_token_and_never_uses_local_sqlite(self):
+        with self.assertRaises(D1MonetaryLedgerError):
             build_live_gateway(
+                self.db_path, self.policy_path, self.registry_path,
+                environ={
+                    "RAAWAA_ENGINE_LIVE_INFERENCE": "enabled",
+                    "RAAWAA_ENGINE_API_URL": "https://engine.example",
+                    "GROQ_API_KEY": "test-key",
+                },
+            )
+
+    def test_cloud_mode_injects_shared_d1_monetary_ledger(self):
+        class FakeLedger:
+            def budget_status(self, *args, **kwargs):
+                return {"daily_over_budget": False, "monthly_over_budget": False, "per_task_over_budget": False}
+            def totals(self):
+                return {"daily_total_nanos": 0, "monthly_total_nanos": 0, "pending_reservations": 0}
+        fake = FakeLedger()
+        with patch("engine.live_runtime.D1MonetaryLedger", return_value=fake) as factory:
+            gateway = build_live_gateway(
                 self.db_path, self.policy_path, self.registry_path,
                 environ={
                     "RAAWAA_ENGINE_LIVE_INFERENCE": "enabled",
@@ -74,6 +94,11 @@ class LiveRuntimeFactoryTests(unittest.TestCase):
                     "GROQ_API_KEY": "test-key",
                 },
             )
+        self.assertIsNotNone(gateway)
+        self.assertIs(gateway.usage_ledger, fake)
+        factory.assert_called_once_with(
+            base_url="https://engine.example", token="test-token"
+        )
 
     def test_preview_profile_is_not_eligible_even_if_marked_enabled(self):
         qwen = next(route for route in self.registry["routes"]
