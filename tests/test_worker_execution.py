@@ -72,6 +72,7 @@ class WorkerExecutionTests(unittest.TestCase):
         self.assertEqual(result["status"], "blocked")
         self.assertEqual(result["reason"], "operating_policy_unavailable")
         self.assertEqual(self.store.list_tasks(1)[0]["status"], "pending")
+        self.assertEqual(self.store.list_tasks(1)[0]["execution_mode"], "unknown")
         gateway.generate.assert_not_called()
 
     def test_live_prompt_places_trusted_operating_policy_before_untrusted_task_payload(self):
@@ -99,6 +100,7 @@ class WorkerExecutionTests(unittest.TestCase):
         gateway.generate.assert_not_called()
         saved = self.store.list_tasks(1)[0]
         self.assertEqual(saved["status"], "succeeded")
+        self.assertEqual(saved["execution_mode"], "dry_run")
         stored = json.loads(saved["result_json"])
         self.assertEqual(stored["provider_calls"], 0)
         self.assertIn("operating_policy", stored)
@@ -113,6 +115,7 @@ class WorkerExecutionTests(unittest.TestCase):
             environ={"RAAWAA_ENGINE_LIVE_INFERENCE": "enabled"},
         )
         self.assertEqual(result["mode"], "live_inference")
+        self.assertEqual(self.store.list_tasks(1)[0]["execution_mode"], "live_inference")
         self.assertEqual(adapter.calls, 1)
         self.assertEqual(adapter.last_request.task_id, self.task["id"])
         self.assertEqual(
