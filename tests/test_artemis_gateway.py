@@ -114,7 +114,7 @@ class ArtemisGatewayTests(unittest.TestCase):
         opener = FakeOpener([FakeResponse({"status": "running"}, "http://127.0.0.1:8000/other")])
         with patch.object(gateway, "build_opener", return_value=opener):
             with self.assertRaises(gateway.ArtemisGatewayError):
-                gateway._request_json(base, "/api/status", None)
+                gateway._request_json(base, "/api/devices", None)
 
     def test_oversized_response_is_rejected(self):
         base = "http://127.0.0.1:8000"
@@ -123,12 +123,12 @@ class ArtemisGatewayTests(unittest.TestCase):
             headers = {"Content-Type": "application/json"}
             def __enter__(self): return self
             def __exit__(self, *args): return False
-            def geturl(self): return base + "/api/status"
+            def geturl(self): return base + "/api/devices"
             def read(self, size=-1): return b" " * (gateway.MAX_RESPONSE_BYTES + 1)
         opener = FakeOpener([Oversized()])
         with patch.object(gateway, "build_opener", return_value=opener):
             with self.assertRaises(gateway.ArtemisGatewayError):
-                gateway._request_json(base, "/api/status", None)
+                gateway._request_json(base, "/api/devices", None)
 
 
 if __name__ == "__main__":
