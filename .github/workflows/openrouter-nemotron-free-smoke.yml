@@ -2,6 +2,11 @@ name: One-shot OpenRouter Nemotron Free smoke
 
 on:
   workflow_dispatch:
+  push:
+    branches:
+      - feat/free-model-provider-expansion
+    paths:
+      - .github/workflows/openrouter-nemotron-free-smoke.yml
 
 permissions:
   contents: read
@@ -12,7 +17,7 @@ concurrency:
 
 jobs:
   smoke:
-    if: ${{ github.ref == 'refs/heads/feat/free-model-provider-expansion' }}
+    if: ${{ github.ref == 'refs/heads/feat/free-model-provider-expansion' && (github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, '[run-nemotron-smoke]')) }}
     runs-on: ubuntu-latest
     timeout-minutes: 2
     steps:
