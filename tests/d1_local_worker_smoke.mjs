@@ -271,9 +271,17 @@ try {
   });
   assertStatus(idemRelease, 200, "release idempotent reservation before I/O");
 
+  const released = await api("/v1/monetary-ledger", {
+    method: "POST", body: { action: "release", reservation_id: preCall },
+  });
+  assertStatus(released, 200, "pre-provider-I/O release");
   const preGlobalStatus = await api("/v1/monetary-ledger");
   assertStatus(preGlobalStatus, 200, "pre-global monetary snapshot");
-  console.log("Pre-global monetary snapshot:", JSON.stringify(preGlobalStatus.payload.snapshot));
+  assert.equal(
+    preGlobalStatus.payload.snapshot.pending_reserved_nanos,
+    10_000_000,
+    "only the in-flight reservation should remain pending before global-cap concurrency test",
+  );
   const globalBase = {
     ...monetaryBase,
     estimated_cost_nanos: 10_000_000,
@@ -307,10 +315,6 @@ try {
     assertStatus(releasedGlobal, 200, "release global-cap test reservation before I/O");
   }
 
-  const released = await api("/v1/monetary-ledger", {
-    method: "POST", body: { action: "release", reservation_id: preCall },
-  });
-  assertStatus(released, 200, "pre-provider-I/O release");
   const started = await api("/v1/monetary-ledger", {
     method: "POST", body: { action: "start", reservation_id: inFlight },
   });
