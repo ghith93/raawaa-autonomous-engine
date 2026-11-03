@@ -12,6 +12,7 @@ Raawaa has a policy loader, task model, quota controls, D1-backed state, a Micro
 | Project | Strength | Fit | Decision |
 |---|---|---|---|
 | Cloudflare Workflows | Durable multi-step Workers, retries, persisted state, pauses and event-driven resume | High: existing Cloudflare Worker/D1 environment; available on Free and Paid plans | **Prototype next** with deterministic fake tasks |
+| Cloudflare Python Workers | Python/Pyodide runtime with D1, Cron and other Workers bindings | Medium for thin control-plane tasks; weak for the current batch runner because Free CPU is 10 ms and `threading`/`multiprocessing` are non-functional | Compatibility benchmark only; do not port the runner yet |
 | Pydantic AI | Typed agents/tools, MCP client, StepPersistence, optional durable engines | Medium: useful for a small agent-runtime comparison; true crash recovery still needs an execution engine | Isolated benchmark only |
 | LangGraph | Stateful graph orchestration, checkpoints, pending writes, thread/checkpoint IDs | Medium: strong checkpoint reference, but duplicates the current MAF adapter and task graph | Borrow tests and semantics; do not add to production |
 | Microsoft Agent Framework | Current isolated workflow/checkpoint prototype | High short-term: already integrated and verified through adapter tests and real workflow resume | Continue restart/authentication tests |
@@ -72,7 +73,26 @@ A fiber checkpoint is not a blanket exactly-once guarantee for arbitrary externa
 
 **Do not adopt or deploy the Agents SDK now.** Keep the current Python-first control plane and the isolated Workflows prototype. First resolve/measure the existing Task Runner schedule gap and complete non-production D1 recovery/concurrency validation. If a Worker-native control agent is still justified, run a separate local/CI-only spike with fake tasks that tests durable webhook acceptance, duplicate idempotency keys, forced eviction, checkpoint recovery, cancellation and bounded alarms. It must not add a second D1 queue consumer, call a model, mutate production D1, configure Telegram secrets, register a webhook or deploy a Worker. Compare the spike against Workflows and the current MAF checkpoint adapter before making an adoption decision.
 
-## 3. Python agent frameworks
+
+## 3. Cloudflare Python Workers — possible Python-native execution path
+
+Cloudflare Python Workers provide a first-class Python runtime through Pyodide/WebAssembly, with access to D1, Durable Objects, Cron Triggers, secrets and other Worker bindings through the Python-to-JavaScript FFI. Cloudflare also publishes examples for Python Cron handlers and querying D1 from Python. This is materially more relevant to the existing engine than adding a generic coding-agent framework: it could eventually let selected Python control-plane handlers run close to the existing D1 ledger without relying on a GitHub-hosted Python process.
+
+However, the current compatibility boundary is significant:
+
+- Python Workers remain in **open beta** and require the `python_workers` compatibility flag.
+- The Free Workers plan currently allows 10 ms CPU per invocation, 128 MB memory, 100,000 requests/day and five Cron Triggers per account. A 5-task / 60-second batch is not a realistic assumption under the 10 ms CPU ceiling; asynchronous waiting does not make CPU-heavy Python work free.
+- Pyodide's `threading` and `multiprocessing` modules are not functional. The existing engine's `LeaseHeartbeat` uses a background thread, so the current worker path is not directly portable without a deliberate async lease-renewal redesign.
+- The Worker filesystem is ephemeral and isolate-local. The current local SQLite task/memory assumptions cannot be carried over as persistent storage; D1 must remain authoritative for shared task state, with explicit bindings and async access.
+- Package support is limited to pure-Python or available Pyodide/PyEmscripten wheels. Each dependency used by the engine must be checked rather than assuming ordinary CPython compatibility.
+
+### Decision
+
+**Do not replace the GitHub Actions consumer or port the full engine now.** First build a no-provider compatibility benchmark in an isolated branch: import the actual engine modules under Pyodide, audit unsupported imports, measure cold-start and CPU use, test D1 binding operations, and prototype async lease renewal without threads. The benchmark must use local simulated D1/Workerd only, never production D1. If the real dry-run handler cannot fit the Free CPU/memory limits or requires unsupported packages, stop rather than silently move to a paid Workers plan. A thin Worker-native control/status adapter may still be useful even if the Python task executor remains on GitHub Actions.
+
+This is distinct from the Agents SDK: Python Workers answer **where existing Python code can execute**, while the Agents SDK supplies a Durable Object lifecycle and agent identity. Neither removes the need for an idempotent D1 task contract or proves reliable periodic execution by itself.
+
+## 4. Python agent frameworks
 
 ### Pydantic AI
 
@@ -104,7 +124,7 @@ OpenHands is better suited to a secured cloud Linux host than an Android tablet.
 
 Recommendation: consider it only if a verified persistent cloud VM with Docker and network isolation becomes available. Do not expose agent/automation ports publicly without authentication, TLS, firewalling and workspace isolation.
 
-## 4. Memory and retrieval
+## 6. Memory and retrieval
 
 ### Mem0
 
@@ -130,7 +150,7 @@ Qdrant supports dense and hybrid retrieval; Qdrant Edge offers embedded/offline 
 
 Decision: defer vector search. Start with indexed Markdown/SQLite/D1 retrieval and add Qdrant Edge only if a benchmark demonstrates semantic-recall gains at acceptable memory cost.
 
-## 5. Priority roadmap
+## 7. Priority roadmap
 
 | Priority | Work | Why | Gate |
 |---|---|---|---|
@@ -147,6 +167,12 @@ No framework, agent, plugin, vector database or hosted provider is adopted becau
 ## Sources
 
 - [Cloudflare Workflows overview](https://developers.cloudflare.com/workflows/)
+- [Cloudflare Python Workers overview](https://developers.cloudflare.com/workers/languages/python/)
+- [Python Workers standard library and unsupported modules](https://developers.cloudflare.com/workers/languages/python/stdlib/)
+- [Query D1 from Python Workers](https://developers.cloudflare.com/d1/examples/query-d1-from-python-workers/)
+- [Cloudflare Python Workers examples](https://github.com/cloudflare/python-workers-examples)
+- [Cloudflare Agents SDK long-running agents](https://developers.cloudflare.com/agents/concepts/agentic-patterns/long-running-agents/)
+- [Cloudflare Agents SDK durable execution](https://developers.cloudflare.com/agents/agent-class/durable-execution/)
 - [Cloudflare Workflows getting started](https://developers.cloudflare.com/workflows/get-started/guide/)
 - [Cloudflare Queues limits](https://developers.cloudflare.com/queues/platform/limits/)
 - [Pydantic AI durable execution](https://pydantic.dev/docs/ai/capabilities/durable_execution/overview/)
