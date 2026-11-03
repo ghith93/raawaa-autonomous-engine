@@ -4,6 +4,8 @@ import worker from "../worker/index.js";
 import { generateKeyPairSync } from "node:crypto";
 
 const TOKEN = "test-worker-token";
+const ADMIN_TOKEN = "test-quota-admin-token";
+const QUOTA_LIMITS = JSON.stringify({"groq:main:model":{enabled:true,minute_request_limit:5,minute_token_limit:1000,daily_request_limit:10,daily_token_limit:2000,monthly_request_limit:100,monthly_token_limit:20000,per_task_request_limit:3,per_task_token_limit:300}});
 
 function request(path, { method = "GET", token = TOKEN, body } = {}) {
   const headers = {};
@@ -400,14 +402,14 @@ test("quota endpoints require the Worker bearer token", async () => {
   assert.equal(response.status, 401);
 });
 
-test("quota reservation validates all hard limits before touching D1", async () => {
+test("quota reservation rejects routes absent from server policy before touching D1", async () => {
   const DB = dbMock();
   const response = await worker.fetch(request("/v1/quota", {
     method: "POST",
-    body: { action: "reserve", route_id: "groq:main:model", task_id: "task-1",
-      estimated_tokens: 10, daily_request_limit: 1 },
-  }), { DB, ENGINE_API_TOKEN: TOKEN });
-  assert.equal(response.status, 400);
+    body: { action: "reserve", route_id: "unconfigured:route:model", task_id: "task-1", estimated_tokens: 10 },
+  }), { DB, ENGINE_API_TOKEN: TOKEN, QUOTA_ROUTE_LIMITS_JSON: QUOTA_LIMITS });
+  assert.equal(response.status, 403);
+  assert.deepEqual(await response.json(), { error: "route_not_configured" });
   assert.equal(DB.calls.length, 0);
 });
 
@@ -428,11 +430,10 @@ test("quota reservation is one conditional parameterized insert", async () => {
   const response = await worker.fetch(request("/v1/quota", {
     method: "POST",
     body: { action: "reserve", route_id: "groq:main:model", task_id: "task-1",
-      estimated_tokens: 10, daily_request_limit: 10, daily_token_limit: 1000,
-      monthly_request_limit: 100, monthly_token_limit: 10000,
-      minute_request_limit: 5, minute_token_limit: 1000,
-      per_task_request_limit: 3, per_task_token_limit: 300 },
-  }), { DB, ENGINE_API_TOKEN: TOKEN });
+      estimated_tokens: 10, daily_request_limit: 1, daily_token_limit: 1,
+      monthly_request_limit: 1, monthly_token_limit: 1, minute_request_limit: 1,
+      minute_token_limit: 1, per_task_request_limit: 1, per_task_token_limit: 1 },
+  }), { DB, ENGINE_API_TOKEN: TOKEN, QUOTA_ROUTE_LIMITS_JSON: QUOTA_LIMITS });
   assert.equal(response.status, 201);
   const payload = await response.json();
   assert.equal(payload.reservation_id, 77);
@@ -442,6 +443,9 @@ test("quota reservation is one conditional parameterized insert", async () => {
   assert.match(calls[0].sql, /NOT EXISTS \(SELECT 1 FROM quota_cooldowns/);
   assert.match(calls[0].sql, /RETURNING id/);
   assert.equal(calls[0].values.length, 32);
+  assert.ok(calls[0].values.includes(2000));
+  assert.ok(calls[0].values.includes(20000));
+  assert.ok(calls[0].values.includes(300));
 });
 
 test("quota rejects oversized streaming bodies before buffering them fully", async () => {
@@ -468,6 +472,29 @@ test("quota rejects oversized streaming bodies before buffering them fully", asy
   assert.equal(canceled, true, "oversized request stream must be canceled at the limit");
 });
 
+test("quota administrative operations reject the shared runner token", async () => {
+  const DB = dbMock();
+  const response = await worker.fetch(request("/v1/quota", { method: "POST", body: { action: "cool_down", route_id: "groq:main:model", seconds: 60 } }),
+    { DB, ENGINE_API_TOKEN: TOKEN, ENGINE_QUOTA_ADMIN_TOKEN: ADMIN_TOKEN });
+  assert.equal(response.status, 403);
+  assert.equal(DB.calls.length, 0);
+});
+
+test("quota admin token is restricted to quota admin operations", async () => {
+  const DB = dbMock();
+  const adminResponse = await worker.fetch(request("/v1/quota", { method: "POST", token: ADMIN_TOKEN, body: { action: "cool_down", route_id: "groq:main:model", seconds: 60 } }),
+    { DB, ENGINE_API_TOKEN: TOKEN, ENGINE_QUOTA_ADMIN_TOKEN: ADMIN_TOKEN });
+  assert.equal(adminResponse.status, 200);
+  const taskResponse = await worker.fetch(request("/v1/tasks", { token: ADMIN_TOKEN }), { DB: dbMock(), ENGINE_API_TOKEN: TOKEN, ENGINE_QUOTA_ADMIN_TOKEN: ADMIN_TOKEN });
+  assert.equal(taskResponse.status, 401);
+});
+
+test("quota admin token cannot reserve runner quota", async () => {
+  const response = await worker.fetch(request("/v1/quota", { method: "POST", token: ADMIN_TOKEN, body: { action: "reserve", route_id: "groq:main:model", task_id: "task-1", estimated_tokens: 1 } }),
+    { DB: dbMock(), ENGINE_API_TOKEN: TOKEN, ENGINE_QUOTA_ADMIN_TOKEN: ADMIN_TOKEN, QUOTA_ROUTE_LIMITS_JSON: QUOTA_LIMITS });
+  assert.equal(response.status, 403);
+});
+
 test("quota settlement retries identical usage and rejects conflicting usage", async () => {
   let existing = { tokens: 42, settled_at: "2026-11-02T00:00:00.000Z" };
   const DB = {
@@ -481,13 +508,13 @@ test("quota settlement retries identical usage and rejects conflicting usage", a
     },
   };
   const replay = await worker.fetch(request("/v1/quota", {
-    method: "POST", body: { action: "settle", reservation_id: 5, actual_tokens: 42 },
-  }), { DB, ENGINE_API_TOKEN: TOKEN });
+    method: "POST", body: { action: "settle", reservation_id: 5, route_id: "groq:main:model", task_id: "task-1", actual_tokens: 42 },
+  }), { DB, ENGINE_API_TOKEN: TOKEN, QUOTA_ROUTE_LIMITS_JSON: QUOTA_LIMITS });
   assert.equal(replay.status, 200);
   assert.equal((await replay.json()).replay, true);
   const conflict = await worker.fetch(request("/v1/quota", {
-    method: "POST", body: { action: "settle", reservation_id: 5, actual_tokens: 43 },
-  }), { DB, ENGINE_API_TOKEN: TOKEN });
+    method: "POST", body: { action: "settle", reservation_id: 5, route_id: "groq:main:model", task_id: "task-1", actual_tokens: 43 },
+  }), { DB, ENGINE_API_TOKEN: TOKEN, QUOTA_ROUTE_LIMITS_JSON: QUOTA_LIMITS });
   assert.equal(conflict.status, 409);
   assert.deepEqual(await conflict.json(), { error: "settlement_conflict" });
 });
@@ -552,7 +579,7 @@ test("paper ledger append is authenticated and writes CAS head, event, and check
       candidate_id: "candidate-1", event_id: "event-1", event_type: "candidate_detected",
       occurred_at: "2026-11-02T11:00:00Z", payload: { source: "café" },
     } },
-  }), { DB, ENGINE_API_TOKEN: TOKEN });
+  }), { DB, ENGINE_API_TOKEN: TOKEN, QUOTA_ROUTE_LIMITS_JSON: QUOTA_LIMITS });
   assert.equal(response.status, 201);
   const result = await response.json();
   assert.equal(result.sequence, 1);
@@ -573,7 +600,7 @@ test("paper ledger rejects missing block provenance for outcome events before wr
       candidate_id: "candidate-1", event_id: "event-2", event_type: "outcome_observed",
       occurred_at: "2026-11-02T11:00:00Z", payload: {},
     } },
-  }), { DB, ENGINE_API_TOKEN: TOKEN });
+  }), { DB, ENGINE_API_TOKEN: TOKEN, QUOTA_ROUTE_LIMITS_JSON: QUOTA_LIMITS });
   assert.equal(response.status, 400);
   assert.equal(DB.calls.length, 0);
 });
@@ -583,7 +610,7 @@ test("paper ledger rejects unauthenticated append requests", async () => {
   const response = await worker.fetch(request("/v1/paper-ledger", {
     method: "POST", token: null,
     body: { action: "append", event: {} },
-  }), { DB, ENGINE_API_TOKEN: TOKEN });
+  }), { DB, ENGINE_API_TOKEN: TOKEN, QUOTA_ROUTE_LIMITS_JSON: QUOTA_LIMITS });
   assert.equal(response.status, 401);
   assert.equal(DB.calls.length, 0);
 });
@@ -596,7 +623,7 @@ test("paper ledger rejects arbitrary event types and malformed raw integer strin
     const DB = paperLedgerDbMock();
     const response = await worker.fetch(request("/v1/paper-ledger", {
       method: "POST", body: { action: "append", event },
-    }), { DB, ENGINE_API_TOKEN: TOKEN });
+    }), { DB, ENGINE_API_TOKEN: TOKEN, QUOTA_ROUTE_LIMITS_JSON: QUOTA_LIMITS });
     assert.equal(response.status, 400);
     assert.equal(DB.calls.length, 0);
   }
@@ -616,7 +643,7 @@ test("paper ledger rejects non-canonical payload numbers and naive timestamps be
     const DB = paperLedgerDbMock();
     const response = await worker.fetch(request("/v1/paper-ledger", {
       method: "POST", body: { action: "append", event },
-    }), { DB, ENGINE_API_TOKEN: TOKEN });
+    }), { DB, ENGINE_API_TOKEN: TOKEN, QUOTA_ROUTE_LIMITS_JSON: QUOTA_LIMITS });
     assert.equal(response.status, 400);
     assert.equal(DB.calls.length, 0);
   }
@@ -635,7 +662,7 @@ test("paper ledger rejects raw-unit integers outside uint256 bounds", async () =
       gross_profit_raw: "115792089237316195423570985008687907853269984665640564039457584007913129639936",
       payload: {},
     } },
-  }), { DB, ENGINE_API_TOKEN: TOKEN });
+  }), { DB, ENGINE_API_TOKEN: TOKEN, QUOTA_ROUTE_LIMITS_JSON: QUOTA_LIMITS });
   assert.equal(response.status, 400);
   assert.deepEqual(await response.json(), { error: "invalid_gross_profit_raw" });
   assert.equal(DB.calls.length, 0);
@@ -757,7 +784,7 @@ test("paper ledger canonicalizes supplementary Unicode keys in Python code-point
       candidate_id: "candidate-unicode", event_id: "unicode-1",
       event_type: "candidate_detected", occurred_at: "2026-11-02T11:00:00Z", payload,
     } },
-  }), { DB, ENGINE_API_TOKEN: TOKEN });
+  }), { DB, ENGINE_API_TOKEN: TOKEN, QUOTA_ROUTE_LIMITS_JSON: QUOTA_LIMITS });
   assert.equal(response.status, 201);
   const batch = DB.calls.find(call => call.kind === "batch");
   assert.equal(batch.statements[1].values[17], String.raw`{"a":3,"\ue000":1,"\ud800\udc00":2}`);
@@ -773,7 +800,7 @@ test("paper ledger canonicalizes integer-like object keys lexicographically like
       event_type: "candidate_detected", occurred_at: "2026-11-02T11:00:00Z",
       payload: { "2": "two", "10": "ten", a: "letter" },
     } },
-  }), { DB, ENGINE_API_TOKEN: TOKEN });
+  }), { DB, ENGINE_API_TOKEN: TOKEN, QUOTA_ROUTE_LIMITS_JSON: QUOTA_LIMITS });
   assert.equal(response.status, 201);
   const batch = DB.calls.find(call => call.kind === "batch");
   assert.equal(batch.statements[1].values[17], String.raw`{"10":"ten","2":"two","a":"letter"}`);
