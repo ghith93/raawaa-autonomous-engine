@@ -256,6 +256,6 @@ The control Worker separates ordinary quota reservation/settlement access (`ENGI
 
 - Official source: https://github.com/google/artemis (Apache-2.0).
 - Registered in `config/integrations.json` and as a disabled `mobile_tester` role. The `mobile_test` task contract fails closed while that role is disabled.
-- `python -m engine.cli artemis-status` performs only two GET requests (`/api/status`, `/api/devices`) when configured; without `ARTEMIS_BASE_URL` it performs zero network calls. It never submits a mobile task.
+- `python -m engine.cli artemis-status` performs one GET request (`/api/devices`) when configured; without `ARTEMIS_BASE_URL` it performs zero network calls. It deliberately avoids `/api/status`, whose current handler may start the task dispatcher and process queued work. It never submits a mobile task.
 - Remote connections require HTTPS, `ARTEMIS_TOKEN`, and explicit `ARTEMIS_REMOTE_AUTH_VERIFIED=true` for an independently verified bearer-authenticated reverse proxy. Artemis documents that its daemon does not provide built-in remote authentication; do not expose it directly to the public internet.
 - **Not runtime verified:** no ARTEMIS daemon endpoint or ADB-authorized device has been confirmed from the Raawaa runtime. No Artemis host was installed or launched, no Android device was controlled, no Gemini inference was made, and no new spend occurred. Full activation requires a Python 3.12+ host, ADB-visible Android device/emulator, secure connectivity, and a verified free model route. Paid inference and device actions remain disabled.
