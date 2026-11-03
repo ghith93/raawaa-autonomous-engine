@@ -98,6 +98,15 @@ class RemoteTaskStoreTests(unittest.TestCase):
         self.assertEqual(open_url.return_value.value["next_attempt_at"], "2026-11-04T00:00:00Z")
 
     @patch("engine.remote_task_store.urlopen")
+    def test_attempt_exhaustion_can_fail_without_retry_due_time(self, open_url):
+        open_url.return_value = FakeResponse({"ok": True, "status": "failed", "next_attempt_at": None})
+        status = self.store.retry_or_fail(
+            "task-1", "provider_not_called:capacity",
+            lease_token="lease-1", retry_after_seconds=600,
+        )
+        self.assertEqual(status, "failed")
+
+    @patch("engine.remote_task_store.urlopen")
     def test_claim_fails_closed_before_claim_if_worker_lacks_retry_schedule(self, open_url):
         open_url.return_value = FakeResponse({"ok": True})
         with self.assertRaisesRegex(RemoteTaskStoreError, "task_retry_schedule_v1"):
