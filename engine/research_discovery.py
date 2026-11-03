@@ -13,7 +13,7 @@ import xml.etree.ElementTree as ET
 from datetime import datetime, timezone
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode, urlsplit
-from urllib.request import Request, urlopen
+from urllib.request import HTTPRedirectHandler, Request, build_opener, urlopen
 
 API = "https://api.github.com/search/repositories"
 MAX_RESPONSE_BYTES = 1048576
@@ -38,6 +38,17 @@ class ResearchDiscoveryError(RuntimeError):
     """A bounded research metadata request failed safely."""
 
 
+class _RejectRedirects(HTTPRedirectHandler):
+    """Do not follow redirects for owner-configured metadata endpoints."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        raise HTTPError(req.full_url, code, "redirects are disabled for fixed-host metadata requests", headers, fp)
+
+
+def _open_without_redirects(request: Request, timeout: int):
+    return build_opener(_RejectRedirects).open(request, timeout=timeout)
+
+
 def _request_json(query: str, token: str = "", timeout: int = 15) -> dict:
     url = API + "?" + urlencode({"q": query, "sort": "updated", "order": "desc", "per_page": "10"})
     headers = {"Accept": "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28", "User-Agent": USER_AGENT}
@@ -45,7 +56,7 @@ def _request_json(query: str, token: str = "", timeout: int = 15) -> dict:
         headers["Authorization"] = "Bearer " + token
     request = Request(url, headers=headers, method="GET")
     try:
-        with urlopen(request, timeout=timeout) as response:
+        with _open_without_redirects(request, timeout) as response:
             if response.status != 200:
                 raise ResearchDiscoveryError(f"GitHub search returned HTTP {response.status}")
             raw = response.read(MAX_RESPONSE_BYTES + 1)
