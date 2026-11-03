@@ -227,6 +227,18 @@ def summarize_mobile_status(payload: object, http_status: int = 200) -> dict[str
             return "unknown"
         return missing_label if marker in value else "available"
 
+    def snapshot_flag(name: str, allowed: set[str], fallback_key: str,
+                      marker: str, missing_label: str) -> str:
+        snapshot = payload.get(name)
+        if snapshot is None:
+            return gap_flag(fallback_key, marker, missing_label)
+        if not isinstance(snapshot, dict):
+            return "unknown"
+        if snapshot.get("freshness") == "stale" or snapshot.get("status") == "stale":
+            return "stale"
+        status = snapshot.get("status")
+        return status if isinstance(status, str) and status in allowed else "unknown"
+
     worker_cron = payload.get("worker_cron")
     if worker_cron is None:
         reason = unavailable.get("worker_cron", "")
@@ -305,8 +317,14 @@ def summarize_mobile_status(payload: object, http_status: int = 200) -> dict[str
         **worker_cron_values,
         "last_scan": gap_flag("last_scan", "not recorded", "not_recorded"),
         "source_freshness": gap_flag("source_freshness", "not yet aggregated", "not_aggregated"),
-        "ci_health": gap_flag("ci_health", "not yet ingested", "not_ingested"),
-        "kill_switch": gap_flag("kill_switch", "not yet mirrored", "not_mirrored"),
+        "ci_health": snapshot_flag(
+            "ci_health", {"success", "failure", "incomplete"},
+            "ci_health", "not yet ingested", "not_ingested",
+        ),
+        "kill_switch": snapshot_flag(
+            "kill_switch", {"engaged", "not_engaged"},
+            "kill_switch", "not yet mirrored", "not_mirrored",
+        ),
         "tasks_pending": str(task_counts.get("pending", 0)),
         "tasks_running": str(task_counts.get("running", 0)),
         "paper_events": str(paper_event_count),
