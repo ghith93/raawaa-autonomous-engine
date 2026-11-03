@@ -186,7 +186,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     sub.add_parser("provider-profile-status", help="Inspect provider profiles; never enables inference")
     sub.add_parser("quota-status", help="Inspect local provider quota usage and threshold alerts; no network calls")
-    research = sub.add_parser("research-discover", help="Read-only discovery of public GitHub research candidates")
+    research = sub.add_parser("research-discover", help="Read-only discovery of public GitHub and academic research metadata")
     research.add_argument("--max-per-query", type=int, default=None)
     return parser
 
@@ -279,6 +279,8 @@ def main() -> int:
             max_queries=research_config["max_queries_per_run"],
             academic_query=research_config.get("academic_query"),
             max_academic_results=research_config.get("max_academic_results", 10),
+            arxiv_query=research_config.get("arxiv_query"),
+            max_arxiv_results=research_config.get("max_arxiv_results", 10),
         )
         print(json.dumps(result, indent=2, ensure_ascii=False))
     elif args.command == "provider-profile-status":
