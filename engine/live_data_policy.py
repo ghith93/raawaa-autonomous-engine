@@ -98,6 +98,10 @@ def validate_live_payload(
 
     # Inspect every supplied field before the allowlist check. This preserves
     # specific sensitive-data findings even when the field itself is not allowed.
+    source_urls = payload.get("source_urls", [])
+    if (not isinstance(source_urls, list) or len(source_urls) > 5
+            or any(not _valid_public_source_url(item) for item in source_urls)):
+        return False, "source_url_invalid"
     fragments = tuple(
         item.lower().replace("_", "").replace("-", "")
         for item in (*BASE_BLOCKED_KEY_FRAGMENTS, *blocked_fragments)
@@ -132,8 +136,4 @@ def validate_live_payload(
     if (not isinstance(questions, list) or len(questions) > 5
             or any(not isinstance(item, str) or not item.strip() or len(item) > 500 for item in questions)):
         return False, "payload_schema_invalid"
-    source_urls = payload.get("source_urls", [])
-    if (not isinstance(source_urls, list) or len(source_urls) > 5
-            or any(not _valid_public_source_url(item) for item in source_urls)):
-        return False, "source_url_invalid"
     return True, "allowed"
