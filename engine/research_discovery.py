@@ -114,7 +114,7 @@ def _request_arxiv(query: str, max_results: int = 10, timeout: int = 20) -> dict
                 xml_text = raw.decode("utf-8-sig")
             except UnicodeDecodeError:
                 raise ResearchDiscoveryError("arXiv Atom response must be valid UTF-8") from None
-            if "\\x00" in xml_text or "<!DOCTYPE" in xml_text.upper() or "<!ENTITY" in xml_text.upper():
+            if chr(0) in xml_text or "<!DOCTYPE" in xml_text.upper() or "<!ENTITY" in xml_text.upper():
                 raise ResearchDiscoveryError("arXiv XML declarations with DTD/entities or invalid null bytes are not accepted")
             root = ET.fromstring(raw)
     except HTTPError as exc:
