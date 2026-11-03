@@ -19,6 +19,9 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 3
     steps:
+      - name: Check out reviewed source
+        uses: actions/checkout@v7
+
       - name: Read-only Access applications and service-token inventory
         env:
           CF_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
@@ -29,6 +32,8 @@ jobs:
           import os
           import urllib.error
           import urllib.request
+
+          from engine.cloudflare_access_audit import is_access_not_enabled
 
           token = os.environ.get("CF_API_TOKEN", "")
           account = os.environ.get("CF_ACCOUNT_ID", "")
@@ -46,6 +51,13 @@ jobs:
                       payload = json.loads(response.read().decode("utf-8"))
                       status = response.status
               except urllib.error.HTTPError as error:
+                  try:
+                      body = json.loads(error.read(8192).decode("utf-8", errors="replace"))
+                  except ValueError:
+                      body = {}
+                  if is_access_not_enabled(error.code, body.get("errors", []) if isinstance(body, dict) else []):
+                      print(f"{label}: Cloudflare Access is not enabled; this inventory is not applicable.")
+                      return
                   print(f"{label}: HTTP {error.code}; API read not available (check token permission).")
                   return
               except (urllib.error.URLError, TimeoutError, OSError, ValueError) as error:
