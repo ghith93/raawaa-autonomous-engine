@@ -67,10 +67,55 @@ jobs:
                   "current_balance_cents": state.get("balance_cents"),
               })
           print(json.dumps({
+              "inventory": "spend_policies",
               "read_only": True,
               "mutations": 0,
               "policy_count": len(safe),
               "policies": safe,
               "note": "Notification policies do not block usage. Only enabled usage_block policies are hard stops, and they apply per product."
+          }, indent=2))
+          PY
+
+          subscriptions_file="$(mktemp)"
+          trap 'rm -f "$response_file" "$subscriptions_file"' EXIT
+          subscriptions_status="$(curl --silent --show-error \
+            --output "$subscriptions_file" \
+            --write-out "%{http_code}" \
+            --header "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+            --header "Accept: application/json" \
+            "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/subscriptions")"
+          if [ "$subscriptions_status" != "200" ]; then
+            echo "Cloudflare subscription inventory returned HTTP $subscriptions_status; fixed fees remain unverified."
+            exit 1
+          fi
+          python - "$subscriptions_file" <<'PY'
+          import json
+          import sys
+
+          with open(sys.argv[1], encoding="utf-8") as stream:
+              payload = json.load(stream)
+          if payload.get("success") is not True or not isinstance(payload.get("result"), list):
+              raise SystemExit("Cloudflare returned an unsuccessful or unexpected subscription response.")
+          safe = []
+          for item in payload["result"]:
+              plan = item.get("rate_plan") or {}
+              safe.append({
+                  "id": item.get("id"),
+                  "frequency": item.get("frequency"),
+                  "price_usd": item.get("price"),
+                  "state": item.get("state"),
+                  "plan_id": plan.get("id"),
+                  "plan_name": plan.get("public_name"),
+                  "scope": plan.get("scope"),
+                  "current_period_start": item.get("current_period_start"),
+                  "current_period_end": item.get("current_period_end"),
+              })
+          print(json.dumps({
+              "inventory": "subscriptions",
+              "read_only": True,
+              "mutations": 0,
+              "subscription_count": len(safe),
+              "subscriptions": safe,
+              "note": "Subscription inventory reports fixed recurring fees separately from usage-based spend policies."
           }, indent=2))
           PY
