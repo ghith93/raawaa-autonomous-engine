@@ -10,7 +10,8 @@ This implementation does not enable model inference. Provider profiles remain di
 
 Migration `0006_monetary_budget_ledger.sql` adds:
 
-- `monetary_reservations`: one record per request reservation, with idempotency key, task/provider/model attribution, estimate, configured caps, lifecycle status, actual cost and token usage.
+- `monetary_budget_policy`: the operator-owned hard caps in integer nano-USD (currently $0.40/day, $12/month, $0.20/task). The API token cannot change these values; every new reservation must match the D1 policy exactly.
+- `monetary_reservations`: one record per request reservation, with idempotency key, task/provider/model attribution, estimate, policy caps, lifecycle status, actual cost and token usage.
 - `monetary_route_quarantines`: persistent provider/model quarantine after actual cost exceeds the estimate or the applicable hard cap.
 
 All amounts are integer nano-USD. Reservations in `reserved`, `in_flight`, or `ambiguous` are counted against every subsequent daily and monthly budget window until settled or released while still pre-I/O. Settled spend is counted in the UTC window containing `settled_at`; task totals are cumulative across that task's history.
@@ -41,7 +42,7 @@ When actual cost exceeds its estimate, or the settled total exceeds the daily/mo
 
 ## Verification and remaining gates
 
-The local D1/Workerd integration suite exercises concurrent global daily/monthly and per-task reservations, pre-I/O-only release, post-start release rejection, ambiguous state across restart, idempotent settlement, over-estimate quarantine, route rejection, legacy spend backfill, and authenticated mobile status. The remote Staging harness also tests concurrent D1 token quota reservations and settlement. Python adapter tests cover nano-USD conversion, authentication, status reads, and fail-closed transport behavior.
+The local D1/Workerd integration suite exercises concurrent global daily/monthly and per-task reservations, rejection of caller-raised caps, pre-I/O-only release, post-start release rejection, ambiguous state across restart, idempotent settlement, over-estimate quarantine, route rejection, legacy spend backfill, and authenticated mobile status. Monthly-cap concurrency is tested locally by temporarily changing only the ephemeral local D1 policy. The remote Staging harness tests concurrent daily/per-task monetary reservations against the operator-owned caps, policy tamper rejection, and concurrent D1 token quota reservations. Python adapter tests cover nano-USD conversion, authentication, status reads, and fail-closed transport behavior.
 
 The issue is not complete until:
 1. This branch is reviewed and merged.
