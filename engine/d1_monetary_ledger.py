@@ -128,8 +128,9 @@ class D1MonetaryLedger:
         daily_cap = _money_nanos(daily_budget_usd, round_up=False)
         monthly_cap = _money_nanos(monthly_budget_usd, round_up=False)
         task_cap = _money_nanos(per_task_budget_usd, round_up=False)
-        if task_cap > 0 and task_id is None:
-            raise ValueError("task_id is required when a per-task monetary budget is configured")
+        # Constructor-time policy validation has no task ID yet. Validate the
+        # operator-owned per-task cap globally; calculate task usage only when
+        # the caller supplies a concrete task ID (the live request path does).
         status = self._status(task_id)
         policy = status["budget_policy"]
         if (int(policy["daily_budget_nanos"]) != daily_cap or
