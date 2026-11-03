@@ -38,10 +38,10 @@
 - Consumes: `recoverStaleTasks(env) -> { requeued, failed }`
 - Produces: `scheduled(controller, env)` writes an `audit_log` row with event `worker_cron_tick`, timestamp, cron expression, and recovery counts.
 
-- [ ] Add an assertion to the scheduled-handler test that verifies the audit row and bound metadata.
-- [ ] Run the focused Worker tests and confirm the new assertion fails before implementation.
-- [ ] Add the minimal audit insert after stale-lease recovery.
-- [ ] Re-run focused Worker tests.
+- [x] Add an assertion to the scheduled-handler test that verifies the audit row and bound metadata.
+- [x] Run the focused Worker tests and confirm the new assertion fails before implementation (PR CI #1653).
+- [x] Add the minimal audit insert after stale-lease recovery.
+- [x] Re-run focused Worker tests.
 
 ### Task 2: Expose heartbeat in mobile status
 
@@ -53,15 +53,15 @@
 - Consumes: `audit_log(event='worker_cron_tick')`
 - Produces: `worker_cron: { last_seen_at, cron, requeued, failed } | null`
 
-- [ ] Add tests for a recorded heartbeat and missing history.
-- [ ] Run focused mobile status tests and confirm the new assertions fail.
-- [ ] Query the latest heartbeat read-only and return normalized fields.
-- [ ] Add a visible dashboard row and a precise unavailable-metric message when no heartbeat exists.
-- [ ] Run focused Worker tests and the full repository CI suite.
+- [x] Add tests for a recorded heartbeat and missing history.
+- [x] Run focused mobile status tests and confirm the new assertions fail (PR CI #1653).
+- [x] Query the latest heartbeat read-only and return normalized fields.
+- [x] Add a visible dashboard row and a precise unavailable-metric message when no heartbeat exists.
+- [x] Run focused Worker tests and the full repository CI suite (exact-head run #1657 pending final confirmation).
 
 ### Task 3: Review and integration
 
-- [ ] Review diff for authentication, query bounds, data minimization, and truthful unknown-state behavior.
+- [x] Review diff for authentication, query bounds, data minimization, and truthful unknown-state behavior.
 - [ ] Require exact-head Engine CI success.
 - [ ] Merge only after validation.
 - [ ] Do not deploy production Worker until the merged artifact and deployment workflow are separately reviewed.
