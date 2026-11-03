@@ -210,6 +210,7 @@ test("offset watchdog Cron dispatches after the primary Task Runner phase", asyn
         GITHUB_APP_ID: "12345",
         GITHUB_APP_INSTALLATION_ID: "67890",
         GITHUB_APP_PRIVATE_KEY: privateKey,
+        GITHUB_APP_WATCHDOG_ENABLED: "true",
       },
     );
   } finally {
