@@ -38,7 +38,7 @@ class CodespaceTaskStoreTests(unittest.TestCase):
     def test_requires_a_distinct_codespace_token(self):
         with self.assertRaisesRegex(ValueError, "distinct high-entropy scoped token"):
             CodespaceTaskStore("https://engine.example", "general-token")
-        with self.assertRaisesRegex(ValueError, "distinct scoped token"):
+        with self.assertRaisesRegex(ValueError, "distinct high-entropy scoped token"):
             CodespaceTaskStore("https://engine.example", "admin-token")
 
     def test_rejects_task_path_injection_and_non_origin_base_urls(self):
@@ -71,7 +71,7 @@ class CodespaceTaskStoreTests(unittest.TestCase):
         self.assertEqual(store.preflight()["executor"], "codespace")
         request = build.return_value.open.call_args.args[0]
         self.assertEqual(request.full_url, "https://engine.example/v1/codespace/status")
-        self.assertEqual(request.get_header("Authorization"), "Bearer codespace-token")
+        self.assertEqual(request.get_header("Authorization"), "Bearer " + CODE_TOKEN)
 
     @patch("engine.remote_task_store.build_opener")
     def test_claim_uses_only_codespace_endpoint_and_validates_task_type(self, build):
