@@ -14,7 +14,13 @@ from typing import Any
 
 
 class RemoteTaskStoreError(RuntimeError):
-    """Remote task API failure with a safe, non-secret message."""
+    """Remote task API failure with safe metadata for retry classification."""
+
+    def __init__(self, message: str, *, http_status: int | None = None,
+                 error_code: str | None = None):
+        super().__init__(message)
+        self.http_status = http_status
+        self.error_code = error_code
 
 
 class _RejectRedirects(HTTPRedirectHandler):
@@ -84,13 +90,25 @@ class RemoteTaskStore:
                     f"Remote task API returned HTTP 403; inspect edge/access policy{detail}"
                 ) from None
             if exc.code == 409:
-                raise RemoteTaskStoreError("Remote task lease was lost") from None
+                error_code = None
+                try:
+                    parsed = json.loads(exc.read().decode("utf-8"))
+                    error_code = parsed.get("error") if isinstance(parsed, dict) else None
+                except Exception:
+                    pass
+                safe_code = error_code if isinstance(error_code, str) and error_code.replace("_", "").isalnum() else "conflict"
+                raise RemoteTaskStoreError(
+                    f"Remote task API conflict ({safe_code})",
+                    http_status=409, error_code=error_code,
+                ) from None
             if exc.code == 404:
                 raise RemoteTaskStoreError("Remote task was not found") from None
             if exc.code == 429:
-                raise RemoteTaskStoreError("Remote task API rate limit reached; retry in a later run") from None
+                raise RemoteTaskStoreError("Remote task API rate limit reached; retry in a later run",
+                                           http_status=429) from None
             if 500 <= exc.code <= 599 or exc.code == 408:
-                raise RemoteTaskStoreError(f"Remote task API temporarily unavailable (HTTP {exc.code})") from None
+                raise RemoteTaskStoreError(f"Remote task API temporarily unavailable (HTTP {exc.code})",
+                                           http_status=exc.code) from None
             raise RemoteTaskStoreError(f"Remote task API returned HTTP {exc.code}") from None
         except (URLError, TimeoutError, OSError, json.JSONDecodeError, UnicodeDecodeError):
             raise RemoteTaskStoreError("Remote task API is unavailable or returned invalid JSON") from None
@@ -151,9 +169,13 @@ class RemoteTaskStore:
         self._request(f"/v1/tasks/{task_id}/finish", "POST", payload)
 
     def retry_or_fail(self, task_id: str, error: str,
-                      lease_token: str | None = None) -> str:
+                      lease_token: str | None = None,
+                      retry_after_seconds: int = 0) -> str:
+        if type(retry_after_seconds) is not int or not 0 <= retry_after_seconds <= 86400:
+            raise ValueError("retry_after_seconds must be an integer from 0 to 86400")
         response = self._request(f"/v1/tasks/{task_id}/retry", "POST",
-                                 {"lease_token": lease_token, "error": error})
+                                 {"lease_token": lease_token, "error": error,
+                                  "retry_after_seconds": retry_after_seconds})
         status = response.get("status")
         if status not in {"pending", "failed"}:
             raise RemoteTaskStoreError("Remote task API returned an invalid retry status")
