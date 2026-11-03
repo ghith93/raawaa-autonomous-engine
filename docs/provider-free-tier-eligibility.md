@@ -1,6 +1,6 @@
 # Provider free-tier eligibility review
 
-**Reviewed:** 2026-11-01  
+**Reviewed:** 2026-11-03 17:00 UTC  
 **Purpose:** Identify candidate inference routes for a zero-spend, business-use agent system. This is a public-documentation review, not an account verification. No provider profile or credential is enabled by this document.
 
 ## Decision
@@ -126,7 +126,7 @@ The OpenAI-compatible and Gemini adapters receive token-usage metadata but do no
 - A positive provider-reported or profile-estimated amount on a route advertised as free is recorded and quarantines that route before returning a result.
 - A zero profile estimate is **not** an invoice-level guarantee. Reconcile the provider's billing/usage console after any explicitly approved controlled inference test.
 
-All provider profiles remain disabled, all monetary budgets remain $0, and no inference request has been sent. This change improves accounting truthfulness; it does not enable or authorize inference.
+All provider profiles remain disabled. One bounded public-prompt request was sent to OpenRouter's pinned Nemotron free endpoint on 2026-11-03 and failed strict response/model validation; no second request, paid fallback, or other provider inference was attempted. The live-inference kill switch remains off; paid fallback and external writes remain disabled. This change improves accounting truthfulness; it does not enable or authorize inference.
 
 ## Required evidence before enabling any route
 
@@ -183,3 +183,41 @@ This is a structural guard, not semantic proof that arbitrary text is public. Th
 
 
 The free-text sensitive-content guard is contextual rather than a blanket ban on ordinary words such as “ingredients” or “order”. It blocks Raawaa-branded formula/ingredient/composition references, confidential/proprietary/internal data phrases, and customer/order/payment or personal-data combinations, while allowing clearly public ingredient-label research. This remains a conservative heuristic, not semantic proof that all text is public.
+
+
+## Cloudflare Workers AI — first-party free-tier candidate (2026-11-03)
+
+### Free allocation and billing boundary
+- Cloudflare's official pricing states that Workers AI includes 10,000 Neurons/day at no charge on Workers Free. The daily allowance resets at 00:00 UTC; usage beyond it fails on Workers Free. On Workers Paid, usage above the same allowance is billed at $0.011 per 1,000 Neurons.
+- The API error reference identifies exhausted daily allocation as HTTP 429 / internal code 3036. Some models require Workers Paid and return HTTP 403 / code 5035. Both must be terminal conditions: never upgrade, purchase credits, switch to a paid model, or retry an ambiguous request.
+- Public documentation does not establish this account's exact Workers plan. The earlier zero-paid-subscription inventory is not conclusive proof of Workers Free. The account plan and current daily usage must be confirmed in the Cloudflare dashboard before any inference.
+
+### Preferred model candidate
+- First candidate: `@cf/google/gemma-4-26b-a4b-it`.
+- Cloudflare lists a 256,000-token context, function calling, reasoning, vision, batch support, and Zero Data Retention. Published rates: 9,091 Neurons per million input tokens and 27,273 Neurons per million output tokens.
+- Google publishes Gemma 4 under Apache License 2.0. This is a permissive model-artifact license; it does not independently prove the account's entitlement or hosted-service billing plan.
+- Secondary candidate: `@cf/openai/gpt-oss-20b`, with 128,000 context, function calling, reasoning, Zero Data Retention, and published rates of 18,182 Neurons/M input and 27,273 Neurons/M output.
+- Do not choose a model solely from its parameter count or marketing claims. Keep model IDs pinned and re-check the catalog and terms before each onboarding cycle.
+
+### Data handling
+- Cloudflare's Workers AI data policy states that standard stateless inputs and outputs are not retained after processing and are not used to train AI models.
+- Operational metadata may still be retained, including account/model identifiers, timestamps, request/response sizes, token/Neuron counts, latency, request source, and normalized status/error codes.
+- Stateful features, AI Gateway logging/caching, or application logs can retain content. Do not enable those features for the initial pilot.
+- The model provider's own license and terms still apply. Initial task payloads must remain explicitly classified `public`; exclude confidential Raawaa formulae, credentials, customer/order data, and private business information.
+
+### Verification status and next gates
+- The existing Cloudflare API token's Workers AI Read permission is not yet verified. Cloudflare documents the read-only model catalog endpoint as `GET /accounts/{account_id}/ai/models/search`, requiring Account > Workers AI > Read or Workers AI > Write.
+- A manual-only workflow, `.github/workflows/cloudflare-workers-ai-inventory.yml`, has been added to test that read permission and confirm that the pinned Gemma 4 catalog entry is visible. It makes GET requests only; it does not call `/ai/run`, mutate account settings, create an AI binding, or change a token.
+- A successful catalog read proves only token permission and public catalog visibility. It does not prove the account plan, model-specific inference entitlement, daily quota remaining, or provider-side billing hard stop.
+- Before any inference, require: (1) operator/account dashboard confirmation of Workers Free; (2) read-only API permission and exact model-catalog visibility; (3) a Staging-only `AI` binding; (4) a D1-backed atomic Neuron reservation/settlement ledger with a global daily cap no higher than 10,000 Neurons; (5) strict model allowlisting and public-only data classification; (6) restart, concurrency, ambiguous-outcome, quota-exhaustion, and no-paid-fallback tests.
+- The Neuron ledger must reserve a conservative estimate before provider I/O, settle actual usage, preserve ambiguous outcomes without automatic retry/release, and fail closed when usage metadata is absent. The account's own 10,000-Neuron allowance is a second boundary, not a substitute for engine-side accounting.
+- No Workers AI binding, model profile, token-scope change, or inference request has been enabled or performed. Production Worker/D1 remain untouched.
+
+Sources:
+- Cloudflare Workers AI pricing: https://developers.cloudflare.com/workers-ai/platform/pricing/
+- Cloudflare Workers AI errors: https://developers.cloudflare.com/workers-ai/platform/errors/
+- Cloudflare Workers AI data usage: https://developers.cloudflare.com/workers-ai/platform/data-usage/
+- Gemma 4 model page: https://developers.cloudflare.com/workers-ai/models/gemma-4-26b-a4b-it/
+- Gemma 4 Apache 2.0 license: https://ai.google.dev/gemma/apache_2
+- GPT-OSS 20B model page: https://developers.cloudflare.com/workers-ai/models/gpt-oss-20b/
+- Cloudflare model catalog API permissions: https://developers.cloudflare.com/api/resources/ai/subresources/models/methods/list/
