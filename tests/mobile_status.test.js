@@ -227,8 +227,8 @@ test("mobile status reports explicit scan and per-source freshness without distu
  assert.equal(body.source_freshness.sources.github.status,"fresh");
  assert.equal(body.source_freshness.sources.crossref.status,"unavailable");
  assert.equal(body.source_freshness.sources.crossref.reason_code,"http_429");
- assert.equal(body.task_invocations.ambiguous,1);
- assert.equal(body.task_invocations.settled,2);
+ assert.equal(body.task_invocations.counts.ambiguous,1);
+ assert.equal(body.task_invocations.counts.settled,2);
  assert.equal(body.unavailable_metrics.last_scan,undefined);
 });
 test("mobile status keeps malformed scan and missing source observations explicitly unknown",async()=>{
