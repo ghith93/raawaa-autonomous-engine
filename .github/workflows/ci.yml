@@ -27,6 +27,8 @@ jobs:
           python-version: "3.12"
       - name: Verify immutable GitHub Actions dependency pins
         run: python scripts/check_workflow_action_pins.py
+      - name: Verify secret-bearing manual workflows are restricted to main
+        run: python scripts/check_workflow_dispatch_guards.py
       - name: Validate policy and agent roster
         run: python -m engine.cli audit
       - name: Run Python unit tests
