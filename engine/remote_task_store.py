@@ -76,7 +76,7 @@ class RemoteTaskStore:
         except HTTPError as exc:
             # Do not include response bodies, request headers, or credentials in errors.
             if exc.code == 401:
-                raise RemoteTaskStoreError("Remote task API authentication failed") from None
+                raise RemoteTaskStoreError("Remote task API authentication failed", http_status=401) from None
             if exc.code == 403:
                 metadata = []
                 ray_id = exc.headers.get("CF-Ray") if exc.headers else None
@@ -102,7 +102,7 @@ class RemoteTaskStore:
                     http_status=409, error_code=error_code,
                 ) from None
             if exc.code == 404:
-                raise RemoteTaskStoreError("Remote task was not found") from None
+                raise RemoteTaskStoreError("Remote task was not found", http_status=404) from None
             if exc.code == 429:
                 raise RemoteTaskStoreError("Remote task API rate limit reached; retry in a later run",
                                            http_status=429) from None
