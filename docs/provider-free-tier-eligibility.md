@@ -173,3 +173,10 @@ Sources:
 - Groq Spend Limits: https://console.groq.com/docs/spend-limits
 - Groq Service Credit Terms: https://console.groq.com/docs/legal/service-credit-terms
 - Groq usage/data handling: https://console.groq.com/docs/your-data
+
+
+## Enforced live-data boundary
+
+The code gate is stricter than a documentation warning: only `research_brief` tasks explicitly classified `public` may pass the live-inference data policy. The payload schema is limited to `data_classification`, `topic`, `questions`, and public HTTPS `source_urls`; internal, code-review, marketing/content, and system-audit tasks are blocked from provider submission. Credentials in URLs, query strings, local/private hosts, common secret patterns, email addresses, oversized topics, and unknown payload fields fail closed.
+
+This is a structural guard, not semantic proof that arbitrary text is public. The task creator must classify accurately; never put Raawaa's confidential formula, exact ingredient composition, customer records, credentials, or other proprietary material into a task marked public. All live profiles remain disabled.
