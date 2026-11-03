@@ -153,10 +153,21 @@ def run_once(store: TaskStore, live_gateway=None, environ=None) -> dict | None:
         heartbeat.stop()
         heartbeat.check()
         store.finish(task["id"], "succeeded", result=result, lease_token=task["lease_token"])
-        return {
+        summary = {
             "id": task["id"], "status": "succeeded", "mode": result["mode"],
             "agent_id": result["agent_id"], "recovery": recovery,
         }
+        if result["mode"] == "live_inference":
+            # Live task payloads are restricted to explicitly classified public research.
+            # Expose a bounded preview to the one-shot workflow summary for verification.
+            summary.update({
+                "provider": result["provider"],
+                "model": result["model"],
+                "output_preview": result["output"][:3500],
+                "input_tokens": result["input_tokens"],
+                "output_tokens": result["output_tokens"],
+            })
+        return summary
     except LeaseHeartbeatLost:
         # Never persist a result without confirmed lease ownership.
         return {"id": task["id"], "status": "lease_lost",
