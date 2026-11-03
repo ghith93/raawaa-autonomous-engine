@@ -421,6 +421,7 @@ def discover_repositories(queries=None, environ=None, max_per_query=5, max_queri
         "arxiv_requests_made": arxiv_requests_made,
         "searxng_candidates": searxng_candidates, "searxng_unavailable": searxng_unavailable,
         "searxng_requests_made": searxng_requests_made,
+        "searxng_endpoint_configured": bool(searxng_base_url),
         "generation_requests": 0, "code_execution": False,
         "installation_or_cloning": False, "candidate_count": len(ordered),
         "total_metadata_candidate_count": len(ordered) + len(academic_candidates) + len(arxiv_candidates) + len(searxng_candidates),
