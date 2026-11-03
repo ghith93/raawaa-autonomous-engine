@@ -228,6 +228,7 @@ class WorkerExecutionTests(unittest.TestCase):
         self.assertEqual(result["reason"], "live_inference_failed_no_replay")
         saved = self.store.list_tasks(1)[0]
         self.assertEqual(saved["status"], "blocked")
+        self.assertEqual(saved["execution_mode"], "live_inference")
         self.assertEqual(saved["attempts"], 1)
 
 
