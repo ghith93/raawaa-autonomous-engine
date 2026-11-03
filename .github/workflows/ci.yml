@@ -20,11 +20,13 @@ jobs:
     timeout-minutes: 5
     steps:
       - name: Check out source
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - name: Set up Python
-        uses: actions/setup-python@v7
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7
         with:
           python-version: "3.12"
+      - name: Verify immutable GitHub Actions dependency pins
+        run: python scripts/check_workflow_action_pins.py
       - name: Validate policy and agent roster
         run: python -m engine.cli audit
       - name: Run Python unit tests
@@ -32,7 +34,7 @@ jobs:
       - name: Compile remote Staging verification harness
         run: python -m py_compile scripts/verify_staging_monetary_ledger.py
       - name: Set up Node.js
-        uses: actions/setup-node@v7
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
         with:
           node-version: "22"
       - name: Run Cloudflare Worker unit tests
@@ -56,13 +58,13 @@ jobs:
       cancel-in-progress: false
     steps:
       - name: Check out the exact main commit that passed Engine CI
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - name: Set up Python
-        uses: actions/setup-python@v7
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7
         with:
           python-version: "3.12"
       - name: Set up Node.js
-        uses: actions/setup-node@v7
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
         with:
           node-version: "22"
       - name: Validate staging and production database separation
@@ -120,13 +122,13 @@ jobs:
       cancel-in-progress: false
     steps:
       - name: Check out the exact main commit that passed CI and Staging migration
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - name: Set up Python
-        uses: actions/setup-python@v7
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7
         with:
           python-version: "3.12"
       - name: Set up Node.js
-        uses: actions/setup-node@v7
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
         with:
           node-version: "22"
       - name: Validate Cloudflare credentials
@@ -202,9 +204,9 @@ jobs:
     timeout-minutes: 5
     steps:
       - name: Check out reviewed main
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - name: Set up Python
-        uses: actions/setup-python@v7
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7
         with:
           python-version: "3.12"
       - name: Publish sanitized operational snapshots to Staging D1 only
