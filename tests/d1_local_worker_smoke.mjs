@@ -193,6 +193,7 @@ try {
   };
   const enqueued = await api("/v1/tasks/enqueue", { method: "POST", body: taskPayload });
   assertStatus(enqueued, 201, "task enqueue");
+  assert.equal(enqueued.payload.task.execution_mode, "unknown");
   const duplicate = await api("/v1/tasks/enqueue", { method: "POST", body: taskPayload });
   assertStatus(duplicate, 200, "idempotent task replay");
   assert.equal(duplicate.payload.task.id, enqueued.payload.task.id);
