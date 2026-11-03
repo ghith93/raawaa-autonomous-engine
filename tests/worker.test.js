@@ -169,7 +169,7 @@ test("scheduled handler fails visibly when the heartbeat audit write fails", asy
   const prepare = DB.prepare.bind(DB);
   DB.prepare = sql => {
     const statement = prepare(sql);
-    if (sql.includes("worker_cron_tick")) {
+    if (sql.includes("INSERT INTO audit_log")) {
       statement.run = async () => { throw new Error("audit storage unavailable"); };
     }
     return statement;
