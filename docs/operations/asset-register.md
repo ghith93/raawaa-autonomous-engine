@@ -102,3 +102,12 @@ At every session start, refresh counts, account/connection status, app permissio
 - Graphify approved for a later code-only local evaluation: official source https://github.com/Graphify-Labs/graphify, Apache-2.0, official PyPI package `graphifyy`, CLI `graphify`. Offline code parsing is local; optional semantic extraction can send docs/media to the configured model backend. Not installed, not run, and not added as a runtime dependency. Security/privacy notes: https://graphify.com/security.
 - Spec Kit remains a deferred optional MIT developer tool; no installation performed. F1/F5 remain pending.
 
+## F2 completion — 2026-11-04
+
+- PR #445 merged to main as `b20707d77dccb6157a4a9a90b6cb01cf12e0946a`; exact PR-head CI and post-merge main CI passed. The broad `ProviderNotCalled` classification and migration 0008 were removed; read-only capacity preflight now runs before live-mode task claim.
+- F2 behavior: no eligible verified-free route or exhausted global budget → idle without claim/attempt consumption; actual prompt/quota/atomic reservation rechecked in gateway. Ambiguous checkpoint/provider outcomes stay blocked; no replay. No limits or paid fallback changed.
+- Post-merge Staging pipeline passed: no migrations pending, isolated Staging Worker deployment and remote monetary/token-quota/invocation/redeploy checks passed, telemetry publish passed, authenticated mobile status readback passed. Ephemeral Staging bearer and quota-admin tokens were revoked.
+- Production deploy workflow was skipped; Production Worker/D1 unchanged. No provider inference or external write.
+- Issue #440 remains open; Codespaces executor remains disabled.
+- F1 is next, then F5. Graphify (Apache-2.0, package `graphifyy`) is approved for later code-only local evaluation, not installed/run. Spec Kit (MIT) remains deferred.
+
