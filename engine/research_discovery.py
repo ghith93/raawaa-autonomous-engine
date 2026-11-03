@@ -1,7 +1,7 @@
-"""Bounded, read-only GitHub repository discovery for proactive research.
+"""Bounded, read-only multi-source discovery for proactive research.
 
-This module retrieves public repository metadata only. It never clones, imports,
- executes, installs, or modifies discovered projects.
+This module retrieves public metadata only. It never clones, imports, executes,
+installs, or modifies discovered projects. Search results remain untrusted data.
 """
 from __future__ import annotations
 
