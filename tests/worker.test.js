@@ -366,12 +366,14 @@ test("research ingestion stores SearXNG HTTPS metadata and rejects IP-literal UR
   assert.equal(metadata.content_fetched, false);
   assert.equal(metadata.license_verified, false);
 
-  const invalidDB = dbMock();
-  const invalid = await worker.fetch(request("/v1/research/candidates", { method: "POST", body: { candidates: [{
-    source: "searxng", title: "Private target", url: "https://127.0.0.1/admin",
-  }] } }), { DB: invalidDB, ENGINE_API_TOKEN: TOKEN });
-  assert.equal(invalid.status, 400);
-  assert.equal(invalidDB.calls.length, 0);
+  for (const url of ["https://127.0.0.1/admin", "https://metadata.localhost/admin", "https://[::1]/admin"]) {
+    const invalidDB = dbMock();
+    const invalid = await worker.fetch(request("/v1/research/candidates", { method: "POST", body: { candidates: [{
+      source: "searxng", title: "Private target", url,
+    }] } }), { DB: invalidDB, ENGINE_API_TOKEN: TOKEN });
+    assert.equal(invalid.status, 400, url);
+    assert.equal(invalidDB.calls.length, 0, url);
+  }
 });
 
 test("research ingestion rejects invalid repository URL before database writes", async () => {
