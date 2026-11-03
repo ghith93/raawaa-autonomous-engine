@@ -19,7 +19,7 @@ from engine.live_runtime import build_live_gateway
 from engine.remote_task_store import RemoteTaskStore
 from engine.worker import run_once
 
-IDEMPOTENCY_KEY = "groq-free-inference-staging-smoke-2026-11-03-v1"
+IDEMPOTENCY_KEY = "groq-free-inference-staging-smoke-2026-11-03-v2"
 ROUTE_IDS = (
     "groq:primary:openai/gpt-oss-120b",
     "groq:primary:openai/gpt-oss-20b",
