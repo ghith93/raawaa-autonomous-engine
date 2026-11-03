@@ -6,6 +6,7 @@ on:
     paths:
       - ".github/workflows/task-runner.yml"
   schedule:
+    # Primary GitHub cadence; the Cloudflare watchdog is a separately gated fallback.
     - cron: "4,9,14,19,24,29,34,39,44,49,54,59 * * * *"
   workflow_dispatch:
 
@@ -253,6 +254,10 @@ jobs:
           MOBILE_WORKER_CRON_SCHEDULE: ${{ steps.mobile.outputs.worker_cron_schedule }}
           MOBILE_WORKER_CRON_REQUEUED: ${{ steps.mobile.outputs.worker_cron_requeued }}
           MOBILE_WORKER_CRON_FAILED: ${{ steps.mobile.outputs.worker_cron_failed }}
+          MOBILE_WATCHDOG_READY: ${{ steps.mobile.outputs.watchdog_ready }}
+          MOBILE_WATCHDOG_MISSING: ${{ steps.mobile.outputs.watchdog_missing }}
+          MOBILE_WATCHDOG_LAST_DISPATCH: ${{ steps.mobile.outputs.watchdog_last_dispatch_requested }}
+          MOBILE_WATCHDOG_LAST_INTENT: ${{ steps.mobile.outputs.watchdog_last_dispatch_intent_at }}
           JOB_STATUS: ${{ job.status }}
         with:
           script: |
@@ -279,6 +284,10 @@ jobs:
                 " · stale leases requeued / failed: " +
                 (process.env.MOBILE_WORKER_CRON_REQUEUED || "unknown") + " / " +
                 (process.env.MOBILE_WORKER_CRON_FAILED || "unknown"),
+              "Task Runner watchdog: " + (process.env.MOBILE_WATCHDOG_READY || "unknown") +
+                " · missing settings: " + (process.env.MOBILE_WATCHDOG_MISSING || "unknown") +
+                " · last dispatch: " + (process.env.MOBILE_WATCHDOG_LAST_DISPATCH || "unknown") +
+                " · last intent: " + (process.env.MOBILE_WATCHDOG_LAST_INTENT || "unknown"),
               "Telemetry gaps — scan: " + (process.env.MOBILE_LAST_SCAN || "unknown") +
                 "; source freshness: " + (process.env.MOBILE_SOURCE_FRESHNESS || "unknown") +
                 "; CI: " + (process.env.MOBILE_CI_HEALTH || "unknown") +
