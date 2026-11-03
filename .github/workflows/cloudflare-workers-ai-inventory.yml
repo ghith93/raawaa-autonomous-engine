@@ -13,6 +13,7 @@ permissions:
 
 jobs:
   inspect-catalog:
+    if: github.ref == 'refs/heads/main'
     name: Verify Workers AI read permission and public model catalog
     runs-on: ubuntu-latest
     timeout-minutes: 2
