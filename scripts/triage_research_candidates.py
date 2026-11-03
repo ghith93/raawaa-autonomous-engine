@@ -10,8 +10,15 @@ from pathlib import Path
 PERMISSIVE_LICENSES = {"MIT", "Apache-2.0", "BSD-2-Clause", "BSD-3-Clause", "ISC", "0BSD", "Unlicense"}
 KNOWN_LICENSES = PERMISSIVE_LICENSES | {"MPL-2.0", "EPL-2.0", "CDDL-1.0", "GPL-2.0", "GPL-3.0", "AGPL-3.0", "LGPL-2.1", "LGPL-3.0"}
 PREFERRED_LANGUAGES = {"python", "typescript", "javascript", "go", "rust"}
-RELEVANT_TOPICS = {"agent_frameworks", "coding_agents", "agent_memory", "mcp_ecosystem", "model_routing", "durable_execution"}
-RELEVANT_PAPER_TERMS = {"agent", "agents", "orchestration", "workflow", "memory", "llm", "model", "mcp", "coding", "autonomous", "tool use"}
+RELEVANT_TOPICS = {
+    "agent_frameworks", "coding_agents", "agent_memory", "mcp_ecosystem",
+    "model_routing", "durable_execution", "agent_skills_security", "agent_evaluation",
+}
+RELEVANT_PAPER_TERMS = {
+    "agent", "agents", "agentic", "orchestration", "workflow", "memory", "llm",
+    "model", "mcp", "coding", "autonomous", "tool use", "skills", "security",
+    "evaluation", "benchmark", "guardrail", "prompt injection", "supply chain",
+}
 
 
 def _parse_datetime(value: str | None) -> datetime | None:
