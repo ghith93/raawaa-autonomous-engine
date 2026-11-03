@@ -51,3 +51,36 @@
 - GitHub's official troubleshooting guidance says scheduled workflows can stop even while still enabled and manual dispatch works; it identifies the schedule actor being suspended/deprovisioned as one possible cause and recommends a write-access commit changing the cron expression to reactivate the schedule. See https://docs.github.com/en/actions/how-tos/troubleshoot-workflows and https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows.
 - This PR changes only the minute offset from `4,9,14,...,59` to `2,7,12,...,57`; cadence remains every five minutes and the run time stays away from minute 0. The push trigger for this workflow may run once after merge; its existing smoke task uses a stable idempotency key and safe-dry-run policy. No inference or external task execution is enabled.
 - **Not yet verified:** reactivation is successful only after a new `event=schedule` run appears on the merged main SHA. If it does not, inspect the workflow's last schedule actor and GitHub account state; keep the Worker watchdog variable restoration as a separate required fallback.
+
+
+## Current-state correction after PR #428 and #439 merges — 2026-11-03 22:44 UTC
+
+This section supersedes earlier statements above that PR #428 is open/unmerged or that PR #427 remains unsynchronized.
+
+- PR #428 (Executive Brain) merged as `478c815f9c64b338caa8548e87a34b9f8c45a696`. Its final exact-head CI #41732844871 passed. It adds deterministic read-only executive portfolio intelligence and proposal-only specialist workflow planning. It does not start persistent agents, execute workflow DAGs, enqueue tasks, call a model, or enable live inference. Default policy remains safe_dry_run and provider routes remain disabled.
+- Multi-step workflow execution remains blocked pending #438: atomic dependency-aware claim/release across SQLite and D1, including idempotency, concurrency, failure blocking, and recovery. Do not execute dependent DAGs until that issue's acceptance criteria pass.
+- PR #427 (Codespaces bridge) has since merged as `bdaf97006aedd431f051c0fec8a182037ed0320b`; exact-head CI #41733151325 passed. Post-merge source inspection confirms the same-UID child-process/filesystem isolation finding remains valid. Remediation is tracked in #440. The runtime requires explicit `RAAWAA_ENGINE_CODESPACE_BRIDGE=enabled`; no Codespaces runner workflow was found and no Codespace was activated. Keep it disabled until #440 passes adversarial sandbox or trusted-code-only acceptance.
+- PR #439 merged as `d1a035f6705751fb432db428863a8bd5bd62b836`, refreshing the Task Runner's five-minute cron registration from minute offsets `4,9,14,...` to `2,7,12,...`. Post-merge run #41732816612 was a `push` event and succeeded with `queue_idle`, 0 tasks processed, and no inference. It again reported watchdog `not_ready`, missing `GITHUB_APP_WATCHDOG_ENABLED`. As of 22:44 UTC, no fresh `event=schedule` run on the new main SHA had yet been observed; wait for and verify a real scheduled event before claiming reactivation.
+- Latest main SHA at this checkpoint: `478c815f9c64b338caa8548e87a34b9f8c45a696`. Main Engine CI #41733119344 was still running at the last observation; do not claim it passed until terminal.
+- Read-only Cloudflare billing inventory #41733119271 succeeded: account subscription endpoint HTTP 200, 0 active subscriptions, and 0 active paid subscriptions. The spend-policy endpoint returned HTTP 404, so no external Workers/Durable Objects usage_block is verified. Keep paid overages and paid model fallback disabled; do not infer a provider-side hard spend stop.
+- The ChatGPT Daily Ops automation remains enabled but has `next_run_time=null`; its recurring scheduler is not verified. A manual run_now produced inline execution only, not a background run.
+- Production Worker/D1 remain untouched. No production variable or secret was changed, no live inference was sent, no task was enqueued, and no Codespace was activated.
+
+## Remaining operator unblock
+
+Cloudflare Dashboard: https://dash.cloudflare.com/ . Select the account → Workers & Pages → `raawaa-autonomous-engine-control` → Settings → Variables and Secrets → Production. Add the non-secret variable `GITHUB_APP_WATCHDOG_ENABLED=enabled`, save, then verify authenticated `/v1/mobile/status` reports `task_runner_watchdog.ready=true` and `missing=[]`. Do not paste credentials into chat. A protected production deployment must be treated as a separate, explicitly approved step.
+
+
+## Post-Codespaces merge correction — 2026-11-03 22:46 UTC
+
+- PR #427 was merged by GitHub at 22:46:14 UTC as `bdaf97006aedd431f051c0fec8a182037ed0320b`. The exact PR head `504b68bfcc04b55db69e6144596e16191f1151dd` passed CI #41733151325. This does not resolve the sandbox finding: current `engine/codespace_bridge.py` still calls `subprocess.run` under the same UID and repository filesystem. Issue #440 remains open. Explicit bridge opt-in is required, the default policy is safe_dry_run, and no Codespaces runner workflow or active Codespace was found. Do not set the opt-in flag or provision the scoped token before #440 passes.
+- Main commit `bdaf97006aedd431f051c0fec8a182037ed0320b` is now the current baseline. Its Engine CI #41733664183 was still running at 22:46 UTC. The scheduled Open-Source Research Discovery workflow also started from this push; its success/failure must be checked separately.
+- The PR #439 cron refresh has not yet produced a verified `event=schedule` run as of 22:46 UTC. The next expected five-minute slot is minute 47; continue checking the event type and SHA, not just successful push/manual runs.
+
+
+## Isolated Staging verification — 2026-11-03 22:49 UTC
+
+- Main Engine CI #41733664183 completed successfully on `bdaf97006aedd431f051c0fec8a182037ed0320b`: full test suite passed, reviewed migrations applied to Staging only, isolated Staging Worker deployed, remote D1 monetary ledger verification passed, sanitized CI/inference-gate telemetry published to Staging D1, and authenticated Staging mobile status readback passed.
+- The authenticated Staging readback returned `status=verified`, `ci_health=success`, `kill_switch=engaged`, `paid_fallback=false`, `paid_model_calls=false`, and `external_writes=false`. Ephemeral Staging bearer and quota-admin tokens were revoked by workflow cleanup.
+- This is isolated Staging evidence only; no Production Worker/D1 deployment or mutation occurred.
+- Task Runner manual dispatch #41733799185 on the same main SHA succeeded with no tasks processed; authenticated D1 status still reports watchdog `not_ready`, missing `GITHUB_APP_WATCHDOG_ENABLED`. As of 22:49 UTC, no new `event=schedule` run was observed after PR #439. The cron refresh remains unverified until a true scheduled event appears.
