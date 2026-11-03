@@ -209,11 +209,12 @@ try {
     body: {
       lease_token: claimed.payload.lease_token,
       status: "succeeded",
-      result: { local_d1_verified: true },
+      result: { mode: "dry_run", execution_started: false, local_d1_verified: true },
     },
   });
   assertStatus(finished, 200, "task finish");
   assert.equal(finished.payload.status, "succeeded");
+  assert.equal(finished.payload.execution_mode, "dry_run");
 
   const staleLease = await api("/v1/tasks/" + enqueued.payload.task.id + "/heartbeat", {
     method: "POST",
@@ -243,6 +244,7 @@ try {
       lease_token: deferredClaim.payload.lease_token,
       error: "provider_not_called:provider_capacity_unavailable",
       retry_after_seconds: 5,
+      execution_mode: "live_inference",
     },
   });
   assertStatus(deferred, 200, "schedule delayed retry");
@@ -264,9 +266,10 @@ try {
   const resumedFinish = await api("/v1/tasks/" + deferredId + "/finish", {
     method: "POST",
     body: { lease_token: resumedClaim.payload.lease_token, status: "succeeded",
-      result: { delayed_retry_verified: true } },
+      result: { mode: "live_inference", delayed_retry_verified: true } },
   });
   assertStatus(resumedFinish, 200, "finish resumed task");
+  assert.equal(resumedFinish.payload.execution_mode, "live_inference");
 
   // Codespaces remains hard-disabled until issue #440's adversarial sandbox
   // acceptance criteria pass. Verify the real local D1 Worker rejects every
@@ -714,7 +717,12 @@ try {
   assertStatus(status, 200, "mobile status after D1 writes");
   assert.equal(status.payload.paper_events.find(row => row.event_type === "candidate_detected")?.count, 1);
   assert.equal(status.payload.tasks.find(row => row.status === "succeeded")?.count, 2,
-    "only the two legacy D1 smoke tasks should succeed while Codespaces is release-gated");
+    "the two D1 smoke tasks should succeed while Codespaces is release-gated");
+  assert.equal(status.payload.task_execution.available, true);
+  assert.equal(status.payload.task_execution.counts.find(row =>
+    row.status === "succeeded" && row.execution_mode === "dry_run")?.count, 1);
+  assert.equal(status.payload.task_execution.counts.find(row =>
+    row.status === "succeeded" && row.execution_mode === "live_inference")?.count, 1);
   assert.equal(status.payload.monetary_ledger.available, true);
   assert.equal(status.payload.monetary_ledger.pending_count, 1);
   assert.equal(status.payload.monetary_ledger.ambiguous_count, 1);
