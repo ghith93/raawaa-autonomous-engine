@@ -62,7 +62,8 @@ jobs:
           summary = {
               "read_only": True,
               "mutations": 0,
-              "billing_read_access_confirmed": policies_status == "200" and subscriptions_status == "200",
+              "billing_read_access_confirmed": subscriptions_status == "200",
+              "spend_policy_endpoint_available": policies_status == "200",
               "spend_policy_http_status": int(policies_status),
               "subscriptions_http_status": int(subscriptions_status),
               "billing_details_printed": False,
@@ -110,7 +111,13 @@ jobs:
           print(json.dumps(summary, indent=2))
           PY
 
-          if [ "$policies_status" != "200" ] || [ "$subscriptions_status" != "200" ]; then
-            echo "Billing inventory is incomplete. Verify Account Billing Read permission and the account API routes; no mutation was attempted."
+          if [ "$subscriptions_status" != "200" ]; then
+            echo "Cloudflare subscription inventory is unavailable; Billing Read access is not verified."
+            exit 1
+          fi
+          if [ "$policies_status" = "404" ]; then
+            echo "Account-level subscriptions were read successfully, but the spend-policy endpoint is unavailable for this account/API context. No external usage_block policy is verified; keep paid overages disabled."
+          elif [ "$policies_status" != "200" ]; then
+            echo "Spend-policy inventory returned HTTP $policies_status. No external usage_block policy is verified."
             exit 1
           fi
