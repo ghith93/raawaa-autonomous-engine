@@ -77,7 +77,10 @@ def main() -> int:
     if not os.environ.get("GROQ_API_KEY", "").strip():
         raise SystemExit("Refusing inference: Groq API credential is not configured.")
 
-    store = RemoteTaskStore()
+    store = RemoteTaskStore(
+        base_url=os.environ.get("RAAWAA_ENGINE_API_URL"),
+        token=os.environ.get("RAAWAA_ENGINE_STAGING_API_TOKEN"),
+    )
     before_mobile = _wait_for_authenticated_worker(store)
     counts = _counts(before_mobile)
     if counts.get("pending", 0) or counts.get("running", 0):
