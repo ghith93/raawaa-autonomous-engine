@@ -25,6 +25,7 @@ class CapabilityGapAnalysisTests(unittest.TestCase):
             json.dumps({
                 "queries": {"agent_frameworks": "agents"},
                 "academic_source": "Crossref public metadata",
+                "arxiv_source": "arXiv Atom API",
             }), encoding="utf-8"
         )
         (self.root / "engine" / "agent_runtime.py").write_text("# deterministic", encoding="utf-8")
