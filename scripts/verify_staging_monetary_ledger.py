@@ -25,6 +25,7 @@ BASE_URL = os.environ.get(
     "https://raawaa-autonomous-engine-staging.ghith-shikhkhaled.workers.dev",
 ).rstrip("/")
 TOKEN = os.environ.get("RAAWAA_ENGINE_STAGING_API_TOKEN", "")
+ADMIN_TOKEN = os.environ.get("RAAWAA_ENGINE_STAGING_ADMIN_API_TOKEN", "")
 PREFIX = "staging-verification-"
 
 STAGING_D1_ID = "231dd948-04a0-49e3-ad73-444f77d69477"
@@ -122,7 +123,8 @@ def set_staging_policy(daily: int, monthly: int, per_task: int) -> None:
 
 
 def api(method: str, path: str, payload: dict[str, Any] | None = None,
-        authenticated: bool = True, readiness_timeout_seconds: int = 90) -> tuple[int, dict[str, Any]]:
+        authenticated: bool = True, readiness_timeout_seconds: int = 90,
+        token: str | None = None) -> tuple[int, dict[str, Any]]:
     """Call the Staging Worker, tolerating bounded propagation of its fresh secret.
 
     The Worker checks bearer authentication before dispatching any authenticated
@@ -135,9 +137,10 @@ def api(method: str, path: str, payload: dict[str, Any] | None = None,
     data = None if payload is None else json.dumps(payload, separators=(",", ":")).encode()
     headers = {"Accept": "application/json", "User-Agent": "RaawaaStagingLedgerVerification/1.0"}
     if authenticated:
-        if not TOKEN:
+        auth_token = TOKEN if token is None else token
+        if not auth_token:
             raise RuntimeError("Staging API token is unavailable")
-        headers["Authorization"] = "Bearer " + TOKEN
+        headers["Authorization"] = "Bearer " + auth_token
     if data is not None:
         headers["Content-Type"] = "application/json"
 
@@ -286,6 +289,51 @@ def cleanup_test_reservations() -> None:
         f"DELETE FROM audit_log WHERE task_id LIKE '{prefix}%'",
     ):
         execute_staging_sql(statement, retry_safe=True)
+
+
+def verify_quota_admin_scopes(run_tag: str) -> None:
+    """Verify separate admin credentials against the isolated Staging Worker."""
+    require(bool(ADMIN_TOKEN) and ADMIN_TOKEN != TOKEN,
+            "A distinct ephemeral Staging quota-admin token is required")
+    route_id = PREFIX + run_tag + "-quota-admin"
+    task_id = PREFIX + run_tag + "-quota-admin-task"
+
+    for action_name, payload in (
+        ("record", {"action": "record", "route_id": route_id, "task_id": task_id, "tokens": 1}),
+        ("cool_down", {"action": "cool_down", "route_id": route_id, "seconds": 60}),
+        ("audit_event", {"action": "audit_event", "event": "staging_admin_scope_test", "route_id": route_id}),
+    ):
+        status, body = api("POST", "/v1/quota", payload)
+        require(status == 403 and body.get("error") == "forbidden_operation_scope",
+                f"Shared runner token unexpectedly authorized quota admin action {action_name}")
+
+    status, body = api("POST", "/v1/quota", {
+        "action": "cool_down", "route_id": route_id, "seconds": 60,
+    }, token=ADMIN_TOKEN)
+    require(status == 200 and isinstance(body.get("until_at"), str),
+            "Dedicated admin token could not apply a Staging cooldown")
+
+    status, body = api("POST", "/v1/quota", {
+        "action": "audit_event", "event": "staging_admin_scope_test", "route_id": route_id,
+    }, token=ADMIN_TOKEN)
+    require(status == 201, "Dedicated admin token could not write a Staging audit event")
+
+    status, body = api("POST", "/v1/quota", {
+        "action": "record", "route_id": route_id, "task_id": task_id, "tokens": 1,
+    }, token=ADMIN_TOKEN)
+    require(status == 201, "Dedicated admin token could not record Staging quota telemetry")
+
+    status, body = api("POST", "/v1/quota", {
+        "action": "reserve", "route_id": route_id, "task_id": task_id, "estimated_tokens": 1,
+    }, token=ADMIN_TOKEN)
+    require(status == 403 and body.get("error") == "forbidden_operation_scope",
+            "Quota admin token unexpectedly acquired runner reserve scope")
+
+    status, _ = api("GET", "/v1/tasks", token=ADMIN_TOKEN)
+    require(status == 401, "Quota admin token escaped the quota endpoint")
+
+    status, _ = api("GET", "/v1/quota?route_id=" + quote(route_id, safe=""), token=ADMIN_TOKEN)
+    require(status == 200, "Quota admin token could not read its scoped quota endpoint")
 
 
 def verify_token_quota_concurrency(run_tag: str) -> None:
@@ -566,6 +614,7 @@ def run() -> None:
     run_tag = str(uuid.uuid4())
     cleanup_test_reservations()
     verify_token_quota_concurrency(run_tag)
+    verify_quota_admin_scopes(run_tag)
     verify_task_invocation_lifecycle(run_tag)
 
     cap_test("daily", run_tag, "daily")
