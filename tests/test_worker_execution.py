@@ -82,6 +82,7 @@ class WorkerExecutionTests(unittest.TestCase):
             environ={"RAAWAA_ENGINE_LIVE_INFERENCE": "enabled"},
         )
         self.assertEqual(result["mode"], "live_inference")
+        self.assertEqual(self.store.list_tasks(1)[0]["execution_mode"], "live_inference")
         self.assertEqual(result["provider"], "groq")
         self.assertEqual(result["model"], "verified-test-model")
         self.assertEqual(result["output_preview"], "A bounded specialist result.")
@@ -96,6 +97,7 @@ class WorkerExecutionTests(unittest.TestCase):
         gateway.preflight_capacity.return_value = {"eligible": True, "reason": "verified_free_route_available"}
         result = run_once(self.store, live_gateway=gateway, environ={})
         self.assertEqual(result["mode"], "dry_run")
+        self.assertEqual(self.store.list_tasks(1)[0]["execution_mode"], "dry_run")
         gateway.generate.assert_not_called()
         saved = self.store.list_tasks(1)[0]
         self.assertEqual(saved["status"], "succeeded")
@@ -114,6 +116,7 @@ class WorkerExecutionTests(unittest.TestCase):
         )
         self.assertEqual(result["mode"], "live_inference")
         self.assertEqual(adapter.calls, 1)
+        self.assertEqual(self.store.list_tasks(1)[0]["execution_mode"], "live_inference")
         self.assertEqual(adapter.last_request.task_id, self.task["id"])
         self.assertEqual(
             adapter.last_request.request_id,
