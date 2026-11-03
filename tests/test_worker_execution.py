@@ -138,6 +138,7 @@ class WorkerExecutionTests(unittest.TestCase):
         store = TaskStore(root / "unclassified.db")
         store.enqueue("research_brief", "Unclassified", {"topic": "safe-looking"}, idempotency_key="unclassified")
         gateway = Mock()
+        gateway.preflight_capacity.return_value = {"eligible": True, "reason": "verified_free_route_available"}
         result = run_once(store, live_gateway=gateway, environ={"RAAWAA_ENGINE_LIVE_INFERENCE": "enabled"})
         self.assertEqual(result["status"], "blocked")
         self.assertEqual(result["reason"], "live_data_policy_blocked")
@@ -155,6 +156,7 @@ class WorkerExecutionTests(unittest.TestCase):
                 store = TaskStore(root / (key + ".db"))
                 store.enqueue("research_brief", "Sensitive test", {key: value, "data_classification": "public"}, idempotency_key=key)
                 gateway = Mock()
+                gateway.preflight_capacity.return_value = {"eligible": True, "reason": "verified_free_route_available"}
                 result = run_once(store, live_gateway=gateway, environ={"RAAWAA_ENGINE_LIVE_INFERENCE": "enabled"})
                 self.assertEqual(result["status"], "blocked")
                 self.assertEqual(result["detail"], expected)
@@ -188,10 +190,34 @@ class WorkerExecutionTests(unittest.TestCase):
         )
         self.assertEqual(result["status"], "blocked")
         self.assertEqual(result["reason"], "live_gateway_unavailable")
-        self.assertEqual(self.store.list_tasks(1)[0]["status"], "blocked")
+        self.assertEqual(self.store.list_tasks(1)[0]["status"], "pending")
+
+    def test_preflight_capacity_unavailable_leaves_task_pending_without_claim(self):
+        class NoCapacityGateway:
+            def preflight_capacity(self, max_output_tokens=256):
+                return {"eligible": False, "reason": "provider_capacity_unavailable"}
+
+            def generate(self, request):
+                raise AssertionError("provider must not be called")
+
+        claim = Mock(wraps=self.store.claim_next)
+        self.store.claim_next = claim
+        result = run_once(
+            self.store, live_gateway=NoCapacityGateway(),
+            environ={"RAAWAA_ENGINE_LIVE_INFERENCE": "enabled"},
+        )
+        self.assertEqual(result["status"], "idle")
+        self.assertEqual(result["reason"], "live_capacity_unavailable")
+        self.assertEqual(result["capacity_reason"], "provider_capacity_unavailable")
+        claim.assert_not_called()
+        self.assertEqual(self.store.list_tasks(1)[0]["status"], "pending")
+        self.assertEqual(self.store.list_tasks(1)[0]["attempts"], 0)
 
     def test_live_failure_is_blocked_and_never_auto_retried(self):
         class FailingGateway:
+            def preflight_capacity(self, max_output_tokens=256):
+                return {"eligible": True, "reason": "verified_free_route_available"}
+
             def generate(self, request):
                 raise TimeoutError("ambiguous provider outcome")
 
