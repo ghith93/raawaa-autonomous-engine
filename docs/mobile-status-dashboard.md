@@ -13,3 +13,6 @@ The following are intentionally shown as unavailable rather than guessed: scan-r
 Security headers include no-store, no-referrer, nosniff, and a restrictive Content Security Policy. The page makes one unauthenticated read-only request to the public GitHub Actions API per dashboard load to show recent CI state; it does not send the Engine token to GitHub. GitHub API rate limits may make this panel temporarily unavailable. The page stores no access token persistently.
 
 This is an additive mobile view only. It does not deploy the Worker, change secrets, apply D1 migrations, or enable external actions.
+
+
+Latest verified production status (2026-11-03 01:48 UTC): authenticated mobile-status read in Task Runner run [#41562069768](https://github.com/ghith93/raawaa-autonomous-engine/actions/runs/41562069768) returned HTTP 200. The Worker Cron heartbeat was `2026-11-03T01:45:34.300Z`; watchdog readiness was `not_ready`, missing the three GitHub App secrets and the explicit opt-in variable. No dispatch intent or workflow_dispatch run was recorded. The separate Python Task Runner completed a bounded batch with `queue_idle` and zero tasks processed.
