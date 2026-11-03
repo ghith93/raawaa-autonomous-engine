@@ -36,6 +36,13 @@ def load_candidates(snapshot: dict) -> list[dict]:
         if key not in seen:
             seen.add(key)
             candidates.append({**item, "source": "crossref"})
+    for item in snapshot.get("arxiv_candidates", []):
+        if not isinstance(item, dict) or not isinstance(item.get("arxiv_id"), str):
+            continue
+        key = "arxiv:" + item["arxiv_id"].lower()
+        if key not in seen:
+            seen.add(key)
+            candidates.append({**item, "source": "arxiv"})
     return candidates
 
 
@@ -143,7 +150,8 @@ def persist_candidates(snapshot: dict, environ=None, request_fn=None, batch_size
     found = {row.get("source_key") for row in rows if isinstance(row, dict)}
     expected = {
         ("github:" + item["full_name"].lower()) if item["source"] == "github"
-        else ("crossref:" + item["doi"].lower())
+        else ("crossref:" + item["doi"].lower()) if item["source"] == "crossref"
+        else ("arxiv:" + item["arxiv_id"].lower())
         for item in candidates
     }
     if expected - found:
