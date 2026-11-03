@@ -1,13 +1,25 @@
 import unittest
+from urllib.error import HTTPError
+from urllib.request import Request
 
 from scripts.persist_research_candidates import (
     ResearchPersistenceError,
     load_candidates,
     persist_candidates,
+    _RejectRedirects,
 )
 
 
 class ResearchPersistenceTests(unittest.TestCase):
+    def test_authenticated_d1_redirects_are_refused_before_credentials_can_be_forwarded(self):
+        handler = _RejectRedirects()
+        request = Request("https://engine.example/v1/research/candidates")
+        with self.assertRaises(HTTPError):
+            handler.redirect_request(
+                request, None, 307, "Temporary Redirect", {},
+                "https://evil.example/collect",
+            )
+
     def test_load_candidates_merges_sources_and_deduplicates(self):
         snapshot = {
             "candidates": [
