@@ -164,6 +164,41 @@ test("scheduled handler runs bounded stale lease recovery and records a heartbea
 });
 
 
+test("Task Runner watchdog Cron is dormant without App settings and does not run lease recovery", async () => {
+  const DB = dbMock();
+  await worker.scheduled(
+    { cron: "2,7,12,17,22,27,32,37,42,47,52,57 * * * *", scheduledTime: 1_800_000_000_000 },
+    { DB },
+  );
+  assert.equal(DB.calls.length, 0);
+});
+
+test("15-minute recovery Cron never calls GitHub App dispatch", async () => {
+  const DB = dbMock();
+  const originalFetch = globalThis.fetch;
+  let calls = 0;
+  globalThis.fetch = async () => {
+    calls += 1;
+    throw new Error("GitHub fetch must not run on the recovery Cron");
+  };
+  try {
+    await worker.scheduled(
+      { cron: "*/15 * * * *", scheduledTime: 1_800_000_000_000 },
+      {
+        DB,
+        GITHUB_APP_ID: "12345",
+        GITHUB_APP_INSTALLATION_ID: "67890",
+        GITHUB_APP_PRIVATE_KEY: "unused-on-recovery-cron",
+      },
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+  assert.equal(calls, 0);
+  assert.ok(DB.calls.some(x => x.kind === "all" && x.sql.includes("LIMIT 100")));
+  assert.ok(DB.calls.some(x => x.kind === "run" && x.values[0] === "worker_cron_tick"));
+});
+
 test("scheduled handler fails visibly when the heartbeat audit write fails", async () => {
   const DB = dbMock();
   const prepare = DB.prepare.bind(DB);
