@@ -28,7 +28,7 @@ policy audit checks these pairs against the actual agent roster and task
 assignment contract. A tool call is denied when the tool or adapter is unknown,
 any role/task/action/environment dimension mismatches, the budget or policy
 gate fails, or the audit sink is unavailable. Read access is scoped to local
-and Staging environments. No production tool is granted in the initial matrix.
+and Staging environments. The initial matrix grants only repository metadata/file inspection. It deliberately excludes `tests.run` because running tests executes repository-controlled code, and excludes `research.public_search` because it requires outbound network access. These require distinct execution-sandbox and network-egress controls; they must not be represented as read-only tools. No production tool is granted in the initial matrix.
 
 ## Write operations
 
