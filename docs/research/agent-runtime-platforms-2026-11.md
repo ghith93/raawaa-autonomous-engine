@@ -393,3 +393,5 @@ No framework, agent, plugin, vector database or hosted provider is adopted becau
 - [Letta Agent SDK](https://www.letta.com/agent-sdk/)
 - [Graphiti](https://github.com/getzep/graphiti)
 - [Qdrant installation](https://qdrant.tech/documentation/installation/)
+
+**Release freshness correction (2026-11-03):** The GitHub Releases API was rechecked after this comparison was merged. PydanticAI's latest release is now `v2.65.0` (2026-11-03), and Temporal's Python SDK is `1.35.0` (2026-10-28). The earlier table entries `v2.64.0` and `1.34.0` are superseded. This does not change the adoption decision: evaluate PydanticAI in an isolated prototype only; do not add a production dependency until its quota, retry, policy, and D1 integration are tested.
