@@ -1000,7 +1000,7 @@ test("existing Task Runner retains its fenced retry route", async () => {
     method: "POST", token: TOKEN, body: { lease_token: "lease-1", error: "retry test" },
   }), { DB, ENGINE_API_TOKEN: TOKEN, ENGINE_CODESPACE_TOKEN: CODESPACE_TOKEN });
   assert.equal(response.status, 200);
-  assert.deepEqual(await response.json(), { ok: true, status: "pending" });
+  assert.deepEqual(await response.json(), { ok: true, status: "pending", next_attempt_at: null });
 });
 
 test("Codespace release gate blocks even a weak configured token", async () => {
