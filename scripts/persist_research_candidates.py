@@ -7,7 +7,6 @@ import sys
 import time
 from pathlib import Path
 from urllib.error import HTTPError, URLError
-from urllib.error import HTTPError
 from urllib.request import HTTPRedirectHandler, Request, build_opener
 
 
