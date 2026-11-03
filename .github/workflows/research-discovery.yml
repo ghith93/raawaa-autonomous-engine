@@ -7,7 +7,7 @@ on:
       - ".github/workflows/research-discovery.yml"
       - "engine/research_discovery.py"
       - "config/research_sources.json"
-      - "scripts/persist_research_candidates.py"
+      - "scripts/persist_research_candidates.py"\n      - "scripts/publish_research_scan_telemetry.py"\n      - "worker/mobile-status.js"
       - "scripts/triage_research_candidates.py"
       - "worker/index.js"
       - "migrations/**"
@@ -37,7 +37,7 @@ jobs:
           python-version: "3.12"
       - name: Validate engine policy
         run: python -m engine.cli audit
-      - name: Discover public research candidates
+      - name: Record research scan start time\n        id: scan_clock\n        run: echo "started_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"\n      - name: Discover public research candidates
         run: python -m engine.cli research-discover --max-per-query 5 > research-candidates.json
       - name: Rank candidates for manual review
         run: python scripts/triage_research_candidates.py research-candidates.json > research-triage.json
@@ -63,3 +63,18 @@ jobs:
           RAAWAA_ENGINE_CF_ACCESS_CLIENT_ID: ${{ secrets.CF_ACCESS_CLIENT_ID }}
           RAAWAA_ENGINE_CF_ACCESS_CLIENT_SECRET: ${{ secrets.CF_ACCESS_CLIENT_SECRET }}
         run: python scripts/persist_research_candidates.py research-candidates.json
+
+      - name: Publish explicit scan and source freshness telemetry
+        if: always() && steps.scan_clock.outcome == 'success' && steps.discover.outcome == 'success'
+        env:
+          RAAWAA_ENGINE_API_URL: https://raawaa-autonomous-engine-control.ghith-shikhkhaled.workers.dev
+          RAAWAA_ENGINE_API_TOKEN: ${{ secrets.ENGINE_API_TOKEN }}
+          RAAWAA_ENGINE_CF_ACCESS_CLIENT_ID: ${{ secrets.CF_ACCESS_CLIENT_ID }}
+          RAAWAA_ENGINE_CF_ACCESS_CLIENT_SECRET: ${{ secrets.CF_ACCESS_CLIENT_SECRET }}
+          GITHUB_RUN_ID: ${{ github.run_id }}
+          GITHUB_RUN_NUMBER: ${{ github.run_number }}
+          GITHUB_RUN_ATTEMPT: ${{ github.run_attempt }}
+          GITHUB_SHA: ${{ github.sha }}
+          GITHUB_WORKFLOW: ${{ github.workflow }}
+          RESEARCH_SCAN_STARTED_AT: ${{ steps.scan_clock.outputs.started_at }}
+        run: python scripts/publish_research_scan_telemetry.py research-candidates.json
