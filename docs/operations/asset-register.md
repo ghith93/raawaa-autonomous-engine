@@ -90,3 +90,5 @@ At every session start, refresh counts, account/connection status, app permissio
 - F2 implementation branch `fix/provider-not-called-backoff` updates Python SQLite task scheduling, the remote D1 task adapter, and the Control Worker claim/retry routes to share the same delayed-retry contract.
 - Status: implemented on an unmerged branch; CI is being corrected/re-run. Migration 0008 is not applied to any remote database. No Worker deployment has occurred from this branch.
 - Spec Kit remains a deferred optional developer tool; no dependency or runtime asset was added.
+
+- F2 verification: exact-head Engine CI run `41737974145` passed on SHA `2798c6f12e01b392be7a866eb31a5d5428f0bc15`, including local D1 delayed-retry smoke. PR creation and required PR-event CI are the next gates. Remote migration/deployment remains pending.
