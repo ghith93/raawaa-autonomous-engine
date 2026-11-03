@@ -6,7 +6,7 @@ This is a dated snapshot of the ChatGPT-connected environment used to operate th
 
 | Surface | Observed state | Operational interpretation |
 |---|---|---|
-| Callable tool definitions | 1,912 across 53 namespaces | Includes provider-specific actions and some tools whose account connection or consent is not complete. Not 1,912 independent integrations. |
+| Callable tool definitions | 1,912 across 50 MCP namespaces (63 total namespace groups including 13 built-in file/settings utilities) | Live `ALL_TOOLS` count at this snapshot. Includes provider-specific actions and tools whose account connection or consent may be incomplete; not 1,912 independent integrations. |
 | Skill definitions | 248 across 33 skill packs | Skills are task instructions, not independent credentials or permissions. Only load the relevant skill for a task. |
 | GitHub | Installed and working | ChatGPT's app-specific action-approval setting is `Allow all actions`; this is not the GitHub App installation's API permission set. Repository code/PR/issues/actions operations work, but the installation lacks repository Administration permission. Global default is low-risk auto-approval. |
 | GitHub repository guardrails | `main` reported `protected=false` and branch-protection checks disabled | PR/CI discipline is currently procedural, not enforced by a branch ruleset. The available GitHub connection cannot read or administer branch-protection settings requiring repository administration permission. |
