@@ -87,13 +87,8 @@ function assertStatus(result, expected, label) {
   assert.equal(result.status, expected, label + ": " + JSON.stringify(result.payload));
 }
 
-let server = null;
-let logs = "";
-
-try {
-  runMigrations();
-
-  server = spawn("npx", [
+function launchWorker() {
+  const child = spawn("npx", [
     ...WRANGLER, "dev",
     "--config", "wrangler.toml",
     "--local",
@@ -108,10 +103,40 @@ try {
     stdio: ["ignore", "pipe", "pipe"],
     detached: process.platform !== "win32",
   });
-  server.stdout.setEncoding("utf8");
-  server.stderr.setEncoding("utf8");
-  server.stdout.on("data", chunk => { logs = (logs + chunk).slice(-12_000); });
-  server.stderr.on("data", chunk => { logs = (logs + chunk).slice(-12_000); });
+  child.stdout.setEncoding("utf8");
+  child.stderr.setEncoding("utf8");
+  child.stdout.on("data", chunk => { logs = (logs + chunk).slice(-12_000); });
+  child.stderr.on("data", chunk => { logs = (logs + chunk).slice(-12_000); });
+  return child;
+}
+
+async function stopWorker(child) {
+  if (!child || child.exitCode !== null || child.signalCode !== null) return;
+  if (process.platform !== "win32" && child.pid) {
+    try { process.kill(-child.pid, "SIGTERM"); } catch { /* already exited */ }
+  } else {
+    child.kill("SIGTERM");
+  }
+  await Promise.race([
+    new Promise(resolve => child.once("exit", resolve)),
+    delay(5000),
+  ]);
+  if (child.exitCode === null && child.signalCode === null) {
+    if (process.platform !== "win32" && child.pid) {
+      try { process.kill(-child.pid, "SIGKILL"); } catch { /* already exited */ }
+    } else {
+      child.kill("SIGKILL");
+    }
+  }
+}
+
+let server = null;
+let logs = "";
+
+try {
+  runMigrations();
+
+  server = launchWorker();
 
   await waitForWorker(server, () => logs);
 
@@ -283,6 +308,9 @@ try {
     method: "POST", body: { action: "ambiguous", reservation_id: crashReservation.payload.reservation_id },
   });
   assertStatus(crashAmbiguous, 200, "mark restart recovery reservation ambiguous");
+  await stopWorker(server);
+  server = launchWorker();
+  await waitForWorker(server, () => logs);
   const monetaryStatus = await api("/v1/monetary-ledger");
   assertStatus(monetaryStatus, 200, "read durable monetary status");
   assert.equal(monetaryStatus.payload.snapshot.pending_count, 1);
@@ -336,23 +364,6 @@ try {
 } catch (error) {
   throw new Error(String(error?.stack || error) + "\nWrangler logs:\n" + logs);
 } finally {
-  if (server && server.exitCode === null && server.signalCode === null) {
-    if (process.platform !== "win32" && server.pid) {
-      try { process.kill(-server.pid, "SIGTERM"); } catch { /* already exited */ }
-    } else {
-      server.kill("SIGTERM");
-    }
-    await Promise.race([
-      new Promise(resolve => server.once("exit", resolve)),
-      delay(5000),
-    ]);
-    if (server.exitCode === null && server.signalCode === null) {
-      if (process.platform !== "win32" && server.pid) {
-        try { process.kill(-server.pid, "SIGKILL"); } catch { /* already exited */ }
-      } else {
-        server.kill("SIGKILL");
-      }
-    }
-  }
+  await stopWorker(server);
   rmSync(root, { recursive: true, force: true });
 }
