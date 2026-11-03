@@ -115,11 +115,19 @@ def _request_arxiv(query: str, max_results: int = 10, timeout: int = 20) -> dict
         with _open_without_redirects(request, timeout) as response:
             if response.status != 200:
                 raise ResearchDiscoveryError(f"arXiv returned HTTP {response.status}")
+            final_url = response.geturl() if callable(getattr(response, "geturl", None)) else request.full_url
+            final = urlsplit(final_url)
+            if final.scheme != "https" or final.netloc.lower() not in {"export.arxiv.org", "export.arxiv.org:443"}:
+                raise ResearchDiscoveryError("arXiv response redirected outside the fixed HTTPS host")
             raw = response.read(MAX_RESPONSE_BYTES + 1)
             if len(raw) > MAX_RESPONSE_BYTES:
                 raise ResearchDiscoveryError("arXiv response exceeded the 1 MiB safety limit")
-            if b"<!DOCTYPE" in raw.upper() or b"<!ENTITY" in raw.upper():
-                raise ResearchDiscoveryError("arXiv XML declarations with DTD/entities are not accepted")
+            try:
+                xml_text = raw.decode("utf-8-sig")
+            except UnicodeDecodeError:
+                raise ResearchDiscoveryError("arXiv Atom response must be valid UTF-8") from None
+            if chr(0) in xml_text or "<!DOCTYPE" in xml_text.upper() or "<!ENTITY" in xml_text.upper():
+                raise ResearchDiscoveryError("arXiv XML declarations with DTD/entities or invalid null bytes are not accepted")
             root = ET.fromstring(raw)
     except HTTPError as exc:
         raise ResearchDiscoveryError(f"arXiv returned HTTP {exc.code}") from exc
