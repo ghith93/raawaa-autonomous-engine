@@ -93,6 +93,43 @@ class StagingMonetaryHarnessTests(unittest.TestCase):
         "CLOUDFLARE_ACCOUNT_ID": "test-account",
     })
     @patch("scripts.verify_staging_monetary_ledger.subprocess.run")
+    def test_safe_staging_cleanup_delete_retries_transient_d1_7429(self, run):
+        run.side_effect = [
+            SimpleNamespace(returncode=1, stdout="", stderr="internal error [code: 7429]"),
+            SimpleNamespace(returncode=0, stdout="ok", stderr=""),
+        ]
+        with patch.object(harness, "verify_staging_target") as verify:
+            with patch.object(harness.time, "sleep") as sleep:
+                harness.execute_staging_sql(
+                    "DELETE FROM monetary_reservations WHERE provider LIKE 'staging-verification-%'"
+                )
+        verify.assert_called_once_with()
+        self.assertEqual(run.call_count, 2)
+        sleep.assert_called_once_with(2)
+
+    @patch.dict(os.environ, {
+        "CLOUDFLARE_API_TOKEN": "test-cloudflare-token",
+        "CLOUDFLARE_ACCOUNT_ID": "test-account",
+    })
+    @patch("scripts.verify_staging_monetary_ledger.subprocess.run")
+    def test_non_idempotent_staging_write_is_not_retried_on_d1_7429(self, run):
+        run.return_value = SimpleNamespace(
+            returncode=1, stdout="", stderr="internal error [code: 7429]"
+        )
+        with patch.object(harness, "verify_staging_target"):
+            with patch.object(harness.time, "sleep") as sleep:
+                with self.assertRaisesRegex(RuntimeError, "Staging-only test cleanup failed"):
+                    harness.execute_staging_sql(
+                        "INSERT INTO tasks(id) VALUES ('staging-verification-fixture')"
+                    )
+        run.assert_called_once()
+        sleep.assert_not_called()
+
+    @patch.dict(os.environ, {
+        "CLOUDFLARE_API_TOKEN": "test-cloudflare-token",
+        "CLOUDFLARE_ACCOUNT_ID": "test-account",
+    })
+    @patch("scripts.verify_staging_monetary_ledger.subprocess.run")
     def test_policy_update_uses_remote_staging_database_only(self, run):
         run.return_value = SimpleNamespace(returncode=0, stdout="", stderr="")
         with patch.object(harness, "verify_staging_target") as verify:
