@@ -289,12 +289,14 @@ class UsageLedger:
             return int(cursor.lastrowid)
 
     def settle(self, reservation_id: int, input_tokens: int, output_tokens: int,
-               actual_cost_usd: float, now: datetime | None = None) -> dict[str, Any]:
+               actual_cost_usd: float, now: datetime | None = None, cost_basis: str = "provider_reported") -> dict[str, Any]:
         """Record actual cost exactly once; return integer spend totals for hard-cap checks."""
         if type(input_tokens) is not int or type(output_tokens) is not int:
             raise ValueError("token counts must be integers")
         if input_tokens < 0 or output_tokens < 0:
             raise ValueError("token counts cannot be negative")
+        if cost_basis not in {"provider_reported", "verified_profile_estimate", "verified_profile_floor", "provider_rejected_429"}:
+            raise ValueError("unsupported monetary cost basis")
         actual = _money_nanos(actual_cost_usd, round_up=True)
         current = _utc(now)
         stamp = current.isoformat()
