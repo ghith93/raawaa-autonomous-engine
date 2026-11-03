@@ -43,3 +43,66 @@ jobs:
         run: npm run test:d1-local
       - name: Run local Cloudflare Workflows runtime smoke test
         run: npm run test:workflow-local
+  staging-migrate:
+    name: Apply reviewed migrations to Staging
+    needs: test
+    if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    concurrency:
+      group: d1-staging-migrations
+      cancel-in-progress: false
+    steps:
+      - name: Check out the exact main commit that passed Engine CI
+        uses: actions/checkout@v7
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+      - name: Validate staging and production database separation
+        run: |
+          python - <<'PY'
+          import tomllib
+          from pathlib import Path
+
+          with Path("wrangler.staging.toml").open("rb") as stream:
+              staging = tomllib.load(stream)
+          with Path("wrangler.toml").open("rb") as stream:
+              production = tomllib.load(stream)
+
+          expected_id = "231dd948-04a0-49e3-ad73-444f77d69477"
+          expected_name = "raawaa-engine-staging"
+          expected_production_id = "f0ffbed3-940f-488d-a7d1-31cbc5fbf742"
+          bindings = staging.get("d1_databases", [])
+          production_bindings = production.get("d1_databases", [])
+          if len(bindings) != 1 or len(production_bindings) != 1:
+              raise SystemExit("Refusing staging migration: expected one D1 binding in each config")
+          binding = bindings[0]
+          production_binding = production_bindings[0]
+          if binding.get("binding") != "DB" or binding.get("database_name") != expected_name or binding.get("database_id") != expected_id or binding.get("migrations_dir") != "migrations":
+              raise SystemExit("Refusing staging migration: staging D1 identity or migrations directory did not match the approved target")
+          if production_binding.get("database_name") != "raawaa-autonomous-e" or production_binding.get("database_id") != expected_production_id:
+              raise SystemExit("Refusing staging migration: production D1 identity changed from the reviewed baseline")
+          if binding.get("database_id") == production_binding.get("database_id") or binding.get("database_name") == production_binding.get("database_name"):
+              raise SystemExit("Refusing staging migration: staging and production D1 targets are not distinct")
+          print("Staging target verified; production D1 identity is separate.")
+          PY
+      - name: Show pending staging migrations
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: npx --yes wrangler@4.156.1 d1 migrations list raawaa-engine-staging --remote --config wrangler.staging.toml
+      - name: Apply pending migrations to staging only
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: npx --yes wrangler@4.156.1 d1 migrations apply raawaa-engine-staging --remote --config wrangler.staging.toml
+      - name: Verify staging migration state after apply
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: npx --yes wrangler@4.156.1 d1 migrations list raawaa-engine-staging --remote --config wrangler.staging.toml
