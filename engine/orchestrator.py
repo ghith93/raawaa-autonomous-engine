@@ -14,7 +14,7 @@ from typing import Any
 
 from engine.agent_runtime import AgentContractError, TASK_AGENT_CONTRACTS, build_task_contract
 
-SAFE_TASK_TYPES = set(TASK_AGENT_CONTRACTS)
+SAFE_TASK_TYPES = {"research_brief", "code_review", "content_draft", "system_audit"}
 ID_RE = re.compile(r"^[a-zA-Z][a-zA-Z0-9_-]{0,63}$")
 DEFAULT_POLICY = {
     "max_parallel_agents": 2,
