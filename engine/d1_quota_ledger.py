@@ -19,24 +19,26 @@ class D1QuotaLedgerError(RuntimeError):
 
 class D1QuotaLedger:
     def __init__(self, base_url: str | None = None, token: str | None = None,
-                 timeout: int = 15):
+                 timeout: int = 15, admin_token: str | None = None):
         self.base_url = (base_url or os.getenv("RAAWAA_ENGINE_API_URL", "")).rstrip("/")
         self.token = token or os.getenv("RAAWAA_ENGINE_API_TOKEN", "")
         self.timeout = timeout
+        self.admin_token = admin_token or os.getenv("RAAWAA_ENGINE_QUOTA_ADMIN_TOKEN", "")
         self._reservations: dict[int, tuple[str, str, str]] = {}
         if not self.base_url.startswith("https://") or not self.token:
             raise D1QuotaLedgerError(
                 "RAAWAA_ENGINE_API_URL (HTTPS) and RAAWAA_ENGINE_API_TOKEN are required"
             )
 
-    def _request(self, method: str, path: str, payload: dict[str, Any] | None = None) -> dict:
+    def _request(self, method: str, path: str, payload: dict[str, Any] | None = None,
+                 token: str | None = None) -> dict:
         data = None if payload is None else json.dumps(payload, separators=(",", ":")).encode()
         # workers.dev Browser Integrity Check has rejected urllib's default
         # Python User-Agent in this project. Match the already-verified task
         # client identity so the new quota endpoint uses the same edge path.
         headers = {
             "Accept": "application/json",
-            "Authorization": f"Bearer {self.token}",
+            "Authorization": f"Bearer {token or self.token}",
             "User-Agent": "RaawaaAutonomousEngine/1.0",
         }
         access_id = os.getenv("RAAWAA_ENGINE_CF_ACCESS_CLIENT_ID", "")
@@ -143,9 +145,11 @@ class D1QuotaLedger:
                   now: datetime | None = None) -> None:
         if type(seconds) is not int or seconds < 1:
             raise ValueError("cooldown must be positive")
+        if not self.admin_token:
+            raise D1QuotaLedgerError("RAAWAA_ENGINE_QUOTA_ADMIN_TOKEN is required for quota cooldown")
         self._request("POST", "/v1/quota", {
             "action": "cool_down", "route_id": route_id, "seconds": seconds, "reason": reason
-        })
+        }, token=self.admin_token)
 
     def cooldown_active(self, route_id: str, now: datetime | None = None) -> bool:
         result = self._snapshot(route_id)
