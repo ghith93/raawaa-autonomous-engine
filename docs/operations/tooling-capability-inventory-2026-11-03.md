@@ -117,3 +117,14 @@ This addendum supersedes earlier status statements where noted. It records only 
 3. **Staging deployment permission:** after merge, the CI job will verify whether the existing Cloudflare API token has both D1 edit and Workers Scripts edit permissions. If the deploy step returns 403, a least-privilege token with those scopes must be stored directly in GitHub Secrets; never paste it into chat.
 4. **Provider hard stop:** the external model-provider spend cap is still unverified. Keep `provider_hard_stop_verified=false`, live inference off, and paid fallback off.
 5. **Daily automation:** the enabled ChatGPT automation has no next run time after its last failed run. Prompt safety was improved, but the scheduler issue remains unverified.
+
+
+## Revalidation update — 2026-11-03 17:00 UTC
+
+This addendum supersedes earlier statements above where they conflict.
+
+- **GitHub branch protection:** issue #318 is closed as completed by #379. The owner-created `main-protection` ruleset (ID `26464558`) is active. It requires pull requests, exact `test` CI success, up-to-date branches, and resolved review threads; it blocks deletion and non-fast-forward updates; no bypass actors are configured. The earlier table and blocker text saying `main` was unprotected are historical and no longer current.
+- **Cloudflare Workers AI access:** the existing GitHub Actions Cloudflare token has not yet been tested for Workers AI Read permission. Cloudflare documents `GET /accounts/{account_id}/ai/models/search` as read-only and requiring Workers AI Read or Workers AI Write. A successful model-catalog read would verify API permission and catalog visibility only; it would not prove the account's Workers plan, model-specific inference entitlement, or billing hard stop. No inference request, binding, token-scope change, or paid plan change has occurred.
+- **Workers AI plan:** the billing subscription inventory previously returned zero active paid subscriptions, but that does not conclusively identify the account's Workers Free/Paid plan. Confirm the exact plan and daily Neuron allocation in the Cloudflare dashboard before any inference. The public 10,000-Neuron daily allocation is not account-specific evidence.
+- **Production/Staging:** the isolated Staging Worker/D1 and authenticated mobile-status verification are complete in CI run [#41678035968](https://github.com/ghith93/raawaa-autonomous-engine/actions/runs/41678035968). Production Worker/D1 were not changed. The Staging test's temporary bearer/admin credentials were revoked.
+
