@@ -105,6 +105,15 @@ class RemoteTaskStoreTests(unittest.TestCase):
         self.assertEqual(open_url.call_count, 1)
         self.assertEqual(open_url.call_args.args[0].full_url, "https://engine.example/health")
 
+    @patch("engine.remote_task_store.urlopen")
+    def test_retry_requires_remote_confirmation_of_due_time(self, open_url):
+        open_url.return_value = FakeResponse({"ok": True, "status": "pending"})
+        with self.assertRaisesRegex(RemoteTaskStoreError, "did not confirm"):
+            self.store.retry_or_fail(
+                "task-1", "provider_not_called:capacity",
+                lease_token="lease-1", retry_after_seconds=60,
+            )
+
     def test_retry_rejects_unbounded_delay(self):
         with self.assertRaises(ValueError):
             self.store.retry_or_fail("task-1", "retry", lease_token="lease-1",
