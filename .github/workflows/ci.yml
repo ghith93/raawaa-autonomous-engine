@@ -218,3 +218,48 @@ jobs:
           ENGINE_CI_STAGING_WORKER_RESULT: ${{ needs.staging-worker-verify.result }}
           RAAWAA_ENGINE_LIVE_INFERENCE: ${{ vars.RAAWAA_ENGINE_LIVE_INFERENCE || 'disabled' }}
         run: python scripts/publish_staging_ops_telemetry.py
+
+  staging-mobile-status-verify:
+    name: Verify authenticated Staging mobile status readback
+    needs: [publish-staging-ops-telemetry, staging-worker-verify]
+    if: ${{ always() && github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.publish-staging-ops-telemetry.result == 'success' && needs.staging-worker-verify.result == 'success' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    concurrency:
+      group: d1-staging-worker-verification
+      cancel-in-progress: false
+    steps:
+      - name: Check out the exact main commit that published telemetry
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - name: Set up Python
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7
+        with:
+          python-version: "3.12"
+      - name: Set up Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
+        with:
+          node-version: "22"
+      - name: Install pinned Wrangler CLI without credentials
+        run: npx --yes wrangler@4.156.1 --version
+      - name: Generate an ephemeral Staging-only bearer token
+        shell: bash
+        run: |
+          STAGING_TOKEN="$(python -c 'import secrets; print(secrets.token_urlsafe(48))')"
+          echo "::add-mask::$STAGING_TOKEN"
+          echo "RAAWAA_ENGINE_STAGING_API_TOKEN=$STAGING_TOKEN" >> "$GITHUB_ENV"
+      - name: Install the ephemeral token on the already verified Staging Worker
+        id: install_staging_token
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: printf '%s' "$RAAWAA_ENGINE_STAGING_API_TOKEN" | npx --yes wrangler@4.156.1 secret put ENGINE_API_TOKEN --config wrangler.staging.toml
+      - name: Verify current CI and default kill-switch snapshots through the mobile API
+        env:
+          RAAWAA_ENGINE_API_URL: https://raawaa-autonomous-engine-staging.ghith-shikhkhaled.workers.dev
+        run: python scripts/verify_staging_mobile_status.py
+      - name: Revoke the ephemeral Staging bearer token
+        if: ${{ always() && steps.install_staging_token.outcome == 'success' }}
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: npx --yes wrangler@4.156.1 secret delete ENGINE_API_TOKEN --config wrangler.staging.toml
