@@ -60,6 +60,24 @@ class LiveDataPolicyTests(unittest.TestCase):
         self.assertFalse(allowed)
         self.assertEqual(reason, "task_type_not_allowed")
 
+    def test_policy_cannot_widen_live_inference_to_other_known_task_types(self):
+        widened = dict(POLICY)
+        widened["allowed_task_types"] = ["research_brief", "content_draft"]
+        allowed, reason = validate_live_payload(
+            "content_draft", "Draft marketing copy", self.valid_payload(), widened
+        )
+        self.assertFalse(allowed)
+        self.assertEqual(reason, "data_policy_invalid")
+
+    def test_policy_cannot_replace_research_allowlist_with_another_known_task(self):
+        widened = dict(POLICY)
+        widened["allowed_task_types"] = ["system_audit"]
+        allowed, reason = validate_live_payload(
+            "system_audit", "Audit", self.valid_payload(), widened
+        )
+        self.assertFalse(allowed)
+        self.assertEqual(reason, "data_policy_invalid")
+
     def test_unrecognized_payload_fields_are_blocked(self):
         payload = self.valid_payload()
         payload["notes"] = "ordinary non-sensitive note"
