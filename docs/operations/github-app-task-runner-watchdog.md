@@ -37,8 +37,9 @@ The Worker requests an installation token narrowed again to repository ID 144135
 1. Open the Cloudflare dashboard.
 2. Go to Workers & Pages and select raawaa-autonomous-engine-control.
 3. Open Settings, then Variables and Secrets.
-4. Add each of the three names above as a Secret. Paste the App ID and installation ID into their matching fields; paste the PEM contents only into GITHUB_APP_PRIVATE_KEY.
-5. Save the settings. Do not send the private key to ChatGPT.
+4. Add `GITHUB_APP_ID`, `GITHUB_APP_INSTALLATION_ID`, and `GITHUB_APP_PRIVATE_KEY` as Worker Secrets. Paste the App ID and installation ID into their matching fields; paste the PEM contents only into `GITHUB_APP_PRIVATE_KEY`.
+5. Add `GITHUB_APP_WATCHDOG_ENABLED` as a Worker variable with the exact value `true` only when you deliberately want to activate the fallback. Leave it absent or set it to `false` to keep the watchdog dormant.
+6. Save the settings. Do not send the private key to ChatGPT.
 
 No GitHub Actions secret is required for this integration. No D1 migration is required.
 
@@ -69,7 +70,7 @@ If the dispatch fails, inspect Cloudflare Worker Cron Events for the sanitized f
 - A D1 dispatch-intent row is written before the GitHub side effect; it suppresses another attempt for 10 minutes even if the post-dispatch audit write fails.
 - GitHub's workflow concurrency group and D1 atomic task claims remain the duplicate-execution controls.
 - Live inference, external writes, trading, and Telegram delivery remain disabled.
-- Missing App settings cause a no-op. No recurring network calls are made until all three settings exist.
+- Missing App settings or an absent/non-`true` `GITHUB_APP_WATCHDOG_ENABLED` variable cause a no-op. No recurring network calls are made until the exact opt-in and all three App secrets exist.
 
 ## Disable or roll back
 
