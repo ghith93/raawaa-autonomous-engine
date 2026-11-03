@@ -170,6 +170,18 @@ try {
   const blocked = await reserve(ambiguousKey, "ambiguous-task", 100000000, "provider-other");
   assert.equal(blocked.accepted, false, "ambiguous estimate must continue to consume the per-task cap");
 
+  // Reservation IDs are idempotency keys and cannot be reused with different metadata.
+  const idempotencyId = randomUUID();
+  const firstReservation = await reserve(settleKey, "idempotent-task", 10000000, "provider-a", idempotencyId);
+  assert.equal(firstReservation.accepted, true);
+  const replayReservation = await reserve(settleKey, "idempotent-task", 10000000, "provider-a", idempotencyId);
+  assert.equal(replayReservation.accepted, false);
+  assert.equal(replayReservation.replay, true);
+  assert.equal(replayReservation.existing.status, "reserved");
+  const conflictingReservation = await reserve(settleKey, "other-task", 10000000, "provider-a", idempotencyId);
+  assert.equal(conflictingReservation.accepted, false);
+  assert.equal(conflictingReservation.existing.task_id, "idempotent-task");
+
   // Settlement is idempotent; a conflicting second settlement cannot overwrite actual cost.
   const settleReservation = await reserve(settleKey, "settle-task", 50000000);
   assert.equal(settleReservation.accepted, true);
@@ -220,6 +232,8 @@ try {
     cost_basis: "provider_reported",
   })), true);
   assert.equal((await status(overKey, "over-task")).taskOver, true);
+  const blockedAfterOverrun = await reserve(overKey, "over-task", 1000000, "provider-other");
+  assert.equal(blockedAfterOverrun.accepted, false, "actual over-cap settlement must block subsequent reservations");
 
   // A new request context after an interrupted runner still sees the in-flight reservation.
   const restart = await reserve(restartKey, "restart-task", 50000000);
