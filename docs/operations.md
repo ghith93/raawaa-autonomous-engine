@@ -204,7 +204,7 @@ The project-wide spending ceiling is **USD 15 per billing month**, inclusive of 
 
 **Cloudflare billing is a separate external control.** Cloudflare budget alerts are informational and do not stop usage. Cloudflare's billing API does expose per-product spend policies with an `usage_block` action for Workers and Durable Objects, but these policies are product-specific and do not cover fixed subscription fees or every Cloudflare product. The current deployment token's Billing permissions and account spend policies have not yet been verified. Do not claim the all-in cap is externally enforced until the account's existing subscriptions, product policies, and token permissions have been inspected. If the Worker/DO spend-block policy is applied, preserve enough headroom to avoid unexpectedly disabling the control plane; any policy change must be checked against current usage and the service's rollback plan.
 
-**Current activation state:** configuration and code-level validation are in this PR; live inference remains disabled, all provider profiles remain disabled, paid fallback remains disabled, and no Cloudflare billing policy has been changed. This change cannot by itself prove account-wide spend blocking. The next step is a read-only Cloudflare billing inventory, then (only with correct billing permissions and a safe product-specific threshold) create/update the required usage-block policies and verify their current state.
+**Current activation state:** configuration and code-level validation are in this PR; live inference remains disabled, all provider profiles remain disabled, paid fallback remains disabled, and no Cloudflare billing policy has been changed. The existing monetary `UsageLedger` is SQLite-backed and is not durable across ephemeral GitHub-hosted runners. The live-runtime factory now explicitly blocks cloud live inference while `RAAWAA_ENGINE_API_URL` is set until a D1-backed monetary reservation/settlement ledger is implemented. Therefore the USD 12 cap is configured and locally testable, but it is not yet a production-shared spend ledger; no paid call can run through the cloud worker path. This change cannot by itself prove account-wide spend blocking. The next steps are: (1) complete the read-only Cloudflare subscription/spend-policy inventory; (2) implement the D1-backed monetary ledger and test it against a dedicated non-production D1 database; (3) only after those checks, review product-specific Cloudflare usage-block policies and configure a safe threshold that preserves service recovery.
 
 **Operational commands:**
 ```bash
@@ -214,3 +214,10 @@ python -m engine.cli provider-profile-status
 ```
 
 These commands are read-only. Monitor actual provider invoices and Cloudflare/GitHub billing dashboards; unresolved provider reservations must continue consuming budget until reconciled with provider-side evidence.
+
+
+### Mandatory blocker before any cloud inference or paid model routing
+
+The model-usage ledger currently uses local SQLite. That is suitable for local testing, but it does not aggregate spend across separate ephemeral GitHub Actions runners. The runtime therefore refuses to construct a live gateway whenever `RAAWAA_ENGINE_API_URL` is set. Do not remove this guard or enable the cloud live-inference switch until a D1-backed monetary ledger is implemented with atomic cross-runner reservations, idempotent settlement, retained ambiguous reservations, and a tested status endpoint. The production D1 database has migrations through `0005`; no dedicated non-production D1 database is currently configured, so migration `0006` must not be applied to production as a shortcut.
+
+The USD 12/month model cap, USD 0.40/day cap, and USD 0.20/task cap are configured policy ceilings. Until the durable ledger and provider-side billing hard stop are both verified, the only permitted model routes are verified-free routes, and the cloud production runtime remains dry-run.
