@@ -81,13 +81,13 @@ def validate_and_plan(
     policy: dict[str, Any] | None = None,
 ) -> WorkflowPlan:
     """Validate a bounded DAG, assign specialists from trusted mappings, and return plan-only waves."""
-    policy = {**DEFAULT_POLICY, **(policy or {})}
     if not isinstance(workflow, dict):
         raise WorkflowValidationError("workflow must be an object")
     if not isinstance(agent_roster, dict) or not isinstance(agent_roster.get("agents"), list):
         raise WorkflowValidationError("agent roster must contain an agents list")
-    if not isinstance(policy, dict):
+    if policy is not None and not isinstance(policy, dict):
         raise WorkflowValidationError("policy must be an object")
+    policy = {**DEFAULT_POLICY, **(policy or {})}
     workflow_id = workflow.get("id")
     steps = workflow.get("steps")
     if not isinstance(workflow_id, str) or not ID_RE.fullmatch(workflow_id):
