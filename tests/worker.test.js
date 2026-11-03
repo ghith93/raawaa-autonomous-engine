@@ -532,6 +532,29 @@ test("quota settlement cannot cross task or route ownership", async () => {
   assert.deepEqual(calls[0].values.slice(2), [5, "groq:main:model", "different-task"]);
 });
 
+test("quota cooldown cannot shorten an existing cooldown", async () => {
+  const existingUntil = "2099-01-01T00:00:00.000Z";
+  let sql = "";
+  const DB = {
+    prepare(statement) {
+      sql = statement;
+      return {
+        bind(...values) { this.values = values; return this; },
+        async first() { return { until_at: existingUntil }; },
+      };
+    },
+  };
+  const response = await worker.fetch(request("/v1/quota", {
+    method: "POST",
+    body: { action: "cool_down", route_id: "groq:main:model", seconds: 60, reason: "short_retry" },
+  }), { DB, ENGINE_API_TOKEN: TOKEN });
+  assert.equal(response.status, 200);
+  assert.equal((await response.json()).until_at, existingUntil);
+  assert.match(sql, /until_at=MAX\\(quota_cooldowns\\.until_at,excluded\\.until_at\\)/);
+  assert.match(sql, /CASE WHEN excluded\\.until_at>quota_cooldowns\\.until_at THEN excluded\\.reason ELSE quota_cooldowns\\.reason END/);
+  assert.match(sql, /RETURNING until_at/);
+});
+
 test("quota settlement retries identical usage and rejects conflicting usage", async () => {
   let existing = { tokens: 42, settled_at: "2026-11-02T00:00:00.000Z" };
   const DB = {
