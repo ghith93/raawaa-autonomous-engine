@@ -254,5 +254,22 @@ class LiveDataPolicyTests(unittest.TestCase):
         self.assertTrue(allowed)
         self.assertEqual(reason, "allowed")
 
+    def test_sensitive_context_patterns_match_across_line_breaks(self):
+        for text in (
+            "Raawaa\nhair serum formula",
+            "customer\nemail addresses from the CRM",
+            "Review payment\nrecords for a client account",
+            "Confidential\ninternal formula details",
+        ):
+            with self.subTest(text=text):
+                payload = self.valid_payload()
+                payload["topic"] = text
+                allowed, reason = validate_live_payload(
+                    "research_brief", "Public research", payload, POLICY
+                )
+                self.assertFalse(allowed)
+                self.assertEqual(reason, "sensitive_content_detected")
+
+
 if __name__ == "__main__":
     unittest.main()
