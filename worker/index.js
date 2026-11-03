@@ -326,7 +326,7 @@ export default {
         await env.DB.prepare(
           "INSERT INTO audit_log(task_id,event,details_json,created_at) VALUES(?,?,?,?)"
         ).bind(claim.id, "task_claimed", JSON.stringify({
-          attempt: claim.attempts, lease_expires_at: expires
+          attempt: claim.attempts, lease_expires_at: expires, execution_mode: executionMode
         }), nowIso).run();
         return json({ task: claim, lease_token: leaseToken, lease_expires_at: expires });
       } catch {
