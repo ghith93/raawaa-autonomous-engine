@@ -7,10 +7,11 @@ from __future__ import annotations
 
 import json
 import os
+import ipaddress
 import xml.etree.ElementTree as ET
 from datetime import datetime, timezone
 from urllib.error import HTTPError, URLError
-from urllib.parse import urlencode
+from urllib.parse import urlencode, urlsplit
 from urllib.request import Request, urlopen
 
 API = "https://api.github.com/search/repositories"
@@ -190,6 +191,89 @@ def _normalize_crossref_item(item: dict, retrieved_at: str) -> dict | None:
             "license_urls": license_urls, "work_type": item.get("type") if isinstance(item.get("type"), str) else None,
             "source": "crossref", "discovered_at": retrieved_at, "review_status": "unreviewed",
             "license_verified": False, "abstract_retrieved": False}
+
+def _validate_searxng_base_url(base_url: str) -> str:
+    """Accept only an operator-configured public HTTPS SearXNG origin/path."""
+    if not isinstance(base_url, str) or not base_url.strip() or len(base_url) > 500:
+        raise ResearchDiscoveryError("SearXNG endpoint is missing or malformed")
+    parsed = urlsplit(base_url.strip())
+    host = parsed.hostname
+    if (parsed.scheme != "https" or not host or parsed.username or parsed.password
+            or parsed.query or parsed.fragment):
+        raise ResearchDiscoveryError("SearXNG endpoint must be HTTPS without credentials, query, or fragment")
+    normalized_host = host.lower().rstrip(".")
+    if normalized_host in {"localhost", "localhost.localdomain"} or normalized_host.endswith((".local", ".internal")):
+        raise ResearchDiscoveryError("SearXNG endpoint must not target a local hostname")
+    try:
+        address = ipaddress.ip_address(normalized_host)
+    except ValueError:
+        address = None
+    if address is not None and not address.is_global:
+        raise ResearchDiscoveryError("SearXNG endpoint must not target a private or reserved IP")
+    return base_url.strip().rstrip("/")
+
+
+def _request_searxng(query: str, base_url: str, max_results: int = 10, timeout: int = 15) -> dict:
+    """Request one JSON page from an operator-configured SearXNG instance."""
+    if not isinstance(query, str) or not query.strip():
+        raise ValueError("SearXNG query must be a non-empty string")
+    if isinstance(max_results, bool) or not isinstance(max_results, int) or not 1 <= max_results <= 10:
+        raise ValueError("SearXNG max_results must be an integer between 1 and 10")
+    endpoint = _validate_searxng_base_url(base_url)
+    parsed = urlsplit(endpoint)
+    params = {"q": query, "format": "json", "pageno": "1", "safesearch": "1"}
+    request_url = endpoint + "/search?" + urlencode(params)
+    request = Request(request_url, headers={"Accept": "application/json", "User-Agent": USER_AGENT}, method="GET")
+    try:
+        with urlopen(request, timeout=timeout) as response:
+            if response.status != 200:
+                raise ResearchDiscoveryError(f"SearXNG returned HTTP {response.status}")
+            final_url = response.geturl() if callable(getattr(response, "geturl", None)) else request_url
+            final = urlsplit(final_url)
+            if final.scheme != "https" or final.hostname != parsed.hostname:
+                raise ResearchDiscoveryError("SearXNG redirected outside the configured HTTPS host")
+            content_type = response.headers.get("Content-Type", "") if getattr(response, "headers", None) else ""
+            if content_type and "json" not in content_type.lower():
+                raise ResearchDiscoveryError("SearXNG did not return JSON; enable search.formats=json on the instance")
+            raw = response.read(MAX_RESPONSE_BYTES + 1)
+            if len(raw) > MAX_RESPONSE_BYTES:
+                raise ResearchDiscoveryError("SearXNG response exceeded the 1 MiB safety limit")
+            payload = json.loads(raw.decode("utf-8"))
+    except HTTPError as exc:
+        raise ResearchDiscoveryError(f"SearXNG returned HTTP {exc.code}; verify JSON format is enabled") from exc
+    except (URLError, TimeoutError, OSError, json.JSONDecodeError, UnicodeDecodeError) as exc:
+        raise ResearchDiscoveryError(f"SearXNG request failed: {type(exc).__name__}") from exc
+    if not isinstance(payload, dict) or not isinstance(payload.get("results"), list):
+        raise ResearchDiscoveryError("SearXNG returned an unexpected JSON response shape")
+    return payload
+
+
+def _normalize_searxng_result(item: dict, retrieved_at: str) -> dict | None:
+    title, url = item.get("title"), item.get("url")
+    if not isinstance(title, str) or not title.strip() or not isinstance(url, str):
+        return None
+    parsed = urlsplit(url)
+    if parsed.scheme not in {"http", "https"} or not parsed.hostname or parsed.username or parsed.password:
+        return None
+    engines = item.get("engines", [])
+    if not isinstance(engines, list):
+        engines = []
+    score = item.get("score")
+    return {
+        "source": "searxng",
+        "source_key": "searxng:" + url[:900],
+        "title": " ".join(title.split())[:240],
+        "url": url[:1000],
+        "snippet": " ".join(item.get("content", "").split())[:500] if isinstance(item.get("content"), str) else "",
+        "engines": [engine[:80] for engine in engines[:5] if isinstance(engine, str)],
+        "category": item.get("category")[:80] if isinstance(item.get("category"), str) else None,
+        "score": score if type(score) in (int, float) and math.isfinite(score) and score >= 0 else None,
+        "discovered_at": retrieved_at,
+        "review_status": "unreviewed",
+        "license_verified": False,
+        "automatic_adoption": False,
+    }
+
 
 def discover_repositories(queries=None, environ=None, max_per_query=5, max_queries=6, request_fn=None, now=None, academic_query=None, max_academic_results=10, academic_request_fn=None, arxiv_query=None, max_arxiv_results=10, arxiv_request_fn=None):
     """Search a bounded set of GitHub topics and return unreviewed candidates."""
