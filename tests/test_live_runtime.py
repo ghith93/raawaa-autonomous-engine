@@ -20,16 +20,6 @@ class LiveRuntimeFactoryTests(unittest.TestCase):
         config_policy = Path(__file__).resolve().parents[1] / "config" / "policy.json"
         self.policy = json.loads(config_policy.read_text(encoding="utf-8"))
         self.policy["mode"] = "live_inference_opt_in"
-        # Test fixture simulates a provider hard-stop verification; repository
-        # defaults intentionally leave this false until real evidence is reviewed.
-        self.policy["model_policy"]["provider_hard_stop_verified"] = True
-        self.policy["model_policy"]["provider_hard_stop_evidence"] = {
-            "provider": "test-provider",
-            "scope": "test-account",
-            "hard_limit": "test-only hard cap",
-            "verified_at": "2026-11-03T00:00:00Z",
-            "source_url": "https://example.invalid/test-provider-hard-stop",
-        }
         source = Path(__file__).resolve().parents[1] / "config" / "provider_profiles.json"
         self.registry = json.loads(source.read_text(encoding="utf-8"))
         self.registry["routes"][0]["enabled"] = True
@@ -43,7 +33,7 @@ class LiveRuntimeFactoryTests(unittest.TestCase):
         self.policy_path.write_text(json.dumps(self.policy), encoding="utf-8")
         self.registry_path.write_text(json.dumps(self.registry), encoding="utf-8")
 
-    def test_provider_hard_stop_must_be_verified_before_any_live_gateway(self):
+    def test_verified_zero_cost_route_does_not_require_paid_provider_hard_stop(self):
         self.policy["model_policy"]["provider_hard_stop_verified"] = False
         self.policy["model_policy"]["provider_hard_stop_evidence"] = None
         self.write_files()
@@ -51,10 +41,11 @@ class LiveRuntimeFactoryTests(unittest.TestCase):
             self.db_path, self.policy_path, self.registry_path,
             environ={"RAAWAA_ENGINE_LIVE_INFERENCE": "enabled", "GROQ_API_KEY": "test-key"},
         )
-        self.assertIsNone(gateway)
+        self.assertIsNotNone(gateway)
+        self.assertEqual(len(gateway.adapters), 1)
 
-    def test_provider_hard_stop_flag_without_auditable_evidence_fails_closed(self):
-        self.policy["model_policy"]["provider_hard_stop_evidence"] = None
+    def test_paid_fallback_cannot_be_enabled_without_paid_hard_stop(self):
+        self.policy["model_policy"]["paid_fallback_enabled"] = True
         self.write_files()
         gateway = build_live_gateway(
             self.db_path, self.policy_path, self.registry_path,
