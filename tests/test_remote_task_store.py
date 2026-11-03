@@ -71,6 +71,23 @@ class RemoteTaskStoreTests(unittest.TestCase):
         self.assertEqual(payload["result"], {"safe": True})
 
     @patch("engine.remote_task_store.urlopen")
+    def test_retry_sends_bounded_delay_to_remote_queue(self, open_url):
+        open_url.return_value = FakeResponse({"ok": True, "status": "pending"})
+        status = self.store.retry_or_fail(
+            "task-1", "provider_not_called:provider_capacity_unavailable",
+            lease_token="lease-1", retry_after_seconds=600,
+        )
+        self.assertEqual(status, "pending")
+        request = open_url.call_args.args[0]
+        self.assertEqual(request.full_url, "https://engine.example/v1/tasks/task-1/retry")
+        payload = json.loads(request.data)
+        self.assertEqual(payload["retry_after_seconds"], 600)
+
+    def test_retry_rejects_unbounded_delay(self):
+        with self.assertRaises(ValueError):
+            self.store.retry_or_fail("task-1", "retry", lease_token="lease-1",
+                                     retry_after_seconds=86401)
+
     def test_recovery_is_bounded_and_validated(self, open_url):
         open_url.return_value = FakeResponse({"requeued": 2, "failed": 1})
         self.assertEqual(self.store.recover_stale(), {"requeued": 2, "failed": 1})
