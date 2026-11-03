@@ -277,7 +277,7 @@ export default {
       }
       try {
         const result = await env.DB.prepare(
-          "SELECT id,idempotency_key,task_type,title,payload_json,status,attempts,max_attempts,created_at,updated_at FROM tasks ORDER BY created_at DESC,id DESC LIMIT ?"
+          "SELECT id,idempotency_key,task_type,title,payload_json,status,execution_mode,attempts,max_attempts,created_at,updated_at FROM tasks ORDER BY created_at DESC,id DESC LIMIT ?"
         ).bind(rawLimit).all();
         return json({ tasks: result.results || [] });
       } catch {
@@ -298,6 +298,16 @@ export default {
       const taskTypeFilter = codespaceClaim
         ? `AND task_type IN (${CODESPACE_TASK_SQL})`
         : `AND task_type NOT IN (${CODESPACE_TASK_SQL})`;
+      let claimInput;
+      try { claimInput = await readJson(request); }
+      catch (error) {
+        return json({ error: error.message === "body_too_large" ? "body_too_large" : "invalid_json" }, 400);
+      }
+      const executionMode = codespaceClaim ? "codespace" : (claimInput?.execution_mode ?? "unknown");
+      if (!["unknown", "dry_run", "live_inference", "codespace"].includes(executionMode) ||
+          (!codespaceClaim && executionMode === "codespace")) {
+        return json({ error: "invalid_execution_mode" }, 400);
+      }
       const leaseSeconds = 900;
       const now = new Date();
       const nowIso = now.toISOString();
@@ -305,19 +315,19 @@ export default {
       const leaseToken = crypto.randomUUID();
       try {
         const claim = await env.DB.prepare(`
-          UPDATE tasks SET status='running', attempts=attempts+1, updated_at=?,
+          UPDATE tasks SET status='running', attempts=attempts+1, execution_mode=?, updated_at=?,
             lease_token=?, lease_expires_at=?
           WHERE id=(SELECT id FROM tasks WHERE status='pending' ${taskTypeFilter}
             ORDER BY created_at,id LIMIT 1)
             AND status='pending' ${taskTypeFilter}
-          RETURNING id,idempotency_key,task_type,title,payload_json,status,attempts,
+          RETURNING id,idempotency_key,task_type,title,payload_json,status,execution_mode,attempts,
             max_attempts,created_at,updated_at,lease_token,lease_expires_at
-        `).bind(nowIso, leaseToken, expires).first();
+        `).bind(executionMode, nowIso, leaseToken, expires).first();
         if (!claim) return json({ task: null });
         await env.DB.prepare(
           "INSERT INTO audit_log(task_id,event,details_json,created_at) VALUES(?,?,?,?)"
         ).bind(claim.id, "task_claimed", JSON.stringify({
-          attempt: claim.attempts, lease_expires_at: expires
+          attempt: claim.attempts, lease_expires_at: expires, execution_mode: executionMode
         }), nowIso).run();
         return json({ task: claim, lease_token: leaseToken, lease_expires_at: expires });
       } catch {
@@ -450,7 +460,7 @@ export default {
       ).bind(JSON.stringify({ task_type: taskType.trim() }), now, key);
       await env.DB.batch([insert, audit]);
       const task = await env.DB.prepare(
-        "SELECT id,idempotency_key,task_type,title,payload_json,status,attempts,max_attempts,created_at,updated_at FROM tasks WHERE idempotency_key=?"
+        "SELECT id,idempotency_key,task_type,title,payload_json,status,execution_mode,attempts,max_attempts,created_at,updated_at FROM tasks WHERE idempotency_key=?"
       ).bind(key).first();
       if (!task) return json({ error: "storage_unavailable" }, 503);
       return json({ task, created: task.id === id }, task.id === id ? 201 : 200);
