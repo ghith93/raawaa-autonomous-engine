@@ -99,8 +99,10 @@ def load_approved_skill(
     missing = _REQUIRED - manifest.keys()
     if missing:
         raise SkillRegistryError("manifest missing required fields")
-    if manifest["schema_version"] != 1 or manifest["skill_id"] != skill_id:
-        raise SkillRegistryError("unsupported schema or mismatched skill id")
+    if type(manifest["schema_version"]) is not int or manifest["schema_version"] != 1:
+        raise SkillRegistryError("unsupported schema version")
+    if not isinstance(manifest["skill_id"], str) or manifest["skill_id"] != skill_id:
+        raise SkillRegistryError("mismatched skill id")
     if manifest["approved"] is not True:
         raise SkillRegistryError("skill has not been manually approved")
 
@@ -124,14 +126,20 @@ def load_approved_skill(
             not isinstance(item, str) or not item.strip() for item in values
         ):
             raise SkillRegistryError(f"invalid {field}")
-    if manifest["network_policy"] not in _NETWORK:
+    if not isinstance(manifest["network_policy"], str) or manifest["network_policy"] not in _NETWORK:
         raise SkillRegistryError("unsupported network policy")
-    if manifest["risk_classification"] not in _RISKS:
+    if not isinstance(manifest["risk_classification"], str) or manifest["risk_classification"] not in _RISKS:
         raise SkillRegistryError("unsupported risk classification")
 
     permissions = manifest.get("permissions")
     if not isinstance(permissions, dict):
         raise SkillRegistryError("explicit role/task permission map is required")
+    if any(
+        not isinstance(role, str) or not isinstance(tasks, list)
+        or any(not isinstance(task, str) or not task.strip() for task in tasks)
+        for role, tasks in permissions.items()
+    ):
+        raise SkillRegistryError("invalid role/task permission map")
     role_tasks = permissions.get(agent_role)
     if not isinstance(role_tasks, list) or task_type not in role_tasks:
         raise SkillRegistryError("skill is not approved for this role and task type")
