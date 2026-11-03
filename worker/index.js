@@ -81,6 +81,29 @@ function normalizeResearchCandidate(item) {
     };
     return { source_key: "crossref:" + doi.toLowerCase(), source: "crossref", title: item.title, url: "https://doi.org/" + doi, metadata_json: JSON.stringify(metadata), now };
   }
+  if (item.source === "arxiv") {
+    const arxivId = item.arxiv_id;
+    const validArxivId = typeof arxivId === "string" &&
+      /^(?:\d{4}\.\d{4,5}|[a-z-]+(?:\.[a-z]{2})?\/\d{7})(?:v\d+)?$/i.test(arxivId);
+    if (!validArxivId || !safeResearchString(item.title, 1000)) return null;
+    let parsed;
+    try { parsed = new URL(item.url); } catch { return null; }
+    const canonicalPath = "/abs/" + arxivId;
+    if (parsed.protocol !== "https:" || parsed.hostname !== "arxiv.org" ||
+        parsed.pathname !== canonicalPath || parsed.search || parsed.hash) return null;
+    const metadata = {
+      authors: Array.isArray(item.authors) ? item.authors.filter(x => typeof x === "string").slice(0, 5).map(x => x.slice(0, 160)) : [],
+      published: typeof item.published === "string" ? item.published.slice(0, 30) : null,
+      updated: typeof item.updated === "string" ? item.updated.slice(0, 30) : null,
+      categories: Array.isArray(item.categories) ? item.categories.filter(x => typeof x === "string").slice(0, 8).map(x => x.slice(0, 80)) : [],
+      primary_category: typeof item.primary_category === "string" ? item.primary_category.slice(0, 80) : null,
+      doi: typeof item.doi === "string" ? item.doi.slice(0, 160) : null,
+      license_verified: false,
+      abstract_retrieved: false,
+      full_text_retrieved: false,
+    };
+    return { source_key: "arxiv:" + arxivId.toLowerCase(), source: "arxiv", title: item.title, url: "https://arxiv.org/abs/" + arxivId, metadata_json: JSON.stringify(metadata), now };
+  }
   return null;
 }
 
