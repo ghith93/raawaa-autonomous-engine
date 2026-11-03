@@ -34,4 +34,22 @@ CREATE TABLE IF NOT EXISTS monetary_route_quarantines (
   quarantined_at TEXT NOT NULL
 );
 
+-- Preserve any already-recorded provider spend when moving from the legacy
+-- model_usage table (which has no task attribution) into the durable ledger.
+INSERT OR IGNORE INTO monetary_reservations (
+  reservation_id,idempotency_key,provider,model,task_kind,task_id,status,
+  estimated_cost_nanos,actual_cost_nanos,daily_budget_nanos,monthly_budget_nanos,
+  per_task_budget_nanos,input_tokens,output_tokens,created_at,started_at,settled_at
+)
+SELECT
+  'legacy-model-usage:' || id,
+  'legacy-model-usage:' || id,
+  provider,model,task_kind,'legacy-unattributed','settled',
+  CAST(ROUND(cost_usd * 1000000000) AS INTEGER),
+  CAST(ROUND(cost_usd * 1000000000) AS INTEGER),
+  400000000,12000000000,200000000,
+  input_tokens,output_tokens,created_at,created_at,created_at
+FROM model_usage
+WHERE cost_usd > 0;
+
 INSERT OR IGNORE INTO schema_migrations(version) VALUES ('0006_monetary_budget_ledger');
