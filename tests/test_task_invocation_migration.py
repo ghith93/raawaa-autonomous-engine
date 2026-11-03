@@ -15,6 +15,7 @@ class TaskInvocationMigrationTests(unittest.TestCase):
             "0003_durable_quota_ledger.sql", "0004_paper_event_ledger.sql",
             "0005_telegram_webhook_receipts.sql", "0006_monetary_budget_ledger.sql",
             "0007_task_model_invocations.sql",
+            "0008_workers_ai_neuron_ledger.sql",
         ):
             path = ROOT / "migrations" / name
             if path.exists():

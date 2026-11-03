@@ -1,5 +1,6 @@
 import { handleQuota } from "./quota.js";
 import { handleMonetaryLedger } from "./monetary-ledger.js";
+import { handleWorkersAiNeuronLedger } from "./neuron-ledger.js";
 import { handlePaperLedger } from "./paper-ledger.js";
 import { handleTaskInvocation } from "./task-invocations.js";
 import { handleTelegramWebhook } from "./telegram-webhook.js";
@@ -211,12 +212,13 @@ export default {
         url.pathname !== "/v1/monetary-ledger" &&
         url.pathname !== "/v1/paper-ledger" &&
         url.pathname !== "/v1/mobile/status" &&
+        url.pathname !== "/v1/workers-ai-neurons" &&
         !/^\/v1\/tasks\/[A-Za-z0-9-]+\/invocations$/.test(url.pathname) &&
         url.pathname !== "/v1/research/candidates/review" &&
         !/^\/v1\/tasks\/[A-Za-z0-9-]+\/(heartbeat|finish|retry)$/.test(url.pathname)) {
       return json({ error: "not_found" }, 404);
     }
-    const quotaAdminAccess = url.pathname === "/v1/quota" &&
+    const quotaAdminAccess = ["/v1/quota", "/v1/workers-ai-neurons"].includes(url.pathname) &&
       Boolean(env.ENGINE_QUOTA_ADMIN_TOKEN) && env.ENGINE_QUOTA_ADMIN_TOKEN !== env.ENGINE_API_TOKEN &&
       constantTimeEqual(bearer(request), env.ENGINE_QUOTA_ADMIN_TOKEN);
     if (!(await authorized(request, env)) && !quotaAdminAccess) {
@@ -228,6 +230,8 @@ export default {
 
     const quotaResponse = await handleQuota(request, env, url);
     if (quotaResponse) return quotaResponse;
+    const neuronLedgerResponse = await handleWorkersAiNeuronLedger(request, env, url);
+    if (neuronLedgerResponse) return neuronLedgerResponse;
     const monetaryResponse = await handleMonetaryLedger(request, env, url);
     if (monetaryResponse) return monetaryResponse;
     const paperLedgerResponse = await handlePaperLedger(request, env, url);
