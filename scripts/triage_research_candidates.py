@@ -106,13 +106,17 @@ def score_github_candidate(item: dict, now: datetime) -> dict:
         risks.append("repository_archived")
 
     license_ready = license_id in PERMISSIVE_LICENSES
+    priority = _priority(score, archived)
+    if priority == "high" and (stars < 10 or not license_ready):
+        priority = "medium"
+
     return {
         "source": "github",
         "source_key": "github:" + str(item.get("full_name", "")).lower(),
         "title": item.get("full_name", ""),
         "url": item.get("url", ""),
         "score": min(100, max(0, score)),
-        "priority": _priority(score, archived),
+        "priority": priority,
         "license_metadata": license_id,
         "permissive_license_signal": license_ready,
         "license_review_required": True,
