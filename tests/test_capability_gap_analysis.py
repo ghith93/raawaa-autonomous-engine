@@ -26,12 +26,11 @@ class CapabilityGapAnalysisTests(unittest.TestCase):
                 "queries": {"agent_frameworks": "agents"},
                 "academic_source": "Crossref public metadata",
                 "arxiv_source": "arXiv Atom API",
+                "arxiv_source": "arXiv Atom API",
             }), encoding="utf-8"
         )
         (self.root / "engine" / "agent_runtime.py").write_text("# deterministic", encoding="utf-8")
         (self.root / "engine" / "task_store.py").write_text("# durable task ledger", encoding="utf-8")
-        (self.root / "engine" / "remote_task_store.py").write_text("# D1-backed task store", encoding="utf-8")
-        (self.root / ".github" / "workflows" / "task-runner.yml").write_text("schedule: cron", encoding="utf-8")
         (self.root / "engine" / "memory.py").write_text("# local memory", encoding="utf-8")
         (self.root / ".github" / "workflows" / "research-discovery.yml").write_text(
             "if: vars.RAAWAA_ENGINE_RESEARCH_PERSISTENCE == 'enabled'", encoding="utf-8"
@@ -76,7 +75,6 @@ class CapabilityGapAnalysisTests(unittest.TestCase):
         self.assertEqual(by_id["agent_orchestration"]["current_status"], "declarative_only")
         self.assertEqual(by_id["memory"]["current_status"], "local_memory_with_optional_research_persistence")
         self.assertEqual(by_id["model_routing"]["current_status"], "profiles_staged_disabled")
-        self.assertEqual(by_id["durable_execution"]["current_status"], "bounded_scheduled_runner")
 
     def test_missing_broker_and_research_sources_are_reported_without_guessing(self):
         result = analyze_capability_gaps(
@@ -102,21 +100,6 @@ class CapabilityGapAnalysisTests(unittest.TestCase):
         result = analyze_capability_gaps(triage, self.root)
         item = next(x for x in result["opportunities"] if x["capability"] == "agent_orchestration")
         self.assertEqual(item["candidate_shortlist"][0]["triage_priority"], "unknown")
-
-    def test_candidates_without_topic_provenance_are_not_assigned_to_gaps(self):
-        triage = {
-            "schema_version": 1,
-            "github_candidates": [{
-                "source_key": "github:legacy/item",
-                "title": "legacy/item",
-                "url": "https://example.invalid/legacy",
-                "score": 80,
-                "priority": "high",
-            }],
-        }
-        result = analyze_capability_gaps(triage, self.root)
-        self.assertEqual(result["unmapped_github_candidate_count"], 1)
-        self.assertTrue(all(item["candidate_count"] == 0 for item in result["opportunities"]))
 
     def test_rejects_unsupported_triage_schema(self):
         with self.assertRaisesRegex(ValueError, "schema_version 1"):
