@@ -46,9 +46,9 @@ No GitHub Actions secret is required for this integration. No D1 migration is re
 
 ## Production deployment status — 2026-11-03
 
-The watchdog code was deployed to the production Worker at 01:25 UTC from main SHA `4800d2aa3fb9dcd31c7dd0aaffe2e4d1b1b5638e` (Worker version `546a233f-5d93-4328-b71f-f3afed990b4c`). Deployment workflow [#41559599177](https://github.com/ghith93/raawaa-autonomous-engine/actions/runs/41559599177) completed successfully, and the public health endpoint returned `{"ok":true}`.
+The watchdog code was first deployed at 01:25 UTC from main SHA `4800d2aa3fb9dcd31c7dd0aaffe2e4d1b1b5638e` (Worker version `546a233f-5d93-4328-b71f-f3afed990b4c`). After PR #305 added the explicit `GITHUB_APP_WATCHDOG_ENABLED=enabled` opt-in, the production Worker was redeployed at 01:34 UTC from main SHA `15e0ff5c4051cd396a59e76dd9503db5448ff52a` (Worker version `b1cb1429-3914-412c-b681-20c245466269`). Deployment workflow [#41560533199](https://github.com/ghith93/raawaa-autonomous-engine/actions/runs/41560533199) completed successfully, and the public health endpoint returned `{"ok":true}`.
 
-This verifies deployment and Worker health only. No watchdog-triggered `workflow_dispatch` Task Runner run has yet been observed. The GitHub connector cannot inspect Cloudflare Worker secret values, so the presence of `GITHUB_APP_ID`, `GITHUB_APP_INSTALLATION_ID`, and `GITHUB_APP_PRIVATE_KEY` is not independently confirmed. Do not treat the fallback as active until a real dispatch event and completed bounded Task Runner batch are verified.
+The current deployed code returns `disabled` before D1 or network access unless the three App secrets and the exact opt-in variable are all present. This verifies deployment and public Worker health only. No watchdog-triggered `workflow_dispatch` Task Runner run has yet been observed. The GitHub connector cannot inspect Cloudflare Worker secret values, so the presence of `GITHUB_APP_ID`, `GITHUB_APP_INSTALLATION_ID`, and `GITHUB_APP_PRIVATE_KEY` is not independently confirmed. Do not treat the fallback as active until a real dispatch event and completed bounded Task Runner batch are verified.
 
 ## Verify activation
 
