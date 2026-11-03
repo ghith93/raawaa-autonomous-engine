@@ -495,6 +495,37 @@ test("quota admin token cannot reserve runner quota", async () => {
   assert.equal(response.status, 403);
 });
 
+test("quota reservation rejects a server-disabled provider route", async () => {
+  const DB = dbMock();
+  const disabled = JSON.stringify({ "groq:main:model": { enabled: false, minute_request_limit: 5, minute_token_limit: 1000, daily_request_limit: 10, daily_token_limit: 2000, monthly_request_limit: 100, monthly_token_limit: 20000, per_task_request_limit: 3, per_task_token_limit: 300 } });
+  const response = await worker.fetch(request("/v1/quota", { method: "POST", body: { action: "reserve", route_id: "groq:main:model", task_id: "task-1", estimated_tokens: 10 } }),
+    { DB, ENGINE_API_TOKEN: TOKEN, QUOTA_ROUTE_LIMITS_JSON: disabled });
+  assert.equal(response.status, 403);
+  assert.deepEqual(await response.json(), { error: "route_disabled" });
+  assert.equal(DB.calls.length, 0);
+});
+
+test("quota settlement rejects a token amount above the server-owned task cap", async () => {
+  const DB = dbMock();
+  const response = await worker.fetch(request("/v1/quota", { method: "POST", body: { action: "settle", reservation_id: 5, route_id: "groq:main:model", task_id: "task-1", actual_tokens: 301 } }),
+    { DB, ENGINE_API_TOKEN: TOKEN, QUOTA_ROUTE_LIMITS_JSON: QUOTA_LIMITS });
+  assert.equal(response.status, 400);
+  assert.equal(DB.calls.length, 0);
+});
+
+test("quota settlement cannot cross task or route ownership", async () => {
+  const calls = [];
+  const DB = { prepare(sql) { return { values: [], bind(...values) { this.values = values; return this; },
+    async run() { calls.push({ kind: "run", sql, values: this.values }); return { meta: { changes: 0 } }; },
+    async first() { calls.push({ kind: "first", sql, values: this.values }); return null; } }; } };
+  const response = await worker.fetch(request("/v1/quota", { method: "POST", body: { action: "settle", reservation_id: 5, route_id: "groq:main:model", task_id: "different-task", actual_tokens: 42 } }),
+    { DB, ENGINE_API_TOKEN: TOKEN, QUOTA_ROUTE_LIMITS_JSON: QUOTA_LIMITS });
+  assert.equal(response.status, 404);
+  assert.deepEqual(await response.json(), { error: "reservation_not_found" });
+  assert.ok(calls[0].sql.includes("route_id=? AND task_id=?"));
+  assert.deepEqual(calls[0].values.slice(2), [5, "groq:main:model", "different-task"]);
+});
+
 test("quota settlement retries identical usage and rejects conflicting usage", async () => {
   let existing = { tokens: 42, settled_at: "2026-11-02T00:00:00.000Z" };
   const DB = {
