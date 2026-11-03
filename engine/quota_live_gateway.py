@@ -397,13 +397,6 @@ class QuotaAwareLiveGateway:
                 "No eligible provider route remains within the configured monetary budget.",
                 retry_after_seconds=3600, reason_code="monetary_budget_exhausted",
             ) from last_error
-        if getattr(last_error, "status_code", None) == 429:
-            # Every attempted route explicitly rejected inference. The invocation
-            # checkpoint has been returned to prepared, so a later retry is safe.
-            raise ProviderNotCalled(
-                "All eligible free routes explicitly rate-limited the request.",
-                retry_after_seconds=self.cooldown_seconds, reason_code="provider_rate_limited",
-            ) from last_error
         if last_error is not None:
             raise ProviderUnavailable(
                 "A provider route failed with an outcome that may be ambiguous; replay is blocked."
