@@ -4,6 +4,7 @@ import worker from "../worker/index.js";
 import { generateKeyPairSync } from "node:crypto";
 
 const TOKEN = "test-worker-token";
+const CODESPACE_TOKEN = "test-codespace-token-0123456789abcdef0123456789abcdef";
 const ADMIN_TOKEN = "test-quota-admin-token";
 const QUOTA_LIMITS = JSON.stringify({"groq:main:model":{enabled:true,minute_request_limit:5,minute_token_limit:1000,daily_request_limit:10,daily_token_limit:2000,monthly_request_limit:100,monthly_token_limit:20000,per_task_request_limit:3,per_task_token_limit:300}});
 
@@ -880,12 +881,12 @@ test("paper ledger canonicalizes integer-like object keys lexicographically like
 test("Codespace status is read-only and requires its distinct scoped token", async () => {
   const DB = dbMock();
   const denied = await worker.fetch(request("/v1/codespace/status", { token: TOKEN }), {
-    DB, ENGINE_API_TOKEN: TOKEN, ENGINE_CODESPACE_TOKEN: "separate-codespace-token",
+    DB, ENGINE_API_TOKEN: TOKEN, ENGINE_CODESPACE_TOKEN: CODESPACE_TOKEN,
   });
   assert.equal(denied.status, 401);
   const allowed = await worker.fetch(request("/v1/codespace/status", {
-    token: "separate-codespace-token",
-  }), { DB, ENGINE_API_TOKEN: TOKEN, ENGINE_CODESPACE_TOKEN: "separate-codespace-token" });
+    token: CODESPACE_TOKEN,
+  }), { DB, ENGINE_API_TOKEN: TOKEN, ENGINE_CODESPACE_TOKEN: CODESPACE_TOKEN });
   assert.equal(allowed.status, 200);
   assert.deepEqual(await allowed.json(), {
     ok: true, executor: "codespace", capabilities: ["inspect", "test"],
@@ -898,8 +899,8 @@ test("Codespace token cannot access general task, quota, or recovery routes", as
   for (const path of ["/v1/tasks", "/v1/tasks/claim", "/v1/tasks/recover", "/v1/quota"]) {
     const post = path.endsWith("/claim") || path.endsWith("/recover");
     const response = await worker.fetch(request(path, {
-      method: post ? "POST" : "GET", token: "separate-codespace-token", body: post ? {} : undefined,
-    }), { DB: dbMock(), ENGINE_API_TOKEN: TOKEN, ENGINE_CODESPACE_TOKEN: "separate-codespace-token" });
+      method: post ? "POST" : "GET", token: CODESPACE_TOKEN, body: post ? {} : undefined,
+    }), { DB: dbMock(), ENGINE_API_TOKEN: TOKEN, ENGINE_CODESPACE_TOKEN: CODESPACE_TOKEN });
     assert.equal(response.status, 401, path);
   }
 });
@@ -912,8 +913,8 @@ test("Codespace claim is isolated to its allowlisted task types", async () => {
   };
   const DB = dbMock({ codespaceClaim: claim });
   const response = await worker.fetch(request("/v1/codespace/tasks/claim", {
-    method: "POST", token: "separate-codespace-token", body: {},
-  }), { DB, ENGINE_API_TOKEN: TOKEN, ENGINE_CODESPACE_TOKEN: "separate-codespace-token" });
+    method: "POST", token: CODESPACE_TOKEN, body: {},
+  }), { DB, ENGINE_API_TOKEN: TOKEN, ENGINE_CODESPACE_TOKEN: CODESPACE_TOKEN });
   assert.equal(response.status, 200);
   assert.equal((await response.json()).task.task_type, "codespace_test");
   const claimSql = DB.calls.find(x => x.kind === "first" && x.sql.includes("UPDATE tasks SET status='running'")).sql;
@@ -924,7 +925,7 @@ test("legacy Task Runner claim explicitly excludes Codespace tasks", async () =>
   const DB = dbMock();
   const response = await worker.fetch(request("/v1/tasks/claim", {
     method: "POST", body: {},
-  }), { DB, ENGINE_API_TOKEN: TOKEN, ENGINE_CODESPACE_TOKEN: "separate-codespace-token" });
+  }), { DB, ENGINE_API_TOKEN: TOKEN, ENGINE_CODESPACE_TOKEN: CODESPACE_TOKEN });
   assert.equal(response.status, 200);
   assert.deepEqual(await response.json(), { task: null });
   const claimSql = DB.calls.find(x => x.kind === "first" && x.sql.includes("UPDATE tasks SET status='running'")).sql;
@@ -939,13 +940,13 @@ test("Codespace lease actions can only mutate Codespace task types", async () =>
   };
   const DB = dbMock({ currentTask: codeTask });
   const response = await worker.fetch(request("/v1/codespace/tasks/task-code/heartbeat", {
-    method: "POST", token: "separate-codespace-token", body: { lease_token: "lease-1" },
-  }), { DB, ENGINE_API_TOKEN: TOKEN, ENGINE_CODESPACE_TOKEN: "separate-codespace-token" });
+    method: "POST", token: CODESPACE_TOKEN, body: { lease_token: "lease-1" },
+  }), { DB, ENGINE_API_TOKEN: TOKEN, ENGINE_CODESPACE_TOKEN: CODESPACE_TOKEN });
   assert.equal(response.status, 200);
   const denied = await worker.fetch(request("/v1/tasks/task-code/heartbeat", {
     method: "POST", token: TOKEN, body: { lease_token: "lease-1" },
   }), { DB: dbMock({ currentTask: codeTask }), ENGINE_API_TOKEN: TOKEN,
-    ENGINE_CODESPACE_TOKEN: "separate-codespace-token" });
+    ENGINE_CODESPACE_TOKEN: CODESPACE_TOKEN });
   assert.equal(denied.status, 403);
   assert.deepEqual(await denied.json(), { error: "executor_mismatch" });
 });
@@ -959,8 +960,8 @@ test("Codespace token must differ from shared API and quota-admin tokens", async
 
 test("Codespace principal has no retry route", async () => {
   const response = await worker.fetch(request("/v1/codespace/tasks/task-code/retry", {
-    method: "POST", token: "separate-codespace-token", body: { lease_token: "lease-1" },
-  }), { DB: dbMock(), ENGINE_API_TOKEN: TOKEN, ENGINE_CODESPACE_TOKEN: "separate-codespace-token" });
+    method: "POST", token: CODESPACE_TOKEN, body: { lease_token: "lease-1" },
+  }), { DB: dbMock(), ENGINE_API_TOKEN: TOKEN, ENGINE_CODESPACE_TOKEN: CODESPACE_TOKEN });
   assert.equal(response.status, 404);
 });
 
@@ -968,7 +969,14 @@ test("existing Task Runner retains its fenced retry route", async () => {
   const DB = dbMock();
   const response = await worker.fetch(request("/v1/tasks/task-1/retry", {
     method: "POST", token: TOKEN, body: { lease_token: "lease-1", error: "retry test" },
-  }), { DB, ENGINE_API_TOKEN: TOKEN, ENGINE_CODESPACE_TOKEN: "separate-codespace-token" });
+  }), { DB, ENGINE_API_TOKEN: TOKEN, ENGINE_CODESPACE_TOKEN: CODESPACE_TOKEN });
   assert.equal(response.status, 200);
   assert.deepEqual(await response.json(), { ok: true, status: "pending" });
+});
+
+test("Codespace principal rejects a weak server-side token", async () => {
+  const response = await worker.fetch(request("/v1/codespace/status", { token: "short-token" }), {
+    DB: dbMock(), ENGINE_API_TOKEN: TOKEN, ENGINE_CODESPACE_TOKEN: "short-token",
+  });
+  assert.equal(response.status, 401);
 });
