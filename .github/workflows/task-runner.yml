@@ -248,6 +248,11 @@ jobs:
           MOBILE_TASKS_PENDING: ${{ steps.mobile.outputs.tasks_pending }}
           MOBILE_TASKS_RUNNING: ${{ steps.mobile.outputs.tasks_running }}
           MOBILE_PAPER_EVENTS: ${{ steps.mobile.outputs.paper_events }}
+          MOBILE_WORKER_CRON_STATUS: ${{ steps.mobile.outputs.worker_cron_status }}
+          MOBILE_WORKER_CRON_LAST_SEEN: ${{ steps.mobile.outputs.worker_cron_last_seen }}
+          MOBILE_WORKER_CRON_SCHEDULE: ${{ steps.mobile.outputs.worker_cron_schedule }}
+          MOBILE_WORKER_CRON_REQUEUED: ${{ steps.mobile.outputs.worker_cron_requeued }}
+          MOBILE_WORKER_CRON_FAILED: ${{ steps.mobile.outputs.worker_cron_failed }}
           JOB_STATUS: ${{ job.status }}
         with:
           script: |
@@ -268,6 +273,12 @@ jobs:
               "Telegram receipt schema: " + (process.env.MOBILE_TELEGRAM_RECEIPTS || "unknown") + " (schema only; webhook activation separately gated)",
               "D1 pending / running tasks: " + (process.env.MOBILE_TASKS_PENDING || "unknown") + " / " + (process.env.MOBILE_TASKS_RUNNING || "unknown"),
               "D1 paper events: " + (process.env.MOBILE_PAPER_EVENTS || "unknown"),
+              "Worker Cron heartbeat: " + (process.env.MOBILE_WORKER_CRON_STATUS || "unknown") +
+                " · last seen: " + (process.env.MOBILE_WORKER_CRON_LAST_SEEN || "unknown") +
+                " · schedule: " + (process.env.MOBILE_WORKER_CRON_SCHEDULE || "unknown") +
+                " · stale leases requeued / failed: " +
+                (process.env.MOBILE_WORKER_CRON_REQUEUED || "unknown") + " / " +
+                (process.env.MOBILE_WORKER_CRON_FAILED || "unknown"),
               "Telemetry gaps — scan: " + (process.env.MOBILE_LAST_SCAN || "unknown") +
                 "; source freshness: " + (process.env.MOBILE_SOURCE_FRESHNESS || "unknown") +
                 "; CI: " + (process.env.MOBILE_CI_HEALTH || "unknown") +
