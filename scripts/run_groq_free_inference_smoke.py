@@ -4,6 +4,9 @@ from __future__ import annotations
 import json
 import os
 import sys
+import time
+import urllib.error
+import urllib.request
 from pathlib import Path
 from urllib.parse import urlencode
 
@@ -21,6 +24,27 @@ ROUTE_IDS = (
     "groq:primary:openai/gpt-oss-120b",
     "groq:primary:openai/gpt-oss-20b",
 )
+
+
+def _wait_for_authenticated_worker(store: RemoteTaskStore, timeout_seconds: int = 45) -> dict:
+    deadline = time.monotonic() + timeout_seconds
+    last_error = "worker_not_ready"
+    while time.monotonic() < deadline:
+        try:
+            request = urllib.request.Request(
+                os.environ["RAAWAA_ENGINE_API_URL"].rstrip("/") + "/health",
+                headers={"Accept": "application/json"},
+            )
+            with urllib.request.urlopen(request, timeout=5) as response:
+                if response.status == 200:
+                    try:
+                        return store._request("/v1/mobile/status")
+                    except Exception as exc:
+                        last_error = type(exc).__name__
+        except (urllib.error.URLError, TimeoutError, OSError) as exc:
+            last_error = type(exc).__name__
+        time.sleep(2)
+    raise SystemExit("Staging Worker authentication did not become ready: " + last_error)
 
 
 def _counts(mobile: dict) -> dict[str, int]:
@@ -54,7 +78,7 @@ def main() -> int:
         raise SystemExit("Refusing inference: Groq API credential is not configured.")
 
     store = RemoteTaskStore()
-    before_mobile = store._request("/v1/mobile/status")
+    before_mobile = _wait_for_authenticated_worker(store)
     counts = _counts(before_mobile)
     if counts.get("pending", 0) or counts.get("running", 0):
         raise SystemExit("Refusing smoke test: Staging queue is not idle.")
