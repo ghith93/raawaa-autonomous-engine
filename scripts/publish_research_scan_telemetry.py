@@ -30,7 +30,7 @@ def _timestamp(value: str) -> str:
 
 def _reason_code(reason: object) -> str:
     text = reason if isinstance(reason, str) else ""
-    match = re.search(r"HTTP (\\d{3})", text)
+    match = re.search(r"HTTP (\d{3})", text)
     if match:
         return "http_" + match.group(1)
     if "rate_limit" in text or "rate limit" in text:
