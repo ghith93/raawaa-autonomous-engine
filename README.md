@@ -78,4 +78,6 @@ All agents must follow [AGENTS.md](AGENTS.md) and the permanent [Master Autonomo
 ## Research and development
 
 - [Continuous R&D operating system](docs/research-and-development-operating-system.ar.md) — roles, cadence, evidence lifecycle, prioritization, experiment gates, metrics, and current activation boundaries.
-- [Capability Expansion Director prompt](docs/prompts/capability-expansion-director.ar.md) — reusable execution prompt for an AI coding/research operator.\n- [SkillSpector evaluation](docs/research/skillspector-evaluation-2026-11-03.ar.md) — evidence-based candidate review; proposed only, not installed.\n- [Deterministic capability-gap analysis](docs/capability-gap-analysis.md) — offline comparison of research topics with the repository's actual capability baseline; no model calls or automatic task creation.
+- [Capability Expansion Director prompt](docs/prompts/capability-expansion-director.ar.md) — reusable execution prompt for an AI coding/research operator.
+- [SkillSpector evaluation](docs/research/skillspector-evaluation-2026-11-03.ar.md) — evidence-based candidate review; proposed only, not installed.
+- [Deterministic capability-gap analysis](docs/capability-gap-analysis.md) — offline comparison of research topics with the repository's actual capability baseline; no model calls or automatic task creation.
