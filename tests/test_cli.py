@@ -104,7 +104,7 @@ class CliTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             (root / "config").mkdir()
-            for name in ("policy.json", "agents.json", "provider_profiles.json"):
+            for name in ("policy.json", "agents.json", "provider_profiles.json", "tool_permissions.json"):
                 source = Path(cli.ROOT) / "config" / name
                 (root / "config" / name).write_text(source.read_text(encoding="utf-8"), encoding="utf-8")
             policy_path = root / "config" / "policy.json"
@@ -157,7 +157,7 @@ class CliTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             (root / "config").mkdir()
-            for name in ("policy.json", "agents.json", "provider_profiles.json"):
+            for name in ("policy.json", "agents.json", "provider_profiles.json", "tool_permissions.json"):
                 source = Path(cli.ROOT) / "config" / name
                 (root / "config" / name).write_text(source.read_text(encoding="utf-8"), encoding="utf-8")
             profiles = json.loads((root / "config" / "provider_profiles.json").read_text(encoding="utf-8"))
