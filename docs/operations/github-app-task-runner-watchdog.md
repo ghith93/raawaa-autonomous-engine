@@ -11,13 +11,14 @@ The watchdog is a fallback. It does not replace the GitHub schedule or the Pytho
 
 ## Disabled-by-default behavior
 
-The watchdog requires all three Cloudflare Worker settings below. If any is missing, the handler returns disabled before making a network request or writing to D1.
+The watchdog requires an explicit opt-in plus the three GitHub App settings below. If the opt-in is absent or is not exactly `true`, the handler returns disabled before making a network request or writing to D1—even if valid App credentials are already present.
 
-- GITHUB_APP_ID
-- GITHUB_APP_INSTALLATION_ID
-- GITHUB_APP_PRIVATE_KEY
+- `GITHUB_APP_WATCHDOG_ENABLED=true` (Worker variable; deliberate activation switch)
+- `GITHUB_APP_ID` (Worker secret)
+- `GITHUB_APP_INSTALLATION_ID` (Worker secret)
+- `GITHUB_APP_PRIVATE_KEY` (Worker secret)
 
-The private key is never needed in ChatGPT and must never be pasted into a conversation, issue, pull request, log, or source file.
+Set the activation variable only after the App has been installed on this repository with Actions: write and the fallback behavior has been reviewed. The private key is never needed in ChatGPT and must never be pasted into a conversation, issue, pull request, log, or source file.
 
 ## Create the least-privilege GitHub App
 
@@ -72,4 +73,4 @@ If the dispatch fails, inspect Cloudflare Worker Cron Events for the sanitized f
 
 ## Disable or roll back
 
-Remove the watchdog Cron expression from wrangler.toml and revert the watchdog handler/import through a reviewed pull request. To disable without a code change, remove GITHUB_APP_PRIVATE_KEY from Worker secrets; the watchdog immediately returns disabled. Keep the 15-minute stale-lease recovery Cron intact.
+Remove or set `GITHUB_APP_WATCHDOG_ENABLED` to any value other than `true` to disable dispatch immediately without rotating the App credentials. For a full rollback, remove the watchdog Cron expression from wrangler.toml and revert the watchdog handler/import through a reviewed pull request. Keep the 15-minute stale-lease recovery Cron intact.
