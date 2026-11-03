@@ -7,6 +7,7 @@ or provide approval evidence. No adapter is registered by the current worker.
 from __future__ import annotations
 
 import math
+from copy import deepcopy
 from dataclasses import dataclass
 from typing import Any, Callable, Mapping
 
@@ -91,6 +92,10 @@ def validate_permission_matrix(
             errors.append(f"{name}: access must be read or write")
         if not isinstance(spec.get("action"), str) or not spec["action"].strip():
             errors.append(f"{name}: action is required")
+        elif spec.get("access") == "read" and spec["action"] != "inspect_code":
+            errors.append(
+                f"{name}: read access is restricted to inspect_code; execution and network actions need separate gates"
+            )
         environments = spec.get("environments")
         if (not isinstance(environments, list) or not environments
                 or any(not isinstance(value, str) or not value.strip() for value in environments)
@@ -170,7 +175,7 @@ class ToolBroker:
         if not isinstance(agents, list):
             raise ValueError("trusted agent roster is required")
         self._agent_by_id = {
-            item.get("id"): item for item in agents
+            item.get("id"): deepcopy(item) for item in agents
             if isinstance(item, dict) and isinstance(item.get("id"), str)
         }
         if not isinstance(adapters, Mapping):
@@ -179,8 +184,10 @@ class ToolBroker:
             raise ValueError("a durable audit sink is required")
         if approval_verifier is not None and not callable(approval_verifier):
             raise ValueError("approval verifier must be callable")
-        self._policy = policy
-        self._matrix = permission_matrix
+        # Snapshot mutable trusted configuration so later caller mutation cannot
+        # silently widen permissions after validation.
+        self._policy = deepcopy(policy)
+        self._matrix = deepcopy(permission_matrix)
         self._adapters = dict(adapters)
         self._audit_sink = audit_sink
         self._approval_verifier = approval_verifier
@@ -198,6 +205,11 @@ class ToolBroker:
             return False
         if not isinstance(request.payload, dict):
             return False
+        for optional_id in (request.approval_id, request.idempotency_key):
+            if optional_id is not None and (
+                not isinstance(optional_id, str) or not optional_id.strip()
+            ):
+                return False
         cost = request.estimated_cost_usd
         return type(cost) in (int, float) and math.isfinite(cost) and cost >= 0
 
@@ -298,6 +310,19 @@ class ToolBroker:
 
     def execute(self, request: ToolRequest) -> Any:
         """Execute only a trusted, registered adapter after successful authorization."""
+        if not isinstance(request, ToolRequest) or not self._valid_request(request):
+            raise ToolBrokerDenied("invalid_tool_request")
+        # ToolRequest is frozen, but its payload dictionary is not. Give the
+        # adapter a stable snapshot so concurrent caller mutation cannot change
+        # the payload between authorization and dispatch.
+        request = ToolRequest(
+            task_id=request.task_id, agent_id=request.agent_id,
+            agent_role=request.agent_role, task_type=request.task_type,
+            tool_name=request.tool_name, action=request.action,
+            environment=request.environment, payload=deepcopy(request.payload),
+            estimated_cost_usd=request.estimated_cost_usd,
+            approval_id=request.approval_id, idempotency_key=request.idempotency_key,
+        )
         decision = self.authorize(request)
         if not decision.allowed:
             if decision.requires_approval:
