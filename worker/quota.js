@@ -10,6 +10,47 @@ function validText(value, max) {
 function positiveInt(value) { return Number.isSafeInteger(value) && value > 0; }
 function nonNegativeInt(value) { return Number.isSafeInteger(value) && value >= 0; }
 
+const LIMIT_FIELDS = [
+  "daily_request_limit", "daily_token_limit", "monthly_request_limit",
+  "monthly_token_limit", "minute_request_limit", "minute_token_limit",
+  "per_task_request_limit", "per_task_token_limit",
+];
+
+function constantTimeTokenMatch(request, expected) {
+  const supplied = request.headers.get("authorization") || "";
+  const actual = supplied.startsWith("Bearer ") ? supplied.slice(7) : "";
+  if (typeof expected !== "string" || !expected || !actual) return false;
+  let diff = actual.length ^ expected.length;
+  const length = Math.max(actual.length, expected.length);
+  for (let i = 0; i < length; i++) {
+    diff |= (actual.charCodeAt(i % actual.length) || 0) ^
+      (expected.charCodeAt(i % expected.length) || 0);
+  }
+  return diff === 0;
+}
+
+function isAdmin(request, env) {
+  return Boolean(env.ENGINE_QUOTA_ADMIN_TOKEN) && env.ENGINE_QUOTA_ADMIN_TOKEN !== env.ENGINE_API_TOKEN && constantTimeTokenMatch(request, env.ENGINE_QUOTA_ADMIN_TOKEN);
+}
+
+function configuredRouteLimits(env, routeId) {
+  if (typeof env.QUOTA_ROUTE_LIMITS_JSON !== "string" || !env.QUOTA_ROUTE_LIMITS_JSON) return null;
+  let routes;
+  try { routes = JSON.parse(env.QUOTA_ROUTE_LIMITS_JSON); } catch { return null; }
+  if (!routes || typeof routes !== "object" || Array.isArray(routes)) return null;
+  let config = routes[routeId];
+  if (!config) {
+    const wildcard = Object.keys(routes).find(key =>
+      key.endsWith("*") && routeId.startsWith(key.slice(0, -1))
+    );
+    if (wildcard) config = routes[wildcard];
+  }
+  if (!config || typeof config !== "object" || Array.isArray(config) ||
+      typeof config.enabled !== "boolean" ||
+      LIMIT_FIELDS.some(key => !positiveInt(config[key]))) return null;
+  return config;
+}
+
 async function body(request) {
   const declared = Number(request.headers.get("content-length") || 0);
   if (Number.isFinite(declared) && declared > 8192) return null;
@@ -82,11 +123,21 @@ export async function handleQuota(request, env, url) {
   if (request.method !== "POST") return json({ error: "method_not_allowed" }, 405);
   const input = await body(request);
   if (!input || !validText(input.action, 20)) return json({ error: "invalid_body" }, 400);
+  const adminActions = new Set(["record", "cool_down", "audit_event"]);
+  if (adminActions.has(input.action)) {
+    if (!isAdmin(request, env)) return json({ error: "forbidden_operation_scope" }, 403);
+  } else if (!constantTimeTokenMatch(request, env.ENGINE_API_TOKEN)) {
+    return json({ error: "forbidden_operation_scope" }, 403);
+  }
   const now = new Date().toISOString();
   try {
     if (input.action === "reserve") {
-      const fields = ["estimated_tokens","daily_request_limit","daily_token_limit","monthly_request_limit","monthly_token_limit","minute_request_limit","minute_token_limit","per_task_request_limit","per_task_token_limit"];
-      if (!validText(input.route_id, 200) || !validText(input.task_id, 200) || fields.some(k => !positiveInt(input[k]))) return json({ error: "invalid_reservation" }, 400);
+      if (!validText(input.route_id, 200) || !validText(input.task_id, 200) ||
+          !positiveInt(input.estimated_tokens)) return json({ error: "invalid_reservation" }, 400);
+      const limits = configuredRouteLimits(env, input.route_id);
+      if (!limits) return json({ error: "route_not_configured" }, 403);
+      if (!limits.enabled) return json({ error: "route_disabled" }, 403);
+      if (input.estimated_tokens > limits.per_task_token_limit) return json({ error: "quota_unavailable" }, 409);
       const day = new Date(now); day.setUTCHours(0,0,0,0);
       const month = new Date(Date.UTC(day.getUTCFullYear(), day.getUTCMonth(), 1));
       const minute = new Date(Date.now() - 60000);
@@ -108,25 +159,38 @@ export async function handleQuota(request, env, url) {
       `).bind(
         input.route_id, input.estimated_tokens, now, input.task_id,
         input.route_id, now,
-        input.route_id, day.toISOString(), input.daily_request_limit,
-        input.route_id, day.toISOString(), input.estimated_tokens, input.daily_token_limit,
-        input.route_id, month.toISOString(), input.monthly_request_limit,
-        input.route_id, month.toISOString(), input.estimated_tokens, input.monthly_token_limit,
-        input.route_id, minute.toISOString(), input.minute_request_limit,
-        input.route_id, minute.toISOString(), input.estimated_tokens, input.minute_token_limit,
-        input.task_id, input.per_task_request_limit,
-        input.task_id, input.estimated_tokens, input.per_task_token_limit
+        input.route_id, day.toISOString(), limits.daily_request_limit,
+        input.route_id, day.toISOString(), input.estimated_tokens, limits.daily_token_limit,
+        input.route_id, month.toISOString(), limits.monthly_request_limit,
+        input.route_id, month.toISOString(), input.estimated_tokens, limits.monthly_token_limit,
+        input.route_id, minute.toISOString(), limits.minute_request_limit,
+        input.route_id, minute.toISOString(), input.estimated_tokens, limits.minute_token_limit,
+        input.task_id, limits.per_task_request_limit,
+        input.task_id, input.estimated_tokens, limits.per_task_token_limit
       ).first();
       if (!result) return json({ error: "quota_unavailable" }, 409);
       return json({ reservation_id: result.id, occurred_at: now }, 201);
     }
     if (input.action === "settle") {
-      if (!positiveInt(input.reservation_id) || !nonNegativeInt(input.actual_tokens)) return json({ error: "invalid_settlement" }, 400);
-      const updated = await env.DB.prepare("UPDATE quota_usage SET tokens=?,settled_at=? WHERE id=? AND settled_at IS NULL").bind(input.actual_tokens, now, input.reservation_id).run();
+      if (!positiveInt(input.reservation_id) || !validText(input.route_id, 200) ||
+          !validText(input.task_id, 200) || !nonNegativeInt(input.actual_tokens)) {
+        return json({ error: "invalid_settlement" }, 400);
+      }
+      const limits = configuredRouteLimits(env, input.route_id);
+      if (!limits || input.actual_tokens > limits.per_task_token_limit) {
+        return json({ error: "invalid_settlement" }, 400);
+      }
+      const updated = await env.DB.prepare(
+        "UPDATE quota_usage SET tokens=MAX(tokens,?),settled_at=? WHERE id=? AND route_id=? AND task_id=? AND settled_at IS NULL"
+      ).bind(input.actual_tokens, now, input.reservation_id, input.route_id, input.task_id).run();
       if (updated.meta?.changes === 1) return json({ ok: true, settled: true });
-      const existing = await env.DB.prepare("SELECT tokens,settled_at FROM quota_usage WHERE id=?").bind(input.reservation_id).first();
+      const existing = await env.DB.prepare(
+        "SELECT tokens,settled_at FROM quota_usage WHERE id=? AND route_id=? AND task_id=?"
+      ).bind(input.reservation_id, input.route_id, input.task_id).first();
       if (!existing) return json({ error: "reservation_not_found" }, 404);
-      if (existing.settled_at && Number(existing.tokens) === input.actual_tokens) return json({ ok: true, settled: true, replay: true });
+      if (existing.settled_at && Number(existing.tokens) >= input.actual_tokens) {
+        return json({ ok: true, settled: true, replay: true });
+      }
       return json({ error: "settlement_conflict" }, 409);
     }
     if (input.action === "record") {

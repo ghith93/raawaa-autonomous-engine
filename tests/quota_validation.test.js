@@ -33,7 +33,7 @@ async function post(body, DB) {
       "content-type": "application/json",
     },
     body: JSON.stringify(body),
-  }), { DB, ENGINE_API_TOKEN: TOKEN });
+  }), { DB, ENGINE_QUOTA_ADMIN_TOKEN: TOKEN });
 }
 
 test("quota task usage telemetry is scoped to both route and task", async () => {
@@ -50,6 +50,17 @@ test("quota task usage telemetry is scoped to both route and task", async () => 
   );
   assert.ok(taskUsage);
   assert.deepEqual(taskUsage.values, ["groq:primary:model-x", "task-42"]);
+});
+
+test("quota audit writes require the dedicated admin token", async () => {
+  const DB = makeDb();
+  const response = await worker.fetch(new Request("https://engine.example/v1/quota", {
+    method: "POST",
+    headers: { authorization: "Bearer shared-runner-token", "content-type": "application/json" },
+    body: JSON.stringify({ action: "audit_event", event: "provider_error" }),
+  }), { DB, ENGINE_API_TOKEN: "shared-runner-token", ENGINE_QUOTA_ADMIN_TOKEN: TOKEN });
+  assert.equal(response.status, 403);
+  assert.equal(DB.calls.length, 0);
 });
 
 test("quota audit event rejects non-string route and task metadata as client errors", async () => {

@@ -298,14 +298,6 @@ def verify_token_quota_concurrency(run_tag: str) -> None:
             "route_id": route_id,
             "task_id": task_id,
             "estimated_tokens": 10,
-            "daily_request_limit": 2,
-            "daily_token_limit": 20,
-            "monthly_request_limit": 2,
-            "monthly_token_limit": 20,
-            "minute_request_limit": 2,
-            "minute_token_limit": 20,
-            "per_task_request_limit": 2,
-            "per_task_token_limit": 20,
         })
         return status, body
 
@@ -317,11 +309,13 @@ def verify_token_quota_concurrency(run_tag: str) -> None:
         if status == 201:
             reservation_id = int(body["reservation_id"])
             settled, _ = api("POST", "/v1/quota", {
-                "action": "settle", "reservation_id": reservation_id, "actual_tokens": 10,
+                "action": "settle", "reservation_id": reservation_id, "route_id": route_id,
+                "task_id": task_id, "actual_tokens": 10,
             })
             require(settled == 200, "D1 token quota reservation did not settle")
             replay, replay_body = api("POST", "/v1/quota", {
-                "action": "settle", "reservation_id": reservation_id, "actual_tokens": 10,
+                "action": "settle", "reservation_id": reservation_id, "route_id": route_id,
+                "task_id": task_id, "actual_tokens": 10,
             })
             require(replay == 200 and replay_body.get("replay") is True,
                     "D1 token quota settlement replay was not idempotent")
