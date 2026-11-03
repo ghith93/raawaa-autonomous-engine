@@ -167,7 +167,7 @@ export async function handleMobileStatus(request, env, url) {
       env.DB.prepare("SELECT created_at,details_json FROM audit_log WHERE task_id IS NULL AND event='ci_health_snapshot' ORDER BY created_at DESC LIMIT 1").first(),
       env.DB.prepare("SELECT created_at,details_json FROM audit_log WHERE task_id IS NULL AND event='kill_switch_snapshot' ORDER BY created_at DESC LIMIT 1").first(),
       env.DB.prepare("SELECT created_at,details_json FROM audit_log WHERE task_id IS NULL AND event='research_scan_completed' ORDER BY created_at DESC LIMIT 1").first(),
-      env.DB.prepare("SELECT created_at,details_json FROM audit_log WHERE task_id IS NULL AND event='research_source_observation' ORDER BY created_at DESC LIMIT 2").all(),
+      env.DB.prepare("SELECT created_at,details_json FROM audit_log WHERE task_id IS NULL AND event='research_source_observation' ORDER BY created_at DESC LIMIT 20").all(),
     ]);
     const applied = new Set((migrations.results || []).map(row => row.version));
     const watchdogReadiness = getTaskRunnerWatchdogReadiness(env);
