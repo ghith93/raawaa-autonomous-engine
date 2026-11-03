@@ -1,7 +1,10 @@
 """Tests for the secret-bearing workflow_dispatch main-ref guard."""
 import unittest
+from pathlib import Path
 
-from scripts.check_workflow_dispatch_guards import workflow_violations
+from scripts.check_workflow_dispatch_guards import job_blocks, workflow_violations
+
+ROOT = Path(__file__).resolve().parents[1]
 
 
 class WorkflowDispatchGuardTests(unittest.TestCase):
