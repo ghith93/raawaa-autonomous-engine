@@ -6,6 +6,7 @@ license determination, signature verifier, or permission to install a skill.
 from __future__ import annotations
 
 import hashlib
+import json
 import re
 from pathlib import PurePosixPath
 from typing import Any
@@ -62,22 +63,27 @@ def _manifest_errors(manifest: Any, files: dict[str, str]) -> list[dict]:
         errors.append({"rule_id": "MANIFEST_NAME_INVALID", "severity": "high", "summary": "Skill name must be a bounded lowercase slug."})
     if not isinstance(manifest.get("version"), str) or not VERSION_RE.fullmatch(manifest.get("version", "")):
         errors.append({"rule_id": "MANIFEST_VERSION_UNPINNED", "severity": "high", "summary": "Skill version must be exact semantic version x.y.z."})
-    if not isinstance(manifest.get("source_url"), str) or not SOURCE_RE.fullmatch(manifest.get("source_url", "")):
+    source_url = manifest.get("source_url")
+    if not isinstance(source_url, str) or len(source_url) > 500 or not SOURCE_RE.fullmatch(source_url):
         errors.append({"rule_id": "MANIFEST_SOURCE_UNTRUSTED", "severity": "critical", "summary": "Source must be a GitHub repository or commit-pinned tree URL over HTTPS."})
     if not isinstance(manifest.get("source_commit"), str) or not COMMIT_RE.fullmatch(manifest.get("source_commit", "")):
         errors.append({"rule_id": "MANIFEST_COMMIT_UNPINNED", "severity": "critical", "summary": "Source commit must be a full 40-character lowercase Git SHA."})
+    elif isinstance(source_url, str):
+        pinned = re.search(r"/tree/([0-9a-f]{40})(?:/|$)", source_url)
+        if pinned and pinned.group(1) != manifest["source_commit"]:
+            errors.append({"rule_id": "MANIFEST_SOURCE_COMMIT_MISMATCH", "severity": "critical", "summary": "Commit in source URL does not match source_commit."})
     if not isinstance(manifest.get("license_spdx"), str) or not LICENSE_RE.fullmatch(manifest.get("license_spdx", "")):
         errors.append({"rule_id": "MANIFEST_LICENSE_MISSING", "severity": "high", "summary": "An SPDX-like license identifier is required; this is not a license approval."})
     entrypoint = manifest.get("entrypoint")
-    if not isinstance(entrypoint, str) or entrypoint not in files:
+    if not isinstance(entrypoint, str) or len(entrypoint) > MAX_PATH_CHARS or entrypoint not in files:
         errors.append({"rule_id": "MANIFEST_ENTRYPOINT_MISSING", "severity": "high", "summary": "Entrypoint must reference a file in the supplied bundle."})
     permissions = manifest.get("permissions")
-    if not isinstance(permissions, list) or any(not isinstance(x, str) for x in permissions):
+    if not isinstance(permissions, list) or len(permissions) > 20 or any(not isinstance(x, str) or len(x) > 100 for x in permissions):
         errors.append({"rule_id": "MANIFEST_PERMISSIONS_INVALID", "severity": "critical", "summary": "Permissions must be a list of strings."})
     else:
         denied = sorted(set(permissions) - ALLOWED_PERMISSIONS)
         if denied:
-            errors.append({"rule_id": "MANIFEST_PERMISSION_ESCALATION", "severity": "critical", "summary": "Requested permissions exceed the static preflight allowlist: " + ",".join(denied[:8])})
+            errors.append({"rule_id": "MANIFEST_PERMISSION_ESCALATION", "severity": "critical", "summary": "Requested permissions exceed the static preflight allowlist: " + ",".join(value[:100] for value in denied[:8])})
     capabilities = manifest.get("capabilities")
     if not isinstance(capabilities, list) or not capabilities or any(not isinstance(x, str) or not x.strip() or len(x) > 100 for x in capabilities):
         errors.append({"rule_id": "MANIFEST_CAPABILITIES_INVALID", "severity": "high", "summary": "Capabilities must be a non-empty list of bounded strings."})
@@ -100,7 +106,7 @@ def scan_skill_bundle(manifest: Any, files: Any) -> dict:
             errors.append({"rule_id": "BUNDLE_PATH_INVALID", "severity": "critical", "summary": "Bundle contains an invalid or overlong path."})
             continue
         path = PurePosixPath(raw_path)
-        if path.is_absolute() or not path.parts or any(part in {"", ".", ".."} for part in path.parts) or raw_path.startswith(".git/"):
+        if path.is_absolute() or not path.parts or any(part in {"", ".", ".."} or part.casefold() == ".git" for part in path.parts):
             errors.append({"rule_id": "BUNDLE_PATH_TRAVERSAL", "severity": "critical", "summary": "Bundle path is absolute, traversing, or inside .git."})
             continue
         folded = raw_path.casefold()
@@ -121,7 +127,15 @@ def scan_skill_bundle(manifest: Any, files: Any) -> dict:
             break
         normalized[raw_path] = content
     errors.extend(_manifest_errors(manifest, normalized))
-    manifest_text = str(manifest)[:MAX_MANIFEST_TEXT] if isinstance(manifest, dict) else ""
+    manifest_text = ""
+    if isinstance(manifest, dict):
+        try:
+            manifest_text = json.dumps(manifest, ensure_ascii=False, separators=(",", ":"))
+            if len(manifest_text.encode("utf-8")) > MAX_MANIFEST_TEXT:
+                errors.append({"rule_id": "MANIFEST_SIZE_LIMIT", "severity": "critical", "summary": "Manifest exceeds the 16 KiB preflight limit."})
+                manifest_text = manifest_text[:MAX_MANIFEST_TEXT]
+        except (TypeError, ValueError, RecursionError):
+            errors.append({"rule_id": "MANIFEST_SERIALIZATION_INVALID", "severity": "critical", "summary": "Manifest cannot be serialized as bounded JSON."})
     scan_files = dict(normalized)
     scan_files["<manifest>"] = manifest_text
     for file_path, content in scan_files.items():
