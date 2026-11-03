@@ -77,3 +77,17 @@ OpenCode and Antigravity are installed as alternative CLI front ends. They do no
 - Cloudflare Worker + D1 remain the control plane and durable task ledger.
 - The Python `engine.agent_runtime` remains deterministic until a dedicated, tested adapter is added. Installing a CLI does not automatically connect it to the task queue.
 - Keep changes on a feature branch and create a PR. Merge only after exact-head CI and review.
+
+
+### Antigravity headless use
+After the interactive Google OAuth sign-in completes in the Codespace, the documented headless interface is `agy -p "Return only: ANTIGRAVITY_AUTH_OK" --output-format json --sandbox --print-timeout 60s`.
+
+A successful process exit and a JSON status of `SUCCESS` prove a single account-backed prompt worked. It does not prove a remaining quota amount or unlimited use. Do not pass `--dangerously-skip-permissions`.
+
+### Codex device-code sign-in
+In the Codespaces terminal, run `codex login --device-auth` and then `codex login status`. Complete the displayed one-time flow in the browser. Then launch an interactive Codex session and use `/status` to inspect the current account allowance and reset information. Do not use an API key for this test.
+
+### Minimal authentication verification task
+Once both logins are complete, run only these low-impact checks: `codex exec --ephemeral --sandbox read-only "Return only: CODEX_AUTH_OK"` and `agy -p "Return only: ANTIGRAVITY_AUTH_OK" --output-format json --sandbox --print-timeout 60s`.
+
+These checks send one trivial prompt to each provider and therefore consume their account allowances. Do not run them until you have reviewed the current usage display. Record success/failure, model ID, elapsed time, and aggregate usage metadata; do not store the prompt/response, credentials, or account identifiers in repository artifacts.
