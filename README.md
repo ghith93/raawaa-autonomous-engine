@@ -74,3 +74,8 @@ python -m engine.cli monetary-status
 6. Add notifications and external integrations incrementally while preserving the kill switch, quota ledger, monetary ledger, default dry-run posture, and strict separation between Staging and production. Production D1 migrations `0001`–`0005` are recorded as applied; Staging migrations `0001`–`0007` are verified separately.
 
 All agents must follow [AGENTS.md](AGENTS.md) and the permanent [Master Autonomous Execution Directive](docs/master-autonomous-execution-directive.ar.md). A user message containing only `.` resumes execution from the latest verified state. Runtime enforcement by every deployed agent remains an engineering requirement until implemented and tested. See [Architecture](docs/architecture.md) and [Operations](docs/operations.md). The additive [Continuous Improvement and Research Charter](docs/continuous-improvement-charter.md) governs proactive research and incremental capability development without replacing existing architecture or safety policy. The [Reusable Task-Completion Handoff Prompt](docs/task-completion-handoff-prompt.md) can be sent after each work cycle to resume from the latest verified state. For the current free-tier, commercial-use, and data-handling assessment, see [Provider free-tier eligibility](docs/provider-free-tier-eligibility.md).
+
+## Research and development
+
+- [Continuous R&D operating system](docs/research-and-development-operating-system.ar.md) — roles, cadence, evidence lifecycle, prioritization, experiment gates, metrics, and current activation boundaries.
+- [Capability Expansion Director prompt](docs/prompts/capability-expansion-director.ar.md) — reusable execution prompt for an AI coding/research operator.
