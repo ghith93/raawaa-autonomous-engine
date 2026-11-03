@@ -9,6 +9,7 @@ import { setTimeout as delay } from "node:timers/promises";
 const PORT = 8792;
 const BASE = "http://127.0.0.1:" + PORT;
 const TOKEN = "test-engine-token-local-only";
+const CODESPACE_TOKEN = "test-codespace-token-0123456789abcdef0123456789abcdef";
 const WRANGLER = ["--yes", "wrangler@4.156.1"];
 const root = mkdtempSync(join(tmpdir(), "raawaa-d1-local-"));
 const stateDir = join(root, "state");
@@ -118,6 +119,7 @@ function launchWorker() {
     "--log-level", "error",
     "--persist-to", stateDir,
     "--var", "ENGINE_API_TOKEN:" + TOKEN,
+    "--var", "ENGINE_CODESPACE_TOKEN:" + CODESPACE_TOKEN,
     "--var", "QUOTA_ROUTE_LIMITS_JSON:" + JSON.stringify({
       "d1-local:concurrency": {
         enabled: true,
@@ -215,6 +217,51 @@ try {
     body: { lease_token: claimed.payload.lease_token },
   });
   assertStatus(staleLease, 409, "finished task must reject stale lease");
+
+  // The Codespace executor must be isolated at the real D1 claim boundary,
+  // not merely in Worker mocks. The legacy Actions claim cannot steal its task.
+  const codespaceStatus = await api("/v1/codespace/status", { token: CODESPACE_TOKEN });
+  assertStatus(codespaceStatus, 200, "Codespace scoped preflight");
+  assert.deepEqual(codespaceStatus.payload.task_types.sort(), ["codespace_inspect", "codespace_test"]);
+  const sharedTokenDenied = await api("/v1/codespace/status", { token: TOKEN });
+  assertStatus(sharedTokenDenied, 401, "general API token cannot impersonate Codespace");
+  const codespaceTask = await api("/v1/tasks/enqueue", {
+    method: "POST",
+    body: {
+      task_type: "codespace_test",
+      title: "Codespace D1 isolation smoke",
+      payload: { operation: "python_tests" },
+      idempotency_key: "d1-local-codespace-isolation-" + randomUUID(),
+      max_attempts: 1,
+    },
+  });
+  assertStatus(codespaceTask, 201, "enqueue Codespace-only task");
+  const legacyCannotClaim = await api("/v1/tasks/claim", { method: "POST", body: {} });
+  assertStatus(legacyCannotClaim, 200, "legacy runner remains operational");
+  assert.equal(legacyCannotClaim.payload.task, null, "legacy runner must not claim Codespace task");
+  const scopedCannotList = await api("/v1/tasks", { token: CODESPACE_TOKEN });
+  assertStatus(scopedCannotList, 401, "Codespace principal cannot list general tasks");
+  const codespaceClaim = await api("/v1/codespace/tasks/claim", {
+    method: "POST", body: {}, token: CODESPACE_TOKEN,
+  });
+  assertStatus(codespaceClaim, 200, "Codespace executor claims its own task");
+  assert.equal(codespaceClaim.payload.task.id, codespaceTask.payload.task.id);
+  const codespaceFinished = await api("/v1/codespace/tasks/" + codespaceTask.payload.task.id + "/finish", {
+    method: "POST",
+    token: CODESPACE_TOKEN,
+    body: {
+      lease_token: codespaceClaim.payload.lease_token,
+      status: "succeeded",
+      result: { executor_isolation_verified: true, external_writes: 0 },
+    },
+  });
+  assertStatus(codespaceFinished, 200, "Codespace-only lease finish");
+  const retryDenied = await api("/v1/codespace/tasks/" + codespaceTask.payload.task.id + "/retry", {
+    method: "POST",
+    token: CODESPACE_TOKEN,
+    body: { lease_token: codespaceClaim.payload.lease_token },
+  });
+  assertStatus(retryDenied, 404, "Codespace principal has no retry endpoint");
 
   // Durable model invocation identities survive retries and distinguish steps.
   const invocationTask = await api("/v1/tasks/enqueue", {
@@ -619,7 +666,8 @@ try {
   status = await api("/v1/mobile/status");
   assertStatus(status, 200, "mobile status after D1 writes");
   assert.equal(status.payload.paper_events.find(row => row.event_type === "candidate_detected")?.count, 1);
-  assert.equal(status.payload.tasks.find(row => row.status === "succeeded")?.count, 1);
+  assert.equal(status.payload.tasks.find(row => row.status === "succeeded")?.count, 2,
+    "both the legacy task and isolated Codespace task should be durably succeeded");
   assert.equal(status.payload.monetary_ledger.available, true);
   assert.equal(status.payload.monetary_ledger.pending_count, 1);
   assert.equal(status.payload.monetary_ledger.ambiguous_count, 1);

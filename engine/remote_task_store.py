@@ -9,7 +9,7 @@ from __future__ import annotations
 import json
 import os
 from urllib.error import HTTPError, URLError
-from urllib.request import Request, urlopen
+from urllib.request import HTTPRedirectHandler, Request, build_opener, urlopen
 from typing import Any
 
 
@@ -17,10 +17,15 @@ class RemoteTaskStoreError(RuntimeError):
     """Remote task API failure with a safe, non-secret message."""
 
 
+class _RejectRedirects(HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
+
+
 class RemoteTaskStore:
     def __init__(self, base_url: str | None = None, token: str | None = None,
                  timeout: float = 15.0, access_client_id: str | None = None,
-                 access_client_secret: str | None = None):
+                 access_client_secret: str | None = None, reject_redirects: bool = False):
         self.base_url = (base_url or os.environ.get("RAAWAA_ENGINE_API_URL", "")).rstrip("/")
         self.token = token or os.environ.get("RAAWAA_ENGINE_API_TOKEN", "")
         self.access_client_id = (
@@ -32,6 +37,7 @@ class RemoteTaskStore:
             else os.environ.get("RAAWAA_ENGINE_CF_ACCESS_CLIENT_SECRET", "")
         )
         self.timeout = timeout
+        self.reject_redirects = bool(reject_redirects)
         if not self.base_url.startswith("https://") or not self.token:
             raise ValueError("Remote task store requires an HTTPS API URL and token")
         if bool(self.access_client_id) != bool(self.access_client_secret):
@@ -51,7 +57,9 @@ class RemoteTaskStore:
             headers["CF-Access-Client-Secret"] = self.access_client_secret
         request = Request(self.base_url + path, data=body, method=method, headers=headers)
         try:
-            with urlopen(request, timeout=self.timeout) as response:
+            opener = build_opener(_RejectRedirects) if self.reject_redirects else None
+            response_context = opener.open(request, timeout=self.timeout) if opener else urlopen(request, timeout=self.timeout)
+            with response_context as response:
                 data = response.read(64 * 1024 + 1)
                 if len(data) > 64 * 1024:
                     raise RemoteTaskStoreError("Remote task API response exceeded limit")
