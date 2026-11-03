@@ -305,7 +305,7 @@ export default {
       const leaseToken = crypto.randomUUID();
       try {
         const claim = await env.DB.prepare(`
-          UPDATE tasks SET status='running', attempts=attempts+1, updated_at=?,
+          UPDATE tasks SET status='running', attempts=attempts+1, updated_at=?,next_attempt_at=NULL,
             lease_token=?, lease_expires_at=?
           WHERE id=(SELECT id FROM tasks WHERE status='pending'
             AND (next_attempt_at IS NULL OR next_attempt_at<=?) ${taskTypeFilter}
