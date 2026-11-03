@@ -878,20 +878,20 @@ test("paper ledger canonicalizes integer-like object keys lexicographically like
   assert.equal(batch.statements[1].values[17], String.raw`{"10":"ten","2":"two","a":"letter"}`);
 });
 
-test("Codespace status is read-only and requires its distinct scoped token", async () => {
+test("Codespace executor remains hard-disabled until sandbox issue #440 is satisfied", async () => {
   const DB = dbMock();
-  const denied = await worker.fetch(request("/v1/codespace/status", { token: TOKEN }), {
-    DB, ENGINE_API_TOKEN: TOKEN, ENGINE_CODESPACE_TOKEN: CODESPACE_TOKEN,
-  });
-  assert.equal(denied.status, 401);
-  const allowed = await worker.fetch(request("/v1/codespace/status", {
-    token: CODESPACE_TOKEN,
-  }), { DB, ENGINE_API_TOKEN: TOKEN, ENGINE_CODESPACE_TOKEN: CODESPACE_TOKEN });
-  assert.equal(allowed.status, 200);
-  assert.deepEqual(await allowed.json(), {
-    ok: true, executor: "codespace", capabilities: ["inspect", "test"],
-    task_types: ["codespace_inspect", "codespace_test"], max_lease_seconds: 900,
-  });
+  for (const [path, method, body] of [
+    ["/v1/codespace/status", "GET", undefined],
+    ["/v1/codespace/tasks/claim", "POST", {}],
+    ["/v1/codespace/tasks/task-code/heartbeat", "POST", { lease_token: "lease-1" }],
+    ["/v1/codespace/tasks/task-code/finish", "POST", { lease_token: "lease-1", status: "succeeded" }],
+  ]) {
+    const response = await worker.fetch(request(path, {
+      method, token: CODESPACE_TOKEN, body,
+    }), { DB, ENGINE_API_TOKEN: TOKEN, ENGINE_CODESPACE_TOKEN: CODESPACE_TOKEN });
+    assert.equal(response.status, 503, path);
+    assert.deepEqual(await response.json(), { error: "codespace_executor_disabled" });
+  }
   assert.equal(DB.calls.length, 0);
 });
 
@@ -905,20 +905,23 @@ test("Codespace token cannot access general task, quota, or recovery routes", as
   }
 });
 
-test("Codespace claim is isolated to its allowlisted task types", async () => {
-  const claim = {
-    id: "task-code", idempotency_key: "code-1", task_type: "codespace_test",
-    title: "Run tests", payload_json: '{"operation":"python_tests"}',
-    status: "running", attempts: 1, max_attempts: 2,
-  };
-  const DB = dbMock({ codespaceClaim: claim });
-  const response = await worker.fetch(request("/v1/codespace/tasks/claim", {
-    method: "POST", token: CODESPACE_TOKEN, body: {},
-  }), { DB, ENGINE_API_TOKEN: TOKEN, ENGINE_CODESPACE_TOKEN: CODESPACE_TOKEN });
-  assert.equal(response.status, 200);
-  assert.equal((await response.json()).task.task_type, "codespace_test");
-  const claimSql = DB.calls.find(x => x.kind === "first" && x.sql.includes("UPDATE tasks SET status='running'")).sql;
-  assert.match(claimSql, /task_type IN \('codespace_inspect','codespace_test'\)/);
+test("Codespace task types cannot be enqueued before sandbox release", async () => {
+  const DB = dbMock();
+  for (const taskType of ["codespace_inspect", "codespace_test"]) {
+    const response = await worker.fetch(request("/v1/tasks/enqueue", {
+      method: "POST",
+      token: TOKEN,
+      body: {
+        task_type: taskType,
+        title: "Codespaces task",
+        idempotency_key: "codespace-disabled-" + taskType,
+        payload: { operation: "inspect_repo" },
+      },
+    }), { DB, ENGINE_API_TOKEN: TOKEN, ENGINE_CODESPACE_TOKEN: CODESPACE_TOKEN });
+    assert.equal(response.status, 503, taskType);
+    assert.deepEqual(await response.json(), { error: "codespace_executor_disabled" });
+  }
+  assert.equal(DB.calls.length, 0);
 });
 
 test("legacy Task Runner claim explicitly excludes Codespace tasks", async () => {
@@ -932,30 +935,18 @@ test("legacy Task Runner claim explicitly excludes Codespace tasks", async () =>
   assert.match(claimSql, /task_type NOT IN \('codespace_inspect','codespace_test'\)/);
 });
 
-test("Codespace lease actions can only mutate Codespace task types", async () => {
+test("legacy Task Runner cannot mutate Codespace task types", async () => {
   const codeTask = {
     id: "task-code", status: "running", attempts: 1, max_attempts: 2,
     task_type: "codespace_test", lease_token: "lease-1",
     lease_expires_at: "2999-01-01T00:00:00.000Z",
   };
-  const DB = dbMock({ currentTask: codeTask });
-  const response = await worker.fetch(request("/v1/codespace/tasks/task-code/heartbeat", {
-    method: "POST", token: CODESPACE_TOKEN, body: { lease_token: "lease-1" },
-  }), { DB, ENGINE_API_TOKEN: TOKEN, ENGINE_CODESPACE_TOKEN: CODESPACE_TOKEN });
-  assert.equal(response.status, 200);
-  const denied = await worker.fetch(request("/v1/tasks/task-code/heartbeat", {
+  const response = await worker.fetch(request("/v1/tasks/task-code/heartbeat", {
     method: "POST", token: TOKEN, body: { lease_token: "lease-1" },
   }), { DB: dbMock({ currentTask: codeTask }), ENGINE_API_TOKEN: TOKEN,
     ENGINE_CODESPACE_TOKEN: CODESPACE_TOKEN });
-  assert.equal(denied.status, 403);
-  assert.deepEqual(await denied.json(), { error: "executor_mismatch" });
-});
-
-test("Codespace token must differ from shared API and quota-admin tokens", async () => {
-  const response = await worker.fetch(request("/v1/codespace/status", { token: TOKEN }), {
-    DB: dbMock(), ENGINE_API_TOKEN: TOKEN, ENGINE_CODESPACE_TOKEN: TOKEN,
-  });
-  assert.equal(response.status, 401);
+  assert.equal(response.status, 403);
+  assert.deepEqual(await response.json(), { error: "executor_mismatch" });
 });
 
 test("Codespace principal has no retry route", async () => {
@@ -974,9 +965,10 @@ test("existing Task Runner retains its fenced retry route", async () => {
   assert.deepEqual(await response.json(), { ok: true, status: "pending" });
 });
 
-test("Codespace principal rejects a weak server-side token", async () => {
+test("Codespace release gate blocks even a weak configured token", async () => {
   const response = await worker.fetch(request("/v1/codespace/status", { token: "short-token" }), {
     DB: dbMock(), ENGINE_API_TOKEN: TOKEN, ENGINE_CODESPACE_TOKEN: "short-token",
   });
-  assert.equal(response.status, 401);
+  assert.equal(response.status, 503);
+  assert.deepEqual(await response.json(), { error: "codespace_executor_disabled" });
 });
