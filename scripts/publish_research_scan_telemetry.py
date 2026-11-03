@@ -1,4 +1,4 @@
-"""Publish sanitized GitHub/Crossref scan telemetry directly to isolated Staging D1."""
+"""Publish sanitized multi-source research scan telemetry to isolated Staging D1."""
 from __future__ import annotations
 
 import json
