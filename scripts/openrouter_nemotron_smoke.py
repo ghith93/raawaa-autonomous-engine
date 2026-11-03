@@ -104,8 +104,8 @@ def main() -> int:
         content = message.get("content") if isinstance(message, dict) else None
         usage = result.get("usage", {})
         returned_model = result.get("model")
-        if not isinstance(content, str) or not content.strip():
-            raise ValueError("empty completion")
+        if not isinstance(content, str) or content.strip() != "RAAWAA_NEMOTRON_SMOKE_OK":
+            raise ValueError("unexpected completion content")
         if returned_model != MODEL:
             raise ValueError("model mismatch")
         if not isinstance(usage, dict):
