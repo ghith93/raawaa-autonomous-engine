@@ -99,23 +99,43 @@ def main() -> int:
 
     try:
         result = json.loads(raw.decode("utf-8"))
-        choices = result.get("choices")
-        message = choices[0].get("message", {}) if isinstance(choices, list) and choices else {}
-        content = message.get("content") if isinstance(message, dict) else None
-        usage = result.get("usage", {})
-        returned_model = result.get("model")
-        if not isinstance(content, str) or content.strip() != "RAAWAA_NEMOTRON_SMOKE_OK":
-            raise ValueError("unexpected completion content")
-        if returned_model != MODEL:
-            raise ValueError("model mismatch")
+        choices = result.get("choices") if isinstance(result, dict) else None
+        has_choice = isinstance(choices, list) and bool(choices) and isinstance(choices[0], dict)
+        message = choices[0].get("message") if has_choice else None
+        message_is_object = isinstance(message, dict)
+        content = message.get("content") if message_is_object else None
+        usage = result.get("usage", {}) if isinstance(result, dict) else {}
+        returned_model = result.get("model") if isinstance(result, dict) else None
+        content_matches = isinstance(content, str) and content.strip() == "RAAWAA_NEMOTRON_SMOKE_OK"
+        model_matches = returned_model == MODEL
+        finish_reason = choices[0].get("finish_reason") if has_choice else None
+        if not content_matches or not model_matches:
+            safe_finish_reason = finish_reason if isinstance(finish_reason, str) and SAFE_CODE.fullmatch(finish_reason) else None
+            print(json.dumps({
+                "status": "failed",
+                "reason": "completion_or_model_validation_failed",
+                "response_is_json_object": isinstance(result, dict),
+                "has_choices": isinstance(choices, list),
+                "has_first_choice": has_choice,
+                "has_message_object": message_is_object,
+                "content_type": type(content).__name__,
+                "content_matches_sentinel": content_matches,
+                "returned_model_matches_requested": model_matches,
+                "finish_reason": safe_finish_reason,
+                "inference_requests_attempted": 1,
+                "paid_fallback": False,
+                "response_text_logged": False,
+            }, sort_keys=True))
+            return 1
         if not isinstance(usage, dict):
             usage = {}
-    except (UnicodeDecodeError, json.JSONDecodeError, ValueError, IndexError, AttributeError, TypeError):
+    except (UnicodeDecodeError, json.JSONDecodeError, AttributeError, TypeError):
         print(json.dumps({
             "status": "failed",
-            "reason": "unexpected_response_shape_or_model_mismatch",
+            "reason": "invalid_json_or_response_structure",
             "inference_requests_attempted": 1,
             "paid_fallback": False,
+            "response_text_logged": False,
         }, sort_keys=True))
         return 1
 
