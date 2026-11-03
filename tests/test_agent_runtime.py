@@ -1,6 +1,7 @@
 import unittest
 
 from engine.agent_runtime import AgentContractError, build_task_contract
+from engine.worker import SAFE_TASKS
 
 
 ROSTER = {"agents": [
@@ -45,6 +46,9 @@ class AgentContractTests(unittest.TestCase):
     def test_unknown_task_type_fails_closed(self):
         with self.assertRaises(AgentContractError):
             build_task_contract(self.task("shell"), ROSTER)
+
+    def test_mobile_test_is_not_worker_allowlisted_without_a_real_executor(self):
+        self.assertNotIn("mobile_test", SAFE_TASKS)
 
     def test_mobile_tester_is_registered_but_disabled_until_artemis_is_verified(self):
         with self.assertRaisesRegex(AgentContractError, "unavailable: mobile_tester"):
