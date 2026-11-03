@@ -162,6 +162,7 @@ export async function createInstallationToken({
           Authorization: "Bearer " + jwt,
           "Content-Type": "application/json",
           "X-GitHub-Api-Version": GITHUB_API_VERSION,
+          "User-Agent": "RaawaaAutonomousEngine/1.0",
         },
         body: JSON.stringify({
           repository_ids: [TARGET_REPOSITORY_ID],
