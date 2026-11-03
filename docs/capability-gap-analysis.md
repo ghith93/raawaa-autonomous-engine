@@ -25,7 +25,7 @@ The analyzer inspects the current repository state for:
 - Tool Broker implementation and permission matrix presence.
 - Provider profile count and enabled state.
 - Existing bounded task-runner foundations.
-- Presence of a skill security gate versus a research-only scanner candidate.
+- Presence of a deterministic skill static preflight versus missing sandbox/signing/runtime gates.
 - Unit-test presence versus a dedicated benchmark directory.
 - Configured GitHub discovery topics, Crossref and arXiv metadata sources, and optional SearXNG endpoint configuration.
 
