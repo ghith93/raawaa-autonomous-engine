@@ -40,7 +40,39 @@ Isolated prototype:
 
 Do not place raw prompts, large state blobs or secrets in queue messages. Keep durable task metadata in the approved state store.
 
-## 2. Python agent frameworks
+
+## 2. Cloudflare Agents SDK and Durable Objects — new runtime candidate (2026-11-03)
+
+Cloudflare's Agents SDK now documents a durable, Worker-native agent lifecycle built on Durable Objects. Each named agent has persistent SQLite-backed state, scheduled wake-ups, WebSocket/RPC routing and hibernation while idle. The SDK exposes two execution primitives that are relevant to this project:
+
+- `runFiber(name, fn)` registers work durably, holds the object alive while it runs, and allows explicit JSON checkpoints through `ctx.stash()`. If the object is evicted or restarted, `onFiberRecovered()` receives the last checkpoint and the application must decide how to resume safely.
+- `startFiber(name, fn, options)` adds durable acceptance, a stable idempotency key, retained status, inspection/cancellation and deduplication for retried webhook deliveries. It is a better fit when an HTTP/webhook caller must receive an accepted receipt before background work finishes.
+- Agents can invoke Workflows for heavyweight multi-step pipelines; the two primitives are complementary rather than mutually exclusive.
+
+### Fit against the existing engine
+
+| Dimension | Agents SDK / Durable Objects | Existing engine / Workflows |
+|---|---|---|
+| Primary role | Long-lived, addressable agent identity and event-driven lifecycle | Existing D1 task control plane plus bounded Python consumer; Workflows for durable multi-step jobs |
+| Durable state | Per-object SQLite and explicit fiber checkpoints | D1 is the canonical shared task ledger; Workflow persists completed step results |
+| Recovery | Application implements `onFiberRecovered()` and checkpoint-aware replay | Workflow retries failed steps; the current Python runner uses D1 leases, fencing and bounded retry |
+| Idempotency | `startFiber()` accepts a stable idempotency key | Existing task/operation stores and webhook receipt table use explicit idempotency contracts |
+| Main integration cost | New Durable Object binding/class/migration and a Worker-native TypeScript execution surface | Existing Worker/D1 and Python runtime are already present |
+| Fit for current Python handlers | Low without porting handlers or building a carefully bounded bridge | High for the existing runner; Workflows can host Worker-native steps |
+
+The Agents SDK is a credible option for a future Worker-native coordinator, webhook ingress, durable reminders and status notifications. It does **not** execute the current Python task handlers inside a Durable Object. Porting those handlers or adding a remote bridge would create a new execution boundary, and a second consumer would risk competing with the existing D1 queue runner. The SDK therefore does not solve the current five-minute GitHub schedule reliability gap by itself.
+
+### Cost and safety boundary
+
+Durable Objects have published Free-plan allowances, including 100,000 requests/day, 13,000 GB-seconds/day, 50 million SQL rows read/day, 100,000 SQL rows written/day and 5 GB of stored data. These are bounded account-level allowances, not an unlimited always-on guarantee. Any prototype must meter requests, storage, alarms and writes, stop at its configured budget, and never assume that exceeding a Free allowance can fall back to paid usage. See the [Cloudflare plan limits](https://www.cloudflare.com/plans/) and [Workers limits](https://developers.cloudflare.com/workers/platform/limits/).
+
+A fiber checkpoint is not a blanket exactly-once guarantee for arbitrary external effects. Recovery code must use stable operation keys, inspect the last checkpoint, and reconcile ambiguous downstream outcomes before replay. Keep secrets and private task payloads out of metadata and logs. Retain D1 as the canonical task ledger if an isolated prototype is ever run.
+
+### Decision
+
+**Do not adopt or deploy the Agents SDK now.** Keep the current Python-first control plane and the isolated Workflows prototype. First resolve/measure the existing Task Runner schedule gap and complete non-production D1 recovery/concurrency validation. If a Worker-native control agent is still justified, run a separate local/CI-only spike with fake tasks that tests durable webhook acceptance, duplicate idempotency keys, forced eviction, checkpoint recovery, cancellation and bounded alarms. It must not add a second D1 queue consumer, call a model, mutate production D1, configure Telegram secrets, register a webhook or deploy a Worker. Compare the spike against Workflows and the current MAF checkpoint adapter before making an adoption decision.
+
+## 3. Python agent frameworks
 
 ### Pydantic AI
 
