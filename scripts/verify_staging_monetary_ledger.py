@@ -114,7 +114,16 @@ def set_staging_policy(daily: int, monthly: int, per_task: int) -> None:
 
 
 def api(method: str, path: str, payload: dict[str, Any] | None = None,
-        authenticated: bool = True) -> tuple[int, dict[str, Any]]:
+        authenticated: bool = True, readiness_timeout_seconds: int = 90) -> tuple[int, dict[str, Any]]:
+    """Call the Staging Worker, tolerating bounded propagation of its fresh secret.
+
+    The Worker checks bearer authentication before dispatching any authenticated
+    route. Therefore a 401 response proves that no GET or POST handler ran, and
+    retrying that exact request is safe while Cloudflare propagates a new secret
+    across edge isolates. No other 4xx response is retried.
+    """
+    if type(readiness_timeout_seconds) is not int or not 1 <= readiness_timeout_seconds <= 180:
+        raise ValueError("Staging readiness timeout must be between 1 and 180 seconds")
     data = None if payload is None else json.dumps(payload, separators=(",", ":")).encode()
     headers = {"Accept": "application/json", "User-Agent": "RaawaaStagingLedgerVerification/1.0"}
     if authenticated:
@@ -123,23 +132,29 @@ def api(method: str, path: str, payload: dict[str, Any] | None = None,
         headers["Authorization"] = "Bearer " + TOKEN
     if data is not None:
         headers["Content-Type"] = "application/json"
-    request = urllib.request.Request(BASE_URL + path, data=data, headers=headers, method=method)
-    try:
-        with urllib.request.urlopen(request, timeout=20) as response:
-            status = response.status
-            raw = response.read()
-    except urllib.error.HTTPError as exc:
-        status = exc.code
-        raw = exc.read()
-    except (urllib.error.URLError, TimeoutError, OSError) as exc:
-        raise RuntimeError("Staging Worker transport failed: " + type(exc).__name__) from None
-    try:
-        body = json.loads(raw.decode("utf-8")) if raw else {}
-    except (UnicodeDecodeError, json.JSONDecodeError):
-        raise RuntimeError(f"Staging Worker returned non-JSON HTTP {status}") from None
-    if not isinstance(body, dict):
-        raise RuntimeError(f"Staging Worker returned an invalid JSON object (HTTP {status})")
-    return status, body
+
+    deadline = time.monotonic() + readiness_timeout_seconds if authenticated else None
+    while True:
+        request = urllib.request.Request(BASE_URL + path, data=data, headers=headers, method=method)
+        try:
+            with urllib.request.urlopen(request, timeout=20) as response:
+                status = response.status
+                raw = response.read()
+        except urllib.error.HTTPError as exc:
+            status = exc.code
+            raw = exc.read()
+            if authenticated and status == 401 and time.monotonic() < deadline:
+                time.sleep(2)
+                continue
+        except (urllib.error.URLError, TimeoutError, OSError) as exc:
+            raise RuntimeError("Staging Worker transport failed: " + type(exc).__name__) from None
+        try:
+            body = json.loads(raw.decode("utf-8")) if raw else {}
+        except (UnicodeDecodeError, json.JSONDecodeError):
+            raise RuntimeError(f"Staging Worker returned non-JSON HTTP {status}") from None
+        if not isinstance(body, dict):
+            raise RuntimeError(f"Staging Worker returned an invalid JSON object (HTTP {status})")
+        return status, body
 
 
 def require(condition: bool, message: str) -> None:
