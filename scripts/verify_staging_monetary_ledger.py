@@ -141,12 +141,22 @@ def wait_for_worker(timeout_seconds: int = 45) -> None:
     raise RuntimeError(f"Staging Worker did not become healthy (last HTTP status: {last_status})")
 
 
-def snapshot(task_id: str | None = None) -> dict[str, Any]:
+def monetary_status(task_id: str | None = None) -> dict[str, Any]:
     suffix = "" if task_id is None else "?task_id=" + quote(task_id, safe="")
     status, body = api("GET", "/v1/monetary-ledger" + suffix)
     require(status == 200 and isinstance(body.get("snapshot"), dict),
             f"Monetary status failed (HTTP {status}, error={body.get('error')})")
-    return body["snapshot"]
+    require(isinstance(body.get("budget_policy"), dict) and body["budget_policy"].get("enabled") is True,
+            "Operator-owned D1 monetary budget policy is unavailable or disabled")
+    return body
+
+
+def snapshot(task_id: str | None = None) -> dict[str, Any]:
+    return monetary_status(task_id)["snapshot"]
+
+
+def budget_policy() -> dict[str, Any]:
+    return monetary_status()["budget_policy"]
 
 
 def reserve(provider: str, model: str, task_id: str, estimate: int,
@@ -246,53 +256,57 @@ def verify_token_quota_concurrency(run_tag: str) -> None:
 
 
 def cap_test(label: str, run_tag: str, cap_kind: str) -> None:
-    estimate = 1_000_000  # $0.001 reservation; no provider request is made.
     current = snapshot()
-    daily = int(current["daily_total_nanos"]) + 100 * estimate
-    monthly = int(current["monthly_total_nanos"]) + 100 * estimate
-    task_cap = estimate
+    policy = budget_policy()
+    daily = int(policy["daily_budget_nanos"])
+    monthly = int(policy["monthly_budget_nanos"])
+    task_cap = int(policy["per_task_budget_nanos"])
     if cap_kind == "daily":
-        daily = int(current["daily_total_nanos"]) + 2 * estimate
-        monthly = int(current["monthly_total_nanos"]) + 100 * estimate
-    elif cap_kind == "monthly":
-        daily = int(current["daily_total_nanos"]) + 100 * estimate
-        monthly = int(current["monthly_total_nanos"]) + 2 * estimate
+        remaining = daily - int(current["daily_total_nanos"])
+        estimate = min(task_cap, remaining // 2)
+        require(estimate > 0, "Staging daily monetary cap has no room for a safe concurrency test")
     elif cap_kind == "task":
-        task_cap = 2 * estimate
+        estimate = task_cap // 2
+        require(estimate > 0, "Staging per-task monetary cap is too small for a concurrency test")
     else:
         raise ValueError("unknown cap kind")
 
-    defaults = default_policy_nanos()
-    try:
-        # The Worker accepts only operator-owned D1 caps. Temporarily set a
-        # deliberately small policy on the verified Staging DB to exercise
-        # each independent ceiling, then restore the repository's approved
-        # policy even if the test assertion fails.
-        set_staging_policy(daily, monthly, task_cap)
+    def attempt(index: int):
+        task_id = f"{PREFIX}{run_tag}-{label}-task" if cap_kind == "task" else f"{PREFIX}{run_tag}-{label}-{index}"
+        return reserve(
+            f"{PREFIX}{run_tag}-{label}-{index}",
+            f"model-{index}",
+            task_id,
+            estimate, daily, monthly, task_cap,
+        )
 
-        def attempt(index: int):
-            task_id = f"{PREFIX}{run_tag}-{label}-task" if cap_kind == "task" else f"{PREFIX}{run_tag}-{label}-{index}"
-            return reserve(
-                f"{PREFIX}{run_tag}-{label}-{index}",
-                f"model-{index}",
-                task_id,
-                estimate, daily, monthly, task_cap,
-            )
+    with concurrent.futures.ThreadPoolExecutor(max_workers=3) as pool:
+        results = list(pool.map(attempt, range(3)))
+    statuses = sorted(item[0] for item in results)
+    require(statuses == [201, 201, 409],
+            f"{label} cap did not admit exactly two of three concurrent reservations: {statuses}")
+    for status, body, rid in results:
+        if status == 201:
+            released, _ = action("release", rid)
+            require(released == 200, f"{label} test reservation was not releasable before provider I/O")
+        else:
+            require(body.get("error") == "budget_exceeded",
+                    f"{label} cap returned an unexpected rejection")
 
-        with concurrent.futures.ThreadPoolExecutor(max_workers=3) as pool:
-            results = list(pool.map(attempt, range(3)))
-        statuses = sorted(item[0] for item in results)
-        require(statuses == [201, 201, 409],
-                f"{label} cap did not admit exactly two of three concurrent reservations: {statuses}")
-        for status, body, rid in results:
-            if status == 201:
-                released, _ = action("release", rid)
-                require(released == 200, f"{label} test reservation was not releasable before provider I/O")
-            else:
-                require(body.get("error") == "budget_exceeded",
-                        f"{label} cap returned an unexpected rejection")
-    finally:
-        set_staging_policy(*defaults)
+
+def verify_operator_policy(run_tag: str) -> None:
+    policy = budget_policy()
+    status, body, _ = reserve(
+        f"{PREFIX}{run_tag}-policy-mismatch",
+        "model",
+        f"{PREFIX}{run_tag}-policy-task",
+        1,
+        int(policy["daily_budget_nanos"]),
+        int(policy["monthly_budget_nanos"]) + 1,
+        int(policy["per_task_budget_nanos"]),
+    )
+    require(status == 409 and body.get("error") == "budget_policy_mismatch",
+            "Caller was able to change an operator-owned D1 monetary hard cap")
 
 
 def run() -> None:
@@ -308,18 +322,23 @@ def run() -> None:
     unauth_quota, _ = api("GET", "/v1/quota", authenticated=False)
     require(unauth_quota == 401, f"Token quota ledger must require authentication (HTTP {unauth_quota})")
 
-    initial = snapshot()
-    require(isinstance(initial.get("daily_total_nanos"), int), "D1 monetary totals are missing")
+    initial = monetary_status()
+    require(isinstance(initial["snapshot"].get("daily_total_nanos"), int), "D1 monetary totals are missing")
+    policy = initial["budget_policy"]
+    require(all(int(policy.get(key, 0)) > 0 for key in (
+        "daily_budget_nanos", "monthly_budget_nanos", "per_task_budget_nanos"
+    )), "Operator-owned monetary hard caps must be positive")
     run_tag = str(uuid.uuid4())
     cleanup_test_reservations()
     verify_token_quota_concurrency(run_tag)
 
     cap_test("daily", run_tag, "daily")
-    cap_test("monthly", run_tag, "monthly")
     cap_test("task", run_tag, "task")
+    verify_operator_policy(run_tag)
 
     # Idempotent reservation replay returns the first durable reservation.
     current = snapshot()
+    policy = budget_policy()
     estimate = 1_000
     provider = PREFIX + run_tag + "-idempotency"
     task = PREFIX + run_tag + "-idempotency-task"
@@ -327,16 +346,16 @@ def run() -> None:
     first_id = str(uuid.uuid4())
     first_status, first_body, _ = reserve(
         provider, "model", task, estimate,
-        int(current["daily_total_nanos"]) + 1_000_000,
-        int(current["monthly_total_nanos"]) + 1_000_000,
-        1_000_000, idem, first_id,
+        int(policy["daily_budget_nanos"]),
+        int(policy["monthly_budget_nanos"]),
+        int(policy["per_task_budget_nanos"]), idem, first_id,
     )
     require(first_status == 201, "Initial idempotency reservation failed")
     replay_status, replay_body, _ = reserve(
         provider, "model", task, estimate,
-        int(current["daily_total_nanos"]) + 1_000_000,
-        int(current["monthly_total_nanos"]) + 1_000_000,
-        1_000_000, idem, str(uuid.uuid4()),
+        int(policy["daily_budget_nanos"]),
+        int(policy["monthly_budget_nanos"]),
+        int(policy["per_task_budget_nanos"]), idem, str(uuid.uuid4()),
     )
     require(replay_status == 200 and replay_body.get("replay") is True and
             replay_body.get("reservation_id") == first_id,
@@ -347,12 +366,14 @@ def run() -> None:
     # Once provider I/O is marked started, release is forbidden. An ambiguous
     # outcome remains pending until an explicit zero-cost settlement.
     current = snapshot()
+    policy = budget_policy()
     lifecycle_provider = PREFIX + run_tag + "-lifecycle"
     lifecycle_task = PREFIX + run_tag + "-lifecycle-task"
     lifecycle_status, _, lifecycle_id = reserve(
         lifecycle_provider, "model", lifecycle_task, 1,
-        int(current["daily_total_nanos"]) + 1_000_000,
-        int(current["monthly_total_nanos"]) + 1_000_000, 1_000_000,
+        int(policy["daily_budget_nanos"]),
+        int(policy["monthly_budget_nanos"]),
+        int(policy["per_task_budget_nanos"]),
     )
     require(lifecycle_status == 201, "Lifecycle reservation failed")
     started, _ = action("start", lifecycle_id)
@@ -369,14 +390,15 @@ def run() -> None:
 
     # Actual spend above estimate is retained and quarantines the route.
     current = snapshot()
+    policy = budget_policy()
     quarantine_provider = PREFIX + run_tag + "-quarantine"
     quarantine_model = "model"
     quarantine_task = PREFIX + run_tag + "-quarantine-task"
     q_status, _, q_id = reserve(
         quarantine_provider, quarantine_model, quarantine_task, 1,
-        int(current["daily_total_nanos"]) + 1_000_000_000,
-        int(current["monthly_total_nanos"]) + 1_000_000_000,
-        1_000_000_000,
+        int(policy["daily_budget_nanos"]),
+        int(policy["monthly_budget_nanos"]),
+        int(policy["per_task_budget_nanos"]),
     )
     require(q_status == 201, "Over-estimate quarantine reservation failed")
     started, _ = action("start", q_id)
@@ -386,9 +408,9 @@ def run() -> None:
             "Actual cost above estimate was not recorded and flagged")
     blocked, body, _ = reserve(
         quarantine_provider, quarantine_model, quarantine_task, 1,
-        int(current["daily_total_nanos"]) + 1_000_000_000,
-        int(current["monthly_total_nanos"]) + 1_000_000_000,
-        1_000_000_000,
+        int(policy["daily_budget_nanos"]),
+        int(policy["monthly_budget_nanos"]),
+        int(policy["per_task_budget_nanos"]),
     )
     require(blocked == 409 and body.get("error") == "budget_exceeded",
             "Quarantined provider/model route accepted another reservation")
@@ -396,13 +418,14 @@ def run() -> None:
     # Leave one ambiguous reservation, redeploy the Worker, and verify that
     # the durable D1 record survives the Worker restart/deployment.
     current = snapshot()
+    policy = budget_policy()
     crash_provider = PREFIX + run_tag + "-restart"
     crash_task = PREFIX + run_tag + "-restart-task"
     crash_status, _, crash_id = reserve(
         crash_provider, "model", crash_task, 3,
-        int(current["daily_total_nanos"]) + 1_000_000_000,
-        int(current["monthly_total_nanos"]) + 1_000_000_000,
-        1_000_000_000,
+        int(policy["daily_budget_nanos"]),
+        int(policy["monthly_budget_nanos"]),
+        int(policy["per_task_budget_nanos"]),
     )
     require(crash_status == 201, "Restart persistence reservation failed")
     started, _ = action("start", crash_id)
@@ -428,6 +451,10 @@ def run() -> None:
     require(mobile_status == 200, f"Authenticated mobile status returned HTTP {mobile_status}")
     require(mobile.get("monetary_ledger", {}).get("available") is True,
             "Mobile status does not report the D1 monetary ledger as available")
+    require(mobile["monetary_ledger"].get("budget_policy_enabled") is True and
+            mobile["monetary_ledger"].get("daily_budget_usd") == int(policy["daily_budget_nanos"]) / 1_000_000_000 and
+            mobile["monetary_ledger"].get("monthly_budget_usd") == int(policy["monthly_budget_nanos"]) / 1_000_000_000,
+            "Mobile status does not expose the operator-owned monetary caps")
     require("model_costs_usd" in mobile, "Mobile status omitted the model cost breakdown")
     require(mobile.get("unavailable_metrics", {}).get("provider_usage") == "Available",
             "Mobile status does not report the D1 token quota ledger as available")
