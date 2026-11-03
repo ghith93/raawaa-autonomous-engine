@@ -207,6 +207,20 @@ class LiveDataPolicyTests(unittest.TestCase):
                 self.assertFalse(allowed)
                 self.assertEqual(reason, "sensitive_content_detected")
 
+    def test_reverse_order_plural_contact_markers_are_blocked(self):
+        for text in (
+            "Review emails for customers",
+            "Summarize order records of users",
+        ):
+            with self.subTest(text=text):
+                payload = self.valid_payload()
+                payload["questions"] = [text]
+                allowed, reason = validate_live_payload(
+                    "research_brief", "Public research", payload, POLICY
+                )
+                self.assertFalse(allowed)
+                self.assertEqual(reason, "sensitive_content_detected")
+
     def test_inline_credential_assignments_are_blocked(self):
         for text in (
             "The account password=correct-horse-battery",
