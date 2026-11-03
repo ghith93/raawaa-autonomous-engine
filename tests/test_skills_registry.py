@@ -110,6 +110,18 @@ class SkillsRegistryTests(unittest.TestCase):
         with self.assertRaises(SkillRegistryError):
             self.load()
 
+    def test_malformed_policy_types_are_rejected_without_type_error(self):
+        self.manifest["network_policy"] = []
+        self.write_manifest()
+        with self.assertRaisesRegex(SkillRegistryError, "network policy"):
+            self.load()
+
+    def test_malformed_role_task_map_is_rejected(self):
+        self.manifest["permissions"] = {"researcher": "research_brief"}
+        self.write_manifest()
+        with self.assertRaisesRegex(SkillRegistryError, "permission map"):
+            self.load()
+
     def test_missing_license_evidence_is_rejected(self):
         self.manifest["license"] = {"spdx_id": "MIT"}
         self.write_manifest()
