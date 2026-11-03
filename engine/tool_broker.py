@@ -219,25 +219,30 @@ class ToolBroker:
         except Exception:
             return False
 
+    def _deny(self, request: ToolRequest, reason: str, requires_approval: bool = False) -> ToolDecision:
+        if not self._audit("tool_call_denied", request, reason):
+            return ToolDecision(False, False, "audit_sink_unavailable")
+        return ToolDecision(False, requires_approval, reason)
+
     def authorize(self, request: ToolRequest) -> ToolDecision:
         """Return a decision and persist it before any adapter can execute."""
         if not isinstance(request, ToolRequest) or not self._valid_request(request):
             return ToolDecision(False, False, "invalid_tool_request")
         spec = self._matrix["tools"].get(request.tool_name)
         if not isinstance(spec, dict):
-            return ToolDecision(False, False, "tool_not_allowlisted")
+            return self._deny(request, "tool_not_allowlisted")
         if request.tool_name not in self._adapters:
-            return ToolDecision(False, False, "trusted_adapter_not_registered")
+            return self._deny(request, "trusted_adapter_not_registered")
         agent = self._agent_by_id.get(request.agent_id)
         if not agent or agent.get("enabled") is not True or agent.get("role") != request.agent_role:
-            return ToolDecision(False, False, "agent_identity_not_authorized")
+            return self._deny(request, "agent_identity_not_authorized")
         assignment = TASK_AGENT_CONTRACTS.get(request.task_type)
         if not assignment or assignment[0] != request.agent_id:
-            return ToolDecision(False, False, "task_agent_assignment_mismatch")
+            return self._deny(request, "task_agent_assignment_mismatch")
         if assignment[1] not in agent.get("capabilities", []):
-            return ToolDecision(False, False, "agent_capability_missing")
+            return self._deny(request, "agent_capability_missing")
         if request.action != spec.get("action"):
-            return ToolDecision(False, False, "tool_action_mismatch")
+            return self._deny(request, "tool_action_mismatch")
         grants = spec.get("grants", [])
         if not any(
             isinstance(grant, dict)
@@ -245,9 +250,9 @@ class ToolBroker:
             and request.task_type in grant.get("task_types", [])
             for grant in grants
         ):
-            return ToolDecision(False, False, "role_task_not_authorized")
+            return self._deny(request, "role_task_not_authorized")
         if request.environment not in spec.get("environments", []):
-            return ToolDecision(False, False, "environment_not_authorized")
+            return self._deny(request, "environment_not_authorized")
 
         access = spec.get("access")
         if access == "read":
@@ -255,25 +260,23 @@ class ToolBroker:
                 request.action, self._policy, request.estimated_cost_usd
             )
             if not policy_decision.allowed:
-                return ToolDecision(
-                    False, policy_decision.requires_approval, policy_decision.reason
-                )
+                return self._deny(request, policy_decision.reason, policy_decision.requires_approval)
         elif access == "write":
             if self._policy.get("allow_external_writes") is not True:
-                return ToolDecision(False, False, "external_writes_disabled")
+                return self._deny(request, "external_writes_disabled")
             approval_actions = self._policy.get("require_human_approval_for", [])
             if request.action not in approval_actions:
-                return ToolDecision(False, False, "write_action_not_approval_gated")
+                return self._deny(request, "write_action_not_approval_gated")
             if request.estimated_cost_usd > 0:
-                return ToolDecision(False, False, "tool_cost_requires_atomic_budget_reservation")
+                return self._deny(request, "tool_cost_requires_atomic_budget_reservation")
             if not request.approval_id or not request.idempotency_key:
-                return ToolDecision(False, True, "human_approval_and_idempotency_required")
+                return self._deny(request, "human_approval_and_idempotency_required", True)
             if self._approval_verifier is None:
-                return ToolDecision(False, True, "trusted_approval_verifier_unavailable")
+                return self._deny(request, "trusted_approval_verifier_unavailable", True)
             try:
                 evidence = self._approval_verifier(request)
             except Exception:
-                return ToolDecision(False, True, "approval_verification_failed")
+                return self._deny(request, "approval_verification_failed", True)
             expected = (
                 request.approval_id, request.task_id, request.agent_id,
                 request.agent_role, request.tool_name, request.action,
@@ -285,9 +288,9 @@ class ToolBroker:
                 evidence.environment,
             )
             if actual != expected:
-                return ToolDecision(False, True, "approval_evidence_mismatch")
+                return self._deny(request, "approval_evidence_mismatch", True)
         else:
-            return ToolDecision(False, False, "unknown_access_class")
+            return self._deny(request, "unknown_access_class")
 
         if not self._audit("tool_call_authorized", request, "authorized"):
             return ToolDecision(False, False, "audit_sink_unavailable")
