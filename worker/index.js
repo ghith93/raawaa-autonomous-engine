@@ -225,7 +225,8 @@ export default {
     const codespaceStatusRoute = url.pathname === "/v1/codespace/status";
     const codespaceActionRoute = /^\/v1\/codespace\/tasks\/[A-Za-z0-9-]+\/(heartbeat|finish)$/.test(url.pathname);
     const codespaceRoute = codespaceClaimRoute || codespaceStatusRoute || codespaceActionRoute;
-    const codespaceAuthorized = Boolean(env.ENGINE_CODESPACE_TOKEN) &&
+    const codespaceAuthorized = typeof env.ENGINE_CODESPACE_TOKEN === "string" &&
+      env.ENGINE_CODESPACE_TOKEN.length >= 32 &&
       env.ENGINE_CODESPACE_TOKEN !== env.ENGINE_API_TOKEN &&
       env.ENGINE_CODESPACE_TOKEN !== env.ENGINE_QUOTA_ADMIN_TOKEN &&
       constantTimeEqual(bearer(request), env.ENGINE_CODESPACE_TOKEN);
