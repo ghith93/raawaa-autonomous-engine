@@ -20,7 +20,7 @@ from engine.remote_task_store import RemoteTaskStoreError
 
 
 REPOSITORY_ROOT = Path(__file__).resolve().parent.parent
-MAX_OUTPUT_CHARS = 8_000
+MAX_OUTPUT_CHARS = 3_000
 COMMAND_TIMEOUT_SECONDS = 240
 POLL_MIN_SECONDS = 30
 POLL_MAX_SECONDS = 300
