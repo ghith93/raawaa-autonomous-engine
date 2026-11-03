@@ -33,6 +33,9 @@ class OrchestratorTests(unittest.TestCase):
         self.assertEqual(plan["assignments"], {
             "research": "researcher", "draft": "marketer", "review": "reviewer"
         })
+        self.assertEqual(plan["steps"]["draft"]["required_capability"], "draft_content")
+        self.assertEqual(plan["steps"]["draft"]["acceptance_checks"], ["Draft follows brand guide"])
+        self.assertNotIn("payload", plan["steps"]["draft"])
         self.assertEqual(plan["execution_waves"], [["research"], ["draft"], ["review"]])
         self.assertFalse(plan["execution_started"])
         self.assertFalse(plan["dispatch_authorized"])
