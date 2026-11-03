@@ -118,6 +118,14 @@ class MobileStatusProbeTests(unittest.TestCase):
         self.assertEqual(result["tasks_live_inference_succeeded"], "1")
         self.assertEqual(result["tasks_unknown_succeeded"], "7")
 
+    def test_inconsistent_execution_mode_totals_fail_closed(self):
+        payload = status_payload()
+        payload["execution_modes"]["counts"]["dry_run"] = 99
+        result = probe.summarize_mobile_status(payload)
+        self.assertEqual(result["task_execution_modes"], "invalid")
+        self.assertEqual(result["tasks_dry_run_succeeded"], "unknown")
+        self.assertEqual(result["tasks_live_inference_succeeded"], "unknown")
+
     def test_missing_execution_mode_migration_is_not_reported_as_zero(self):
         payload = status_payload()
         payload["execution_modes"] = {"available": False}
