@@ -13,3 +13,11 @@ The following are intentionally shown as unavailable rather than guessed: scan-r
 Security headers include no-store, no-referrer, nosniff, and a restrictive Content Security Policy. CI health is ingested by a main-only GitHub Actions job into the dedicated Staging D1 audit ledger. The publisher verifies the Staging and production database IDs differ, writes only two sanitized metadata events, and reads them back. It does not write to production D1 or expose provider credentials. The page stores no access token persistently.
 
 The CI telemetry publisher is currently Staging-only. The production Worker and production D1 are unchanged; promoting the new dashboard fields to production remains a separately gated deployment decision. The telemetry job does not apply migrations, change secrets, enable inference, or enable external actions.
+
+## Execution-mode reporting (migration 0009)
+
+The task queue now stores `execution_mode` separately from terminal task status. Values are `not_started`, `dry_run`, and `live_inference`. Existing rows are backfilled as `not_started`; the system does not infer that legacy `succeeded` rows were live executions. A task completed in dry-run mode remains terminal for queue processing, but the dashboard counts it as a **simulated completion**, separately from successful live-inference tasks.
+
+The authenticated status API returns task counts grouped by status and execution mode. The page shows simulated completions, successful live-inference completions, and the total task counts for each execution path. If migration `0009_task_execution_mode` is absent or the aggregate query fails, execution-mode metrics are shown as unavailable rather than guessed. `live_inference` records that the live path was selected; pending or blocked rows do not prove a provider call completed, and no external write is implied.
+
+The remote task runner requires the Worker health capability `task_execution_mode_v1` before it claims remote tasks. When live inference is enabled, it additionally requires `task_retry_schedule_v1`. This fail-closed rollout gate prevents a runner from silently dropping execution-mode metadata or ignoring delayed retries. The new capability is deployed and tested in Staging only after migration `0009`; Production migration and Worker deployment remain separately gated.
