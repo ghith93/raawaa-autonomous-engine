@@ -134,6 +134,25 @@ class CapabilityGapAnalysisTests(unittest.TestCase):
         self.assertEqual(result["unmapped_github_candidate_count"], 1)
         self.assertTrue(all(item["candidate_count"] == 0 for item in result["opportunities"]))
 
+    def test_all_opportunities_have_bounded_scores_and_reviewable_proposals(self):
+        result = analyze_capability_gaps(
+            {"schema_version": 1, "github_candidates": []}, self.root
+        )
+        self.assertEqual(len(result["task_proposals"]), 9)
+        for opportunity in result["opportunities"]:
+            self.assertGreaterEqual(opportunity["priority_score"], 0)
+            self.assertLessEqual(opportunity["priority_score"], 7)
+            self.assertIn(opportunity["risk_band"], {"low", "medium", "high"})
+            self.assertIn(opportunity["cost_band"], {"zero", "low", "medium", "high"})
+            self.assertIn(opportunity["complexity_band"], {"low", "medium", "high"})
+        for proposal in result["task_proposals"]:
+            self.assertEqual(proposal["task_type"], "capability_proposal")
+            self.assertTrue(proposal["acceptance_criteria"])
+            self.assertTrue(proposal["rollback_plan"])
+            self.assertFalse(proposal["task_store_write"])
+            self.assertEqual(proposal["approval_state"], "not_requested")
+
+
     def test_rejects_unsupported_triage_schema(self):
         with self.assertRaisesRegex(ValueError, "schema_version 1"):
             analyze_capability_gaps({"schema_version": 2}, self.root)
