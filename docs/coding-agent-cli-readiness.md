@@ -37,3 +37,46 @@ Before connecting any CLI to task execution, verify:
 ## Follow-up
 
 After the installation smoke run passes, evaluate one CLI at a time in an isolated, non-production task. Prefer a supported personal-account OAuth flow where available; do not assume that a browser login from a local device can be copied to a hosted runner. Keep inference disabled until all gates above are verified.
+
+
+## Verified 2026-11-03: separate install, authentication, and execution gates
+
+The existing Codespaces bootstrap installs Codex CLI and Antigravity CLI alongside OpenCode. Do not collapse the following independent states into a single ready flag:
+
+| Gate | Codex CLI | Antigravity CLI |
+|---|---|---|
+| Binary installation | pinned npm package in `.devcontainer/post-create.sh` | official Linux installer in `.devcontainer/post-create.sh` |
+| Account authentication | ChatGPT OAuth, device-code flow where enabled | Google account OAuth; remote SSH URL/code handoff |
+| Identity proof | `codex login status` | authenticated CLI session plus successful `agy -p` |
+| Usage/quota visibility | `/status` in an interactive Codex session and ChatGPT usage dashboard | `/usage` in the CLI; capture only documented aggregate usage metadata |
+| Headless execution | `codex exec` | `agy -p` |
+| Engine integration | not implemented | not implemented |
+
+### Codex account usage
+- ChatGPT-account authentication uses the user's ChatGPT plan allowance; it is not OpenAI API billing.
+- API-key authentication is a different billing path and must not be used as a fallback for this zero-additional-spend pilot.
+- The exact Free-plan task allowance varies and is not a fixed token quota. Record the actual `/status` output's allowance/reset information as a dated operator observation; do not scrape private account endpoints or infer an exact quota from the plan name.
+- Keep the OAuth credential in the Codespace user's protected home/credential store. Never copy `~/.codex/auth.json` into GitHub Secrets, repository files, artifacts, issues, or logs. Treat it as a password.
+- A GitHub Actions runner must not be seeded with a personal ChatGPT session. The public repository and CI workflow are not a trusted persistent personal-auth runner.
+
+### Antigravity account usage
+- Use the Google account OAuth route, not `GEMINI_API_KEY`, for this experiment. A Gemini API key is separately billed/limited and is not equivalent to a Google-account Antigravity entitlement.
+- For a Codespace/SSH terminal, use the documented remote OAuth URL and one-time authorization code flow; do not export local keyring files or copy Google tokens.
+- Use `agy -p` only after authentication. The CLI documents JSON/stream-JSON output and a `/usage` command. Capture aggregate usage counters, selected model, timestamps, and status only; redact account identifiers and never persist prompt/response content in quota telemetry.
+- Review Google's interaction-data collection and account terms before sending private project material. Initial pilot tasks must be public-classified only.
+
+### Headless safety defaults
+- Codex: use `codex exec --sandbox read-only` for review/research and `--sandbox workspace-write` only for a bounded implementation task. Never use `danger-full-access` or `--full-auto` in the engine runner.
+- Antigravity: use `agy -p ... --output-format json --sandbox` and a short explicit timeout. Do not use `--dangerously-skip-permissions`. Do not grant blanket shell-command permissions.
+- Both CLIs are execution engines, not generic chat APIs. The engine must wrap each invocation with a durable task ID, lease fencing, wall-clock timeout, bounded stdout/stderr, process-group termination, workspace isolation, and metadata-only audit.
+- The engine's D1 provider quota ledger currently accounts API provider requests/tokens, not ChatGPT-plan or Antigravity-account allowances. Do not route tasks to either CLI until a separate account-usage budget/circuit breaker is designed and verified.
+- Never start both agents on the same working tree. Use isolated Git worktrees per task and let a distinct reviewer inspect the resulting diff before a PR can be merged.
+
+### Current gate result
+- Install/bootstrap definition: present.
+- Linux install/version smoke: must pass on the exact current branch before calling the binaries install-verified.
+- Codex ChatGPT OAuth: not yet completed or verified in a persistent Codespace.
+- Antigravity Google OAuth: not yet completed or verified in a persistent Codespace.
+- Headless inference: not yet run.
+- Model Router/Execution Manager integration: not yet implemented.
+- Production or storefront write permissions: not granted by this plan.
