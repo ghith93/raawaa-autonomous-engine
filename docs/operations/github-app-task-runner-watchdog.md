@@ -11,11 +11,13 @@ The watchdog is a fallback. It does not replace the GitHub schedule or the Pytho
 
 ## Disabled-by-default behavior
 
-The watchdog requires all three Cloudflare Worker settings below. If any is missing, the handler returns disabled before making a network request or writing to D1.
+The watchdog requires three Cloudflare Worker secrets and one explicit non-secret activation variable. If any secret or the activation variable is missing, the handler returns disabled before any D1 access or network request.
 
 - GITHUB_APP_ID
 - GITHUB_APP_INSTALLATION_ID
 - GITHUB_APP_PRIVATE_KEY
+
+Also add the plain-text Worker variable GITHUB_APP_WATCHDOG_ENABLED with the exact value enabled. This is a separate activation switch; adding the App secrets alone does not start the watchdog.
 
 The private key is never needed in ChatGPT and must never be pasted into a conversation, issue, pull request, log, or source file.
 
@@ -36,8 +38,9 @@ The Worker requests an installation token narrowed again to repository ID 144135
 1. Open the Cloudflare dashboard.
 2. Go to Workers & Pages and select raawaa-autonomous-engine-control.
 3. Open Settings, then Variables and Secrets.
-4. Add each of the three names above as a Secret. Paste the App ID and installation ID into their matching fields; paste the PEM contents only into GITHUB_APP_PRIVATE_KEY.
-5. Save the settings. Do not send the private key to ChatGPT.
+4. Add GITHUB_APP_ID, GITHUB_APP_INSTALLATION_ID, and GITHUB_APP_PRIVATE_KEY as Secrets. Paste the App ID and installation ID into their matching fields; paste the PEM contents only into GITHUB_APP_PRIVATE_KEY.
+5. Add GITHUB_APP_WATCHDOG_ENABLED as a plain-text Variable with the exact value enabled.
+6. Save the settings. Do not send the private key to ChatGPT.
 
 No GitHub Actions secret is required for this integration. No D1 migration is required.
 
@@ -68,8 +71,8 @@ If the dispatch fails, inspect Cloudflare Worker Cron Events for the sanitized f
 - A D1 dispatch-intent row is written before the GitHub side effect; it suppresses another attempt for 10 minutes even if the post-dispatch audit write fails.
 - GitHub's workflow concurrency group and D1 atomic task claims remain the duplicate-execution controls.
 - Live inference, external writes, trading, and Telegram delivery remain disabled.
-- Missing App settings cause a no-op. No recurring network calls are made until all three settings exist.
+- Missing App secrets or the explicit GITHUB_APP_WATCHDOG_ENABLED=enabled variable cause a no-op. No recurring network calls are made until all four settings are present.
 
 ## Disable or roll back
 
-Remove the watchdog Cron expression from wrangler.toml and revert the watchdog handler/import through a reviewed pull request. To disable without a code change, remove GITHUB_APP_PRIVATE_KEY from Worker secrets; the watchdog immediately returns disabled. Keep the 15-minute stale-lease recovery Cron intact.
+Remove the watchdog Cron expression from wrangler.toml and revert the watchdog handler/import through a reviewed pull request. To disable without a code change, remove or change GITHUB_APP_WATCHDOG_ENABLED; the watchdog immediately returns disabled. Keep the 15-minute stale-lease recovery Cron intact.
