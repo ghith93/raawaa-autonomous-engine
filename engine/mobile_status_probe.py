@@ -261,12 +261,13 @@ def summarize_mobile_status(payload: object, http_status: int = 200) -> dict[str
             if not isinstance(totals, dict) or not isinstance(statuses_by_mode, dict):
                 raise ValueError("invalid execution-mode aggregate")
             for mode in modes:
-                _count(totals.get(mode))
+                total = _count(totals.get(mode))
                 per_status = statuses_by_mode.get(mode)
                 if not isinstance(per_status, dict):
                     raise ValueError("missing execution-mode status aggregate")
-                for status in statuses:
-                    _count(per_status.get(status))
+                status_total = sum(_count(per_status.get(status)) for status in statuses)
+                if status_total != total:
+                    raise ValueError("inconsistent execution-mode aggregate")
             mode_values = {
                 "task_execution_modes": "available",
                 "tasks_dry_run_succeeded": str(statuses_by_mode["dry_run"]["succeeded"]),
