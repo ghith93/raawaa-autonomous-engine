@@ -546,7 +546,7 @@ test("quota cooldown cannot shorten an existing cooldown", async () => {
     },
   };
   const response = await worker.fetch(request("/v1/quota", {
-    method: "POST",
+    method: "POST", token: ADMIN_TOKEN,
     body: { action: "cool_down", route_id: "groq:main:model", seconds: 60, reason: "short_retry" },
   }), { DB, ENGINE_API_TOKEN: TOKEN, ENGINE_QUOTA_ADMIN_TOKEN: ADMIN_TOKEN });
   assert.equal(response.status, 200);
