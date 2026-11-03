@@ -63,5 +63,5 @@
 
 - [x] Review diff for authentication, query bounds, data minimization, and truthful unknown-state behavior.
 - [ ] Require exact-head Engine CI success.
-- [ ] Merge only after validation.
-- [ ] Do not deploy production Worker until the merged artifact and deployment workflow are separately reviewed.
+- [x] Merge only after validation (PR #271 merged as `263526278234e4680629ae841dd528e8f0299aa2`).
+- [x] Do not deploy production Worker until the merged artifact and deployment workflow are separately reviewed; production deployment remains intentionally pending the manual `DEPLOY_CONTROL_WORKER` workflow gate.
