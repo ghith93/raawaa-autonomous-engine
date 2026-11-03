@@ -24,17 +24,21 @@ The D1 binding and database identifier are declared in `wrangler.toml`. The Work
 requires a separate `ENGINE_API_TOKEN` secret; do not reuse the Cloudflare account
 API token as an application bearer token.
 
-Deployment lifecycle:
+Deployment lifecycle (verified against the workflow files on 2026-11-03):
 
-- `.github/workflows/deploy-worker.yml` deploys automatically after reviewed changes to `worker/` or `wrangler.toml` reach `main`; it can also be dispatched manually for the initial deployment.
-- It installs the dedicated `ENGINE_API_TOKEN` as a Worker secret from the GitHub Actions secret of the same name, then deploys with Wrangler.
-- The D1 schema is now applied automatically by `.github/workflows/d1-auto-migrate.yml` after migration changes are merged to `main`.
+- `.github/workflows/deploy-worker.yml` is **manual-dispatch only**. It does not deploy on pushes or merges to `main`.
+- The dispatch input `confirm_deployment` must equal `DEPLOY_CONTROL_WORKER`. The workflow checks `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`, and the dedicated `ENGINE_API_TOKEN` secret, installs the application bearer token as a Worker secret, then deploys the reviewed `main` revision with Wrangler.
+- `.github/workflows/d1-migrate.yml` is also **manual-dispatch only**. Its `confirm_database` input must equal `raawaa-autonomous-e`; it first lists remote migration status and then applies reviewed migrations to that explicitly confirmed production D1 database.
+- Neither Worker deployment nor production D1 migration is automatic after a merge. Treat them as separate production actions with separate explicit confirmations.
 
 One-time setup required before the first deployment: create a strong, random application bearer token and add it as the repository Actions secret `ENGINE_API_TOKEN`. Never reuse `CLOUDFLARE_API_TOKEN`. The deployment workflow checks that this secret exists and stops before deployment if it is missing. The Cloudflare API token must have Workers Scripts write permission in addition to the D1 permissions already used by migrations.
 
 No secret is stored in source control. Do not enable public enqueue routes without
-setting the Worker secret. Keep task execution, external writes, and model inference
-disabled until the D1 worker/runner lifecycle is separately implemented and tested.
+setting the Worker secret. The authenticated D1 task intake/claim/lease/finish lifecycle
+and bounded Python consumer are implemented; supported task types currently execute
+deterministic dry-run handlers only. Keep live model inference and external writes
+disabled. Production Worker deployment, production migrations, Telegram webhook
+configuration, and webhook registration remain separately gated actions.
 
 ## Tests
 
@@ -70,6 +74,6 @@ The schedule is designed for the Cloudflare Workers Free limits published at imp
 
 ## Scheduled Python task consumer
 
-GitHub Actions invokes the Python runner every 5 minutes and can also be started manually from the Actions tab. It uses the repository Actions secret `ENGINE_API_TOKEN`, the deployed Worker URL, and a strict batch limit of five tasks / 60 seconds. If Cloudflare Access is enabled for the Worker, it can additionally use the optional service-token secrets described above.
+GitHub Actions is **configured** with a five-minute cron and can also be started manually from the Actions tab. A configured cron is not proof of reliable periodic execution: GitHub scheduled events are best-effort and may be delayed or dropped. As of 2026-11-03 00:15 UTC, the latest verified `event=schedule` run was #20 at 2026-11-02 21:55 UTC; later runs #22 and #23 were `push` events, not scheduled runs. Periodic five-minute execution therefore remains unverified. The workflow uses the repository Actions secret `ENGINE_API_TOKEN`, the deployed Worker URL, and a strict batch limit of five tasks / 60 seconds. If Cloudflare Access is enabled for the Worker, it can additionally use the optional service-token secrets described above.
 
 The runner currently supports only the safe dry-run handlers listed in `engine/worker.py`. Unsupported task types are marked blocked. It does not call Gemini, Groq, OpenRouter, or other model providers, and it cannot perform external writes. Scheduled GitHub Actions jobs may be delayed; this is periodic batch processing, not real-time or always-on execution.
