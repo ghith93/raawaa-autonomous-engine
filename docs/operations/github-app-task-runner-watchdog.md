@@ -61,6 +61,17 @@ The authenticated status read in Task Runner run [#41562069768](https://github.c
 
 If the dispatch fails, inspect Cloudflare Worker Cron Events for the sanitized failure code and HTTP status. A 403 usually indicates the App installation or Actions permission is incorrect. If the workflow has been manually disabled in GitHub, an owner must enable it in the Actions UI; the watchdog does not bypass that administrative state.
 
+## Latest production verification — 2026-11-03 02:56 UTC
+
+The operator confirmed that all three GitHub App values were added as Cloudflare Worker Production secrets and then enabled the separate Production variable `GITHUB_APP_WATCHDOG_ENABLED=enabled`. The following evidence verifies the integration end to end:
+
+- Task Runner run [#41569188010](https://github.com/ghith93/raawaa-autonomous-engine/actions/runs/41569188010) was created at 02:56:42 UTC on `main`, with event `workflow_dispatch` and actor `raawaa-engine[bot]`; it completed successfully at 02:56:58 UTC.
+- Its authenticated D1 mobile-status probe returned HTTP 200, `watchdog_ready=ready`, `watchdog_missing=none`, and matching latest dispatch-request / D1-intent timestamps `2026-11-03T02:56:40.404Z`.
+- The bounded batch completed with `tasks_processed=0` and `queue_idle`; no task was waiting, and no business task execution is claimed.
+- The run reported the latest Worker stale-lease Cron heartbeat as `2026-11-03T02:45:34.076Z`, with zero leases requeued and zero failures.
+
+This closes the one-time GitHub App setup and dispatch verification. Continue monitoring subsequent Worker Cron heartbeats and the primary GitHub `schedule` event separately. Do not interpret a successful idle dispatch as proof that a real task was processed or that GitHub's primary schedule is reliable.
+
 ## Security and operational guarantees
 
 - No personal access token is used.
