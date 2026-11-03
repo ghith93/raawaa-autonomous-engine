@@ -29,17 +29,17 @@
 
 **Files:** tests/test_triage_research_candidates.py
 
-- [ ] Add a test proving a fresh Apache-2.0 repo with 4 stars has a high numeric score but medium priority.
-- [ ] Add tests proving missing/NOASSERTION and GPL/AGPL license metadata cannot produce high priority.
-- [ ] Keep the existing well-adopted MIT/Python high-priority test unchanged.
-- [ ] Run python -m unittest tests.test_triage_research_candidates -v; expected: new tests fail because current scorer assigns high priority from score alone.
+- [x] Add a test proving a fresh Apache-2.0 repo with 4 stars has a high numeric score but medium priority.
+- [x] Add tests proving missing/NOASSERTION and GPL/AGPL license metadata cannot produce high priority.
+- [x] Keep the existing well-adopted MIT/Python high-priority test unchanged.
+- [x] PR CI #275 verified the red phase: 272 tests ran, with exactly 5 expected failures across the new adoption/license cases.
 
 ## Task 2: Minimal scoring change
 
 **File:** scripts/triage_research_candidates.py
 
-- [ ] Derive GitHub priority from score, archived state, stars >= 10, and membership in PERMISSIVE_LICENSES.
-- [ ] Do not alter numeric score, candidate output fields, academic priority, or discovery behavior.
+- [x] Derive GitHub priority from score, archived state, stars >= 10, and membership in PERMISSIVE_LICENSES.
+- [x] Do not alter numeric score, candidate output fields, academic priority, or discovery behavior.
 - [ ] Run focused triage tests; expected: all pass.
 
 ## Task 3: Full validation and PR
