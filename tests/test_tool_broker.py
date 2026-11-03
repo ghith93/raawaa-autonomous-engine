@@ -92,6 +92,43 @@ class ToolBrokerTests(unittest.TestCase):
                 errors = validate_permission_matrix(unsafe, ROSTER)
                 self.assertTrue(any("read access is restricted to inspect_code" in error for error in errors))
 
+    def test_malformed_access_and_environment_values_fail_validation(self):
+        malformed_access = {
+            **MATRIX,
+            "tools": {
+                **MATRIX["tools"],
+                "repository.read_file": {
+                    **MATRIX["tools"]["repository.read_file"],
+                    "access": [],
+                },
+            },
+        }
+        self.assertTrue(validate_permission_matrix(malformed_access, ROSTER))
+
+        malformed_environment = {
+            **MATRIX,
+            "tools": {
+                **MATRIX["tools"],
+                "storefront.publish": {
+                    **MATRIX["tools"]["storefront.publish"],
+                    "environments": None,
+                },
+            },
+        }
+        self.assertTrue(validate_permission_matrix(malformed_environment, ROSTER))
+
+    def test_unallowlisted_or_non_callable_adapters_are_rejected(self):
+        with self.assertRaisesRegex(ValueError, "explicitly allowlisted"):
+            ToolBroker(
+                self.policy, MATRIX, {"shell.exec": lambda _req: None},
+                agent_roster=ROSTER, audit_sink=self.events.append,
+            )
+        with self.assertRaisesRegex(ValueError, "explicitly allowlisted"):
+            ToolBroker(
+                self.policy, MATRIX, {"repository.read_file": None},
+                agent_roster=ROSTER, audit_sink=self.events.append,
+            )
+
     def test_authorized_read_executes_through_registered_adapter(self):
         result = self.broker.execute(request())
         self.assertEqual(result, "file contents")
