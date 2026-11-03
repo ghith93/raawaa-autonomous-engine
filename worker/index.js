@@ -198,7 +198,7 @@ export default {
       try {
         const row = await env.DB.prepare("SELECT 1 AS ok").first();
         if (!row || row.ok !== 1) return json({ ok: false }, 503);
-        return json({ ok: true });
+        return json({ ok: true, capabilities: ["task_retry_schedule_v1"] });
       } catch {
         return json({ ok: false }, 503);
       }
