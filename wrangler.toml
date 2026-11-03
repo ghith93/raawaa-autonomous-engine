@@ -3,6 +3,9 @@ main = "worker/index.js"
 compatibility_date = "2026-10-31"
 workers_dev = true
 
+[vars]
+GITHUB_APP_WATCHDOG_ENABLED = "enabled"
+
 [[d1_databases]]
 binding = "DB"
 database_name = "raawaa-autonomous-e"
