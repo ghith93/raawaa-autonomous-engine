@@ -1,0 +1,24 @@
+{
+  "schema_version": 1,
+  "default_effect": "deny",
+  "tools": {
+    "repository.read_file": {
+      "access": "read",
+      "action": "inspect_code",
+      "grants": [
+        {"agent_role": "quality_and_security", "task_types": ["code_review"]},
+        {"agent_role": "operations_and_monitoring", "task_types": ["system_audit"]}
+      ],
+      "environments": ["local", "staging"]
+    },
+    "repository.list_files": {
+      "access": "read",
+      "action": "inspect_code",
+      "grants": [
+        {"agent_role": "quality_and_security", "task_types": ["code_review"]},
+        {"agent_role": "operations_and_monitoring", "task_types": ["system_audit"]}
+      ],
+      "environments": ["local", "staging"]
+    }
+  }
+}
