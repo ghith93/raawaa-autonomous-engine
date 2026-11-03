@@ -36,7 +36,7 @@ function dbMock(options = {}) {
           }
           if (sql.includes("SELECT id,status,attempts")) return options.currentTask || {
             id: "task-1", status: "running", attempts: 1, max_attempts: 2,
-            task_type: "research_brief", lease_token: "lease-1",
+            task_type: "research_brief", execution_mode: "not_started", lease_token: "lease-1",
             lease_expires_at: "2999-01-01T00:00:00.000Z",
           };
           if (sql.includes("WHERE idempotency_key")) {
@@ -122,6 +122,39 @@ test("claim endpoint is authenticated and returns an empty queue safely", async 
   assert.deepEqual(await response.json(), { task: null });
 });
 
+test("claim preserves compatibility with an empty request body", async () => {
+  const response = await worker.fetch(request("/v1/tasks/claim", { method: "POST" }), {
+    DB: dbMock(), ENGINE_API_TOKEN: TOKEN,
+  });
+  assert.equal(response.status, 200);
+  assert.deepEqual(await response.json(), { task: null });
+});
+
+test("claim persists and returns a validated execution mode", async () => {
+  const DB = dbMock({ normalClaim: {
+    id: "task-1", status: "running", attempts: 1, execution_mode: "dry_run",
+  } });
+  const response = await worker.fetch(request("/v1/tasks/claim", {
+    method: "POST", body: { execution_mode: "dry_run" },
+  }), { DB, ENGINE_API_TOKEN: TOKEN });
+  assert.equal(response.status, 200);
+  const payload = await response.json();
+  assert.equal(payload.task.execution_mode, "dry_run");
+  const claim = DB.calls.find(x => x.kind === "first" && x.sql.includes("UPDATE tasks SET status='running'"));
+  assert.match(claim.sql, /execution_mode=\?/);
+  assert.equal(claim.values[0], "dry_run");
+});
+
+test("claim rejects invalid execution modes before database writes", async () => {
+  const DB = dbMock();
+  const response = await worker.fetch(request("/v1/tasks/claim", {
+    method: "POST", body: { execution_mode: "shell" },
+  }), { DB, ENGINE_API_TOKEN: TOKEN });
+  assert.equal(response.status, 400);
+  assert.deepEqual(await response.json(), { error: "invalid_execution_mode" });
+  assert.equal(DB.calls.some(x => x.kind === "first" && x.sql.includes("UPDATE tasks SET status='running'")), false);
+});
+
 test("claim endpoint rejects unauthenticated callers", async () => {
   const response = await worker.fetch(request("/v1/tasks/claim", { method: "POST", token: null, body: {} }), {
     DB: dbMock(), ENGINE_API_TOKEN: TOKEN,
@@ -147,6 +180,29 @@ test("finish rejects unsupported terminal states", async () => {
   assert.deepEqual(await response.json(), { error: "invalid_status" });
 });
 
+
+test("finish derives execution mode from the persisted result", async () => {
+  const DB = dbMock();
+  const response = await worker.fetch(request("/v1/tasks/task-1/finish", {
+    method: "POST",
+    body: { lease_token: "lease-1", status: "succeeded", result: { mode: "dry_run" } },
+  }), { DB, ENGINE_API_TOKEN: TOKEN });
+  assert.equal(response.status, 200);
+  const update = DB.calls.find(x => x.kind === "run" && x.sql.startsWith("UPDATE tasks"));
+  assert.match(update.sql, /execution_mode=\?/);
+  assert.equal(update.values[3], "dry_run");
+});
+
+test("finish rejects invalid execution mode without mutating task", async () => {
+  const DB = dbMock();
+  const response = await worker.fetch(request("/v1/tasks/task-1/finish", {
+    method: "POST",
+    body: { lease_token: "lease-1", status: "succeeded", execution_mode: "shell" },
+  }), { DB, ENGINE_API_TOKEN: TOKEN });
+  assert.equal(response.status, 400);
+  assert.deepEqual(await response.json(), { error: "invalid_execution_mode" });
+  assert.equal(DB.calls.some(x => x.kind === "run" && x.sql.startsWith("UPDATE tasks")), false);
+});
 
 test("recover endpoint is authenticated and bounded to stale task selection", async () => {
   const DB = dbMock();

@@ -77,7 +77,8 @@ def run_once(store: TaskStore, live_gateway=None, environ=None) -> dict | None:
             return {"status": "blocked", "reason": "live_capacity_preflight_blocked",
                     "capacity_reason": reason, "recovery": recovery}
 
-    task = store.claim_next()
+    execution_mode = "live_inference" if _live_requested(environ) else "dry_run"
+    task = store.claim_next(execution_mode=execution_mode)
     if task is None:
         return {"status": "idle", "recovery": recovery} if any(recovery.values()) else None
 

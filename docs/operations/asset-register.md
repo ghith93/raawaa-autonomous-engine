@@ -111,3 +111,11 @@ At every session start, refresh counts, account/connection status, app permissio
 - Issue #440 remains open; Codespaces executor remains disabled.
 - F1 is next, then F5. Graphify (Apache-2.0, package `graphifyy`) is approved for later code-only local evaluation, not installed/run. Spec Kit (MIT) remains deferred.
 
+
+
+## F1 execution-mode field — 2026-11-04
+
+- Proposed additive migration: `migrations/0009_task_execution_mode.sql`; SQLite compatibility migration is in `engine/task_store.py`.
+- Updated D1 Worker task list/claim/finish endpoints and Mobile Status to expose execution-mode aggregates.
+- Values: `not_started`, `dry_run`, `live_inference`, `unknown`. Legacy rows remain `unknown`; new tasks begin `not_started`.
+- Status: implementation on unmerged branch `feat/task-execution-mode-v2`; no migration has been applied to Staging or Production and no Worker deployment has occurred.

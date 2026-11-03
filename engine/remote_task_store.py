@@ -116,10 +116,13 @@ class RemoteTaskStore:
             raise RemoteTaskStoreError("Remote task API returned an invalid task list")
         return tasks
 
-    def claim_next(self, lease_timeout_seconds: int = 900) -> dict[str, Any] | None:
+    def claim_next(self, lease_timeout_seconds: int = 900,
+                   execution_mode: str = "unknown") -> dict[str, Any] | None:
         if not 1 <= int(lease_timeout_seconds) <= 900:
             raise ValueError("remote lease timeout must be between 1 and 900 seconds")
-        result = self._request("/v1/tasks/claim", "POST", {})
+        if execution_mode not in {"unknown", "dry_run", "live_inference"}:
+            raise ValueError("invalid execution_mode")
+        result = self._request("/v1/tasks/claim", "POST", {"execution_mode": execution_mode})
         task = result.get("task")
         if task is None:
             return None
@@ -140,7 +143,8 @@ class RemoteTaskStore:
         return expiry
 
     def finish(self, task_id: str, status: str, result: dict[str, Any] | None = None,
-               error: str | None = None, lease_token: str | None = None) -> None:
+               error: str | None = None, lease_token: str | None = None,
+               execution_mode: str | None = None) -> None:
         if status not in {"succeeded", "failed", "blocked"}:
             raise ValueError("invalid terminal status")
         payload: dict[str, Any] = {"lease_token": lease_token, "status": status}
@@ -148,6 +152,12 @@ class RemoteTaskStore:
             payload["result"] = result
         if error is not None:
             payload["error"] = error
+        if execution_mode is not None:
+            if execution_mode not in {"unknown", "not_started", "dry_run", "live_inference"}:
+                raise ValueError("invalid execution_mode")
+            payload["execution_mode"] = execution_mode
+        elif result is not None and result.get("mode") in {"dry_run", "live_inference"}:
+            payload["execution_mode"] = result["mode"]
         self._request(f"/v1/tasks/{task_id}/finish", "POST", payload)
 
     def retry_or_fail(self, task_id: str, error: str,
