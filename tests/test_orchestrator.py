@@ -53,6 +53,10 @@ class OrchestratorTests(unittest.TestCase):
         plan = validate_and_plan(workflow, ROSTER, {"max_parallel_agents": 2}).as_dict()
         self.assertEqual(plan["execution_waves"], [["audit", "r1"], ["r2"]])
 
+    def test_non_object_policy_is_rejected_as_validation_error(self):
+        with self.assertRaisesRegex(WorkflowValidationError, "policy must be an object"):
+            validate_and_plan(self.workflow(), ROSTER, policy=[])
+
     def test_wrong_specialist_is_rejected_even_if_enabled(self):
         workflow = self.workflow()
         workflow["steps"][0]["agent"] = "manager"
