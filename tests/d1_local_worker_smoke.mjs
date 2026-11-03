@@ -262,6 +262,13 @@ try {
       route_id: "groq:model-a", rejection_code: "http_429" },
   });
   assertStatus(rejected429, 200, "explicit 429 permits a new route attempt");
+  const replayRejected429 = await api(invocationPath, {
+    method: "POST",
+    body: { action: "reject", lease_token: invocationLease, invocation_id: invocationId,
+      route_id: "groq:model-a", rejection_code: "http_429" },
+  });
+  assertStatus(replayRejected429, 200, "lost reject response is idempotently replayable");
+  assert.equal(replayRejected429.payload.replay, true);
   const alternateRoute = await api(invocationPath, {
     method: "POST",
     body: { action: "start", lease_token: invocationLease, invocation_id: invocationId, route_id: "cerebras:model-b" },
@@ -272,6 +279,12 @@ try {
     body: { action: "settle", lease_token: invocationLease, invocation_id: invocationId },
   });
   assertStatus(settledInvocation, 200, "settle logical invocation");
+  const replaySettled = await api(invocationPath, {
+    method: "POST",
+    body: { action: "settle", lease_token: invocationLease, invocation_id: invocationId },
+  });
+  assertStatus(replaySettled, 200, "lost settle response is idempotently replayable");
+  assert.equal(replaySettled.payload.replay, true);
   const settledReplay = await api(invocationPath, { method: "POST", body: prepareBody });
   assertStatus(settledReplay, 409, "settled invocation cannot be replayed");
 
@@ -286,6 +299,12 @@ try {
     body: { action: "ambiguous", lease_token: invocationLease, invocation_id: secondInvocationId },
   });
   assertStatus(ambiguous, 200, "mark ambiguous provider outcome");
+  const replayAmbiguous = await api(invocationPath, {
+    method: "POST",
+    body: { action: "ambiguous", lease_token: invocationLease, invocation_id: secondInvocationId },
+  });
+  assertStatus(replayAmbiguous, 200, "lost ambiguous response is idempotently replayable");
+  assert.equal(replayAmbiguous.payload.replay, true);
   const ambiguousReplay = await api(invocationPath, {
     method: "POST",
     body: { ...prepareBody, step_key: "research:review" },
