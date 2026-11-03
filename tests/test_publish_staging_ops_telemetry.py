@@ -15,8 +15,8 @@ from scripts.publish_staging_ops_telemetry import (
 
 
 def write_fixture(root: Path, *, staging_id="231dd948-04a0-49e3-ad73-444f77d69477"):
-    (root / "config").mkdir(parents=True)
-    (root / ".github" / "workflows").mkdir(parents=True)
+    (root / "config").mkdir(parents=True, exist_ok=True)
+    (root / ".github" / "workflows").mkdir(parents=True, exist_ok=True)
     (root / "config" / "policy.json").write_text(json.dumps({
         "mode": "safe_dry_run",
         "allow_paid_model_calls": False,
@@ -71,7 +71,7 @@ class FakeD1Client:
     def __init__(self, *, account_id, database_id, api_token, changes=2, rows=None):
         self.configuration = (account_id, database_id, api_token)
         self.changes = changes
-        self.rows = rows or [
+        self.rows = rows if rows is not None else [
             {"event": "ci_health_snapshot", "created_at": "2026-11-03T12:40:00+00:00"},
             {"event": "kill_switch_snapshot", "created_at": "2026-11-03T12:40:00+00:00"},
         ]
