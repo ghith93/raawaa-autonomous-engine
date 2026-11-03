@@ -58,7 +58,7 @@ def valid_env(**changes):
         "GITHUB_WORKFLOW": "Engine CI",
         "ENGINE_CI_TEST_RESULT": "success",
         "ENGINE_CI_STAGING_MIGRATE_RESULT": "success",
-        "ENGINE_CI_STAGING_WORKER_RESULT": "success",
+        "ENGINE_CI_STAGING_WORKER_RESULT": "success",\n        "RAAWAA_ENGINE_LIVE_INFERENCE": "disabled",
     }
     env.update(changes)
     return env
