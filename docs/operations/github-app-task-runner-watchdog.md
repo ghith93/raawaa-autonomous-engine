@@ -75,3 +75,8 @@ If the dispatch fails, inspect Cloudflare Worker Cron Events for the sanitized f
 ## Disable or roll back
 
 Remove the watchdog Cron expression from wrangler.toml and revert the watchdog handler/import through a reviewed pull request. To disable without a code change, remove or change GITHUB_APP_WATCHDOG_ENABLED; the watchdog immediately returns disabled. Keep the 15-minute stale-lease recovery Cron intact.
+
+
+## Latest production verification — 2026-11-03 01:48 UTC
+
+Task Runner push run [#41562069768](https://github.com/ghith93/raawaa-autonomous-engine/actions/runs/41562069768) read the authenticated mobile-status endpoint successfully (HTTP 200). It verified the Worker Cron heartbeat at `2026-11-03T01:45:34.300Z`, with zero stale leases requeued and zero failures. The Python Task Runner batch succeeded with `queue_idle` and zero tasks processed. Watchdog readiness was `not_ready`; the missing settings are `GITHUB_APP_ID`, `GITHUB_APP_INSTALLATION_ID`, `GITHUB_APP_PRIVATE_KEY`, and `GITHUB_APP_WATCHDOG_ENABLED`. No dispatch intent or GitHub `workflow_dispatch` run was recorded. The fallback remains intentionally dormant until the operator completes the GitHub App setup and explicitly sets the Cloudflare Worker variable.
