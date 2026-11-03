@@ -124,6 +124,10 @@ def _baseline(root: Path) -> dict[str, dict[str, Any]]:
         tools = {}
     broker_exists = _exists(root, "engine/tool_broker.py") and bool(tools)
     worker_files = _exists(root, "engine/agent_runtime.py") and _exists(root, "engine/task_store.py")
+    bounded_remote_runner = (
+        _exists(root, "engine/remote_task_store.py")
+        and _exists(root, ".github/workflows/task-runner.yml")
+    )
     agent_note = str(agents.get("note", "")).lower()
 
     query_map = research.get("queries", {})
@@ -158,9 +162,9 @@ def _baseline(root: Path) -> dict[str, dict[str, Any]]:
             "evidence": f"{len(routes)} provider profiles found; {enabled_routes} enabled. This is configuration evidence, not proof of provider availability.",
         },
         "durable_execution": {
-            "status": "bounded_scheduled_runner" if worker_files else "not_verified",
+            "status": "bounded_scheduled_runner" if bounded_remote_runner else ("local_task_store_only" if _exists(root, "engine/task_store.py") else "not_verified"),
             "evidence_paths": ["engine/task_store.py", "engine/remote_task_store.py", ".github/workflows/task-runner.yml"],
-            "evidence": "A durable task ledger and bounded scheduled runner do not constitute an always-on process or guarantee 24/7 execution.",
+            "evidence": "The remote task store plus scheduled runner indicate bounded, resumable batch execution; they do not constitute an always-on process or guarantee 24/7 execution.",
         },
         "skill_security": {
             "status": "scanner_candidate_only" if _exists(root, "docs/research/skillspector-evaluation-2026-11-03.ar.md") else "not_implemented",
