@@ -81,6 +81,22 @@ class CliTests(unittest.TestCase):
         self.assertIn("safe dry-run", output.getvalue())
 
 
+    def test_audit_rejects_enabled_artemis_integration(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "config").mkdir()
+            for name in ("policy.json", "agents.json", "provider_profiles.json", "tool_permissions.json", "integrations.json"):
+                source = Path(cli.ROOT) / "config" / name
+                (root / "config" / name).write_text(source.read_text(encoding="utf-8"), encoding="utf-8")
+            integrations_path = root / "config" / "integrations.json"
+            integrations = json.loads(integrations_path.read_text(encoding="utf-8"))
+            integrations["integrations"]["google_artemis"]["enabled"] = True
+            integrations_path.write_text(json.dumps(integrations), encoding="utf-8")
+            output = io.StringIO()
+            with patch.object(cli, "ROOT", root), contextlib.redirect_stdout(output):
+                self.assertEqual(cli.audit(), 1)
+            self.assertIn("Google ARTEMIS must remain disabled", output.getvalue())
+
     def test_audit_rejects_budget_overrun_and_malformed_caps(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
