@@ -116,6 +116,8 @@ class WorkerExecutionTests(unittest.TestCase):
                            f"raawaa-engine:{self.task['id']}:step:primary-inference:v1")),
         )
         self.assertEqual(adapter.last_request.task_kind, "research")
+        self.assertEqual(adapter.last_request.step_key, "primary-inference:v1")
+        self.assertTrue(adapter.last_request.lease_token)
         self.assertIn("test topic", adapter.last_request.prompt)
         quota = manager.snapshot()[0]
         self.assertEqual(quota["daily_requests_used"], 1)
