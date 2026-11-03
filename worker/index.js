@@ -110,7 +110,8 @@ function normalizeResearchCandidate(item) {
     try { parsed = new URL(item.url); } catch { return null; }
     if (parsed.protocol !== "https:" || !parsed.hostname || parsed.username || parsed.password
         || parsed.hash || parsed.hostname === "localhost"
-        || parsed.hostname.endsWith(".local") || parsed.hostname.endsWith(".internal")) return null;
+        || parsed.hostname.endsWith(".local") || parsed.hostname.endsWith(".internal")
+        || parsed.hostname.endsWith(".localhost")) return null;
     const host = parsed.hostname.toLowerCase();
     // Research links are stored, never fetched; reject all IP-literal hosts conservatively.
     if (/^(?:\d{1,3}\.){3}\d{1,3}$/.test(host) || host.includes(":")) return null;
