@@ -1,4 +1,5 @@
 name: One-shot Groq Free inference Staging smoke
+# Re-run only when this one-shot workflow is deliberately revised.
 
 on:
   push:
