@@ -410,7 +410,7 @@ export default {
 
         let executionMode = current.execution_mode || "unknown";
         if (input.execution_mode !== undefined) {
-          if (!["unknown", "not_started", "dry_run", "live_inference"].includes(input.execution_mode)) {
+          if (!["unknown", "dry_run", "live_inference"].includes(input.execution_mode)) {
             return json({ error: "invalid_execution_mode" }, 400);
           }
           executionMode = input.execution_mode;

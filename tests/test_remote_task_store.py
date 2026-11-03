@@ -73,6 +73,15 @@ class RemoteTaskStoreTests(unittest.TestCase):
         self.assertEqual(payload["result"], {"safe": True, "mode": "dry_run"})
 
     @patch("engine.remote_task_store.urlopen")
+    def test_finish_rejects_not_started_execution_mode(self, open_url):
+        with self.assertRaisesRegex(ValueError, "invalid execution_mode"):
+            self.store.finish(
+                "task-1", "succeeded", {"safe": True},
+                lease_token="lease-1", execution_mode="not_started",
+            )
+        open_url.assert_not_called()
+
+    @patch("engine.remote_task_store.urlopen")
     def test_recovery_is_bounded_and_validated(self, open_url):
         open_url.return_value = FakeResponse({"requeued": 2, "failed": 1})
         self.assertEqual(self.store.recover_stale(), {"requeued": 2, "failed": 1})

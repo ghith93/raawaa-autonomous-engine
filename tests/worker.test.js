@@ -193,15 +193,17 @@ test("finish derives execution mode from the persisted result", async () => {
   assert.equal(update.values[3], "dry_run");
 });
 
-test("finish rejects invalid execution mode without mutating task", async () => {
-  const DB = dbMock();
-  const response = await worker.fetch(request("/v1/tasks/task-1/finish", {
-    method: "POST",
-    body: { lease_token: "lease-1", status: "succeeded", execution_mode: "shell" },
-  }), { DB, ENGINE_API_TOKEN: TOKEN });
-  assert.equal(response.status, 400);
-  assert.deepEqual(await response.json(), { error: "invalid_execution_mode" });
-  assert.equal(DB.calls.some(x => x.kind === "run" && x.sql.startsWith("UPDATE tasks")), false);
+test("finish rejects invalid and not-started execution modes without mutating task", async () => {
+  for (const execution_mode of ["shell", "not_started"]) {
+    const DB = dbMock();
+    const response = await worker.fetch(request("/v1/tasks/task-1/finish", {
+      method: "POST",
+      body: { lease_token: "lease-1", status: "succeeded", execution_mode },
+    }), { DB, ENGINE_API_TOKEN: TOKEN });
+    assert.equal(response.status, 400);
+    assert.deepEqual(await response.json(), { error: "invalid_execution_mode" });
+    assert.equal(DB.calls.some(x => x.kind === "run" && x.sql.startsWith("UPDATE tasks")), false);
+  }
 });
 
 test("recover endpoint is authenticated and bounded to stale task selection", async () => {

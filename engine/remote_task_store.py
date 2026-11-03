@@ -153,7 +153,7 @@ class RemoteTaskStore:
         if error is not None:
             payload["error"] = error
         if execution_mode is not None:
-            if execution_mode not in {"unknown", "not_started", "dry_run", "live_inference"}:
+            if execution_mode not in {"unknown", "dry_run", "live_inference"}:
                 raise ValueError("invalid execution_mode")
             payload["execution_mode"] = execution_mode
         elif result is not None and result.get("mode") in {"dry_run", "live_inference"}:
