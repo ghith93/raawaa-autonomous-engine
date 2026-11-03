@@ -46,7 +46,7 @@ The local D1/Workerd integration suite exercises concurrent per-task reservation
 The issue is not complete until:
 1. This branch is reviewed and merged.
 2. Migration 0006 is applied to the isolated Staging D1 database by the existing green-main CI migration gate.
-3. A Staging Worker is deployed with its own operator-managed `ENGINE_API_TOKEN`; no production Worker deployment is implied.
+3. The CI-gated `staging-worker-verify` job deploys an isolated Staging Worker after successful tests and Staging migrations, installs a per-run ephemeral `ENGINE_API_TOKEN` that is masked and not stored in GitHub, and runs remote verification. No production Worker deployment is implied.
 4. Remote Staging tests verify cross-runner concurrency, crash/restart persistence, duplicate settlement, ambiguous provider outcomes, and over-cap behavior.
 5. The authenticated mobile status surface reports the D1 monetary totals.
 6. Provider-side hard-stop semantics are independently verified. The Cloudflare spend-policy endpoint previously returned HTTP 404, so account-wide infrastructure spend blocking remains unverified.
