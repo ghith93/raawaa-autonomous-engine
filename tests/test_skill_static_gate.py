@@ -83,6 +83,28 @@ class SkillStaticGateTests(unittest.TestCase):
         self.assertEqual(result["status"], "BLOCKED")
         self.assertIn("BUNDLE_FILE_SIZE_LIMIT", {x["rule_id"] for x in result["manifest_errors"]})
 
+    def test_source_commit_mismatch_and_case_colliding_paths_block(self):
+        pinned = "a" * 40
+        result = scan_skill_bundle(
+            manifest(source_url="https://github.com/example/sample-skill/tree/" + pinned,
+                     source_commit="b" * 40),
+            {"SKILL.md": "Safe"},
+        )
+        self.assertIn("MANIFEST_SOURCE_COMMIT_MISMATCH", {x["rule_id"] for x in result["manifest_errors"]})
+        collision = scan_skill_bundle(
+            manifest(),
+            {"SKILL.md": "Safe", "skill.md": "Another file"},
+        )
+        self.assertIn("BUNDLE_PATH_COLLISION", {x["rule_id"] for x in collision["manifest_errors"]})
+
+    def test_oversized_manifest_is_blocked(self):
+        value = manifest()
+        value["notes"] = "x" * (16 * 1024)
+        result = scan_skill_bundle(value, {"SKILL.md": "Safe"})
+        self.assertEqual(result["status"], "BLOCKED")
+        self.assertIn("MANIFEST_SIZE_LIMIT", {x["rule_id"] for x in result["manifest_errors"]})
+
+
     def test_missing_license_or_entrypoint_never_becomes_approved(self):
         result = scan_skill_bundle(
             manifest(license_spdx="", entrypoint="missing.md"),
