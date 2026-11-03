@@ -4,8 +4,6 @@ This module deliberately does not create tasks, reorder the queue, claim work,
 or call models. It provides explainable operational triage using existing data.
 """
 from __future__ import annotations
-
-import json
 from collections import Counter
 from datetime import datetime, timezone
 from typing import Any
