@@ -267,12 +267,44 @@ def discover_repositories(queries=None, environ=None, max_per_query=5, max_queri
             academic_candidates.sort(key=lambda item: (item["published"] or "", item["citation_count"]), reverse=True)
         except ResearchDiscoveryError as exc:
             academic_unavailable = str(exc)
+    arxiv_candidates, arxiv_unavailable, arxiv_requests_made = [], None, 0
+    if arxiv_query:
+        try:
+            arxiv_fetch = arxiv_request_fn or _request_arxiv
+            # One bounded request per daily run; upstream guidance asks clients
+            # to leave at least three seconds between consecutive requests.
+            arxiv_requests_made = 1
+            payload = arxiv_fetch(arxiv_query, max_arxiv_results)
+            entries = payload.get("entries", []) if isinstance(payload, dict) else None
+            if not isinstance(entries, list):
+                raise ResearchDiscoveryError("arXiv result entries are malformed")
+            for entry in entries[:max_arxiv_results]:
+                if isinstance(entry, ET.Element):
+                    candidate = _normalize_arxiv_entry(entry, retrieved_at)
+                    if candidate is not None:
+                        arxiv_candidates.append(candidate)
+                elif isinstance(entry, dict):
+                    allowed = {"arxiv_id", "title", "url", "authors", "published", "updated",
+                               "categories", "primary_category", "doi"}
+                    candidate = {key: entry[key] for key in allowed if key in entry}
+                    if all(isinstance(candidate.get(key), str) and candidate[key].strip()
+                           for key in ("arxiv_id", "title", "url")):
+                        arxiv_candidates.append({
+                            **candidate, "source": "arxiv", "discovered_at": retrieved_at,
+                            "review_status": "unreviewed", "license_verified": False,
+                            "abstract_retrieved": False, "full_text_retrieved": False,
+                        })
+            arxiv_candidates.sort(key=lambda item: (item.get("published") or "", item["title"]), reverse=True)
+        except ResearchDiscoveryError as exc:
+            arxiv_unavailable = str(exc)
     return {
         "schema_version": 1, "discovery_only": True, "source": "github_public_repository_search",
         "retrieved_at": retrieved_at, "queries_attempted": len(query_items),
         "requests_made": requests_made, "academic_requests_made": academic_requests_made,
-        "total_requests_made": requests_made + academic_requests_made,
+        "total_requests_made": requests_made + academic_requests_made + arxiv_requests_made,
         "academic_candidates": academic_candidates, "academic_unavailable": academic_unavailable,
+        "arxiv_candidates": arxiv_candidates, "arxiv_unavailable": arxiv_unavailable,
+        "arxiv_requests_made": arxiv_requests_made,
         "generation_requests": 0, "code_execution": False,
         "installation_or_cloning": False, "candidate_count": len(ordered), "candidates": ordered,
         "unavailable": unavailable, "review_required": True,
