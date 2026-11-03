@@ -187,12 +187,13 @@ class D1MonetaryLedger:
         }
 
     def budget_status(self, daily_budget_usd: float, monthly_budget_usd: float,
-                      task_id: str | None = None, per_task_budget_usd: float = 0.0) -> dict[str, Any]:
+                      task_id: str | None = None, per_task_budget_usd: float | None = None) -> dict[str, Any]:
         status = self.status(task_id)
-        expected = (self.money_nanos(daily_budget_usd), self.money_nanos(monthly_budget_usd),
-                    self.money_nanos(per_task_budget_usd))
-        actual = (status["caps"]["daily_nanos"], status["caps"]["monthly_nanos"],
-                  status["caps"]["per_task_nanos"])
+        expected = [self.money_nanos(daily_budget_usd), self.money_nanos(monthly_budget_usd)]
+        actual = [status["caps"]["daily_nanos"], status["caps"]["monthly_nanos"]]
+        if per_task_budget_usd is not None:
+            expected.append(self.money_nanos(per_task_budget_usd))
+            actual.append(status["caps"]["per_task_nanos"])
         if expected != actual:
             raise D1MonetaryLedgerError("local monetary policy does not match the immutable D1 budget policy")
         per_task = status.get("per_task")
