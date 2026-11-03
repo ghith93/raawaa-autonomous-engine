@@ -65,14 +65,13 @@ def run() -> None:
         if row.get("task_id") == TASK_ID and row.get("provider") == PROVIDER
         and row.get("model") == MODEL and row.get("status") == "ambiguous"
     ]
-    if len(matches) != 1:
-        if not matches and int(ledger["snapshot"].get("task_pending_count", -1)) == 0:
-            print("The exact task has no unresolved reservation; no reconciliation action taken.")
-            return
-        raise RuntimeError("Unexpected unresolved state for the exact Groq Staging task; refusing mutation")
-    reservation_id = matches[0].get("reservation_id")
-    if not isinstance(reservation_id, str) or not reservation_id:
+    if len(matches) > 1:
+        raise RuntimeError("Multiple ambiguous reservations match the exact Groq Staging task; refusing mutation")
+    reservation_id = matches[0].get("reservation_id") if matches else None
+    if matches and (not isinstance(reservation_id, str) or not reservation_id):
         raise RuntimeError("Matching reservation omitted its durable ID")
+    if not matches and int(ledger["snapshot"].get("task_pending_count", -1)) != 0:
+        raise RuntimeError("The exact task has unresolved state but no matching ambiguous Groq reservation; refusing mutation")
 
     status, quota = api(
         "GET",
@@ -96,15 +95,16 @@ def run() -> None:
     if not (confirmed_403 and stopped):
         raise RuntimeError("The exact task does not have the required recorded HTTP 403 evidence")
 
-    status, settled = api("POST", "/v1/monetary-ledger", {
-        "action": "settle",
-        "reservation_id": reservation_id,
-        "actual_cost_nanos": 0,
-        "input_tokens": 0,
-        "output_tokens": 0,
-    })
-    if status != 200 or settled.get("settled") is not True:
-        raise RuntimeError("Could not reconcile the verified rejected request at zero spend")
+    if reservation_id:
+        status, settled = api("POST", "/v1/monetary-ledger", {
+            "action": "settle",
+            "reservation_id": reservation_id,
+            "actual_cost_nanos": 0,
+            "input_tokens": 0,
+            "output_tokens": 0,
+        })
+        if status != 200 or settled.get("settled") is not True:
+            raise RuntimeError("Could not reconcile the verified rejected request at zero spend")
 
     status, cooled = api("POST", "/v1/quota", {
         "action": "cool_down",
@@ -119,7 +119,7 @@ def run() -> None:
     if status != 200 or int(after.get("snapshot", {}).get("task_pending_count", -1)) != 0:
         raise RuntimeError("Reconciliation did not clear the exact task's unresolved reservation")
     print(json.dumps({
-        "status": "reconciled",
+        "status": "reconciled" if reservation_id else "already_settled_route_quarantined",
         "provider": PROVIDER,
         "model": MODEL,
         "http_status": 403,
