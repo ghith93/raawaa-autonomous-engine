@@ -1,0 +1,120 @@
+name: Cloudflare Billing Spend-Policy Inventory
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/cloudflare-billing-inventory.yml"
+      - "config/policy.json"
+      - "docs/operations.md"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: cloudflare-billing-inventory
+  cancel-in-progress: false
+
+jobs:
+  read-only-inventory:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    env:
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+    steps:
+      - name: Validate billing inventory credentials
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$CLOUDFLARE_ACCOUNT_ID" || { echo "CLOUDFLARE_ACCOUNT_ID is not configured."; exit 1; }
+          test -n "$CLOUDFLARE_API_TOKEN" || { echo "CLOUDFLARE_API_TOKEN is not configured."; exit 1; }
+          echo "Required secret names are present; values are not printed."
+
+      - name: Read Cloudflare spend policies without mutation
+        shell: bash
+        run: |
+          set -euo pipefail
+          response_file="$(mktemp)"
+          trap 'rm -f "$response_file"' EXIT
+          status="$(curl --silent --show-error             --output "$response_file"             --write-out "%{http_code}"             --header "Authorization: Bearer $CLOUDFLARE_API_TOKEN"             --header "Accept: application/json"             "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/billing/spend-policies")"
+          if [ "$status" != "200" ]; then
+            echo "Cloudflare billing inventory returned HTTP $status."
+            if [ "$status" = "401" ] || [ "$status" = "403" ]; then
+              echo "The current token likely lacks Account Billing Read permission. No mutation was attempted."
+            fi
+            exit 1
+          fi
+          python - "$response_file" <<'PY'
+          import json
+          import sys
+
+          with open(sys.argv[1], encoding="utf-8") as stream:
+              payload = json.load(stream)
+          if payload.get("success") is not True or not isinstance(payload.get("result"), list):
+              raise SystemExit("Cloudflare returned an unsuccessful or unexpected billing-policy response.")
+          policies = payload["result"]
+          summary = {
+              "inventory": "spend_policies",
+              "read_only": True,
+              "mutations": 0,
+              "policy_count": len(policies),
+              "enabled_workers_usage_block": any(
+                  item.get("product_id") == "workers"
+                  and item.get("action") == "usage_block"
+                  and item.get("enabled") is True
+                  for item in policies
+              ),
+              "enabled_durable_objects_usage_block": any(
+                  item.get("product_id") == "durable_objects"
+                  and item.get("action") == "usage_block"
+                  and item.get("enabled") is True
+                  for item in policies
+              ),
+              "note": "Detailed billing thresholds, balances, and identifiers are intentionally not printed because this repository is public."
+          }
+          print(json.dumps(summary, indent=2))
+          PY
+
+          subscriptions_file="$(mktemp)"
+          trap 'rm -f "$response_file" "$subscriptions_file"' EXIT
+          subscriptions_status="$(curl --silent --show-error \
+            --output "$subscriptions_file" \
+            --write-out "%{http_code}" \
+            --header "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+            --header "Accept: application/json" \
+            "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/subscriptions")"
+          if [ "$subscriptions_status" != "200" ]; then
+            echo "Cloudflare subscription inventory returned HTTP $subscriptions_status; fixed fees remain unverified."
+            exit 1
+          fi
+          python - "$subscriptions_file" <<'PY'
+          import json
+          import sys
+
+          with open(sys.argv[1], encoding="utf-8") as stream:
+              payload = json.load(stream)
+          if payload.get("success") is not True or not isinstance(payload.get("result"), list):
+              raise SystemExit("Cloudflare returned an unsuccessful or unexpected subscription response.")
+          subscriptions = payload["result"]
+          active = [
+              item for item in subscriptions
+              if item.get("state") not in {"Cancelled", "Failed", "Expired"}
+          ]
+          paid = [
+              item for item in active
+              if isinstance(item.get("price"), (int, float))
+              and item.get("price", 0) > 0
+          ]
+          print(json.dumps({
+              "inventory": "subscriptions",
+              "read_only": True,
+              "mutations": 0,
+              "subscription_count": len(subscriptions),
+              "active_subscription_count": len(active),
+              "active_paid_subscription_count": len(paid),
+              "fixed_fee_amounts_printed": False,
+              "note": "Detailed prices, plan names, identifiers, and billing dates are intentionally not printed because this repository is public. Review exact fixed fees privately in Cloudflare Billing."
+          }, indent=2))
+          PY

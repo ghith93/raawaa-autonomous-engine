@@ -65,7 +65,7 @@ class CliTests(unittest.TestCase):
         self.assertIn("safe dry-run", output.getvalue())
 
 
-    def test_audit_rejects_nonzero_or_malformed_per_task_budget(self):
+    def test_audit_rejects_budget_overrun_and_malformed_caps(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             (root / "config").mkdir()
@@ -74,12 +74,12 @@ class CliTests(unittest.TestCase):
                 (root / "config" / name).write_text(source.read_text(encoding="utf-8"), encoding="utf-8")
             policy_path = root / "config" / "policy.json"
             policy = json.loads(policy_path.read_text(encoding="utf-8"))
-            policy["per_task_budget_usd"] = 0.01
+            policy["monthly_budget_usd"] = 13.0
             policy_path.write_text(json.dumps(policy), encoding="utf-8")
             output = io.StringIO()
             with patch.object(cli, "ROOT", root), contextlib.redirect_stdout(output):
                 self.assertEqual(cli.audit(), 1)
-            self.assertIn("daily, monthly, and per-task", output.getvalue())
+            self.assertIn("monthly_budget_usd must equal the model monthly hard cap", output.getvalue())
 
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -94,7 +94,7 @@ class CliTests(unittest.TestCase):
             output = io.StringIO()
             with patch.object(cli, "ROOT", root), contextlib.redirect_stdout(output):
                 self.assertEqual(cli.audit(), 1)
-            self.assertIn("daily, monthly, and per-task", output.getvalue())
+            self.assertIn("per_task_budget_usd must be a finite non-negative number", output.getvalue())
 
 
     def test_audit_rejects_invalid_parallel_agent_policy(self):
@@ -226,15 +226,15 @@ class CliTests(unittest.TestCase):
             status = json.loads(output.getvalue())
             self.assertFalse(status["network_calls_enabled"])
             self.assertFalse(status["paid_calls_enabled"])
-            self.assertEqual(status["budgets"]["per_task_usd"], 0)
+            self.assertEqual(status["budgets"]["per_task_usd"], 0.2)
 
     def test_monetary_status_is_read_only_and_lists_ambiguous_reservations(self):
         with tempfile.TemporaryDirectory() as tmp:
             db_path = os.path.join(tmp, "engine.db")
             ledger = UsageLedger(db_path)
             ledger.reserve(
-                "groq", "openai/gpt-oss-20b", "research", 0.05, 1.0, 1.0,
-                task_id="task-test", per_task_budget_usd=0.10,
+                "groq", "openai/gpt-oss-20b", "research", 0.25, 0.4, 12.0,
+                task_id="task-test", per_task_budget_usd=0.30,
             )
             output = io.StringIO()
             with patch.dict(os.environ, {"RAAWAA_ENGINE_DB": db_path}, clear=True):
@@ -247,10 +247,11 @@ class CliTests(unittest.TestCase):
             self.assertEqual(result["usage"]["pending_reservations"], 1)
             self.assertEqual(result["pending_reservations"][0]["task_id"], "task-test")
             self.assertEqual(result["pending_reservations"][0]["provider"], "groq")
-            self.assertEqual(result["pending_reservations"][0]["estimated_cost_usd"], 0.05)
+            self.assertEqual(result["pending_reservations"][0]["estimated_cost_usd"], 0.25)
             self.assertEqual(result["per_task_usage"][0]["task_id"], "task-test")
             self.assertTrue(result["per_task_usage"][0]["over_budget"])
-            self.assertTrue(result["budget_status"]["daily_over_budget"])
+            self.assertFalse(result["budget_status"]["daily_over_budget"])
+            self.assertFalse(result["budget_status"]["monthly_over_budget"])
             self.assertIn("Legacy usage rows", result["per_task_attribution_note"])
             self.assertIn("Do not release", result["reconciliation_note"])
             self.assertNotIn("gsk_", output.getvalue())
