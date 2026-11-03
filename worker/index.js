@@ -428,7 +428,7 @@ export default {
         await env.DB.prepare(
           "INSERT INTO audit_log(task_id,event,details_json,created_at) VALUES(?,?,?,?)"
         ).bind(taskId, action === "retry" ? (status === "pending" ? "task_retry_scheduled" : "task_failed") : "task_" + status,
-          JSON.stringify({ error }), nowIso).run();
+          JSON.stringify({ error, execution_mode: executionMode }), nowIso).run();
         return json({ ok: true, status });
       } catch {
         return json({ error: "storage_unavailable" }, 503);
