@@ -390,6 +390,135 @@ def verify_operator_policy(run_tag: str) -> None:
             "Caller was able to change an operator-owned D1 monetary hard cap")
 
 
+
+def verify_task_invocation_lifecycle(run_tag: str) -> None:
+    """Exercise the durable invocation endpoint in isolated Staging without provider I/O."""
+    task_id = str(uuid.uuid4())
+    lease_token = str(uuid.uuid4())
+    replacement_lease = str(uuid.uuid4())
+    now = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+    expires = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(time.time() + 600))
+    idempotency_key = PREFIX + run_tag + "-invocation-" + task_id
+    sql_values = [task_id, idempotency_key, lease_token, now, expires]
+    for value in sql_values:
+        require("'" not in value, "Generated Staging invocation fixture contained an unsafe SQL character")
+    execute_staging_sql(
+        "INSERT INTO tasks(id,idempotency_key,task_type,title,payload_json,status,attempts,max_attempts,"
+        "created_at,updated_at,lease_token,lease_expires_at) VALUES("
+        f"'{task_id}','{idempotency_key}','system_audit','Invocation lifecycle verification','{{}}',"
+        f"'running',1,2,'{now}','{now}','{lease_token}','{expires}')"
+    )
+    base_path = f"/v1/tasks/{task_id}/invocations"
+    invocation_ids: list[str] = []
+    try:
+        prepare = {
+            "action": "prepare", "lease_token": lease_token,
+            "step_key": "research:primary", "task_kind": "research",
+        }
+        status, body = api("POST", base_path, prepare)
+        require(status == 201 and isinstance(body.get("invocation"), dict),
+                f"Staging invocation prepare failed (HTTP {status}, error={body.get('error')})")
+        primary = body["invocation"]
+        invocation_ids.append(primary["invocation_id"])
+        require(primary.get("status") == "prepared" and isinstance(primary.get("request_id"), str),
+                "Staging prepare omitted the durable request identity")
+        status, replay = api("POST", base_path, prepare)
+        require(status == 201 and replay.get("invocation", {}).get("invocation_id") == primary["invocation_id"] and
+                replay.get("invocation", {}).get("request_id") == primary["request_id"],
+                "Staging prepare replay did not return the original logical invocation identity")
+
+        review_prepare = {**prepare, "step_key": "research:review"}
+        status, review_body = api("POST", base_path, review_prepare)
+        require(status == 201 and isinstance(review_body.get("invocation"), dict),
+                f"Staging second step prepare failed (HTTP {status})")
+        review = review_body["invocation"]
+        invocation_ids.append(review["invocation_id"])
+        require(review["invocation_id"] != primary["invocation_id"] and
+                review["request_id"] != primary["request_id"],
+                "Distinct task steps collided on their durable invocation identity")
+
+        started, body = api("POST", base_path, {
+            "action": "start", "lease_token": lease_token,
+            "invocation_id": primary["invocation_id"], "route_id": "staging-test:route-a",
+        })
+        require(started == 200, "Staging invocation start failed")
+        duplicate_start, _ = api("POST", base_path, {
+            "action": "start", "lease_token": lease_token,
+            "invocation_id": primary["invocation_id"], "route_id": "staging-test:route-a",
+        })
+        require(duplicate_start == 409, "Staging invocation allowed a duplicate in-flight route attempt")
+
+        rejected, _ = api("POST", base_path, {
+            "action": "reject", "lease_token": lease_token,
+            "invocation_id": primary["invocation_id"], "route_id": "staging-test:route-a",
+            "rejection_code": "http_429",
+        })
+        require(rejected == 200, "Staging invocation did not accept an explicit route rejection")
+        reject_replay, reject_body = api("POST", base_path, {
+            "action": "reject", "lease_token": lease_token,
+            "invocation_id": primary["invocation_id"], "route_id": "staging-test:route-a",
+            "rejection_code": "http_429",
+        })
+        require(reject_replay == 200 and reject_body.get("replay") is True,
+                "Staging invocation reject transition was not idempotent after a lost response")
+
+        alternate, _ = api("POST", base_path, {
+            "action": "start", "lease_token": lease_token,
+            "invocation_id": primary["invocation_id"], "route_id": "staging-test:route-b",
+        })
+        require(alternate == 200, "Staging invocation did not permit a new route after explicit 429")
+        settled, _ = api("POST", base_path, {
+            "action": "settle", "lease_token": lease_token,
+            "invocation_id": primary["invocation_id"],
+        })
+        require(settled == 200, "Staging invocation settlement failed")
+        settle_replay, settle_body = api("POST", base_path, {
+            "action": "settle", "lease_token": lease_token,
+            "invocation_id": primary["invocation_id"],
+        })
+        require(settle_replay == 200 and settle_body.get("replay") is True,
+                "Staging invocation settlement replay was not idempotent")
+        settled_prepare, settled_body = api("POST", base_path, prepare)
+        require(settled_prepare == 409 and settled_body.get("error") == "invocation_replay_blocked",
+                "Staging invocation allowed replay after settlement")
+
+        ambiguous_start, _ = api("POST", base_path, {
+            "action": "start", "lease_token": lease_token,
+            "invocation_id": review["invocation_id"], "route_id": "staging-test:route-a",
+        })
+        require(ambiguous_start == 200, "Staging second-step invocation start failed")
+        ambiguous, _ = api("POST", base_path, {
+            "action": "ambiguous", "lease_token": lease_token,
+            "invocation_id": review["invocation_id"],
+        })
+        require(ambiguous == 200, "Staging invocation ambiguous state was not persisted")
+        ambiguous_replay, ambiguous_body = api("POST", base_path, {
+            "action": "ambiguous", "lease_token": lease_token,
+            "invocation_id": review["invocation_id"],
+        })
+        require(ambiguous_replay == 200 and ambiguous_body.get("replay") is True,
+                "Staging ambiguous transition was not idempotent after a lost response")
+        blocked, blocked_body = api("POST", base_path, review_prepare)
+        require(blocked == 409 and blocked_body.get("error") == "invocation_replay_blocked",
+                "Staging invocation allowed replay after an ambiguous provider outcome")
+
+        stale, stale_body = api("POST", base_path, {
+            "action": "prepare", "lease_token": replacement_lease,
+            "step_key": "research:stale-worker", "task_kind": "research",
+        })
+        require(stale == 409 and stale_body.get("error") == "lease_lost",
+                "Staging invocation endpoint accepted a stale task lease")
+    finally:
+        invocation_id_list = ",".join("'" + value.replace("'", "''") + "'" for value in invocation_ids)
+        if invocation_id_list:
+            execute_staging_sql(
+                "DELETE FROM task_model_invocation_attempts WHERE invocation_id IN (" + invocation_id_list + ")"
+            )
+            execute_staging_sql(
+                "DELETE FROM task_model_invocations WHERE invocation_id IN (" + invocation_id_list + ")"
+            )
+        execute_staging_sql("DELETE FROM tasks WHERE id='" + task_id + "'")
+
 def run() -> None:
     require(BASE_URL.startswith("https://"), "Staging Worker URL must use HTTPS")
     require(bool(TOKEN), "RAAWAA_ENGINE_STAGING_API_TOKEN is required")
@@ -417,6 +546,7 @@ def run() -> None:
     run_tag = str(uuid.uuid4())
     cleanup_test_reservations()
     verify_token_quota_concurrency(run_tag)
+    verify_task_invocation_lifecycle(run_tag)
 
     cap_test("daily", run_tag, "daily")
     cap_test("monthly", run_tag, "monthly")
@@ -553,7 +683,7 @@ def run() -> None:
             "Mobile status does not report the D1 token quota ledger as available")
 
     cleanup_test_reservations()
-    print("Staging D1 verification passed: token quota concurrency/settlement, global daily/monthly/task monetary caps, operator-policy tamper rejection, idempotency, pre-I/O release, ambiguous settlement, over-estimate quarantine, Worker redeploy persistence, and aggregate-only authenticated mobile status. No model provider was called.")
+    print("Staging D1 verification passed: token quota concurrency/settlement, durable multi-step invocation identities, lease fencing, explicit 429 route rotation, blocked ambiguous/settled replay, global daily/monthly/task monetary caps, operator-policy tamper rejection, idempotency, pre-I/O release, ambiguous settlement, over-estimate quarantine, Worker redeploy persistence, and aggregate-only authenticated mobile status. No model provider was called.")
 
 
 if __name__ == "__main__":
