@@ -246,11 +246,11 @@ try {
   assert.notEqual(secondStep.payload.invocation.invocation_id, prepared.payload.invocation.invocation_id);
 
   const invocationId = prepared.payload.invocation.invocation_id;
-  const started = await api(invocationPath, {
+  const invocationStarted = await api(invocationPath, {
     method: "POST",
     body: { action: "start", lease_token: invocationLease, invocation_id: invocationId, route_id: "groq:model-a" },
   });
-  assertStatus(started, 200, "start first route attempt");
+  assertStatus(invocationStarted, 200, "start first route attempt");
   const duplicateRoute = await api(invocationPath, {
     method: "POST",
     body: { action: "start", lease_token: invocationLease, invocation_id: invocationId, route_id: "groq:model-a" },
