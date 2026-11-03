@@ -516,6 +516,12 @@ def run() -> None:
             mobile["monetary_ledger"].get("monthly_budget_usd") == int(policy["monthly_budget_nanos"]) / 1_000_000_000,
             "Mobile status does not expose the operator-owned monetary caps")
     require("model_costs_usd" in mobile, "Mobile status omitted the model cost breakdown")
+    require(set(mobile.get("provider_usage", {}).keys()) == {"requests", "tokens"},
+            "Mobile status exposed route-level provider usage details")
+    require("by_provider" not in mobile.get("model_costs_usd", {}),
+            "Mobile status exposed provider-level model cost details")
+    require("unresolved" not in mobile.get("monetary_ledger", {}),
+            "Mobile status exposed reservation metadata")
     require(mobile.get("unavailable_metrics", {}).get("provider_usage") == "Available",
             "Mobile status does not report the D1 token quota ledger as available")
 
