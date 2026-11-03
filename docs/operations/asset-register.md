@@ -82,3 +82,11 @@ Google ARTEMIS is registered in `config/integrations.json`, but disabled and not
 ## Maintenance contract
 
 At every session start, refresh counts, account/connection status, app permissions, Activepieces project/flow/connection, automations, secret-name references, workflows, PR/CI, deployments and task/D1 status. Record each item as catalog-only, configured, connected, permission-verified, tested, merged, deployed, runtime-verified, blocked or unknown. Append dated evidence; never upgrade a status without proof.
+
+ 
+## Continuation update — 2026-11-03 23:12 UTC
+
+- New additive migration asset: `migrations/0008_task_retry_schedule.sql`. It adds nullable `tasks.next_attempt_at` and an index for due-task selection. Existing rows remain immediately eligible because NULL means no delay.
+- F2 implementation branch `fix/provider-not-called-backoff` updates Python SQLite task scheduling, the remote D1 task adapter, and the Control Worker claim/retry routes to share the same delayed-retry contract.
+- Status: implemented on an unmerged branch; CI is being corrected/re-run. Migration 0008 is not applied to any remote database. No Worker deployment has occurred from this branch.
+- Spec Kit remains a deferred optional developer tool; no dependency or runtime asset was added.
