@@ -104,7 +104,7 @@ def _request_json(
 
 
 def probe_artemis(environ: dict[str, str] | None = None) -> dict[str, Any]:
-    """Check daemon health and attached devices; never starts a mobile task."""
+    """List attached devices through one read-only API call; never starts a task dispatcher."""
     env = os.environ if environ is None else environ
     configured_url = env.get("ARTEMIS_BASE_URL", "").strip()
     if not configured_url:
@@ -137,7 +137,10 @@ def probe_artemis(environ: dict[str, str] | None = None) -> dict[str, Any]:
             "message": str(exc),
         }
 
-    raw_devices = devices_payload.get("devices", []) if isinstance(devices_payload, dict) else devices_payload
+    if isinstance(devices_payload, dict):
+        raw_devices = devices_payload.get("devices")
+    else:
+        raw_devices = devices_payload
     if not isinstance(raw_devices, list):
         return {
             "integration": "google_artemis",
