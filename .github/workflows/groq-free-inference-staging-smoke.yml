@@ -13,7 +13,8 @@ permissions:
   contents: read
 
 concurrency:
-  group: groq-free-inference-staging-smoke
+  # Serialize with the main CI Staging Worker verification deployment.
+  group: d1-staging-worker-verification
   cancel-in-progress: false
 
 jobs:
