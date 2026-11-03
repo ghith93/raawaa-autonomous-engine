@@ -2,6 +2,9 @@
 from __future__ import annotations
 
 import json
+import os
+import subprocess
+import sys
 import tempfile
 import unittest
 from datetime import datetime, timezone
@@ -93,6 +96,23 @@ class StagingOpsTelemetryTests(unittest.TestCase):
 
     def tearDown(self):
         self.temp.cleanup()
+
+    def test_script_bootstraps_repo_root_when_invoked_by_path(self):
+        env = {
+            key: value for key, value in os.environ.items()
+            if key not in {"CLOUDFLARE_API_TOKEN", "CLOUDFLARE_ACCOUNT_ID"}
+        }
+        result = subprocess.run(
+            [sys.executable, str(Path(__file__).resolve().parents[1] / "scripts" / "publish_staging_ops_telemetry.py")],
+            cwd=tempfile.gettempdir(),
+            env=env,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertNotIn("ModuleNotFoundError", result.stderr)
+        self.assertIn("Missing required telemetry environment settings", result.stdout)
+        self.assertEqual(result.returncode, 1)
 
     def test_builds_parameterized_staging_events_and_default_kill_switch(self):
         sql, params, summary = build_telemetry_statement(valid_env(), self.root, self.now)
