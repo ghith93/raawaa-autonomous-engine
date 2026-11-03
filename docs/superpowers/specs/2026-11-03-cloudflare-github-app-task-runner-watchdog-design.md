@@ -76,7 +76,6 @@ Use the GitHub REST workflow-runs endpoint for the fixed workflow filename and m
 GET /repos/ghith93/raawaa-autonomous-engine/actions/workflows/task-runner.yml/runs?branch=main&per_page=20
 
 - If any returned run is queued, in_progress, waiting, or requested, return active_run.
-- Find the latest run with event === schedule.
 - If any Task Runner run's created_at is no more than 10 minutes old, return recent_task_runner_run.
 - Otherwise call POST /repos/ghith93/raawaa-autonomous-engine/actions/workflows/task-runner.yml/dispatches with { "ref": "main" }.
 - Accept documented success responses 200 and 204.
@@ -85,7 +84,8 @@ GET /repos/ghith93/raawaa-autonomous-engine/actions/workflows/task-runner.yml/ru
 
 ### Audit and failure handling
 
-- Record only a sanitized audit event after an accepted dispatch: workflow filename, ref, scheduled time, and HTTP status.
+- Atomically reserve a sanitized D1 dispatch-intent row before the GitHub side effect; record a second sanitized audit event after an accepted dispatch.
+- Keep the 10-minute intent window even if the post-dispatch audit write fails, so a later watchdog tick cannot immediately issue a duplicate request.
 - On missing configuration, return disabled without network or D1 access.
 - On API/auth/configuration failure, expose only a stable error code and HTTP status; do not echo response body or exception text.
 - Let Cloudflare Cron report a failed invocation for real dispatch errors so the failure is visible in Cron Events.
@@ -111,7 +111,7 @@ GET /repos/ghith93/raawaa-autonomous-engine/actions/workflows/task-runner.yml/ru
 6. Before secrets are configured, the deployed watchdog performs no network calls and no D1 reads or writes.
 7. Before dispatch, an atomic D1 `task_runner_dispatch_intent` insert reserves a 10-minute dedupe window; a failed outcome audit cannot immediately cause a duplicate external dispatch.
 8. After App setup, a real watchdog-triggered workflow_dispatch run is observed and the Task Runner completes its bounded batch.
-8. A successful dispatch is not reported as proof of task execution; both stages require separate evidence.
+9. A successful dispatch is not reported as proof of task execution; both stages require separate evidence.
 
 ## Rollback
 
