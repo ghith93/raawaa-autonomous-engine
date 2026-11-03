@@ -264,6 +264,51 @@ Two additional projects were checked against their actual GitHub repository meta
 
 These ideas are references only. The engine must retain its own task ledger, quota controls, zero-budget default, dry-run mode, and approval policy. Do not import a complete second agent runtime or treat upstream security claims as a substitute for an independent threat review.
 
+## 11. Daily public-source discovery review — 2026-11-03 01:24 UTC
+
+### Discovery pipeline evidence
+
+The new [Scheduled Open-Source Research Discovery workflow](https://github.com/ghith93/raawaa-autonomous-engine/actions/runs/41559511028) ran successfully on main SHA `4800d2aa3fb9dcd31c7dd0aaffe2e4d1b1b5638e`. It completed six bounded GitHub repository searches and one Crossref query, yielding 26 public repository metadata records and 10 scholarly metadata records. The first-pass deterministic triage produced eight high-priority manual-review candidates. The run made no model calls, installed or executed no candidate code, and uploaded two bounded artifacts. D1 persistence was skipped because the explicit persistence variable was not enabled. The workflow retains artifacts for 30 days.
+
+The triage score is a discovery-priority heuristic, not a security, quality, or adoption verdict. Stars, recent commits and license metadata do not establish maintainer quality, license compliance, safe code, or compatibility. Every candidate remains `unreviewed`; automatic adoption is disabled.
+
+### Highest-value candidates and decisions
+
+| Candidate | Discovery signal | Relevant capability | Decision for Raawaa |
+|---|---|---|---|
+| [Omnigent](https://github.com/omnigent-ai/omnigent) | Apache-2.0; about 11.1k stars in the discovery snapshot; Python 3.12+ | Harness-neutral orchestration across Codex, Claude Code, Cursor, OpenCode, Pi and custom agents; mobile session UI; sandbox adapters; policy governance; MCP gateway. Telemetry is enabled by default. | **Borrow architecture patterns, do not deploy the platform.** Its remote sessions and harness abstraction are relevant, but the full server plus sandbox providers and model credentials add infrastructure and provider dependencies that conflict with the current free-first Cloudflare/GitHub design. Review telemetry opt-out and sandbox boundaries before any experiment. |
+| [CrewAI](https://github.com/crewAIInc/crewAI) | MIT; about 60.4k stars in the snapshot | Standalone Crews and deterministic Flows, task delegation and integrations. | **Do not add as a runtime.** It would duplicate the current task store, deterministic planner and specialist assignment. Reuse concepts only if a concrete workflow gap appears. |
+| [Swarms](https://github.com/kyegomez/swarms) | Apache-2.0; about 7.3k stars in the snapshot | Sequential, concurrent, graph and hierarchical orchestration; MCP deployment and many composition patterns. | **Do not add as a runtime.** The breadth is useful as a design catalogue, but it introduces a large agent framework and model/provider assumptions. Our existing policy and task ledger must remain the execution authority. |
+| [Workflow Builder](https://github.com/synergycodes/workflowbuilder) | Apache-2.0; about 427 stars in the snapshot | White-label React workflow editor, Temporal durability, per-node retry/timeout, live run history and human approvals. | **Defer.** It requires Temporal and Postgres for durable execution and is aimed at embedded workflow editors. The current mobile status surface and D1 ledger are a smaller fit; revisit only if visual workflow authoring becomes a real requirement. |
+| [JiuwenMemory](https://github.com/openJiuwen-ai/agent-memory) | Apache-2.0; about 76 stars in the snapshot | L0–L3 layered memory, asynchronous consolidation, graph memory, conflict handling, REST/MCP service and multiple storage adapters. | **Do not replace current memory.** The architecture is worth monitoring, but graph/vector retrieval and automatic memory extraction add storage and embedding/LLM dependencies. The existing SQLite memory remains cheaper and simpler until a measured retrieval failure justifies expansion. |
+| [Shipwright](https://github.com/app-vitals/shipwright) | MIT; early-stage in the snapshot | Plan → build → review → metrics delivery pipeline; GitHub Actions or self-hosted execution; layered unit/integration/smoke/E2E testing. | **Borrow its durable artifact and test-readiness discipline.** Do not adopt its Claude Code-centric execution dependency; the engine already uses reviewed GitHub PRs and CI. |
+| [LittleGuys](https://github.com/herval/littleguys) | MIT; Rust; small adoption signal | Lightweight coding-agent experimentation. | **Monitor only.** No demonstrated capability gap or mobile-first deployment advantage. |
+| [durable-workflow/workflow](https://github.com/durable-workflow/workflow) | MIT; PHP | Durable workflow engine. | **Do not adopt.** Language/runtime mismatch and no clear advantage over the existing D1 + Worker + Actions split. |
+
+### Research literature
+
+Crossref returned 10 records. Most were foundational or older multi-agent work with modest citation signals. The newest finance-related result was *A Parent-Child Multi-Agent Architecture for Real-Time Financial Fraud Detection Using Tool-Augmented Language Model Agents* (2026 SSRN DOI `10.2139/ssrn.7377878`); it is a preprint-level research lead, not evidence of production-grade arbitrage performance. The recent 2026 paper on multi-agent decision-conference agreement is relevant to reviewer consensus, but its initial citation count is zero. Neither paper justifies enabling financial execution or adding a new runtime.
+
+### Concrete adoption decisions
+
+1. Keep the existing D1 task ledger, Python worker, GitHub Actions runner, Cloudflare Worker and specialist roster as the only production control plane.
+2. Keep Omnigent as the strongest future reference for harness adapters, remote mobile sessions and policy-enforced sandboxing; do not import its dependency graph.
+3. Keep CrewAI and Swarms as architecture references only. Do not create parallel orchestrators.
+4. Keep JiuwenMemory as a future memory-evaluation candidate; do not introduce vector databases, Redis or model-based memory consolidation while all provider budgets are zero.
+5. Use Shipwright's plan/build/review artifact chain as a process reference, not a runtime dependency.
+6. Continue daily public-metadata discovery, but require manual license, security, maintenance, cost, mobile compatibility and architecture review before any adoption.
+
+### Sources
+
+- [Omnigent repository](https://github.com/omnigent-ai/omnigent) and [architecture overview](https://omnigent.ai/).
+- [CrewAI repository](https://github.com/crewAIInc/crewAI).
+- [Swarms repository](https://github.com/kyegomez/swarms).
+- [Workflow Builder repository](https://github.com/synergycodes/workflowbuilder).
+- [JiuwenMemory repository](https://github.com/openJiuwen-ai/agent-memory) and [release history](https://github.com/openJiuwen-ai/agent-memory/releases).
+- [Shipwright repository](https://github.com/app-vitals/shipwright).
+- [LittleGuys repository](https://github.com/herval/littleguys).
+- [Crossref public REST API](https://api.crossref.org/).
+
 ## Adoption rule
 
 No framework, agent, plugin, vector database or hosted provider is adopted because it is popular or feature-rich. It must solve a measured limitation, fit zero-spend or have a separately approved budget, preserve policy/quota enforcement, support bounded execution and auditability, have a maintained upstream and clear license, and pass isolated tests before production integration.
