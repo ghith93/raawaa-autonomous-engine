@@ -83,6 +83,15 @@ export async function handleMonetaryLedger(request, env, url) {
           !["estimated_cost_nanos","daily_budget_nanos","monthly_budget_nanos","per_task_budget_nanos"].every(key => safeInt(input[key]))) {
         return json({error:"invalid_reservation"},400);
       }
+      // Hard caps are operator-owned in D1, not caller-controlled. This prevents
+      // any runner holding the API token from silently raising the spend ceiling.
+      const policy = await env.DB.prepare("SELECT daily_budget_nanos,monthly_budget_nanos,per_task_budget_nanos FROM monetary_budget_policy WHERE policy_key='default' AND enabled=1").first();
+      if (!policy) return json({error:"budget_policy_unavailable"},503);
+      if (Number(policy.daily_budget_nanos) !== input.daily_budget_nanos ||
+          Number(policy.monthly_budget_nanos) !== input.monthly_budget_nanos ||
+          Number(policy.per_task_budget_nanos) !== input.per_task_budget_nanos) {
+        return json({error:"budget_policy_mismatch"},409);
+      }
       const existing = await env.DB.prepare("SELECT * FROM monetary_reservations WHERE idempotency_key=?").bind(input.idempotency_key).first();
       if (existing) return sameReservation(existing,input)
         ? json({reservation_id:existing.reservation_id,status:existing.status,replay:true})
