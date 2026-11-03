@@ -324,7 +324,7 @@ if __name__ == "__main__":
             task_store = TaskStore(db_path)
             task_store.enqueue("system_audit", "Executive audit", idempotency_key="executive-cli-test")
             output = io.StringIO()
-            with patch.dict(os.environ, {"RAAWAA_ENGINE_DB": str(db_path)}, clear=False):
+            with patch.dict(os.environ, {"RAAWAA_ENGINE_DB": str(db_path), "RAAWAA_ENGINE_API_URL": ""}, clear=False):
                 with patch("sys.argv", ["engine", "executive-status"]):
                     with contextlib.redirect_stdout(output):
                         self.assertEqual(cli.main(), 0)
