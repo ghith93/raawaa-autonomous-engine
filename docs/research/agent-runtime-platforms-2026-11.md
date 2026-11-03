@@ -93,7 +93,26 @@ However, the current compatibility boundary is significant:
 
 This is distinct from the Agents SDK: Python Workers answer **where existing Python code can execute**, while the Agents SDK supplies a Durable Object lifecycle and agent identity. Neither removes the need for an idempotent D1 task contract or proves reliable periodic execution by itself.
 
-## 4. Python agent frameworks
+## 4. Fresh GitHub discovery candidates — triaged 2026-11-03
+
+The discovery workflow [run #41551442181](https://github.com/ghith93/raawaa-autonomous-engine/actions/runs/41551442181) completed a discovery-only pass: six GitHub repository queries and one Crossref request, yielding 26 GitHub candidates and 10 academic records. The triage artifact made zero model calls, executed no candidate code, cloned/installed nothing, and set `automatic_adoption=false`. Its priority scores are search/metadata triage signals, not quality, security or production-readiness ratings.
+
+Four candidates with direct relevance were inspected at repository-metadata and README level:
+
+| Candidate | Verified signal | Potential value | Fit decision |
+|---|---|---|---|
+| [Omnigent](https://github.com/omnigent-ai/omnigent) | Apache-2.0 metadata; Python; actively updated; README labels project alpha; requires Python 3.12+ and Node.js 22+ for the full toolchain | Phone/browser control surface, mixed coding harnesses, policy enforcement, optional cloud sandboxes | **Monitor; do not install.** It is a meta-harness, not a lightweight library. Most hosted sandbox integrations require separate accounts/credentials and may incur cost; running it requires a persistent host and a second control plane. It could be reconsidered only if a genuinely free, approved host and a measured mobile-supervision gap are established. |
+| [Microsoft Agent Framework](https://github.com/microsoft/agent-framework) | MIT; Python/.NET; active; graph workflows, checkpoints, middleware, HITL and OpenTelemetry | Multi-agent workflow orchestration and restartable execution | **Continue the existing integration.** This repository already contains an isolated MAF checkpoint adapter and resume tests; adding a second framework install or replacing it would duplicate the current architecture. |
+| [Swarms](https://github.com/kyegomez/swarms) | Apache-2.0 metadata; Python; active; broad agent/team orchestration and MCP integrations | Rapid experiments with hierarchical, sequential and concurrent agent patterns | **Do not adopt.** It introduces another orchestration runtime, model-provider dependencies and a broad dependency surface without solving the current scheduler, D1 durability or explicit opt-in gates. Reuse patterns only after a benchmark shows a concrete win. |
+| [openJiuwen Agent Memory](https://github.com/openJiuwen-ai/agent-memory) | Apache-2.0 metadata; Python 3.11+; layered extraction/abstraction/association, hybrid retrieval and pluggable storage | More sophisticated long-term agent memory and retrieval evaluation | **Defer.** The project adds a memory service/indexing/storage subsystem. The engine already has D1 task/quota state and its own memory contracts; no measured retrieval-quality bottleneck justifies a second source of truth or an embedding/indexing service yet. |
+
+### Adoption gate
+
+No candidate is approved for dependency addition or production use by discovery score alone. Before adoption, verify the exact license file and transitive licenses, pin a release/commit, inspect dependency and network behavior, evaluate secrets/data handling, test on a disposable isolated branch, benchmark CPU/RAM/cold-start and provider spend, and compare against the existing runtime. A candidate that requires a paid model, paid sandbox, persistent VM, second queue, or second authoritative store is rejected under the current zero-spend architecture unless a measured benefit and separate approval justify it.
+
+This review does not change dependencies, runtime configuration, agent roster, permissions, secrets, production services, or model-call policy.
+
+## 5. Python agent frameworks
 
 ### Pydantic AI
 
@@ -113,7 +132,7 @@ Recommendation: borrow pending-write, per-thread isolation, explicit checkpoint 
 
 Agno documents team coordination modes, task decomposition, shared state, session history, memory, guardrails, human-in-the-loop, hooks, metrics and remote members. It is a broad alternative, not a small utility. Use its team/task examples as design references; prototype a missing capability independently rather than migrating the engine.
 
-## 3. Coding-agent projects
+## 6. Coding-agent projects
 
 ### Goose
 
@@ -125,7 +144,7 @@ OpenHands is better suited to a secured cloud Linux host than an Android tablet.
 
 Recommendation: consider it only if a verified persistent cloud VM with Docker and network isolation becomes available. Do not expose agent/automation ports publicly without authentication, TLS, firewalling and workspace isolation.
 
-## 6. Memory and retrieval
+## 7. Memory and retrieval
 
 ### Mem0
 
@@ -151,7 +170,7 @@ Qdrant supports dense and hybrid retrieval; Qdrant Edge offers embedded/offline 
 
 Decision: defer vector search. Start with indexed Markdown/SQLite/D1 retrieval and add Qdrant Edge only if a benchmark demonstrates semantic-recall gains at acceptable memory cost.
 
-## 7. Priority roadmap
+## 8. Priority roadmap
 
 | Priority | Work | Why | Gate |
 |---|---|---|---|
