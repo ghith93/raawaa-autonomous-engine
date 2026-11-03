@@ -45,6 +45,7 @@ h2{font-size:16px;margin:0 0 10px}.rows{display:grid;gap:8px}.item{display:flex;
 <section class="panel"><h2>Paper research events</h2><div id="paper" class="rows"></div></section>
 <section class="panel"><h2>Provider usage · D1</h2><div id="usage" class="rows"></div></section>
 <section class="panel"><h2>Recorded model inference costs · USD</h2><div id="modelCosts" class="rows"></div><p class="muted">Recorded provider costs only; external or unreported spend is not inferred.</p></section>
+<section class="panel"><h2>Durable monetary budget ledger · D1</h2><div id="monetaryLedger" class="rows"></div><p class="muted">Unresolved reservations count against all budget windows. A pending reservation is never released automatically.</p></section>
 <section class="panel"><h2>Latest market snapshot</h2><div id="snapshot" class="muted">—</div></section><section class="panel"><h2>Latest paper event</h2><div id="latest" class="muted">—</div></section><section class="panel"><h2>Telegram control readiness</h2><div id="telegramSchema" class="rows"></div><p class="muted">Schema presence only; webhook activation still requires operator-managed secrets and Telegram configuration.</p></section><section class="panel"><h2>Worker Cron heartbeat</h2><div id="workerCron" class="rows"></div></section><section class="panel"><h2>Task Runner watchdog</h2><div id="watchdog" class="rows"></div><p class="muted">Readiness only; secret values are never returned. Dispatch history is read from the D1 audit ledger.</p></section><section class="panel"><h2>GitHub CI health</h2><div id="ci" class="rows"></div></section>
 <section class="panel"><h2>Not yet connected to this status feed</h2><div id="gaps" class="rows"></div></section>
 <button id="refresh">Refresh</button><button class="secondary" id="disconnect">Disconnect</button>
@@ -89,6 +90,14 @@ async function load() {
     ["Total recorded", "$"+(Number(costs.total)||0).toFixed(6)],
     ...byProvider
   ],"No recorded model inference costs");
+  const money=data.monetary_ledger||{};
+  rows("monetaryLedger",money.available?[
+    ["Daily settled spend","$"+Number(money.daily_spent_usd||0).toFixed(9)],
+    ["Monthly settled spend","$"+Number(money.monthly_spent_usd||0).toFixed(9)],
+    ["Pending / ambiguous reserve","$"+Number(money.pending_reserved_usd||0).toFixed(9)],
+    ["Unresolved reservations",money.pending_count||0],
+    ["Quarantined routes",money.quarantined_routes||0]
+  ]:[],data.unavailable_metrics?.monetary_ledger||"D1 monetary ledger unavailable");
   $("snapshot").textContent=data.latest_market_snapshot?data.latest_market_snapshot.candidate_id+" · chain "+(data.latest_market_snapshot.chain_id??"—")+" · block "+(data.latest_market_snapshot.block_number??"—")+" · "+data.latest_market_snapshot.occurred_at:"No market snapshot recorded";
   $("latest").textContent=data.latest_paper_event?data.latest_paper_event.event_type+" · "+data.latest_paper_event.candidate_id+" · "+data.latest_paper_event.occurred_at:"No paper event recorded";
   rows("telegramSchema",[[ "Webhook receipt schema", data.telegram_webhook_schema?.status || "Unknown" ]],"Schema status unavailable");
@@ -134,7 +143,7 @@ export async function handleMobileStatus(request, env, url) {
   try {
     const [tasks, migrations, workerCron, watchdogEvents] = await Promise.all([
       env.DB.prepare("SELECT status,COUNT(*) AS count FROM tasks GROUP BY status").all(),
-      env.DB.prepare("SELECT version FROM schema_migrations WHERE version IN ('0003_durable_quota_ledger','0004_paper_event_ledger','0005_telegram_webhook_receipts')").all(),
+      env.DB.prepare("SELECT version FROM schema_migrations WHERE version IN ('0003_durable_quota_ledger','0004_paper_event_ledger','0005_telegram_webhook_receipts','0006_monetary_budget_ledger')").all(),
       env.DB.prepare("SELECT created_at,details_json FROM audit_log WHERE task_id IS NULL AND event='worker_cron_tick' ORDER BY created_at DESC LIMIT 1").first(),
       env.DB.prepare("SELECT event,created_at,details_json FROM audit_log WHERE task_id IS NULL AND event IN ('task_runner_dispatch_requested','task_runner_dispatch_intent') ORDER BY created_at DESC LIMIT 2").all(),
     ]);
@@ -188,6 +197,21 @@ export async function handleMobileStatus(request, env, url) {
         ? env.DB.prepare("SELECT route_id,COUNT(*) AS requests,COALESCE(SUM(tokens),0) AS tokens FROM quota_usage GROUP BY route_id ORDER BY route_id").all()
         : Promise.resolve({ results: [] }),
       env.DB.prepare("SELECT provider,COUNT(*) AS requests,COALESCE(SUM(input_tokens),0) AS input_tokens,COALESCE(SUM(output_tokens),0) AS output_tokens,COALESCE(SUM(cost_usd),0) AS cost_usd FROM model_usage GROUP BY provider ORDER BY provider").all(),
+      applied.has("0006_monetary_budget_ledger")
+        ? (async () => {
+            const current = new Date();
+            const day = new Date(Date.UTC(current.getUTCFullYear(), current.getUTCMonth(), current.getUTCDate())).toISOString();
+            const month = new Date(Date.UTC(current.getUTCFullYear(), current.getUTCMonth(), 1)).toISOString();
+            return env.DB.prepare(`
+              SELECT
+                (SELECT COALESCE(SUM(actual_cost_nanos),0) FROM monetary_reservations WHERE status='settled' AND settled_at>=?) AS daily_spent_nanos,
+                (SELECT COALESCE(SUM(actual_cost_nanos),0) FROM monetary_reservations WHERE status='settled' AND settled_at>=?) AS monthly_spent_nanos,
+                (SELECT COALESCE(SUM(estimated_cost_nanos),0) FROM monetary_reservations WHERE status IN ('reserved','in_flight','ambiguous')) AS pending_reserved_nanos,
+                (SELECT COUNT(*) FROM monetary_reservations WHERE status IN ('reserved','in_flight','ambiguous')) AS pending_count,
+                (SELECT COUNT(*) FROM monetary_route_quarantines) AS quarantined_routes
+            `).bind(day, month).first();
+          })()
+        : Promise.resolve(null),
     ]);
     return json({
       generated_at: new Date().toISOString(),
@@ -227,6 +251,16 @@ export async function handleMobileStatus(request, env, url) {
         })),
         source: "model_usage D1 ledger; recorded provider costs only",
       },
+      monetary_ledger: monetary ? {
+        available: true,
+        daily_spent_usd: Number(monetary.daily_spent_nanos || 0) / 1000000000,
+        monthly_spent_usd: Number(monetary.monthly_spent_nanos || 0) / 1000000000,
+        pending_reserved_usd: Number(monetary.pending_reserved_nanos || 0) / 1000000000,
+        pending_count: Number(monetary.pending_count || 0),
+        quarantined_routes: Number(monetary.quarantined_routes || 0),
+        unit: "USD",
+        source: "D1 monetary_reservations; integer nano-USD",
+      } : { available: false },
       unavailable_metrics: {
         last_scan: "Scan-run heartbeat is not recorded; the latest captured market snapshot is shown separately",
         source_freshness: "Not yet aggregated from market-data adapters",
@@ -235,6 +269,7 @@ export async function handleMobileStatus(request, env, url) {
         ...(!workerCronStatus.value ? { worker_cron: workerCronStatus.unavailable } : {}),
         paper_ledger: applied.has("0004_paper_event_ledger") ? "Available" : "Migration 0004 is not applied to this database",
         provider_usage: applied.has("0003_durable_quota_ledger") ? "Available" : "Migration 0003 is not applied to this database",
+        monetary_ledger: applied.has("0006_monetary_budget_ledger") ? "Available" : "Migration 0006 is not applied to this database",
       },
     });
   } catch {
