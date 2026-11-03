@@ -1,18 +1,22 @@
-"""Publish explicit, sanitized GitHub/Crossref scan-run telemetry."""
+"""Publish sanitized GitHub/Crossref scan telemetry directly to isolated Staging D1."""
 from __future__ import annotations
 
 import json
 import os
 import re
 import sys
+import tomllib
 from datetime import datetime, timezone
 from pathlib import Path
-from urllib.error import HTTPError, URLError
-from urllib.request import Request, urlopen
 
 ROOT = Path(__file__).resolve().parents[1]
-API_HOST = "raawaa-autonomous-engine-control.ghith-shikhkhaled.workers.dev"
-USER_AGENT = "RaawaaAutonomousEngine-Research/1.0 (+https://github.com/ghith93/raawaa-autonomous-engine)"
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+from engine.d1_client import D1Client, D1APIError, D1ConfigurationError
+
+STAGING_DATABASE_ID = "231dd948-04a0-49e3-ad73-444f77d69477"
+PRODUCTION_DATABASE_ID = "f0ffbed3-940f-488d-a7d1-31cbc5fbf742"
 
 
 class ScanTelemetryError(RuntimeError):
@@ -30,7 +34,7 @@ def _timestamp(value: str) -> str:
 
 def _reason_code(reason: object) -> str:
     text = reason if isinstance(reason, str) else ""
-    match = re.search(r"HTTP (\d{3})", text)
+    match = re.search(r"HTTP (\\d{3})", text)
     if match:
         return "http_" + match.group(1)
     if "rate_limit" in text or "rate limit" in text:
@@ -38,6 +42,24 @@ def _reason_code(reason: object) -> str:
     if "Timeout" in text:
         return "timeout"
     return "request_failed" if text else "source_unavailable"
+
+
+def _validate_staging_target(root: Path) -> None:
+    with (root / "wrangler.staging.toml").open("rb") as stream:
+        staging = tomllib.load(stream)
+    with (root / "wrangler.toml").open("rb") as stream:
+        production = tomllib.load(stream)
+    staging_bindings = staging.get("d1_databases", [])
+    production_bindings = production.get("d1_databases", [])
+    if len(staging_bindings) != 1 or len(production_bindings) != 1:
+        raise ScanTelemetryError("expected exactly one D1 binding in each Wrangler config")
+    stage, prod = staging_bindings[0], production_bindings[0]
+    if (staging.get("name") != "raawaa-autonomous-engine-staging"
+        or stage.get("database_name") != "raawaa-engine-staging"
+        or stage.get("database_id") != STAGING_DATABASE_ID
+        or prod.get("database_id") != PRODUCTION_DATABASE_ID
+        or stage.get("database_id") == prod.get("database_id")):
+        raise ScanTelemetryError("refusing scan telemetry write: Staging/production identity mismatch")
 
 
 def build_payload(snapshot: dict, environ: dict[str, str], now: datetime | None = None) -> dict:
@@ -63,26 +85,17 @@ def build_payload(snapshot: dict, environ: dict[str, str], now: datetime | None 
     crossref_requests = snapshot.get("academic_requests_made")
     github_unavailable = snapshot.get("unavailable")
     crossref_unavailable = snapshot.get("academic_unavailable")
-    if not isinstance(github_requests, int) or isinstance(github_requests, bool) or github_requests < 0:
-        raise ScanTelemetryError("invalid GitHub request count")
-    if not isinstance(crossref_requests, int) or isinstance(crossref_requests, bool) or crossref_requests < 0:
-        raise ScanTelemetryError("invalid Crossref request count")
-    if not isinstance(github_unavailable, dict):
-        raise ScanTelemetryError("invalid GitHub source result")
-    if crossref_unavailable is not None and not isinstance(crossref_unavailable, str):
-        raise ScanTelemetryError("invalid Crossref source result")
+    if type(github_requests) is not int or github_requests < 0 or type(crossref_requests) is not int or crossref_requests < 0:
+        raise ScanTelemetryError("invalid source request count")
+    if not isinstance(github_unavailable, dict) or (crossref_unavailable is not None and not isinstance(crossref_unavailable, str)):
+        raise ScanTelemetryError("invalid source result metadata")
     candidates = snapshot.get("candidates", [])
     academic = snapshot.get("academic_candidates", [])
     if not isinstance(candidates, list) or not isinstance(academic, list):
         raise ScanTelemetryError("invalid candidate collections")
     unavailable_count = len(github_unavailable) + int(bool(crossref_unavailable))
     requested_sources = int(github_requests > 0) + int(crossref_requests > 0)
-    if requested_sources != 2:
-        status = "failure"
-    elif unavailable_count:
-        status = "partial" if unavailable_count < 2 else "failure"
-    else:
-        status = "success"
+    status = "failure" if requested_sources != 2 or unavailable_count == 2 else "partial" if unavailable_count else "success"
     scan_id = f"{environ['GITHUB_RUN_ID']}:{environ['GITHUB_RUN_ATTEMPT']}"
     scan = {
         "scan_id": scan_id, "scan_type": "github_crossref",
@@ -102,48 +115,65 @@ def build_payload(snapshot: dict, environ: dict[str, str], now: datetime | None 
         ("crossref", crossref_requests, academic, bool(crossref_unavailable)),
     ):
         state = "unavailable" if unavailable or requests == 0 else "fresh"
-        observation = {
+        reason = crossref_unavailable if source == "crossref" else next(iter(github_unavailable.values()), None)
+        observations.append({
             "scan_id": scan_id, "source": source, "status": state,
             "observed_at": completed, "freshness_hours": 24,
             "request_count": requests, "item_count": len(items),
-            "reason_code": _reason_code(crossref_unavailable if source == "crossref" else next(iter(github_unavailable.values()), None)) if state == "unavailable" else None,
-        }
-        observations.append(observation)
+            "reason_code": _reason_code(reason) if state == "unavailable" else None,
+        })
     return {"scan": scan, "source_observations": observations}
 
 
-def publish(payload: dict, environ: dict[str, str], opener=None) -> dict:
-    api_url = environ.get("RAAWAA_ENGINE_API_URL", "").strip()
-    token = environ.get("RAAWAA_ENGINE_API_TOKEN", "").strip()
-    if api_url != "https://" + API_HOST or not token:
-        raise ScanTelemetryError("exact approved Engine Worker origin and API token are required")
-    headers = {
-        "Authorization": "Bearer " + token, "Content-Type": "application/json",
-        "Accept": "application/json", "User-Agent": USER_AGENT,
-    }
-    access_id = environ.get("RAAWAA_ENGINE_CF_ACCESS_CLIENT_ID", "").strip()
-    access_secret = environ.get("RAAWAA_ENGINE_CF_ACCESS_CLIENT_SECRET", "").strip()
-    if bool(access_id) != bool(access_secret):
-        raise ScanTelemetryError("Cloudflare Access credentials must be configured as a pair")
-    if access_id:
-        headers["CF-Access-Client-Id"] = access_id
-        headers["CF-Access-Client-Secret"] = access_secret
-    request = Request(api_url + "/v1/research/scan-runs",
-                      data=json.dumps(payload, separators=(",", ":")).encode("utf-8"),
-                      headers=headers, method="POST")
+def build_statements(payload: dict) -> list[dict]:
+    scan = payload["scan"]
+    scan_id = scan["scan_id"]
+    statements = [{
+        "sql": "INSERT INTO audit_log(task_id,event,details_json,created_at) SELECT NULL,'research_scan_completed',?,? WHERE NOT EXISTS (SELECT 1 FROM audit_log WHERE event='research_scan_completed' AND json_extract(details_json,'$.scan_id')=?)",
+        "params": [json.dumps(scan, separators=(",", ":")), scan["completed_at"], scan_id],
+    }]
+    for item in payload["source_observations"]:
+        statements.append({
+            "sql": "INSERT INTO audit_log(task_id,event,details_json,created_at) SELECT NULL,'research_source_observation',?,? WHERE NOT EXISTS (SELECT 1 FROM audit_log WHERE event='research_source_observation' AND json_extract(details_json,'$.scan_id')=? AND json_extract(details_json,'$.source')=?)",
+            "params": [json.dumps(item, separators=(",", ":")), item["observed_at"], scan_id, item["source"]],
+        })
+    return statements
+
+
+def publish(payload: dict, environ: dict[str, str], *, root: Path = ROOT, client_factory=None) -> dict:
+    _validate_staging_target(root)
+    account = environ.get("CLOUDFLARE_ACCOUNT_ID", "").strip()
+    token = environ.get("CLOUDFLARE_API_TOKEN", "").strip()
+    if not account or not token:
+        raise ScanTelemetryError("Cloudflare Staging D1 credentials are required")
+    client = (client_factory or D1Client)(
+        account_id=account, database_id=STAGING_DATABASE_ID, api_token=token
+    )
     try:
-        with (opener or urlopen)(request, timeout=20) as response:
-            body = response.read(16 * 1024 + 1)
-            if len(body) > 16 * 1024 or response.status not in (200, 201):
-                raise ScanTelemetryError("scan telemetry endpoint returned an invalid response")
-            result = json.loads(body.decode("utf-8"))
-            if not isinstance(result, dict) or result.get("ok") is not True or result.get("scan_id") != payload["scan"]["scan_id"]:
-                raise ScanTelemetryError("scan telemetry readback acknowledgement is invalid")
-            return result
-    except HTTPError as exc:
-        raise ScanTelemetryError(f"scan telemetry endpoint returned HTTP {exc.code}") from None
-    except (URLError, TimeoutError, OSError, json.JSONDecodeError, UnicodeDecodeError):
-        raise ScanTelemetryError("scan telemetry endpoint unavailable or returned invalid JSON") from None
+        health = client.query("SELECT 1 AS ok")
+        if not health.get("results") or health["results"][0].get("ok") != 1:
+            raise ScanTelemetryError("Staging D1 healthcheck failed")
+        results = client.batch(build_statements(payload))
+        inserted = sum(int(item.get("meta", {}).get("changes", 0)) for item in results)
+        rows = client.query(
+            "SELECT event,details_json FROM audit_log WHERE (event='research_scan_completed' OR event='research_source_observation') AND json_extract(details_json,'$.scan_id')=? ORDER BY event",
+            [payload["scan"]["scan_id"]],
+        ).get("results", [])
+        parsed = []
+        for row in rows:
+            try:
+                parsed.append((row.get("event"), json.loads(row.get("details_json", "{}"))))
+            except (TypeError, json.JSONDecodeError):
+                continue
+        scan_rows = [item for event, item in parsed if event == "research_scan_completed"]
+        source_rows = [item for event, item in parsed if event == "research_source_observation"]
+        if len(scan_rows) != 1 or len(source_rows) != 2 or {item.get("source") for item in source_rows} != {"github", "crossref"}:
+            raise ScanTelemetryError("Staging D1 readback did not confirm one scan and two source observations")
+        return {"status": "recorded", "scan_id": payload["scan"]["scan_id"],
+                "inserted_events": inserted, "verified_events": 3,
+                "database_id": STAGING_DATABASE_ID}
+    except (D1APIError, D1ConfigurationError) as exc:
+        raise ScanTelemetryError("Staging D1 telemetry write/readback failed: " + type(exc).__name__) from None
 
 
 def main() -> int:
@@ -152,9 +182,7 @@ def main() -> int:
         snapshot = json.loads(snapshot_path.read_text(encoding="utf-8"))
         payload = build_payload(snapshot, dict(os.environ))
         result = publish(payload, dict(os.environ))
-        print(json.dumps({"status": "recorded", "scan_id": result["scan_id"],
-                          "recorded_events": result["recorded_events"],
-                          "scan_status": payload["scan"]["status"]}, separators=(",", ":")))
+        print(json.dumps({key: result[key] for key in ("status","scan_id","inserted_events","verified_events","database_id")}, separators=(",", ":")))
         return 0
     except (OSError, json.JSONDecodeError, ScanTelemetryError, ValueError) as exc:
         print(f"Research scan telemetry failed: {type(exc).__name__}: {exc}")
