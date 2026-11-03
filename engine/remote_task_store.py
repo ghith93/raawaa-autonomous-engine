@@ -193,7 +193,7 @@ class RemoteTaskStore:
         status = response.get("status")
         if status not in {"pending", "failed"}:
             raise RemoteTaskStoreError("Remote task API returned an invalid retry status")
-        if retry_after_seconds > 0 and not isinstance(response.get("next_attempt_at"), str):
+        if status == "pending" and retry_after_seconds > 0 and not isinstance(response.get("next_attempt_at"), str):
             raise RemoteTaskStoreError(
                 "Remote Worker did not confirm the delayed retry schedule; task runner stopped"
             )
