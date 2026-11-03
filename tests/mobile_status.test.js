@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import worker from "../worker/index.js";
 
 const TOKEN = "mobile-status-test-token";
-function dbMock(migrationVersions=["0003_durable_quota_ledger","0004_paper_event_ledger","0005_telegram_webhook_receipts"], workerCron={created_at:"2026-11-03T00:00:00.000Z",details_json:JSON.stringify({cron:"*/15 * * * *",requeued:2,failed:1})}) {
+function dbMock(migrationVersions=["0003_durable_quota_ledger","0004_paper_event_ledger","0005_telegram_webhook_receipts"], workerCron={created_at:"2026-11-03T00:00:00.000Z",details_json:JSON.stringify({cron:"*/15 * * * *",requeued:2,failed:1})}, watchdogEvents=[]) {
   const calls=[];
   return {
     calls,
@@ -19,6 +19,7 @@ function dbMock(migrationVersions=["0003_durable_quota_ledger","0004_paper_event
           if(sql.includes("FROM paper_events")) return {results:[{event_type:"candidate_detected",count:4}]};
           if(sql.includes("FROM quota_usage")) return {results:[{route_id:"groq:gpt-oss-20b",requests:3,tokens:1200}]};
           if(sql.includes("FROM model_usage")) return {results:[{provider:"groq",requests:2,input_tokens:900,output_tokens:300,cost_usd:0.0125}]};
+          if(sql.includes("task_runner_dispatch_requested")) return {results:watchdogEvents};
           return {results:[]};
         },
       };
@@ -39,6 +40,7 @@ test("mobile status page is public static HTML and never embeds an API token",as
  assert.match(body,/Recorded model inference costs/);
  assert.match(body,/Telegram control readiness/);
  assert.match(body,/Worker Cron/);
+ assert.match(body,/Task Runner watchdog/);
  assert.match(body,/worker_cron/);
  assert.match(body,/model_costs_usd/);
  assert.match(body,/toFixed\(6\)/);
@@ -68,11 +70,31 @@ test("mobile status endpoint returns read-only D1 metrics and explicit unknowns"
  assert.deepEqual(body.model_costs_usd,{total:0.0125,by_provider:[{provider:"groq",requests:2,input_tokens:900,output_tokens:300,cost_usd:0.0125}],source:"model_usage D1 ledger; recorded provider costs only"});
  assert.deepEqual(body.telegram_webhook_schema,{available:true,status:"Migration 0005 applied; webhook activation remains separately gated"});
  assert.deepEqual(body.worker_cron,{last_seen_at:"2026-11-03T00:00:00.000Z",cron:"*/15 * * * *",requeued:2,failed:1});
+ assert.deepEqual(body.task_runner_watchdog,{ready:false,missing:["GITHUB_APP_ID","GITHUB_APP_INSTALLATION_ID","GITHUB_APP_PRIVATE_KEY","GITHUB_APP_WATCHDOG_ENABLED"],last_dispatch_requested:null,last_dispatch_intent_at:null});
  assert.equal(body.unavailable_metrics.worker_cron,undefined);
  assert.equal(body.unavailable_metrics.monetary_costs,undefined);
  assert.ok(DB.calls.every(call=>call.kind==="all"||call.kind==="first"));
 });
 
+
+
+test("mobile status exposes only watchdog readiness and sanitized dispatch audit metadata",async()=>{
+ const events=[
+  {event:"task_runner_dispatch_requested",created_at:"2026-11-03T01:10:00.000Z",details_json:JSON.stringify({workflow:"task-runner.yml",ref:"main",http_status:204,scheduled_time:"2026-11-03T01:06:00.000Z"})},
+  {event:"task_runner_dispatch_intent",created_at:"2026-11-03T01:09:59.000Z",details_json:JSON.stringify({workflow:"task-runner.yml",ref:"main",scheduled_time:"2026-11-03T01:06:00.000Z"})},
+ ];
+ const DB=dbMock(undefined,undefined,events);
+ const env={DB,ENGINE_API_TOKEN:TOKEN,GITHUB_APP_ID:"12345",GITHUB_APP_INSTALLATION_ID:"67890",GITHUB_APP_PRIVATE_KEY:"PRIVATE_KEY_NEVER_RETURN",GITHUB_APP_WATCHDOG_ENABLED:"enabled"};
+ const response=await worker.fetch(request("/v1/mobile/status"),env);
+ assert.equal(response.status,200);
+ const body=await response.json();
+ assert.deepEqual(body.task_runner_watchdog,{
+  ready:true,missing:[],
+  last_dispatch_requested:{event:"task_runner_dispatch_requested",created_at:"2026-11-03T01:10:00.000Z",workflow:"task-runner.yml",ref:"main",http_status:204},
+  last_dispatch_intent_at:"2026-11-03T01:09:59.000Z",
+ });
+ assert.equal(JSON.stringify(body).includes("PRIVATE_KEY_NEVER_RETURN"),false);
+});
 
 test("mobile status reports Worker Cron history as unknown when no heartbeat exists",async()=>{
  const DB=dbMock(undefined,null);
