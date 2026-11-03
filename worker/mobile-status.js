@@ -95,7 +95,7 @@ async function load() {
     ["Last invocation",cron.last_seen_at],
     ["Schedule",cron.cron],
     ["Expired leases requeued / failed",(cron.requeued??"—")+" / "+(cron.failed??"—")]
-  ]:[],"No Worker Cron heartbeat recorded yet");
+  ]:[],data.unavailable_metrics?.worker_cron || "No Worker Cron heartbeat recorded yet");
   await loadCi();
   rows("gaps",Object.entries(data.unavailable_metrics||{}),"No unavailable metrics");
   $("updated").textContent="Snapshot generated: "+data.generated_at;
@@ -129,6 +129,24 @@ export async function handleMobileStatus(request, env, url) {
       env.DB.prepare("SELECT created_at,details_json FROM audit_log WHERE task_id IS NULL AND event='worker_cron_tick' ORDER BY created_at DESC LIMIT 1").first(),
     ]);
     const applied = new Set((migrations.results || []).map(row => row.version));
+    const workerCronStatus = (() => {
+      const invalid = { value: null, unavailable: "Latest Worker Cron heartbeat metadata is invalid" };
+      if (!workerCron) return { value: null, unavailable: "No Worker Cron heartbeat has been recorded yet" };
+      if (typeof workerCron.created_at !== "string" || !Number.isFinite(Date.parse(workerCron.created_at))) return invalid;
+      let details;
+      try { details = JSON.parse(workerCron.details_json || "{}"); } catch { return invalid; }
+      if (!details || typeof details !== "object" || Array.isArray(details)) return invalid;
+      const count = value => Number.isInteger(value) && value >= 0 ? value : null;
+      return {
+        value: {
+          last_seen_at: workerCron.created_at,
+          cron: typeof details.cron === "string" && details.cron.length <= 100 ? details.cron : null,
+          requeued: count(details.requeued),
+          failed: count(details.failed),
+        },
+        unavailable: null,
+      };
+    })();
     const [paper, latest, snapshot, usage, modelCosts] = await Promise.all([
       applied.has("0004_paper_event_ledger")
         ? env.DB.prepare("SELECT event_type,COUNT(*) AS count FROM paper_events GROUP BY event_type ORDER BY event_type").all()
@@ -164,16 +182,7 @@ export async function handleMobileStatus(request, env, url) {
           ? "Migration 0005 applied; webhook activation remains separately gated"
           : "Migration 0005 is not applied to this database",
       },
-      worker_cron: workerCron ? (() => {
-        let details = {};
-        try { details = JSON.parse(workerCron.details_json || "{}"); } catch {}
-        return {
-          last_seen_at: workerCron.created_at,
-          cron: typeof details.cron === "string" ? details.cron : null,
-          requeued: Number.isInteger(details.requeued) ? details.requeued : null,
-          failed: Number.isInteger(details.failed) ? details.failed : null,
-        };
-      })() : null,
+      worker_cron: workerCronStatus.value,
       model_costs_usd: {
         total: (modelCosts.results || []).reduce((sum, row) => sum + (Number(row.cost_usd) || 0), 0),
         by_provider: (modelCosts.results || []).map(row => ({
@@ -190,7 +199,7 @@ export async function handleMobileStatus(request, env, url) {
         source_freshness: "Not yet aggregated from market-data adapters",
         ci_health: "Not yet ingested from GitHub Actions",
         kill_switch: "Engine policy state is not yet mirrored to the Worker",
-        ...(!workerCron ? { worker_cron: "No Worker Cron heartbeat has been recorded yet" } : {}),
+        ...(!workerCronStatus.value ? { worker_cron: workerCronStatus.unavailable } : {}),
         paper_ledger: applied.has("0004_paper_event_ledger") ? "Available" : "Migration 0004 is not applied to this database",
         provider_usage: applied.has("0003_durable_quota_ledger") ? "Available" : "Migration 0003 is not applied to this database",
       },
