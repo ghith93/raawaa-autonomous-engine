@@ -122,6 +122,14 @@ test("claim endpoint is authenticated and returns an empty queue safely", async 
   assert.deepEqual(await response.json(), { task: null });
 });
 
+test("claim preserves compatibility with an empty request body", async () => {
+  const response = await worker.fetch(request("/v1/tasks/claim", { method: "POST" }), {
+    DB: dbMock(), ENGINE_API_TOKEN: TOKEN,
+  });
+  assert.equal(response.status, 200);
+  assert.deepEqual(await response.json(), { task: null });
+});
+
 test("claim persists and returns a validated execution mode", async () => {
   const DB = dbMock({ normalClaim: {
     id: "task-1", status: "running", attempts: 1, execution_mode: "dry_run",
