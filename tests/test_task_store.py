@@ -27,6 +27,7 @@ class TaskStoreTests(unittest.TestCase):
         self.assertEqual(result["status"], "succeeded")
         task = self.store.list_tasks()[0]
         self.assertEqual(task["status"], "succeeded")
+        self.assertEqual(task["execution_mode"], "dry_run")
         self.assertIn("dry_run", task["result_json"])
         self.assertIn('"agent_id": "researcher"', task["result_json"])
         self.assertIn('"execution_started": false', task["result_json"])
@@ -35,6 +36,32 @@ class TaskStoreTests(unittest.TestCase):
         self.store.enqueue("shell", "Do arbitrary shell work")
         result = run_once(self.store)
         self.assertEqual(result["status"], "blocked")
+
+    def test_claim_records_selected_execution_mode(self):
+        task = self.store.enqueue("research_brief", "Mode tracking")
+        claimed = self.store.claim_next(execution_mode="live_inference")
+        self.assertEqual(claimed["id"], task["id"])
+        self.assertEqual(claimed["execution_mode"], "live_inference")
+        self.assertEqual(self.store.list_tasks()[0]["execution_mode"], "live_inference")
+        with self.assertRaises(ValueError):
+            self.store.claim_next(execution_mode="shell")
+
+    def test_existing_database_rows_migrate_to_unknown_mode(self):
+        legacy_path = Path(self.tmp.name) / "legacy.db"
+        with sqlite3.connect(legacy_path) as db:
+            db.execute("""CREATE TABLE tasks (
+                id TEXT PRIMARY KEY, idempotency_key TEXT NOT NULL UNIQUE,
+                task_type TEXT NOT NULL, title TEXT NOT NULL, payload_json TEXT NOT NULL,
+                status TEXT NOT NULL CHECK(status IN ('pending','running','succeeded','failed','blocked')),
+                attempts INTEGER NOT NULL DEFAULT 0, max_attempts INTEGER NOT NULL DEFAULT 2,
+                created_at TEXT NOT NULL, updated_at TEXT NOT NULL, result_json TEXT,
+                error TEXT, lease_token TEXT, lease_expires_at TEXT
+            )""")
+            db.execute("""INSERT INTO tasks
+                (id,idempotency_key,task_type,title,payload_json,status,attempts,max_attempts,created_at,updated_at)
+                VALUES ('legacy','legacy-key','research_brief','Legacy','{}','succeeded',1,2,'2026-01-01','2026-01-01')""")
+        migrated = TaskStore(legacy_path)
+        self.assertEqual(migrated.list_tasks()[0]["execution_mode"], "unknown")
 
     def test_claim_empty_queue(self):
         self.assertIsNone(self.store.claim_next())
