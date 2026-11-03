@@ -1,5 +1,18 @@
 -- Durable, provider-agnostic monetary budget reservations and settlements.
 -- All amounts are integer nano-USD; unresolved reservations remain charged across windows.
+-- The Worker API cannot raise these operator-approved hard caps per request.
+CREATE TABLE IF NOT EXISTS monetary_budget_policy (
+  policy_key TEXT PRIMARY KEY CHECK(policy_key = 'default'),
+  daily_budget_nanos INTEGER NOT NULL CHECK(daily_budget_nanos >= 0),
+  monthly_budget_nanos INTEGER NOT NULL CHECK(monthly_budget_nanos >= 0),
+  per_task_budget_nanos INTEGER NOT NULL CHECK(per_task_budget_nanos >= 0),
+  enabled INTEGER NOT NULL DEFAULT 1 CHECK(enabled IN (0,1)),
+  updated_at TEXT NOT NULL
+);
+INSERT OR IGNORE INTO monetary_budget_policy(
+  policy_key,daily_budget_nanos,monthly_budget_nanos,per_task_budget_nanos,enabled,updated_at
+) VALUES('default',400000000,12000000000,200000000,1,CURRENT_TIMESTAMP);
+
 CREATE TABLE IF NOT EXISTS monetary_reservations (
   reservation_id TEXT PRIMARY KEY,
   idempotency_key TEXT NOT NULL UNIQUE,
