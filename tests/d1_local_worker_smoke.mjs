@@ -181,6 +181,8 @@ try {
   assertStatus(status, 200, "mobile status must query migrated D1");
   assert.equal(status.payload.unavailable_metrics.paper_ledger, "Available");
   assert.equal(status.payload.unavailable_metrics.provider_usage, "Available");
+  assert.equal(status.payload.execution_modes.available, true);
+  assert.equal(status.payload.execution_modes.counts.unknown, 0);
 
   const taskPayload = {
     task_type: "system_audit",
@@ -195,22 +197,33 @@ try {
   assertStatus(duplicate, 200, "idempotent task replay");
   assert.equal(duplicate.payload.task.id, enqueued.payload.task.id);
   assert.equal(duplicate.payload.created, false);
+  assert.equal(enqueued.payload.task.execution_mode, "not_started");
 
-  const claimed = await api("/v1/tasks/claim", { method: "POST", body: {} });
+  const claimed = await api("/v1/tasks/claim", {
+    method: "POST", body: { execution_mode: "dry_run" },
+  });
   assertStatus(claimed, 200, "task claim");
   assert.equal(claimed.payload.task.id, enqueued.payload.task.id);
   assert.equal(typeof claimed.payload.lease_token, "string");
+  assert.equal(claimed.payload.task.execution_mode, "dry_run");
 
   const finished = await api("/v1/tasks/" + enqueued.payload.task.id + "/finish", {
     method: "POST",
     body: {
       lease_token: claimed.payload.lease_token,
       status: "succeeded",
-      result: { local_d1_verified: true },
+      result: { mode: "dry_run", local_d1_verified: true },
     },
   });
   assertStatus(finished, 200, "task finish");
   assert.equal(finished.payload.status, "succeeded");
+  const taskReadback = await api("/v1/tasks?limit=10");
+  assertStatus(taskReadback, 200, "execution mode task readback");
+  const persistedTask = taskReadback.payload.tasks.find(task => task.id === enqueued.payload.task.id);
+  assert.equal(persistedTask.execution_mode, "dry_run");
+  status = await api("/v1/mobile/status");
+  assertStatus(status, 200, "mobile execution-mode aggregate");
+  assert.equal(status.payload.execution_modes.counts.dry_run, 1);
 
   const staleLease = await api("/v1/tasks/" + enqueued.payload.task.id + "/heartbeat", {
     method: "POST",
