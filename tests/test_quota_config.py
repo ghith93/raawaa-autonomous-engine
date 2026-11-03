@@ -1,6 +1,7 @@
 import json
 import tempfile
 import unittest
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from engine.quota_config import load_provider_profile_registry
@@ -70,6 +71,23 @@ class ProviderProfileConfigTests(unittest.TestCase):
         self.assertTrue(enabled.enabled)
         self.assertTrue(enabled.profile.enabled)
         self.assertTrue(enabled.ready_for_routing)
+
+    def test_stale_future_and_timezone_naive_verification_are_not_route_ready(self):
+        data = json.loads(self.source.read_text(encoding="utf-8"))
+        route = data["routes"][0]
+        route["enabled"] = True
+        now = datetime.now(timezone.utc)
+        for label, verified_at in (
+            ("stale", now - timedelta(days=8)),
+            ("future", now + timedelta(days=1)),
+            ("naive", now.replace(tzinfo=None)),
+        ):
+            with self.subTest(label=label):
+                route["verified_at"] = verified_at.isoformat()
+                self.path.write_text(json.dumps(data), encoding="utf-8")
+                entry = load_provider_profile_registry(self.path)[0]
+                self.assertFalse(entry.verification_is_current)
+                self.assertFalse(entry.ready_for_routing)
 
     def test_registry_rejects_duplicate_ids(self):
         data = json.loads(self.source.read_text(encoding="utf-8"))
