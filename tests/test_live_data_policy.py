@@ -192,6 +192,15 @@ class LiveDataPolicyTests(unittest.TestCase):
         self.assertEqual(reason, "payload_schema_invalid")
 
 
+    def test_public_customer_satisfaction_research_is_not_blocked(self):
+        payload = self.valid_payload()
+        payload["topic"] = "Analyze customer satisfaction trends in public product reviews"
+        allowed, reason = validate_live_payload(
+            "research_brief", "Public review analysis", payload, POLICY
+        )
+        self.assertTrue(allowed)
+        self.assertEqual(reason, "allowed")
+
     def test_publicly_disclosed_ingredient_research_without_private_markers_is_allowed(self):
         payload = self.valid_payload()
         payload["topic"] = "Compare publicly disclosed shampoo ingredient lists"
