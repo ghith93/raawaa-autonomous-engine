@@ -7,6 +7,7 @@ import unittest
 ROOT = Path(__file__).resolve().parents[1]
 MIGRATION = ROOT / "migrations" / "0001_initial.sql"
 MIGRATION_2 = ROOT / "migrations" / "0002_research_candidates.sql"
+MIGRATION_8 = ROOT / "migrations" / "0008_task_retry_schedule.sql"
 
 
 class D1MigrationContractTests(unittest.TestCase):
@@ -84,6 +85,37 @@ class D1MigrationContractTests(unittest.TestCase):
                  "unknown", 0, 2, "2026-01-01T00:00:00Z",
                  "2026-01-01T00:00:00Z")
             )
+
+    def test_task_retry_schedule_migration_is_additive_and_preserves_existing_tasks(self):
+        self.db.executescript(self.sql)
+        self.db.execute("""INSERT INTO tasks
+            (id,idempotency_key,task_type,title,payload_json,status,attempts,max_attempts,created_at,updated_at)
+            VALUES ('legacy-task','legacy-key','research_brief','Legacy','{}','pending',0,2,'2026-01-01','2026-01-01')""")
+        migration = MIGRATION_8.read_text(encoding="utf-8")
+        self.db.executescript(migration)
+        columns = {row[1] for row in self.db.execute("PRAGMA table_info(tasks)")}
+        self.assertIn("next_attempt_at", columns)
+        self.assertIsNone(self.db.execute(
+            "SELECT next_attempt_at FROM tasks WHERE id='legacy-task'"
+        ).fetchone()[0])
+        self.db.execute(
+            "UPDATE tasks SET next_attempt_at='2999-01-01T00:00:00Z' WHERE id='legacy-task'"
+        )
+        self.assertEqual(self.db.execute(
+            "SELECT COUNT(*) FROM tasks WHERE status='pending' AND (next_attempt_at IS NULL OR next_attempt_at<=?)",
+            ("2026-01-01T00:00:00Z",),
+        ).fetchone()[0], 0)
+        self.db.execute(
+            "UPDATE tasks SET next_attempt_at='2000-01-01T00:00:00Z' WHERE id='legacy-task'"
+        )
+        self.assertEqual(self.db.execute(
+            "SELECT COUNT(*) FROM tasks WHERE status='pending' AND (next_attempt_at IS NULL OR next_attempt_at<=?)",
+            ("2026-01-01T00:00:00Z",),
+        ).fetchone()[0], 1)
+        version = self.db.execute(
+            "SELECT version FROM schema_migrations WHERE version='0008_task_retry_schedule'"
+        ).fetchone()
+        self.assertEqual(version, ("0008_task_retry_schedule",))
 
     def test_operations_and_usage_constraints(self):
         self.db.executescript(self.sql)
