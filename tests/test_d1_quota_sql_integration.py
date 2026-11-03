@@ -39,6 +39,7 @@ def reservation_params(
     *,
     route_id: str = "groq:primary:model",
     task_id: str = "task-concurrent",
+    settlement_key: str = "integration-settlement-proof",
     estimated_tokens: int = 10,
     daily_requests: int = 3,
     daily_tokens: int = 100,
@@ -54,7 +55,7 @@ def reservation_params(
     minute = now - timedelta(minutes=1)
     stamp = iso(now)
     return [
-        route_id, estimated_tokens, stamp, task_id,
+        route_id, estimated_tokens, stamp, task_id, settlement_key,
         route_id, stamp,
         route_id, iso(day), daily_requests,
         route_id, iso(day), estimated_tokens, daily_tokens,
