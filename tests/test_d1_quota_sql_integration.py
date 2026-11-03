@@ -70,7 +70,7 @@ def reservation_params(
 def worker_cooldown_sql() -> str:
     source = (ROOT / "worker" / "quota.js").read_text(encoding="utf-8")
     match = re.search(
-        r'const cooldown = await env\.DB\.prepare\("(INSERT INTO quota_cooldowns.*?)"\\)\.bind\(',
+        r'const cooldown = await env\.DB\.prepare\("(INSERT INTO quota_cooldowns.*?)"\)\.bind\(',
         source,
     )
     if match is None:
