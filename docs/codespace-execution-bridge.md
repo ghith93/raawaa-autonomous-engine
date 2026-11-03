@@ -34,8 +34,8 @@ GitHub-hosted Actions remains responsible for its existing task classes. If the 
 
 1. For the first increment, avoid a schema migration: reserve the exact task types `codespace_inspect` and `codespace_test`, and route them through dedicated endpoints. Keep D1 as the only queue.
 2. Add atomic claims filtered by the explicit task-type allowlist. The existing Actions claim must exclude these types; the Codespace claim must include only these types. If additional executor classes later require a broader model, introduce an additive executor field through a separately reviewed migration.
-3. Give the bridge a distinct credential and Worker authorization scope. Do not reuse or expose `ENGINE_API_TOKEN`, quota-admin credentials, GitHub PATs, provider keys, or production secrets to the bridge.
-4. Use short-lived credentials where supported, rotation/revocation, constant-time authentication, bounded request bodies, rate limits, and metadata-only logs.
+3. Give the bridge a distinct high-entropy credential (minimum 32 characters) and Worker authorization scope. The Codespace principal has preflight, claim, heartbeat, and finish only; no retry/recovery/list/admin endpoints. Do not reuse or expose `ENGINE_API_TOKEN`, quota-admin credentials, GitHub PATs, provider keys, or production secrets to the bridge.
+4. Use a distinct credential with documented rotation/revocation (deleting the Worker secret is the server-side kill switch), constant-time authentication, bounded request bodies, and metadata-only logs. The current Worker bearer credential is long-lived until rotated; do not describe it as short-lived.
 5. Require lease-token fencing on heartbeat, completion, cancellation, and retry. Never accept results from expired or superseded leases.
 6. Do not accept arbitrary shell strings from task payloads. Use a fixed operation registry with schema-validated arguments and explicit per-operation permissions.
 
