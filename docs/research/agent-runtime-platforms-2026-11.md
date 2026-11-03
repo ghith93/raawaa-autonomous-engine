@@ -180,6 +180,31 @@ Decision: defer vector search. Start with indexed Markdown/SQLite/D1 retrieval a
 | P4 | Improve memory retrieval using indexed Markdown/SQLite/D1 | Lower token use and better context selection | Retrieval benchmark before vector DB |
 | P5 | Evaluate Qdrant Edge / Letta / Graphiti only against a demonstrated gap | Avoid premature infrastructure | Measured retrieval or temporal-memory need |
 
+## 9. Additional self-hosted and GitHub-native agent platforms — reviewed 2026-11-03
+
+This pass compared three actively discussed platforms against the engine's existing D1 task ledger, Cloudflare control Worker, bounded GitHub Actions consumer, quota policy, and mobile-only operating constraint. Repository metadata and upstream setup/release documentation were checked; no code was cloned, installed, or executed.
+
+| Platform | Verified upstream facts | Relevant capability | Main mismatch | Decision |
+|---|---|---|---|---|
+| [Optio](https://github.com/jonwiggins/optio) | MIT, TypeScript, 1,086 stars / 125 forks at review time; pushed 2026-11-02; latest GitHub release v0.23.0 on 2026-10-29. | Work feed for agent tasks/jobs, schedules and event triggers; Git worktrees; CI/review/resume; persistent agents; native iOS and Android clients; paired-machine execution. | Control plane requires Kubernetes, PostgreSQL and Redis. The local quick-start requires Docker Desktop with Kubernetes, Node.js, pnpm, Helm and kubectl. Native mobile clients do not remove the server/cluster requirement. | **Do not adopt now.** Strong reference for mobile operations UX, work-feed design and resumable PR workflows. Infrastructure is incompatible with the current no-PC / zero-spend baseline unless a suitable persistent cluster is later verified. |
+| [SwarmClaw](https://github.com/swarmclawai/swarmclaw) | MIT, TypeScript, 703 stars / 144 forks; repository last pushed 2026-06-30; latest GitHub release v1.9.40 was published 2026-06-30. | Self-hosted agent runtime with durable memory, MCP, skills, schedules, delegation, structured sessions and 24+ provider/CLI integrations; publishes ARM64 container images. | Requires a persistent Node.js host (Node 22.6+); Docker is recommended for sandboxing. The site describes a broad provider/runtime surface, but there is no verified always-free persistent host for this project. GitHub push/release recency is materially older than the current review date. | **Monitor only.** Useful reference for MCP assignment, skill registry and durable sessions; do not add a second runtime, database or model router. Recheck upstream maintenance before reconsidering. |
+| [Aeon](https://github.com/aeonfun/aeon) | MIT, JavaScript, 787 stars / 297 forks; pushed 2026-11-02; first tagged release v0.1.0 published 2026-07-09. | GitHub Actions-native scheduled skills, persistent repo-backed memory, reactive triggers, skill health scoring, self-repair PRs, and an optional MCP interface. Official docs describe 60 core skills across six packs in the tagged snapshot. | It still requires a model/provider route for agent work and its health scoring uses a model; public Actions minutes do not make inference free. The provider cascade includes external services, and the catalog contains consequential actions (e.g. token distribution and contract deployment). Its own configuration shows skills disabled by default and its security policy treats fetched web content as untrusted. | **Do not adopt wholesale.** Closest architectural reference because it uses GitHub Actions. Borrow only bounded patterns: explicit read-only/write capability modes, declared secret requirements, quality/failure scoring, systemic failure clustering, cooldowns, and one small repair PR per cycle. Keep all provider calls and consequential skills behind Raawaa's existing zero-budget and approval gates. |
+
+### Transferable patterns versus duplication
+
+The current engine already owns the canonical task state, D1 audit trail, agent roster, policy loader, quota ledger, provider profiles, and bounded scheduler. Therefore:
+
+- Do not import a second scheduler, memory store, model router, or orchestration framework from these platforms.
+- Consider a future additive capability contract per agent/task: `read_only` / `internal_write` / `external_write`, permitted data classifications, required secret *names*, allowed task types, and budget class. Enforce it in the existing policy loader and handler boundary; a prompt-only declaration is insufficient.
+- Consider a model-free health evaluator first: task exit codes, retry/error signatures, staleness, artifact schema checks and CI outcomes. Model-based quality scoring remains disabled until a zero-cost, account-verified route is explicitly approved.
+- Keep automated repair limited to a branch + tested PR. Never allow an autonomous repair skill to silently modify secrets, production settings, billing, trading, or user-facing storefront content.
+
+### Sources checked
+
+- Optio repository and [getting started requirements](https://optio.host/docs/getting-started/).
+- [SwarmClaw repository](https://github.com/swarmclawai/swarmclaw), [documentation](https://www.swarmclaw.ai/docs), and [release history](https://github.com/swarmclawai/swarmclaw/releases).
+- [Aeon repository](https://github.com/aeonfun/aeon), [core architecture](https://github.com/aeonfun/aeon/blob/main/docs/CORE.md), [configuration](https://github.com/aeonfun/aeon/blob/main/aeon.yml), and [security policy](https://github.com/aeonfun/aeon/security/policy).
+
 ## Adoption rule
 
 No framework, agent, plugin, vector database or hosted provider is adopted because it is popular or feature-rich. It must solve a measured limitation, fit zero-spend or have a separately approved budget, preserve policy/quota enforcement, support bounded execution and auditability, have a maintained upstream and clear license, and pass isolated tests before production integration.
