@@ -28,7 +28,7 @@ Planning Intelligence may draft a JSON workflow with 1–20 bounded steps. Every
 - risk level;
 - estimated model cost.
 
-The model's output is a proposal, not a command.
+The model's output is a proposal, not a command. The plan's `monthly_budget_usd` check compares the proposed workflow estimate with the configured ceiling only; it does not subtract current D1 usage or reserve funds. It is not a remaining-budget guarantee. Any future dispatcher must consult the canonical monetary/quota ledgers and reserve budget before a provider call.
 
 ### Step 3 — Deterministic assignment
 
@@ -62,7 +62,7 @@ Record the plan version, rationale, assigned role, selected model/profile, estim
 
 ## Model strategy
 
-- The planner model is selected by the existing provider registry/router only after provider terms, zero-cost status, context limits, rate limits, commercial use, credentials, and quota enforcement are verified.
+- The planner model is selected by the existing provider registry/router only after provider terms, zero-cost status, context limits, rate limits, commercial use, credentials, and quota enforcement are verified. Provider verification timestamps must be timezone-aware, no more than seven days old, and no more than five minutes in the future; stale profiles fail closed.
 - Prefer the best verified free route for the specific planning task; do not hard-code Gemini, Grok, or any vendor as the permanent brain.
 - Use a smaller deterministic route for classification and validation; use a stronger eligible model for strategic decomposition and difficult research only when available within the zero-cost envelope.
 - If no eligible model is available, fail closed to deterministic triage and leave the plan pending; do not silently fall back to a paid model.
