@@ -334,6 +334,46 @@ test("research ingestion normalizes Crossref DOI and rejects arbitrary URL targe
   assert.equal(batch.statements[0].values[3], "https://doi.org/10.1234/agent-paper");
 });
 
+test("research ingestion stores bounded arXiv metadata without abstracts or full text", async () => {
+  const DB = dbMock();
+  const response = await worker.fetch(request("/v1/research/candidates", { method: "POST", body: { candidates: [{
+    source: "arxiv", arxiv_id: "2601.01234v2", title: "Agent safety research",
+    url: "https://arxiv.org/abs/2601.01234v2", authors: ["A Researcher"],
+    published: "2026-01-02T00:00:00Z", categories: ["cs.AI"],
+    abstract_retrieved: false, full_text_retrieved: false,
+  }] } }), { DB, ENGINE_API_TOKEN: TOKEN });
+  assert.equal(response.status, 201);
+  const statement = DB.calls.find(x => x.kind === "batch").statements[0];
+  assert.equal(statement.values[0], "arxiv:2601.01234v2");
+  assert.equal(statement.values[1], "arxiv");
+  assert.equal(statement.values[3], "https://arxiv.org/abs/2601.01234v2");
+  const metadata = JSON.parse(statement.values[4]);
+  assert.equal(metadata.abstract_retrieved, false);
+  assert.equal(metadata.full_text_retrieved, false);
+});
+
+test("research ingestion stores SearXNG HTTPS metadata and rejects IP-literal URLs", async () => {
+  const DB = dbMock();
+  const response = await worker.fetch(request("/v1/research/candidates", { method: "POST", body: { candidates: [{
+    source: "searxng", title: "Agent security", url: "https://docs.example.org/agent-security?ref=search",
+    snippet: "Untrusted search snippet", engines: ["brave", "duckduckgo"],
+  }] } }), { DB, ENGINE_API_TOKEN: TOKEN });
+  assert.equal(response.status, 201);
+  const statement = DB.calls.find(x => x.kind === "batch").statements[0];
+  assert.equal(statement.values[0], "searxng:https://docs.example.org/agent-security?ref=search");
+  assert.equal(statement.values[1], "searxng");
+  const metadata = JSON.parse(statement.values[4]);
+  assert.equal(metadata.content_fetched, false);
+  assert.equal(metadata.license_verified, false);
+
+  const invalidDB = dbMock();
+  const invalid = await worker.fetch(request("/v1/research/candidates", { method: "POST", body: { candidates: [{
+    source: "searxng", title: "Private target", url: "https://127.0.0.1/admin",
+  }] } }), { DB: invalidDB, ENGINE_API_TOKEN: TOKEN });
+  assert.equal(invalid.status, 400);
+  assert.equal(invalidDB.calls.length, 0);
+});
+
 test("research ingestion rejects invalid repository URL before database writes", async () => {
   const DB = dbMock();
   const response = await worker.fetch(request("/v1/research/candidates", { method: "POST", body: { candidates: [{ source: "github", full_name: "org/agent", url: "https://evil.example/org/agent" }] } }), { DB, ENGINE_API_TOKEN: TOKEN });
