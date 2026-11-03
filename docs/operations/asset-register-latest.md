@@ -28,3 +28,11 @@
 - PR #428 (Executive Brain) and PR #427 (Codespaces bridge) are each five commits behind current main and have historical exact-head CI only. Do not merge without syncing to current main and rerunning CI. PR #427 also has a security finding recorded in its discussion (#issuecomment-6617117212): same-UID child processes can potentially inspect the bridge process environment and filesystem; keep Codespaces disabled until a real sandbox boundary or trusted-code-only contract is implemented.
 - Cloudflare production Worker inventory is healthy at the public layer, but Task Runner watchdog readiness remains unverified/not ready because `GITHUB_APP_WATCHDOG_ENABLED` is missing. Restore that non-secret Production Worker variable manually; do not confuse Worker `/health` HTTP 200 with watchdog readiness.
 - No model inference, paid API call, production deployment, production D1 migration, secret mutation, Codespaces activation, or task queue execution occurred in this continuation cycle.
+
+
+## Bounded Task Runner and D1 revalidation — 2026-11-03 22:34 UTC
+
+- Read-only D1 connectivity check #41731781689 succeeded: `D1Client.healthcheck()` returned `ok=true`, `rows_read=0`. This verifies the configured D1 client path; the database identifier remains withheld.
+- Bounded Task Runner run #41731889132 succeeded on main SHA `d3c84919bea6e778c8062b8828fb681161b47ec3` with `run_public_research_once=false`. Public Worker health GET and authenticated diagnostics POST both returned HTTP 200; D1 mobile status GET returned HTTP 200; policy audit passed; batch completed with `tasks_processed=0` and `stop_reason=queue_idle`. Pending/running tasks were both 0. No task was claimed, no live inference was enabled, and the optional research enqueue/route-enable steps were skipped.
+- The same authenticated readback confirmed `watchdog_ready=not_ready` and `watchdog_missing=GITHUB_APP_WATCHDOG_ENABLED`. Worker Cron heartbeat was recorded, last seen `2026-11-03T22:30:34.171Z`, schedule `*/15 * * * *`, stale leases requeued 0, failed 0. This confirms the Worker cron heartbeat is alive while the separate GitHub App Task Runner watchdog remains blocked.
+- The Task Runner published its bounded status to tracking issue #34. This was a sanitized operational status update, not a customer-facing action.
