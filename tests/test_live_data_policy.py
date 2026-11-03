@@ -62,12 +62,12 @@ class LiveDataPolicyTests(unittest.TestCase):
 
     def test_unrecognized_payload_fields_are_blocked(self):
         payload = self.valid_payload()
-        payload["notes"] = "internal notes"
+        payload["notes"] = "ordinary non-sensitive note"
         allowed, reason = validate_live_payload(
             "research_brief", "Research", payload, POLICY
         )
         self.assertFalse(allowed)
-        self.assertEqual(reason, "sensitive_field_detected")
+        self.assertEqual(reason, "payload_schema_invalid")
 
     def test_sensitive_field_names_are_blocked(self):
         payload = self.valid_payload()
@@ -76,7 +76,7 @@ class LiveDataPolicyTests(unittest.TestCase):
             "research_brief", "Research", payload, POLICY
         )
         self.assertFalse(allowed)
-        self.assertEqual(reason, "payload_schema_invalid")
+        self.assertEqual(reason, "sensitive_field_detected")
 
     def test_secret_like_values_are_blocked(self):
         payload = self.valid_payload()
