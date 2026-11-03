@@ -46,6 +46,22 @@ The paid fallback remains disabled. Do not set the provider hard-stop flag or th
 - In GitHub Actions, absence of the control Worker URL blocks cloud live runtime construction. It never silently falls back to ephemeral local SQLite.
 - Local CLI development may continue to use the existing SQLite ledger.
 
+## Provider-side hard-stop research
+
+The currently documented free tiers do not provide a common, verified hard-spend control:
+
+- **Groq:** organization-wide monthly spend limits are available only on paid-tier accounts with organization-owner permissions. Spend tracking updates about every 10–15 minutes, so a small overrun is possible before new calls are blocked. The Free tier does not expose this spend-limit feature.
+- **Gemini API:** the Free tier has no billing-account spend cap. Prepay stops service when the balance reaches zero, but Google documents roughly 10 minutes of billing-pipeline latency and possible overages for long-running work. Project spend caps are experimental and also subject to latency.
+- **OpenRouter:** the Free plan lists Budgets & Spend Controls as unavailable and limits free-model requests to 50/day. Paid plans expose per-key and workspace budgets, but they require a paid account/workspace configuration.
+
+Therefore none of these controls is currently verified for the user's connected provider accounts. The runtime requires `provider_hard_stop_verified=true` plus auditable account/scope/limit evidence before constructing a provider adapter. Keep this false until the actual account tier and enforced limit are independently checked. A D1 reservation ledger is an important local safeguard, not proof that the provider itself cannot charge beyond the configured budget.
+
+References:
+- [Groq Spend Limits](https://console.groq.com/docs/spend-limits)
+- [Gemini API Billing and Spend Caps](https://ai.google.dev/gemini-api/docs/billing)
+- [OpenRouter Pricing and Free-plan controls](https://openrouter.ai/pricing)
+- [OpenRouter API key limits and budgets](https://github.com/OpenRouterTeam/docs/blob/main/api_reference/limits.mdx)
+
 ## Cloudflare infrastructure billing boundary
 
 Cloudflare documents account-level Spend Policies with a `usage_block` action for Workers and Durable Objects. This blocks further usage of the selected Cloudflare product until the billing period ends; it is not scoped to this Raawaa Worker. The current account inventory workflow receives HTTP 404 from the Spend Policies endpoint, so no account-level Cloudflare hard stop has been verified. We do not create or enable a product-wide usage block because it could disable unrelated and production Workers.
