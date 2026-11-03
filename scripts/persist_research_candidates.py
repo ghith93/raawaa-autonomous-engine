@@ -7,7 +7,8 @@ import sys
 import time
 from pathlib import Path
 from urllib.error import HTTPError, URLError
-from urllib.request import Request, urlopen
+from urllib.error import HTTPError
+from urllib.request import HTTPRedirectHandler, Request, build_opener
 
 
 USER_AGENT = "RaawaaAutonomousEngine-Research/1.0 (+https://github.com/ghith93/raawaa-autonomous-engine)"
@@ -15,6 +16,17 @@ USER_AGENT = "RaawaaAutonomousEngine-Research/1.0 (+https://github.com/ghith93/r
 
 class ResearchPersistenceError(RuntimeError):
     pass
+
+
+class _RejectRedirects(HTTPRedirectHandler):
+    """Never forward engine bearer or Cloudflare Access credentials across redirects."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        raise HTTPError(req.full_url, code, "redirects are disabled for authenticated D1 requests", headers, fp)
+
+
+def _open_without_redirects(request: Request, timeout: int):
+    return build_opener(_RejectRedirects).open(request, timeout=timeout)
 
 
 def load_candidates(snapshot: dict) -> list[dict]:
@@ -62,7 +74,7 @@ def _post(base_url: str, token: str, candidates: list[dict],
     request = Request(base_url.rstrip("/") + "/v1/research/candidates",
                       data=payload, headers=headers, method="POST")
     try:
-        with urlopen(request, timeout=timeout) as response:
+        with _open_without_redirects(request, timeout) as response:
             raw = response.read(16 * 1024 + 1)
             if len(raw) > 16 * 1024:
                 raise ResearchPersistenceError("research persistence response exceeded limit")
