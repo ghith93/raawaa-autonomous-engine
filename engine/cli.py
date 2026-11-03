@@ -6,6 +6,7 @@ from pathlib import Path
 
 from engine.task_store import TaskStore
 from engine.remote_task_store import RemoteTaskStore
+from engine.task_invocation_store import TaskInvocationStore
 from engine.memory import MemoryStore
 from engine.model_gateway import ModelGateway, UsageLedger
 from engine.worker import run_once
@@ -37,6 +38,15 @@ def store():
 
 def memory_store() -> MemoryStore:
     return MemoryStore(db_path())
+
+def build_gateway_for_task_store(task_store):
+    """Bind durable invocation checkpoints only to the authenticated remote D1 queue."""
+    invocation_store = TaskInvocationStore(task_store) if isinstance(task_store, RemoteTaskStore) else None
+    return build_live_gateway(
+        db_path(), ROOT / "config" / "policy.json",
+        ROOT / "config" / "provider_profiles.json",
+        invocation_store=invocation_store,
+    )
 
 
 def audit() -> int:
@@ -210,17 +220,13 @@ def main() -> int:
     elif args.command == "list":
         print(json.dumps(store().list_tasks(args.limit), indent=2, ensure_ascii=False))
     elif args.command == "run-once":
-        gateway = build_live_gateway(
-            db_path(), ROOT / "config" / "policy.json",
-            ROOT / "config" / "provider_profiles.json",
-        )
-        print(json.dumps(run_once(store(), live_gateway=gateway, environ=os.environ),
+        task_store = store()
+        gateway = build_gateway_for_task_store(task_store)
+        print(json.dumps(run_once(task_store, live_gateway=gateway, environ=os.environ),
                          indent=2, ensure_ascii=False))
     elif args.command == "run-batch":
-        gateway = build_live_gateway(
-            db_path(), ROOT / "config" / "policy.json",
-            ROOT / "config" / "provider_profiles.json",
-        )
+        task_store = store()
+        gateway = build_gateway_for_task_store(task_store)
         runner = lambda current_store: run_once(
             current_store, live_gateway=gateway, environ=os.environ
         )
