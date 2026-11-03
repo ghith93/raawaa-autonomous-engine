@@ -24,16 +24,14 @@ class D1MonetaryLedgerTests(unittest.TestCase):
         self.ledger = D1MonetaryLedger("https://engine.example", "test-token")
 
     @patch("urllib.request.urlopen")
-    def test_reserve_uses_integer_nano_usd_and_authenticated_worker(self, open_url):
+    def test_reserve_uses_stable_caller_identities_and_integer_nano_usd(self, open_url):
         open_url.return_value = Response({"reservation_id": "00000000-0000-4000-8000-000000000001"})
-        with patch("engine.d1_monetary_ledger.uuid.uuid4", side_effect=[
-            "00000000-0000-4000-8000-000000000001",
-            "00000000-0000-4000-8000-000000000002",
-        ]):
-            result = self.ledger.reserve(
-                "groq", "model-a", "research", 0.0123456781,
-                0.4, 12.0, task_id="task-1", per_task_budget_usd=0.2,
-            )
+        result = self.ledger.reserve(
+            "groq", "model-a", "research", 0.0123456781,
+            0.4, 12.0, task_id="task-1", per_task_budget_usd=0.2,
+            idempotency_key="00000000-0000-4000-8000-000000000002",
+            reservation_id="00000000-0000-4000-8000-000000000001",
+        )
         self.assertEqual(result, "00000000-0000-4000-8000-000000000001")
         request = open_url.call_args.args[0]
         self.assertEqual(request.full_url, "https://engine.example/v1/monetary-ledger")
@@ -45,6 +43,33 @@ class D1MonetaryLedgerTests(unittest.TestCase):
         self.assertEqual(payload["monthly_budget_nanos"], 12_000_000_000)
         self.assertEqual(payload["per_task_budget_nanos"], 200_000_000)
         self.assertEqual(payload["task_id"], "task-1")
+        self.assertEqual(payload["reservation_id"], "00000000-0000-4000-8000-000000000001")
+        self.assertEqual(payload["idempotency_key"], "00000000-0000-4000-8000-000000000002")
+
+    @patch("urllib.request.urlopen")
+    def test_lost_response_replay_reuses_exact_reservation_identity(self, open_url):
+        key = "00000000-0000-4000-8000-000000000022"
+        reservation = "00000000-0000-4000-8000-000000000021"
+        open_url.side_effect = [
+            URLError("response lost after remote commit"),
+            Response({"reservation_id": reservation, "replay": True}),
+        ]
+        kwargs = dict(
+            provider="groq", model="model-a", task_kind="research",
+            estimated_cost_usd=0.01, daily_budget_usd=0.4,
+            monthly_budget_usd=12.0, task_id="task-replay",
+            per_task_budget_usd=0.2, idempotency_key=key,
+            reservation_id=reservation,
+        )
+        with self.assertRaisesRegex(D1MonetaryLedgerError, "transport failed"):
+            self.ledger.reserve(**kwargs)
+        first_payload = json.loads(open_url.call_args_list[0].args[0].data)
+        result = self.ledger.reserve(**kwargs)
+        second_payload = json.loads(open_url.call_args_list[1].args[0].data)
+        self.assertEqual(result, reservation)
+        self.assertEqual(first_payload, second_payload)
+        self.assertEqual(second_payload["idempotency_key"], key)
+        self.assertEqual(second_payload["reservation_id"], reservation)
 
     @patch("urllib.request.urlopen")
     def test_start_ambiguous_release_and_settle_use_lifecycle_actions(self, open_url):
@@ -70,7 +95,9 @@ class D1MonetaryLedgerTests(unittest.TestCase):
         )
         with self.assertRaises(BudgetExceeded):
             self.ledger.reserve("groq", "model", "research", 0.1, 0.4, 12,
-                                task_id="task-1", per_task_budget_usd=0.2)
+                                task_id="task-1", per_task_budget_usd=0.2,
+                                idempotency_key="00000000-0000-4000-8000-000000000012",
+                                reservation_id="00000000-0000-4000-8000-000000000011")
 
     @patch("urllib.request.urlopen")
     def test_ambiguous_transport_failure_never_falls_back(self, open_url):
