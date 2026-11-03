@@ -85,7 +85,7 @@ async function recordResearchScan(request, env) {
   const allowedSources = new Set(["github", "crossref"]);
   const seen = new Set();
   for (const item of observations) {
-    if (!item || typeof item !== "object" || !allowedSources.has(item.source) ||
+    if (!item || typeof item !== "object" || !allowedSources.has(item.source) || item.scan_id !== scan.scan_id ||
         seen.has(item.source) || !["fresh", "unavailable"].includes(item.status) ||
         !timestamp(item.observed_at) || !nonnegative(item.request_count) ||
         !nonnegative(item.item_count) || ![6, 12, 24, 48].includes(item.freshness_hours) ||
@@ -97,11 +97,11 @@ async function recordResearchScan(request, env) {
   const scanId = scan.scan_id;
   const now = new Date().toISOString();
   const statements = [
-    env.DB.prepare("INSERT INTO audit_log(task_id,event,details_json,created_at) VALUES(NULL,'research_scan_completed',?,?)")
-      .bind(JSON.stringify(scan), now),
+    env.DB.prepare("INSERT INTO audit_log(task_id,event,details_json,created_at) SELECT NULL,'research_scan_completed',?,? WHERE NOT EXISTS (SELECT 1 FROM audit_log WHERE event='research_scan_completed' AND json_extract(details_json,'$.scan_id')=?)")
+      .bind(JSON.stringify(scan), now, scanId),
     ...observations.map(item => env.DB.prepare(
-      "INSERT INTO audit_log(task_id,event,details_json,created_at) VALUES(NULL,'research_source_observation',?,?)"
-    ).bind(JSON.stringify(item), now)),
+      "INSERT INTO audit_log(task_id,event,details_json,created_at) SELECT NULL,'research_source_observation',?,? WHERE NOT EXISTS (SELECT 1 FROM audit_log WHERE event='research_source_observation' AND json_extract(details_json,'$.scan_id')=? AND json_extract(details_json,'$.source')=?)"
+    ).bind(JSON.stringify(item), now, scanId, item.source)),
   ];
   try {
     await env.DB.batch(statements);
