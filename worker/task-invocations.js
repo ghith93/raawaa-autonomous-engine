@@ -49,8 +49,9 @@ export async function handleTaskInvocation(request, env, url) {
       const invocationId = crypto.randomUUID();
       const requestId = crypto.randomUUID();
       await env.DB.prepare(
-        "INSERT OR IGNORE INTO task_model_invocations(invocation_id,task_id,step_key,task_kind,request_id,status,created_at,updated_at) VALUES(?,?,?,?,?,'prepared',?,?)"
-      ).bind(invocationId,taskId,input.step_key.trim(),input.task_kind.trim(),requestId,now,now).run();
+        "INSERT OR IGNORE INTO task_model_invocations(invocation_id,task_id,step_key,task_kind,request_id,status,created_at,updated_at) " +
+        "SELECT ?,?,?,?,?, 'prepared',?,? WHERE EXISTS (SELECT 1 FROM tasks WHERE id=? AND status='running' AND lease_token=? AND lease_expires_at>=?)"
+      ).bind(invocationId,taskId,input.step_key.trim(),input.task_kind.trim(),requestId,now,now,taskId,leaseToken,now).run();
       const row = await env.DB.prepare(
         "SELECT invocation_id,task_id,step_key,task_kind,request_id,status,last_route_id FROM task_model_invocations WHERE task_id=? AND step_key=?"
       ).bind(taskId,input.step_key.trim()).first();
@@ -68,14 +69,21 @@ export async function handleTaskInvocation(request, env, url) {
     if (action === "start") {
       if (!validText(input.route_id,200)) return json({error:"invalid_route"},400);
       if (invocation.status !== "prepared") return json({error:"invocation_replay_blocked",status:invocation.status},409);
-      const inserted = await env.DB.prepare(
-        "INSERT OR IGNORE INTO task_model_invocation_attempts(invocation_id,route_id,status,created_at,updated_at) VALUES(?,?,'in_flight',?,?)"
-      ).bind(invocation.invocation_id,input.route_id,now,now).run();
-      if (inserted.meta?.changes !== 1) return json({error:"route_replay_blocked"},409);
-      const updated = await env.DB.prepare(
-        "UPDATE task_model_invocations SET status='in_flight',last_route_id=?,started_at=?,updated_at=? WHERE invocation_id=? AND status='prepared'"
-      ).bind(input.route_id,now,now,invocation.invocation_id).run();
-      if (updated.meta?.changes !== 1) return json({error:"invocation_state_conflict"},409);
+      const batch = await env.DB.batch([
+        env.DB.prepare(
+          "INSERT INTO task_model_invocation_attempts(invocation_id,route_id,status,created_at,updated_at) " +
+          "SELECT ?,?,'in_flight',?,? WHERE EXISTS (SELECT 1 FROM task_model_invocations WHERE invocation_id=? AND task_id=? AND status='prepared') " +
+          "AND EXISTS (SELECT 1 FROM tasks WHERE id=? AND status='running' AND lease_token=? AND lease_expires_at>=?)"
+        ).bind(invocation.invocation_id,input.route_id,now,now,invocation.invocation_id,taskId,taskId,leaseToken,now),
+        env.DB.prepare(
+          "UPDATE task_model_invocations SET status='in_flight',last_route_id=?,started_at=?,updated_at=? " +
+          "WHERE invocation_id=? AND task_id=? AND status='prepared' " +
+          "AND EXISTS (SELECT 1 FROM task_model_invocation_attempts WHERE invocation_id=? AND route_id=? AND status='in_flight' AND created_at=?) " +
+          "AND EXISTS (SELECT 1 FROM tasks WHERE id=? AND status='running' AND lease_token=? AND lease_expires_at>=?)"
+        ).bind(input.route_id,now,now,invocation.invocation_id,taskId,invocation.invocation_id,input.route_id,now,taskId,leaseToken,now),
+      ]);
+      if (batch?.[0]?.meta?.changes !== 1 || batch?.[1]?.meta?.changes !== 1)
+        return json({error:"invocation_state_conflict"},409);
       return json({ok:true,status:"in_flight"});
     }
 
@@ -84,14 +92,21 @@ export async function handleTaskInvocation(request, env, url) {
         return json({error:"invalid_rejection"},400);
       if (invocation.status !== "in_flight" || invocation.last_route_id !== input.route_id)
         return json({error:"invocation_state_conflict"},409);
-      const attempt = await env.DB.prepare(
-        "UPDATE task_model_invocation_attempts SET status='rejected',rejection_code=?,updated_at=? WHERE invocation_id=? AND route_id=? AND status='in_flight'"
-      ).bind(input.rejection_code,now,invocation.invocation_id,input.route_id).run();
-      if (attempt.meta?.changes !== 1) return json({error:"invocation_state_conflict"},409);
-      const update = await env.DB.prepare(
-        "UPDATE task_model_invocations SET status='prepared',last_route_id=NULL,updated_at=? WHERE invocation_id=? AND status='in_flight'"
-      ).bind(now,invocation.invocation_id).run();
-      if (update.meta?.changes !== 1) return json({error:"invocation_state_conflict"},409);
+      const batch = await env.DB.batch([
+        env.DB.prepare(
+          "UPDATE task_model_invocation_attempts SET status='rejected',rejection_code=?,updated_at=? " +
+          "WHERE invocation_id=? AND route_id=? AND status='in_flight' " +
+          "AND EXISTS (SELECT 1 FROM tasks WHERE id=? AND status='running' AND lease_token=? AND lease_expires_at>=?)"
+        ).bind(input.rejection_code,now,invocation.invocation_id,input.route_id,taskId,leaseToken,now),
+        env.DB.prepare(
+          "UPDATE task_model_invocations SET status='prepared',last_route_id=NULL,updated_at=? " +
+          "WHERE invocation_id=? AND status='in_flight' AND last_route_id=? " +
+          "AND EXISTS (SELECT 1 FROM task_model_invocation_attempts WHERE invocation_id=? AND route_id=? AND status='rejected') " +
+          "AND EXISTS (SELECT 1 FROM tasks WHERE id=? AND status='running' AND lease_token=? AND lease_expires_at>=?)"
+        ).bind(now,invocation.invocation_id,input.route_id,invocation.invocation_id,input.route_id,taskId,leaseToken,now),
+      ]);
+      if (batch?.[0]?.meta?.changes !== 1 || batch?.[1]?.meta?.changes !== 1)
+        return json({error:"invocation_state_conflict"},409);
       return json({ok:true,status:"prepared"});
     }
 
@@ -99,14 +114,19 @@ export async function handleTaskInvocation(request, env, url) {
       if (invocation.status !== "in_flight" || !invocation.last_route_id)
         return json({error:"invocation_state_conflict"},409);
       const terminal = action === "ambiguous" ? "ambiguous" : "settled";
-      const attempt = await env.DB.prepare(
-        "UPDATE task_model_invocation_attempts SET status=?,updated_at=? WHERE invocation_id=? AND route_id=? AND status='in_flight'"
-      ).bind(terminal,now,invocation.invocation_id,invocation.last_route_id).run();
-      if (attempt.meta?.changes !== 1) return json({error:"invocation_state_conflict"},409);
-      const update = await env.DB.prepare(
-        "UPDATE task_model_invocations SET status=?,settled_at=?,updated_at=? WHERE invocation_id=? AND status='in_flight'"
-      ).bind(terminal === "settled" ? "settled" : "ambiguous",terminal === "settled" ? now : null,now,invocation.invocation_id).run();
-      if (update.meta?.changes !== 1) return json({error:"invocation_state_conflict"},409);
+      const batch = await env.DB.batch([
+        env.DB.prepare(
+          "UPDATE task_model_invocation_attempts SET status=?,updated_at=? WHERE invocation_id=? AND route_id=? AND status='in_flight' " +
+          "AND EXISTS (SELECT 1 FROM tasks WHERE id=? AND status='running' AND lease_token=? AND lease_expires_at>=?)"
+        ).bind(terminal,now,invocation.invocation_id,invocation.last_route_id,taskId,leaseToken,now),
+        env.DB.prepare(
+          "UPDATE task_model_invocations SET status=?,settled_at=?,updated_at=? WHERE invocation_id=? AND task_id=? AND status='in_flight' " +
+          "AND EXISTS (SELECT 1 FROM task_model_invocation_attempts WHERE invocation_id=? AND route_id=? AND status=?) " +
+          "AND EXISTS (SELECT 1 FROM tasks WHERE id=? AND status='running' AND lease_token=? AND lease_expires_at>=?)"
+        ).bind(terminal,terminal === "settled" ? now : null,now,invocation.invocation_id,taskId,invocation.invocation_id,invocation.last_route_id,terminal,taskId,leaseToken,now),
+      ]);
+      if (batch?.[0]?.meta?.changes !== 1 || batch?.[1]?.meta?.changes !== 1)
+        return json({error:"invocation_state_conflict"},409);
       return json({ok:true,status:terminal});
     }
     return json({error:"unsupported_action"},400);
