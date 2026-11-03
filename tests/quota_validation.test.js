@@ -157,3 +157,27 @@ test("direct quota record mutation is disabled", async () => {
   assert.deepEqual(await response.json(), { error: "unsupported_action" });
   assert.equal(DB.calls.length, 0);
 });
+
+test("quota cooldown requires a separate admin token", async () => {
+  const DB = makeDb();
+  const ordinary = await worker.fetch(new Request("https://engine.example/v1/quota", {
+    method: "POST", headers: {
+      authorization: "Bearer " + TOKEN, "content-type": "application/json",
+    }, body: JSON.stringify({
+      action: "cool_down", route_id: ROUTE, seconds: 30, reason: "rate_limited",
+    }),
+  }), { DB, ENGINE_API_TOKEN: TOKEN, ENGINE_QUOTA_ADMIN_TOKEN: "separate-admin-token" });
+  assert.equal(ordinary.status, 403);
+  assert.deepEqual(await ordinary.json(), { error: "forbidden_scope" });
+  assert.equal(DB.calls.length, 0);
+
+  const admin = await worker.fetch(new Request("https://engine.example/v1/quota", {
+    method: "POST", headers: {
+      authorization: "Bearer separate-admin-token", "content-type": "application/json",
+    }, body: JSON.stringify({
+      action: "cool_down", route_id: ROUTE, seconds: 30, reason: "rate_limited",
+    }),
+  }), { DB, ENGINE_API_TOKEN: TOKEN, ENGINE_QUOTA_ADMIN_TOKEN: "separate-admin-token" });
+  assert.equal(admin.status, 200);
+  assert.equal(DB.calls.length, 1);
+});
