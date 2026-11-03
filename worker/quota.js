@@ -30,7 +30,7 @@ function constantTimeTokenMatch(request, expected) {
 }
 
 function isAdmin(request, env) {
-  return constantTimeTokenMatch(request, env.ENGINE_QUOTA_ADMIN_TOKEN);
+  return Boolean(env.ENGINE_QUOTA_ADMIN_TOKEN) && env.ENGINE_QUOTA_ADMIN_TOKEN !== env.ENGINE_API_TOKEN && constantTimeTokenMatch(request, env.ENGINE_QUOTA_ADMIN_TOKEN);
 }
 
 function configuredRouteLimits(env, routeId) {
