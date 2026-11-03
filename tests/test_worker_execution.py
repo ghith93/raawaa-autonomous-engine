@@ -2,6 +2,7 @@ import json
 import os
 import tempfile
 import unittest
+import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from unittest.mock import Mock, patch
@@ -109,6 +110,11 @@ class WorkerExecutionTests(unittest.TestCase):
         self.assertEqual(result["mode"], "live_inference")
         self.assertEqual(adapter.calls, 1)
         self.assertEqual(adapter.last_request.task_id, self.task["id"])
+        self.assertEqual(
+            adapter.last_request.request_id,
+            str(uuid.uuid5(uuid.NAMESPACE_URL,
+                           f"raawaa-engine:{self.task['id']}:step:primary-inference:v1")),
+        )
         self.assertEqual(adapter.last_request.task_kind, "research")
         self.assertIn("test topic", adapter.last_request.prompt)
         quota = manager.snapshot()[0]
