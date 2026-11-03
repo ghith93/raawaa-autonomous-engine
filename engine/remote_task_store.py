@@ -116,10 +116,15 @@ class RemoteTaskStore:
             raise RemoteTaskStoreError("Remote task API returned an invalid task list")
         return tasks
 
-    def claim_next(self, lease_timeout_seconds: int = 900) -> dict[str, Any] | None:
+    def claim_next(self, lease_timeout_seconds: int = 900,
+                   execution_mode: str = "unknown") -> dict[str, Any] | None:
         if not 1 <= int(lease_timeout_seconds) <= 900:
             raise ValueError("remote lease timeout must be between 1 and 900 seconds")
-        result = self._request("/v1/tasks/claim", "POST", {})
+        if execution_mode not in {"unknown", "dry_run", "live_inference"}:
+            raise ValueError("invalid execution_mode")
+        result = self._request("/v1/tasks/claim", "POST", {
+            "execution_mode": execution_mode,
+        })
         task = result.get("task")
         if task is None:
             return None
