@@ -86,7 +86,7 @@ class TaskStore:
                    execution_mode: str = "unknown") -> dict[str, Any] | None:
         if lease_timeout_seconds < 1:
             raise ValueError("lease_timeout_seconds must be positive")
-        if execution_mode not in {"unknown", "dry_run", "live_inference", "codespace"}:
+        if not isinstance(execution_mode, str) or execution_mode not in {"unknown", "dry_run", "live_inference", "codespace"}:
             raise ValueError("invalid execution_mode")
         with self._connect() as db:
             db.execute("BEGIN IMMEDIATE")
