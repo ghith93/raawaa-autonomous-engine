@@ -157,7 +157,7 @@ export async function handleMobileStatus(request, env, url) {
       env.DB.prepare("SELECT status,COUNT(*) AS count FROM tasks GROUP BY status").all(),
       env.DB.prepare("SELECT version FROM schema_migrations WHERE version IN ('0003_durable_quota_ledger','0004_paper_event_ledger','0005_telegram_webhook_receipts','0006_monetary_budget_ledger')").all(),
       env.DB.prepare("SELECT created_at,details_json FROM audit_log WHERE task_id IS NULL AND event='worker_cron_tick' ORDER BY created_at DESC LIMIT 1").first(),
-      env.DB.prepare("SELECT event,created_at,details_json FROM audit_log WHERE task_id IS NULL AND event IN ('task_runner_dispatch_requested','task_runner_dispatch_intent') ORDER BY created_at DESC LIMIT 2").all(),
+      env.DB.prepare("SELECT event,created_at,details_json FROM audit_log WHERE task_id IS NULL AND event IN ('task_runner_dispatch_requested','task_runner_dispatch_intent') ORDER BY created_at DESC LIMIT 20").all(),
       env.DB.prepare("SELECT created_at,details_json FROM audit_log WHERE task_id IS NULL AND event='ci_health_snapshot' ORDER BY created_at DESC LIMIT 1").first(),
       env.DB.prepare("SELECT created_at,details_json FROM audit_log WHERE task_id IS NULL AND event='kill_switch_snapshot' ORDER BY created_at DESC LIMIT 1").first(),
       env.DB.prepare("SELECT created_at,details_json FROM audit_log WHERE task_id IS NULL AND event='research_scan_completed' ORDER BY created_at DESC LIMIT 1").first(),
@@ -225,7 +225,7 @@ export async function handleMobileStatus(request, env, url) {
         if (typeof row.created_at !== "string" || !Number.isFinite(Date.parse(row.created_at))) continue;
         let details;
         try { details = JSON.parse(row.details_json || "{}"); } catch { continue; }
-        if (!details || !["github","crossref"].includes(details.source) ||
+        if (!details || !["github","crossref"].includes(details.source) || values[details.source] ||
             !["fresh","unavailable"].includes(details.status) || !validTimestamp(details.observed_at) ||
             !Number.isSafeInteger(details.freshness_hours) || details.freshness_hours < 1 ||
             !Number.isSafeInteger(details.request_count) || details.request_count < 0 ||
