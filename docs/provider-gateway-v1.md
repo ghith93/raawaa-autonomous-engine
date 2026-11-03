@@ -13,7 +13,7 @@
 - The current model router remains deterministic and configuration-driven; quality/latency benchmarks are not yet available.
 
 ## Safety defaults
-The repository policy remains zero daily/monthly budget, paid calls disabled, and external writes disabled. The gateway is not wired to production task execution. Its only offline test path uses the mock adapter and an `offline_test` task.
+The repository enforces a USD 15 all-in monthly ceiling, with a USD 12 model-inference cap (USD 0.40/day and USD 0.20/task), USD 0 paid infrastructure overages, and USD 3 unallocated reserve. Verified-free routes remain the only eligible routes; paid fallback and external writes remain disabled. The gateway is not wired to production task execution. Its only offline test path uses the mock adapter and an `offline_test` task.
 
 ## Next
-Before enabling a real adapter, verify the provider's current API contract, pricing, free-tier limits, data handling, and key permissions. Store credentials only in GitHub Actions Secrets or a dedicated secret manager; never commit them or paste them into chat. Add provider-specific tests with mocked HTTP responses before permitting any live request.
+Before enabling a real adapter, verify the provider's current API contract, pricing, free-tier limits, data handling, and key permissions. Before enabling any paid model, configure and test a provider-enforced spend block or prepaid balance no greater than the remaining USD 12 monthly model allocation. A billing alert is not a hard cap. Store credentials only in GitHub Actions Secrets or a dedicated secret manager; never commit them or paste them into chat. Add provider-specific tests with mocked HTTP responses before permitting any live request.
