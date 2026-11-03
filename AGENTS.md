@@ -4,7 +4,7 @@ Before every work cycle, every executive/lead agent, specialist, coding agent, r
 1. `docs/master-autonomous-execution-directive.ar.md`
 2. `docs/continuous-improvement-charter.md`
 3. `docs/architecture.md`
-4. `docs/operations.md`, `docs/operations/tooling-capability-inventory-2026-11-03.md`, `config/integrations.json`, `config/tool_permissions.json`, and applicable subsystem policies.
+4. `docs/operations.md`, `docs/operations/asset-register.md`, `docs/operations/tooling-capability-inventory-2026-11-03.md`, `config/integrations.json`, `config/tool_permissions.json`, and applicable subsystem policies.
 
 These are mandatory repository policies, not optional context. Re-read them each cycle; do not rely only on chat history or cached summaries. If a runtime cannot read them, report that limitation and do not claim policy loading succeeded.
 
