@@ -1,0 +1,41 @@
+name: Coding Agent CLI Installation Smoke
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/coding-agent-cli-smoke.yml"
+      - "docs/coding-agent-cli-readiness.md"
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: coding-agent-cli-smoke-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  install-and-version-check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Install OpenCode CLI
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm install --global @opencode/cli
+          opencode --version
+
+      - name: Install Codex CLI
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm install --global @openai/codex
+          codex --version
+
+      - name: Install Google Antigravity CLI
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -fsSL https://antigravity.google/cli/install.sh | bash
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          "$HOME/.local/bin/agy" --version
