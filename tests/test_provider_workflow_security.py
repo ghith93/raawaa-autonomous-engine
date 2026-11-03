@@ -47,7 +47,7 @@ class ProviderWorkflowSecurityTests(unittest.TestCase):
         expression = "${{ secrets.GROQ_API_KEY }}"
         self.assertIn("GROQ_API_KEY: " + expression, step)
         self.assertEqual(source.count(expression), 1)
-        self.assertNotIn("    env:\\n      GROQ_API_KEY:", source)
+        self.assertNotIn("    env:\n      GROQ_API_KEY:", source)
         self.assertIn("python scripts/groq_connection_check.py", step)
 
 if __name__ == "__main__":
