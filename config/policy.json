@@ -17,7 +17,9 @@
     "paid_fallback_requires_prepaid_or_provider_enforced_cap": true,
     "paid_fallback_monthly_cap_usd": 12,
     "no_automatic_plan_upgrade": true,
-    "no_trial_or_promotional_credit_as_permanent_capacity": true
+    "no_trial_or_promotional_credit_as_permanent_capacity": true,
+    "provider_hard_stop_verified": false,
+    "provider_hard_stop_evidence": null
   },
   "budget_envelope": {
     "currency": "USD",
