@@ -153,13 +153,15 @@ export async function handleMobileStatus(request, env, url) {
   if (url.pathname !== "/v1/mobile/status") return null;
   if (request.method !== "GET") return json({ error: "method_not_allowed" }, 405);
   try {
-    const [tasks, migrations, workerCron, watchdogEvents, ciHealthRow, killSwitchRow] = await Promise.all([
+    const [tasks, migrations, workerCron, watchdogEvents, ciHealthRow, killSwitchRow, scanRows, sourceRows] = await Promise.all([
       env.DB.prepare("SELECT status,COUNT(*) AS count FROM tasks GROUP BY status").all(),
       env.DB.prepare("SELECT version FROM schema_migrations WHERE version IN ('0003_durable_quota_ledger','0004_paper_event_ledger','0005_telegram_webhook_receipts','0006_monetary_budget_ledger')").all(),
       env.DB.prepare("SELECT created_at,details_json FROM audit_log WHERE task_id IS NULL AND event='worker_cron_tick' ORDER BY created_at DESC LIMIT 1").first(),
       env.DB.prepare("SELECT event,created_at,details_json FROM audit_log WHERE task_id IS NULL AND event IN ('task_runner_dispatch_requested','task_runner_dispatch_intent') ORDER BY created_at DESC LIMIT 2").all(),
       env.DB.prepare("SELECT created_at,details_json FROM audit_log WHERE task_id IS NULL AND event='ci_health_snapshot' ORDER BY created_at DESC LIMIT 1").first(),
       env.DB.prepare("SELECT created_at,details_json FROM audit_log WHERE task_id IS NULL AND event='kill_switch_snapshot' ORDER BY created_at DESC LIMIT 1").first(),
+      env.DB.prepare("SELECT created_at,details_json FROM audit_log WHERE task_id IS NULL AND event='research_scan_completed' ORDER BY created_at DESC LIMIT 1").first(),
+      env.DB.prepare("SELECT created_at,details_json FROM audit_log WHERE task_id IS NULL AND event='research_source_observation' ORDER BY created_at DESC LIMIT 2").all(),
     ]);
     const applied = new Set((migrations.results || []).map(row => row.version));
     const watchdogReadiness = getTaskRunnerWatchdogReadiness(env);
@@ -184,6 +186,68 @@ export async function handleMobileStatus(request, env, url) {
       const age = Date.now() - Date.parse(row.created_at);
       return age >= 0 ? age : null;
     };
+
+    const safeScanId = value => typeof value === "string" && value.length <= 160 && /^[A-Za-z0-9_.:-]+$/.test(value);
+    const validTimestamp = value => typeof value === "string" && value.length <= 40 &&
+      /(?:Z|[+-]\\d{2}:\\d{2})$/.test(value) && Number.isFinite(Date.parse(value));
+    const researchScan = (() => {
+      const unknown = { value: null, unavailable: "No valid research scan has been recorded" };
+      if (!scanRows) return unknown;
+      const age = telemetryAge(scanRows);
+      if (age === null) return { value: null, unavailable: "Latest research scan timestamp is invalid" };
+      let details;
+      try { details = JSON.parse(scanRows.details_json || "{}"); } catch { return { value: null, unavailable: "Latest research scan metadata is invalid" }; }
+      const count = value => Number.isSafeInteger(value) && value >= 0;
+      if (!details || details.workflow !== "research-discovery.yml" || details.scan_type !== "github_crossref" ||
+          !safeScanId(details.scan_id) || !["success","partial","failure"].includes(details.status) ||
+          !Number.isSafeInteger(details.run_id) || !Number.isSafeInteger(details.run_number) ||
+          !Number.isSafeInteger(details.run_attempt) || typeof details.head_sha !== "string" ||
+          !/^[0-9a-f]{40}$/.test(details.head_sha) ||
+          !validTimestamp(details.started_at) || !validTimestamp(details.completed_at) ||
+          Date.parse(details.completed_at) < Date.parse(details.started_at) ||
+          !["requests_made","academic_requests_made","candidate_count","academic_candidate_count","unavailable_query_count"].every(key => count(details[key]))) {
+        return { value: null, unavailable: "Latest research scan metadata is invalid" };
+      }
+      const stale = age > 24*60*60*1000;
+      return { value: {
+        scan_id: details.scan_id, scan_type: details.scan_type, status: stale ? "stale" : details.status,
+        run_id: details.run_id, run_number: details.run_number, run_attempt: details.run_attempt,
+        head_sha: details.head_sha, started_at: details.started_at, completed_at: details.completed_at,
+        requests_made: details.requests_made, academic_requests_made: details.academic_requests_made,
+        candidate_count: details.candidate_count, academic_candidate_count: details.academic_candidate_count,
+        unavailable_query_count: details.unavailable_query_count, recorded_at: scanRows.created_at,
+        freshness: stale ? "stale" : "fresh",
+      }, unavailable: null };
+    })();
+    const sourceFreshness = (() => {
+      const values = {};
+      for (const row of sourceRows.results || []) {
+        if (typeof row.created_at !== "string" || !Number.isFinite(Date.parse(row.created_at))) continue;
+        let details;
+        try { details = JSON.parse(row.details_json || "{}"); } catch { continue; }
+        if (!details || !["github","crossref"].includes(details.source) ||
+            !["fresh","unavailable"].includes(details.status) || !validTimestamp(details.observed_at) ||
+            !Number.isSafeInteger(details.freshness_hours) || details.freshness_hours < 1 ||
+            !Number.isSafeInteger(details.request_count) || details.request_count < 0 ||
+            !Number.isSafeInteger(details.item_count) || details.item_count < 0) continue;
+        const age = Date.now() - Date.parse(details.observed_at);
+        if (age < 0) continue;
+        const stale = age > details.freshness_hours * 60 * 60 * 1000;
+        values[details.source] = {
+          status: details.status === "unavailable" ? "unavailable" : stale ? "stale" : "fresh",
+          observed_at: details.observed_at, age_seconds: Math.floor(age/1000),
+          freshness_hours: details.freshness_hours, request_count: details.request_count,
+          item_count: details.item_count,
+          ...(details.status === "unavailable" && typeof details.reason_code === "string" ? {reason_code:details.reason_code} : {}),
+        };
+      }
+      const present = ["github","crossref"].filter(source => values[source]);
+      const aggregate = present.length !== 2 ? "unknown" :
+        (Object.values(values).every(item=>item.status==="fresh") ? "fresh" :
+         Object.values(values).some(item=>item.status==="fresh") ? "partial" :
+         Object.values(values).some(item=>item.status==="stale") ? "stale" : "unavailable");
+      return { value: present.length ? values : null, status: aggregate };
+    })();
     const ciHealth = (() => {
       const age = telemetryAge(ciHealthRow);
       if (age === null) return null;
@@ -327,7 +391,7 @@ export async function handleMobileStatus(request, env, url) {
       worker_cron: workerCronStatus.value,
       ci_health: ciHealth,
       kill_switch: killSwitch,
-      task_runner_watchdog: {
+      last_scan: researchScan.value,\n      source_freshness: { status: sourceFreshness.status, sources: sourceFreshness.value },\n      task_runner_watchdog: {
         ready: watchdogReadiness.ready,
         missing: watchdogReadiness.missing,
         last_dispatch_requested: lastDispatchRequested,
@@ -355,7 +419,7 @@ export async function handleMobileStatus(request, env, url) {
       unavailable_metrics: {
         last_scan: "Scan-run heartbeat is not recorded; the latest captured market snapshot is shown separately",
         source_freshness: "Not yet aggregated from market-data adapters",
-        ...(!ciHealth ? { ci_health: "No fresh validated Engine CI snapshot has been ingested from GitHub Actions" } : {}),
+        ...(!researchScan.value ? { last_scan: researchScan.unavailable } : {}),\n        ...(sourceFreshness.status === "unknown" ? { source_freshness: "No valid source observations have been recorded" } : {}),\n        ...(!ciHealth ? { ci_health: "No fresh validated Engine CI snapshot has been ingested from GitHub Actions" } : {}),
         ...(!killSwitch ? { kill_switch: "No fresh validated default Task Runner inference-gate snapshot has been ingested" } : {}),
         ...(!workerCronStatus.value ? { worker_cron: workerCronStatus.unavailable } : {}),
         paper_ledger: applied.has("0004_paper_event_ledger") ? "Available" : "Migration 0004 is not applied to this database",
