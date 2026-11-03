@@ -52,6 +52,31 @@ def run_once(store: TaskStore, live_gateway=None, environ=None) -> dict | None:
 
     # Recover abandoned work before claiming another item.
     recovery = store.recover_stale()
+
+    # In live mode, check current free-route capacity before consuming a task lease.
+    # This is read-only and deliberately does not reserve quota; generate() repeats
+    # the eligibility check and atomically reserves immediately before provider I/O.
+    if _live_requested(environ):
+        if live_gateway is None:
+            return {"status": "blocked", "reason": "live_gateway_unavailable",
+                    "recovery": recovery}
+        preflight = getattr(live_gateway, "preflight_capacity", None)
+        if not callable(preflight):
+            return {"status": "blocked", "reason": "live_gateway_preflight_unavailable",
+                    "recovery": recovery}
+        try:
+            capacity = preflight(max_output_tokens=LIVE_MAX_OUTPUT_TOKENS)
+        except Exception as exc:
+            return {"status": "blocked", "reason": "live_capacity_preflight_failed",
+                    "detail": type(exc).__name__, "recovery": recovery}
+        if not isinstance(capacity, dict) or capacity.get("eligible") is not True:
+            reason = capacity.get("reason") if isinstance(capacity, dict) else "invalid_preflight_result"
+            if reason in {"provider_capacity_unavailable", "monetary_budget_exhausted"}:
+                return {"status": "idle", "reason": "live_capacity_unavailable",
+                        "capacity_reason": reason, "recovery": recovery}
+            return {"status": "blocked", "reason": "live_capacity_preflight_blocked",
+                    "capacity_reason": reason, "recovery": recovery}
+
     task = store.claim_next()
     if task is None:
         return {"status": "idle", "recovery": recovery} if any(recovery.values()) else None
