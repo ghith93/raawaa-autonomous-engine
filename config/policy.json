@@ -21,8 +21,16 @@
   "live_inference_data_policy": {
     "require_explicit_classification": true,
     "allowed_classifications": [
-      "public",
-      "internal"
+      "public"
+    ],
+    "allowed_task_types": [
+      "research_brief"
+    ],
+    "allowed_payload_keys": [
+      "data_classification",
+      "topic",
+      "questions",
+      "source_urls"
     ],
     "max_prompt_bytes": 7000,
     "blocked_key_fragments": [
