@@ -4,7 +4,7 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-USES = re.compile(r"^\s*uses:\s*([^\s#]+)", re.MULTILINE)
+USES = re.compile(r"^[ \t]*(?:-[ \t]*)?uses:[ \t]*([^\s#]+)", re.MULTILINE)
 FULL_SHA = re.compile(r"^[0-9a-f]{40}$")
 
 
