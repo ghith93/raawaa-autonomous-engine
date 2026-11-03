@@ -22,10 +22,12 @@ Trusted host code constructs the broker with:
 - an approval verifier backed by an operator-controlled, one-time approval
   record (only when a write capability is intentionally enabled).
 
-A tool call is denied when the tool or adapter is unknown, any role/task/action/
-environment dimension mismatches, the budget or policy gate fails, or the audit
-sink is unavailable. Read access is explicitly scoped to local and Staging
-environments. No production tool is granted in the initial matrix.
+Each grant binds one agent role to its explicitly assigned task types. The CLI
+policy audit checks these pairs against the actual agent roster and task
+assignment contract. A tool call is denied when the tool or adapter is unknown,
+any role/task/action/environment dimension mismatches, the budget or policy
+gate fails, or the audit sink is unavailable. Read access is scoped to local
+and Staging environments. No production tool is granted in the initial matrix.
 
 ## Write operations
 
