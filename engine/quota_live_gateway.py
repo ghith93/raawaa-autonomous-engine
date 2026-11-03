@@ -191,6 +191,7 @@ class QuotaAwareLiveGateway:
                     "provider_error", request, profile,
                     http_status=exc.status_code or 0,
                     error_type=type(exc).__name__,
+                    error_code=exc.error_code,
                 )
                 # The provider may have processed the request before a timeout,
                 # transport failure, or malformed response. Retain the full token
@@ -218,6 +219,7 @@ class QuotaAwareLiveGateway:
                     "provider_failure_stopped", request, profile,
                     reason="non_429_no_route_rotation",
                     http_status=exc.status_code or 0,
+                    error_code=exc.error_code,
                 )
                 raise ProviderUnavailable(
                     "Provider error was not HTTP 429; route rotation stopped to avoid replay."
