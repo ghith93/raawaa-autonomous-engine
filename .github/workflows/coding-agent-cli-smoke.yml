@@ -1,6 +1,12 @@
 name: Coding Agent CLI Installation Smoke
 
 on:
+  pull_request:
+    paths:
+      - ".github/workflows/coding-agent-cli-smoke.yml"
+      - ".devcontainer/**"
+      - "docs/coding-agent-cli-readiness.md"
+      - "docs/coding-agent-codespaces.md"
   push:
     branches: [main]
     paths:
