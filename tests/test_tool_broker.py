@@ -17,15 +17,13 @@ MATRIX = {
         "repository.read_file": {
             "access": "read",
             "action": "inspect_code",
-            "agent_roles": ["engineering"],
-            "task_types": ["code_review"],
+            "grants": [{"agent_role": "engineering", "task_types": ["code_review"]}],
             "environments": ["local", "staging"],
         },
         "storefront.publish": {
             "access": "write",
             "action": "publish_content",
-            "agent_roles": ["marketing_and_content"],
-            "task_types": ["content_draft"],
+            "grants": [{"agent_role": "marketing_and_content", "task_types": ["content_draft"]}],
             "environments": ["staging"],
         },
     },
@@ -87,8 +85,8 @@ class ToolBrokerTests(unittest.TestCase):
 
     def test_role_task_action_and_environment_must_all_match(self):
         cases = [
-            ({"agent_role": "marketing_and_content"}, "agent_role_not_authorized"),
-            ({"task_type": "system_audit"}, "task_type_not_authorized"),
+            ({"agent_role": "marketing_and_content"}, "role_task_not_authorized"),
+            ({"task_type": "system_audit"}, "role_task_not_authorized"),
             ({"action": "publish_content"}, "tool_action_mismatch"),
             ({"environment": "production"}, "environment_not_authorized"),
         ]
@@ -112,13 +110,14 @@ class ToolBrokerTests(unittest.TestCase):
         self.assertEqual(self.calls, [])
 
     def test_external_write_is_denied_even_with_approval_id_when_policy_is_off(self):
-        decision = self.broker.authorize(ToolRequest(
+        req = ToolRequest(
             task_id="task-2", agent_id="marketer",
             agent_role="marketing_and_content", task_type="content_draft",
             tool_name="storefront.publish", action="publish_content",
             environment="staging", payload={"content": "draft"},
             approval_id="approval-1", idempotency_key="idem-1",
-        ))
+        )
+        decision = self.broker.authorize(req)
         self.assertFalse(decision.allowed)
         self.assertEqual(decision.reason, "external_writes_disabled")
         self.assertEqual(self.calls, [])
