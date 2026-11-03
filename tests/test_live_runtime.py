@@ -6,6 +6,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from engine.d1_monetary_ledger import D1MonetaryLedgerError
+from engine.d1_quota_ledger import D1QuotaLedgerError
 
 from engine.live_runtime import build_live_gateway
 
@@ -77,14 +78,24 @@ class LiveRuntimeFactoryTests(unittest.TestCase):
                 },
             )
 
-    def test_cloud_mode_injects_shared_d1_monetary_ledger(self):
-        class FakeLedger:
+    def test_cloud_mode_injects_shared_d1_monetary_and_token_ledgers(self):
+        class FakeMonetaryLedger:
             def budget_status(self, *args, **kwargs):
                 return {"daily_over_budget": False, "monthly_over_budget": False, "per_task_over_budget": False}
             def totals(self):
                 return {"daily_total_nanos": 0, "monthly_total_nanos": 0, "pending_reservations": 0}
-        fake = FakeLedger()
-        with patch("engine.live_runtime.D1MonetaryLedger", return_value=fake) as factory:
+
+        class FakeQuotaLedger:
+            def usage_today(self, *args, **kwargs): return {"requests": 0, "tokens": 0}
+            def usage_minute(self, *args, **kwargs): return {"requests": 0, "tokens": 0}
+            def usage_month(self, *args, **kwargs): return {"requests": 0, "tokens": 0}
+            def usage_for_task(self, *args, **kwargs): return {"requests": 0, "tokens": 0}
+            def cooldown_active(self, *args, **kwargs): return False
+
+        fake_money = FakeMonetaryLedger()
+        fake_quota = FakeQuotaLedger()
+        with patch("engine.live_runtime.D1MonetaryLedger", return_value=fake_money) as money_factory, \\
+             patch("engine.live_runtime.D1QuotaLedger", return_value=fake_quota) as quota_factory:
             gateway = build_live_gateway(
                 self.db_path, self.policy_path, self.registry_path,
                 environ={
@@ -95,10 +106,25 @@ class LiveRuntimeFactoryTests(unittest.TestCase):
                 },
             )
         self.assertIsNotNone(gateway)
-        self.assertIs(gateway.usage_ledger, fake)
-        factory.assert_called_once_with(
+        self.assertIs(gateway.usage_ledger, fake_money)
+        self.assertIs(gateway.quota_manager.ledger, fake_quota)
+        money_factory.assert_called_once_with(
             base_url="https://engine.example", token="test-token"
         )
+        quota_factory.assert_called_once_with(
+            base_url="https://engine.example", token="test-token"
+        )
+
+    def test_github_actions_without_control_worker_url_fails_closed(self):
+        with self.assertRaisesRegex(RuntimeError, "both durable D1"):
+            build_live_gateway(
+                self.db_path, self.policy_path, self.registry_path,
+                environ={
+                    "RAAWAA_ENGINE_LIVE_INFERENCE": "enabled",
+                    "GITHUB_ACTIONS": "true",
+                    "GROQ_API_KEY": "test-key",
+                },
+            )
 
     def test_preview_profile_is_not_eligible_even_if_marked_enabled(self):
         qwen = next(route for route in self.registry["routes"]
