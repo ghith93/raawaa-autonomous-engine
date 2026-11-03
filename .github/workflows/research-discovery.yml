@@ -7,7 +7,9 @@ on:
       - ".github/workflows/research-discovery.yml"
       - "engine/research_discovery.py"
       - "config/research_sources.json"
-      - "scripts/persist_research_candidates.py"\n      - "scripts/publish_research_scan_telemetry.py"\n      - "worker/mobile-status.js"
+      - "scripts/persist_research_candidates.py"
+      - "scripts/publish_research_scan_telemetry.py"
+      - "worker/mobile-status.js"
       - "scripts/triage_research_candidates.py"
       - "worker/index.js"
       - "migrations/**"
@@ -37,7 +39,11 @@ jobs:
           python-version: "3.12"
       - name: Validate engine policy
         run: python -m engine.cli audit
-      - name: Record research scan start time\n        id: scan_clock\n        run: echo "started_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"\n      - name: Discover public research candidates
+      - name: Record research scan start time
+        id: scan_clock
+        run: echo "started_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
+      - name: Discover public research candidates
+        id: discover
         run: python -m engine.cli research-discover --max-per-query 5 > research-candidates.json
       - name: Rank candidates for manual review
         run: python scripts/triage_research_candidates.py research-candidates.json > research-triage.json
