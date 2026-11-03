@@ -367,6 +367,33 @@ The [OWASP Agentic Skills Top 10](https://github.com/OWASP/www-project-agentic-s
 - [Agent Skills specification](https://agentskills.io/specification) and [reference repository](https://github.com/agentskills/agentskills).
 - [OWASP Agentic Skills Top 10](https://github.com/OWASP/www-project-agentic-skills-top-10) and [OWASP AI Agent Security Cheat Sheet](https://cheatsheetseries.owasp.org/cheatsheets/AI_Agent_Security_Cheat_Sheet.html).
 
+
+## 12. Skill supply-chain scanners and agent evaluation projects — reviewed 2026-11-03
+
+The broader GitHub searches surfaced the following concrete projects. Repository metadata and READMEs were inspected directly; popularity is not treated as a security or quality guarantee.
+
+| Project | Verified details | Fit for Raawaa | Decision |
+|---|---|---|---|
+| [NVIDIA SkillSpector](https://github.com/NVIDIA/SkillSpector) | Apache-2.0; Python 3.12+; static and optional semantic skill scanning; 71 patterns across 17 categories; AST/dataflow, YARA signatures, JSON/Markdown/SARIF output; `--no-llm` disables LLM analysis. Includes explicit analysis resource bounds. | Matches the engine's Python 3.12 CI and can run without provider inference. | **Preferred scanner to pilot when an engine-local `skills/` directory exists.** Pin a reviewed release/commit and use static-only mode in CI. Do not add it while there are no local skills to scan. |
+| [Cisco AI Defense Skill Scanner](https://github.com/cisco-ai-defense/skill-scanner) | Python 3.11–3.14; README claims Apache-2.0; combines YAML/YARA-X, AST/dataflow and optional LLM analysis; supports SARIF, GitHub Actions and pre-commit. GitHub repository metadata currently reports `NOASSERTION` for its licence. | Technically promising second opinion; licence metadata needs reconciliation before vendoring or installing. | Keep as an alternate; verify the actual LICENSE file and pinned release before adoption. |
+| [Snyk Agent Scan](https://github.com/snyk/agent-scan) | Apache-2.0; scans agent components, MCP servers and skills. README warns that MCP scanning may execute configured commands or make outbound network requests; CLI output is explicitly experimental. | Useful inventory/scan reference, but its MCP discovery mode is unsafe to point at untrusted configs without isolation. | Do not use as the default CI scanner; reconsider only inside a disposable sandbox with reviewed configuration. |
+| [Microsoft SkillOpt](https://github.com/microsoft/SkillOpt) | MIT; Python 3.10+; optimizes reusable skill text from agent trajectories, with replay and held-out validation gates. Supports multiple model backends. | Potentially useful for measured skill improvement, but needs real model calls, repeatable task trajectories and evaluation data. | Defer until live inference is explicitly enabled and a local skill registry exists. |
+| [SkillsBench](https://github.com/benchflow-ai/skillsbench) | Apache-2.0; evaluates whether agents actually benefit from skills. Uses BenchFlow tasks and supports local Docker; Modal is the default cloud sandbox in its quick start. | Good future benchmark for skill usefulness, but real agent runs need model credentials and execution resources. | Use its task/evaluation design later; do not add Modal or model spend now. |
+| [PawBench](https://github.com/agentscope-ai/PawBench) | Apache-2.0; v1.0 describes 150 tasks, 9 models and 3 harnesses with public prompts, graders, traces and diagnostic slices. | Strong model × harness evaluation design; requires multiple model runs and a judge to reproduce its full comparison. | Use as a benchmark-design reference, not as a production dependency. |
+| [AgentCompass](https://github.com/open-compass/AgentCompass) | Apache-2.0; Python 3.12+; README describes 30+ benchmarks, 10+ harnesses, local/Docker/remote sandboxes, task scheduling, trace capture and resumable evaluations. | Broad evaluation infrastructure, but overlaps the existing planner, D1 task ledger and CI harness. | Defer; too much additional runtime and dependency surface for current needs. |
+| [Cloudflare Security Audit Skill](https://github.com/cloudflare/security-audit-skill) | MIT; multi-phase coding-agent security-audit skill with independently verified machine-readable findings. | Useful future audit procedure, but it is a skill rather than a standalone scanner. | Review manually before any import; do not treat it as an authorization boundary. |
+
+### Recommended skill-security path
+
+1. Keep the current engine with no executable local skills until a real agent runtime consumes them.
+2. When the first local skills are added, create a small reviewed registry using the Agent Skills directory format and immutable source/version/hash metadata.
+3. Pilot NVIDIA SkillSpector with `--no-llm` on only that local directory in an ephemeral CI runner. Preserve SARIF/JSON findings as artifacts; do not fail the build on unreviewed false positives until a baseline is established.
+4. Add human review and the engine's backend tool allowlist. Scanner output is advisory; it never grants permissions.
+5. Add SkillsBench-style golden tasks only when the runtime can execute deterministic, budget-bounded test cases. Measure skill-on vs skill-off, task completion, tool correctness, latency and cost.
+6. Consider SkillOpt only after the engine has enough reviewed trajectories to optimize against and a held-out validation set to prevent skill regressions.
+
+**Do not install any scanner or skill package globally on the user's devices.** The first pilot should run only in disposable GitHub Actions compute, with no repository secrets passed to the scanner and no LLM mode.
+
 ## Adoption rule
 
 No framework, agent, plugin, vector database or hosted provider is adopted because it is popular or feature-rich. It must solve a measured limitation, fit zero-spend or have a separately approved budget, preserve policy/quota enforcement, support bounded execution and auditability, have a maintained upstream and clear license, and pass isolated tests before production integration.
