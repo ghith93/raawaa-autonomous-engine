@@ -70,6 +70,7 @@ test("installation token request is scoped to this repository and Actions write"
   assert.equal(calls[0].url, "https://api.github.com/app/installations/67890/access_tokens");
   assert.equal(calls[0].options.method, "POST");
   assert.equal(calls[0].options.headers.Authorization.startsWith("Bearer "), true);
+  assert.equal(calls[0].options.headers["User-Agent"], "RaawaaAutonomousEngine/1.0");
   assert.deepEqual(JSON.parse(calls[0].options.body), {
     repository_ids: [1441352567],
     permissions: { actions: "write" },
