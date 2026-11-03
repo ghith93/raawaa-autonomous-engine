@@ -77,13 +77,19 @@ class D1MonetaryLedger:
             raise D1MonetaryLedgerError(str(result["error"]))
         return result
 
-    def _snapshot(self, task_id: str | None = None) -> dict:
+    def _status(self, task_id: str | None = None) -> dict:
         suffix = "" if task_id is None else "?task_id=" + quote(task_id, safe="")
         result = self._request("GET", "/v1/monetary-ledger" + suffix)
         snapshot = result.get("snapshot")
+        policy = result.get("budget_policy")
         if not isinstance(snapshot, dict):
             raise D1MonetaryLedgerError("monetary Worker omitted its spend snapshot")
-        return snapshot
+        if not isinstance(policy, dict) or policy.get("enabled") is not True:
+            raise D1MonetaryLedgerError("operator-owned D1 monetary budget policy is unavailable or disabled")
+        return result
+
+    def _snapshot(self, task_id: str | None = None) -> dict:
+        return self._status(task_id)["snapshot"]
 
     def totals(self) -> dict[str, float | int]:
         snapshot = self._snapshot()
@@ -124,11 +130,17 @@ class D1MonetaryLedger:
         task_cap = _money_nanos(per_task_budget_usd, round_up=False)
         if task_cap > 0 and task_id is None:
             raise ValueError("task_id is required when a per-task monetary budget is configured")
-        totals = self.totals()
-        task_total = self.task_totals(task_id)["total_nanos"] if task_id else 0
+        status = self._status(task_id)
+        policy = status["budget_policy"]
+        if (int(policy["daily_budget_nanos"]) != daily_cap or
+                int(policy["monthly_budget_nanos"]) != monthly_cap or
+                (task_cap > 0 and int(policy["per_task_budget_nanos"]) != task_cap)):
+            raise D1MonetaryLedgerError("local monetary policy does not match the operator-owned D1 hard caps")
+        snapshot = status["snapshot"]
+        task_total = int(snapshot["task_total_nanos"]) if task_id else 0
         return {
-            "daily_over_budget": totals["daily_total_nanos"] > daily_cap,
-            "monthly_over_budget": totals["monthly_total_nanos"] > monthly_cap,
+            "daily_over_budget": int(snapshot["daily_total_nanos"]) > daily_cap,
+            "monthly_over_budget": int(snapshot["monthly_total_nanos"]) > monthly_cap,
             "per_task_over_budget": task_total > task_cap,
         }
 
