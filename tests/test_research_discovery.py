@@ -262,6 +262,19 @@ class ResearchDiscoveryTests(unittest.TestCase):
         self.assertIn("403", failed["searxng_unavailable"])
         self.assertEqual(failed["searxng_candidates"], [])
 
+    def test_searxng_rejects_cross_host_or_port_redirect(self):
+        class Response:
+            status = 200
+            headers = {"Content-Type": "application/json"}
+            def __enter__(self): return self
+            def __exit__(self, *args): return False
+            def geturl(self): return "https://other.example.org/search"
+            def read(self, limit): return b'{"results":[]}'
+        with patch("engine.research_discovery.urlopen", return_value=Response()):
+            with self.assertRaisesRegex(ResearchDiscoveryError, "redirected outside"):
+                _request_searxng("agent security", "https://search.example.org", 5)
+
+
     def test_searxng_rejects_oversized_response(self):
         class Response:
             status = 200
