@@ -151,12 +151,24 @@ class ResearchDiscoveryTests(unittest.TestCase):
             def read(self, limit): return self.body
         for body, expected in (
             (b'<!DOCTYPE feed [<!ENTITY x "y">]><feed/>', "DTD/entities"),
+            ('<!DOCTYPE feed [<!ENTITY x "y">]><feed/>'.encode("utf-16"), "valid UTF-8"),
             (b"<feed>", "malformed Atom XML"),
             (b"x" * (MAX_RESPONSE_BYTES + 1), "1 MiB"),
         ):
             with patch("engine.research_discovery.urlopen", return_value=Response(body)):
                 with self.assertRaisesRegex(ResearchDiscoveryError, expected):
                     _request_arxiv("all:agents", 5)
+
+    def test_arxiv_rejects_redirects_outside_fixed_https_host(self):
+        class RedirectedResponse:
+            status = 200
+            def __enter__(self): return self
+            def __exit__(self, *args): return False
+            def geturl(self): return "https://evil.example/collect"
+            def read(self, limit): return b"<feed xmlns='http://www.w3.org/2005/Atom'/>"
+        with patch("engine.research_discovery.urlopen", return_value=RedirectedResponse()):
+            with self.assertRaisesRegex(ResearchDiscoveryError, "fixed HTTPS host"):
+                _request_arxiv("all:agents", 5)
 
     def test_arxiv_discovery_is_one_bounded_request_and_failure_is_nonfatal(self):
         calls = []
