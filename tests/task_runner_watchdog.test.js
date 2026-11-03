@@ -14,6 +14,7 @@ const NOW = Date.parse("2026-11-03T01:15:00.000Z");
 function envWith(db = dbMock()) {
   return {
     DB: db,
+    GITHUB_APP_WATCHDOG_ENABLED: "enabled",
     GITHUB_APP_ID: "12345",
     GITHUB_APP_INSTALLATION_ID: "67890",
     GITHUB_APP_PRIVATE_KEY: privateKeyPem,
@@ -105,6 +106,23 @@ test("missing D1 audit binding fails before any GitHub network call", async () =
     /task_runner_dispatch_audit_unavailable/,
   );
   assert.equal(calls, 0);
+});
+
+test("GitHub App credentials without explicit watchdog opt-in remain dormant", async () => {
+  const module = await loadModule();
+  assert.ok(module, "Task Runner watchdog module must exist");
+  const DB = dbMock();
+  const env = envWith(DB);
+  delete env.GITHUB_APP_WATCHDOG_ENABLED;
+  let calls = 0;
+  const result = await module.dispatchTaskRunnerIfStale({
+    env,
+    fetchImpl: async () => { calls += 1; throw new Error("network must not run"); },
+    nowMs: NOW,
+  });
+  assert.deepEqual(result, { status: "disabled", reason: "missing_configuration" });
+  assert.equal(calls, 0);
+  assert.equal(DB.calls.length, 0);
 });
 
 test("an active Task Runner run suppresses dispatch", async () => {
