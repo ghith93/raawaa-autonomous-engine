@@ -14,8 +14,7 @@ from scripts.publish_staging_ops_telemetry import (
 )
 
 
-def write_fixture(root: Path, *, staging_id="231dd948-04a0-49e3-ad73-444f77d69477",
-                  live_switch=False):
+def write_fixture(root: Path, *, staging_id="231dd948-04a0-49e3-ad73-444f77d69477"):
     (root / "config").mkdir(parents=True)
     (root / ".github" / "workflows").mkdir(parents=True)
     (root / "config" / "policy.json").write_text(json.dumps({
@@ -24,24 +23,24 @@ def write_fixture(root: Path, *, staging_id="231dd948-04a0-49e3-ad73-444f77d6947
         "allow_external_writes": False,
         "model_policy": {"paid_fallback_enabled": False},
     }), encoding="utf-8")
-    batch_env = "          RAAWAA_ENGINE_LIVE_INFERENCE: enabled\n" if live_switch else ""
     (root / ".github" / "workflows" / "task-runner.yml").write_text(
-        "      - name: Process bounded D1 task batch\n" + batch_env
-        + "      - name: Publish bounded Task Runner status\n",
+        "      - name: Process bounded D1 task batch\\n"
+        "          RAAWAA_ENGINE_LIVE_INFERENCE: disabled\\n"
+        "      - name: Publish bounded Task Runner status\\n",
         encoding="utf-8",
     )
     (root / "wrangler.staging.toml").write_text(
-        'name = "raawaa-autonomous-engine-staging"\n'
-        '[[d1_databases]]\n'
-        'database_name = "raawaa-engine-staging"\n'
-        f'database_id = "{staging_id}"\n',
+        'name = "raawaa-autonomous-engine-staging"\\n'
+        '[[d1_databases]]\\n'
+        'database_name = "raawaa-engine-staging"\\n'
+        f'database_id = "{staging_id}"\\n',
         encoding="utf-8",
     )
     (root / "wrangler.toml").write_text(
-        'name = "raawaa-autonomous-engine-control"\n'
-        '[[d1_databases]]\n'
-        'database_name = "raawaa-autonomous-e"\n'
-        'database_id = "f0ffbed3-940f-488d-a7d1-31cbc5fbf742"\n',
+        'name = "raawaa-autonomous-engine-control"\\n'
+        '[[d1_databases]]\\n'
+        'database_name = "raawaa-autonomous-e"\\n'
+        'database_id = "f0ffbed3-940f-488d-a7d1-31cbc5fbf742"\\n',
         encoding="utf-8",
     )
 
@@ -58,7 +57,8 @@ def valid_env(**changes):
         "GITHUB_WORKFLOW": "Engine CI",
         "ENGINE_CI_TEST_RESULT": "success",
         "ENGINE_CI_STAGING_MIGRATE_RESULT": "success",
-        "ENGINE_CI_STAGING_WORKER_RESULT": "success",\n        "RAAWAA_ENGINE_LIVE_INFERENCE": "disabled",
+        "ENGINE_CI_STAGING_WORKER_RESULT": "success",
+        "RAAWAA_ENGINE_LIVE_INFERENCE": "disabled",
     }
     env.update(changes)
     return env
@@ -102,16 +102,19 @@ class StagingOpsTelemetryTests(unittest.TestCase):
         )
         self.assertEqual(summary["conclusion"], "incomplete")
 
-    def test_live_inference_configured_in_default_task_runner_disengages_gate(self):
-        write_fixture(self.root, live_switch=True)
-        _, summary = build_telemetry_sql(valid_env(), self.root, self.now)
+    def test_enabled_live_inference_disengages_gate(self):
+        _, summary = build_telemetry_sql(
+            valid_env(RAAWAA_ENGINE_LIVE_INFERENCE="enabled"), self.root, self.now
+        )
         self.assertEqual(summary["kill_switch"], "not_engaged")
 
     def test_wrong_database_id_fails_before_runner(self):
         write_fixture(self.root, staging_id="f0ffbed3-940f-488d-a7d1-31cbc5fbf742")
         called = []
         with self.assertRaisesRegex(TelemetryPublishError, "identity mismatch"):
-            publish_staging_telemetry(valid_env(), root=self.root, runner=lambda *a, **k: called.append(a))
+            publish_staging_telemetry(
+                valid_env(), root=self.root, runner=lambda *a, **k: called.append(a)
+            )
         self.assertEqual(called, [])
 
     def test_only_main_push_engine_ci_is_accepted(self):
@@ -137,9 +140,7 @@ class StagingOpsTelemetryTests(unittest.TestCase):
         )
         command = seen["command"]
         self.assertEqual(result["published_events"], 2)
-        self.assertEqual(command[:4], [
-            "npx", "--yes", "wrangler@4.156.1", "d1"
-        ])
+        self.assertEqual(command[:4], ["npx", "--yes", "wrangler@4.156.1", "d1"])
         self.assertIn("raawaa-engine-staging", command)
         self.assertIn("--remote", command)
         self.assertIn("wrangler.staging.toml", command)
