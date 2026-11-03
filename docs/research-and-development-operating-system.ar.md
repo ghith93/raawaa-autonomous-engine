@@ -10,11 +10,11 @@
 - `engine/research_discovery.py` للاكتشاف العام المحدود.
 - `.github/workflows/research-discovery.yml` للجدولة اليومية واللقطة.
 - `scripts/triage_research_candidates.py` للفرز الحتمي.
-- D1 `research_candidates` للذاكرة البحثية الدائمة عند تفعيل إعداد الاستمرارية.
+- D1 `research_candidates` لحفظ metadata المرشحين من GitHub وCrossref وarXiv عند تفعيل إعداد الاستمرارية؛ قيمة الإعداد الحالية غير مستنتجة من ملفات المستودع.
 - D1 audit telemetry لقياس نجاح الفحص وحداثة المصادر.
 - Task Store / Remote Task Store لإدارة المهام عندما يكون نوع المهمة وعقده مدعومين.
 - سجل الوكلاء الحالي بوصفه توصيفاً للأدوار، لا دليلاً على وجود وكلاء نموذجية عاملة.
-- Tool Broker بعد اكتمال مراجعته ودمجه، مع بقاء الأدوات غير المسجلة ممنوعة.
+- Tool Broker مدمج بنمط deny-by-default؛ لكنه غير موصول بالـ runtime ولا توجد adapters خارجية مسجلة.
 
 يجب أن يظل الفرق واضحاً بين:
 1. **R&D Discovery:** جمع بيانات عامة وفرزها آلياً.
