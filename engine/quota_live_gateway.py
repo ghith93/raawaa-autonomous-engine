@@ -7,7 +7,7 @@ import uuid
 from dataclasses import replace
 
 from engine.live_adapters import LiveAdapterError
-from engine.model_gateway import BudgetExceeded, ProviderNotCalled, ProviderUnavailable, UsageLedger
+from engine.model_gateway import BudgetExceeded, ProviderUnavailable, UsageLedger
 from engine.provider import GenerationRequest
 from engine.quota_manager import QuotaManager
 
@@ -71,19 +71,7 @@ class QuotaAwareLiveGateway:
                     request.task_id, request.lease_token, request.step_key, request.task_kind
                 )
             except Exception as exc:
-                # A confirmed replay/lease conflict means a prior invocation may
-                # already be in flight; preserve the no-replay block. Transient
-                # transport/5xx failures happened before adapter.generate().
-                status = getattr(exc, "http_status", None)
-                code = getattr(exc, "error_code", None)
-                if code or status in {400, 401, 403, 404, 409}:
-                    raise ProviderUnavailable(
-                        "Could not prepare a durable task-step invocation; replay remains blocked."
-                    ) from exc
-                raise ProviderNotCalled(
-                    "Could not prepare a durable task-step invocation; provider was not called.",
-                    retry_after_seconds=60, reason_code="checkpoint_unavailable",
-                ) from exc
+                raise ProviderUnavailable("Could not prepare a durable task-step invocation; provider was not called.") from exc
             request = replace(request, request_id=checkpoint["request_id"], invocation_id=checkpoint["invocation_id"])
         if not isinstance(request.request_id, str) or not request.request_id.strip():
             raise ProviderUnavailable(
@@ -393,18 +381,14 @@ class QuotaAwareLiveGateway:
             return response
 
         if isinstance(last_error, BudgetExceeded):
-            raise ProviderNotCalled(
-                "No eligible provider route remains within the configured monetary budget.",
-                retry_after_seconds=3600, reason_code="monetary_budget_exhausted",
+            raise ProviderUnavailable(
+                "No eligible provider route remains within the configured monetary budget."
             ) from last_error
         if last_error is not None:
             raise ProviderUnavailable(
-                "A provider route failed with an outcome that may be ambiguous; replay is blocked."
+                "All eligible free routes failed or were rate-limited."
             ) from last_error
-        raise ProviderNotCalled(
-            "No verified free route has sufficient remaining quota.",
-            retry_after_seconds=900, reason_code="provider_capacity_unavailable",
-        )
+        raise ProviderUnavailable("No verified free route has sufficient remaining quota.")
 
     def status(self):
         return {
