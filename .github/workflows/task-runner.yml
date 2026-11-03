@@ -9,6 +9,12 @@ on:
     # Primary GitHub cadence; the Cloudflare watchdog is a separately gated fallback.
     - cron: "4,9,14,19,24,29,34,39,44,49,54,59 * * * *"
   workflow_dispatch:
+    inputs:
+      run_public_research_once:
+        description: "Queue and run one public research task using the verified Groq Free route"
+        required: false
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -193,13 +199,81 @@ jobs:
               raise SystemExit(1)
           PY
 
+      - name: Enqueue one-time public research task
+        if: github.event_name == 'workflow_dispatch' && inputs.run_public_research_once
+        id: research
+        env:
+          ENGINE_API_URL: https://raawaa-autonomous-engine-control.ghith-shikhkhaled.workers.dev
+          ENGINE_API_TOKEN: ${{ secrets.ENGINE_API_TOKEN }}
+          PENDING_TASKS: ${{ steps.mobile.outputs.tasks_pending }}
+          GITHUB_RUN_ID: ${{ github.run_id }}
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          from urllib.request import Request, urlopen
+          from urllib.error import HTTPError, URLError
+
+          if os.environ.get("PENDING_TASKS") != "0":
+              raise SystemExit("Refusing one-shot live research: the D1 queue must be empty before enqueue.")
+          payload = {
+              "task_type": "research_brief",
+              "title": "Public research: lean multi-agent orchestration choices",
+              "payload": {
+                  "data_classification": "public",
+                  "topic": "Compare LangGraph, CrewAI, PydanticAI and Agno for a lightweight Python multi-agent operating system with durable task queues, safe delegation, observable execution, and strict free-only inference budgets.",
+                  "questions": [
+                      "Compare their orchestration model, learning curve, persistence, retries, observability, and deployment footprint.",
+                      "Identify the smallest practical architecture for a solo operator using GitHub Actions and Cloudflare D1 without paid infrastructure.",
+                      "Separate verified capabilities from assumptions and list concrete migration risks.",
+                      "Recommend a staged adoption plan that avoids unnecessary framework complexity."
+                  ],
+                  "source_urls": [
+                      "https://docs.langchain.com/oss/python/langgraph/overview",
+                      "https://docs.crewai.com/",
+                      "https://ai.pydantic.dev/",
+                      "https://docs.agno.com/"
+                  ]
+              },
+              "idempotency_key": "raawaa-public-research-" + os.environ["GITHUB_RUN_ID"],
+              "max_attempts": 1
+          }
+          request = Request(
+              os.environ["ENGINE_API_URL"].rstrip("/") + "/v1/tasks/enqueue",
+              data=json.dumps(payload).encode("utf-8"),
+              headers={
+                  "Authorization": "Bearer " + os.environ["ENGINE_API_TOKEN"],
+                  "Content-Type": "application/json",
+                  "Accept": "application/json",
+                  "User-Agent": "RaawaaAutonomousEngine/1.0 (+https://github.com/ghith93/raawaa-autonomous-engine)"
+              },
+              method="POST"
+          )
+          try:
+              with urlopen(request, timeout=15) as response:
+                  result = json.loads(response.read().decode("utf-8"))
+                  task = result.get("task") or {}
+                  if response.status != 200 or not task.get("id"):
+                      raise SystemExit("Research task enqueue returned no task identity.")
+                  print("Public research task enqueued; created=" + str(result.get("created")) + ".")
+                  print("Task status: " + str(task.get("status", "unknown")) + ".")
+                  with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
+                      output.write("task_id=" + str(task["id"]) + "\n")
+          except HTTPError as error:
+              raise SystemExit("Research task enqueue failed with HTTP " + str(error.code)) from None
+          except (URLError, TimeoutError, OSError, ValueError) as error:
+              raise SystemExit("Research task enqueue failed: " + type(error).__name__) from None
+          PY
+
       - name: Process bounded D1 task batch
         id: batch
         env:
           # Provider credentials are scoped to the bounded worker process only.
           # The gateway still fails closed unless repository policy, provider
           # verification, quota evidence, and the operator switch all permit use.
-          RAAWAA_ENGINE_LIVE_INFERENCE: ${{ vars.RAAWAA_ENGINE_LIVE_INFERENCE }}
+          RAAWAA_ENGINE_LIVE_INFERENCE: ${{ inputs.run_public_research_once && 'enabled' || '' }}
+          RUN_PUBLIC_RESEARCH_ONCE: ${{ inputs.run_public_research_once }}
+          EXPECTED_RESEARCH_TASK_ID: ${{ steps.research.outputs.task_id }}
           RAAWAA_ENGINE_API_URL: https://raawaa-autonomous-engine-control.ghith-shikhkhaled.workers.dev
           RAAWAA_ENGINE_API_TOKEN: ${{ secrets.ENGINE_API_TOKEN }}
           RAAWAA_ENGINE_QUOTA_ADMIN_TOKEN: ${{ secrets.ENGINE_QUOTA_ADMIN_TOKEN }}
@@ -214,8 +288,10 @@ jobs:
           import subprocess
           import sys
 
+          run_research = os.environ.get("RUN_PUBLIC_RESEARCH_ONCE", "").lower() == "true"
+          max_tasks = "1" if run_research else "5"
           command = [sys.executable, "-m", "engine.cli", "run-batch",
-                     "--max-tasks", "5", "--max-seconds", "60"]
+                     "--max-tasks", max_tasks, "--max-seconds", "60"]
           result = subprocess.run(command, capture_output=True, text=True, check=False)
           if result.stdout:
               print(result.stdout, end="")
@@ -228,9 +304,24 @@ jobs:
               tasks_processed = int(payload.get("tasks_processed", 0))
               stop_reason = str(payload.get("stop_reason", "unknown"))
           except (ValueError, TypeError):
-              pass
+              payload = {}
+          if os.environ.get("RUN_PUBLIC_RESEARCH_ONCE", "").lower() == "true":
+              results = payload.get("results", []) if isinstance(payload, dict) else []
+              expected_id = os.environ.get("EXPECTED_RESEARCH_TASK_ID", "")
+              if (result.returncode != 0 or tasks_processed != 1 or len(results) != 1
+                      or results[0].get("id") != expected_id
+                      or results[0].get("status") != "succeeded"
+                      or results[0].get("mode") != "live_inference"
+                      or results[0].get("provider") != "groq"
+                      or results[0].get("model") != "openai/gpt-oss-20b"
+                      or not results[0].get("output_preview")):
+                  raise SystemExit("One-shot research did not complete through the expected live Groq route.")
+              with open(os.environ["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8") as summary:
+                  summary.write("## One-shot public research result\\n\\n")
+                  summary.write("Provider: Groq · Model: openai/gpt-oss-20b\\n\\n")
+                  summary.write(results[0]["output_preview"][:3500] + "\\n")
           with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
-              output.write(f"tasks_processed={tasks_processed}\nstop_reason={stop_reason}\n")
+              output.write(f"tasks_processed={tasks_processed}\\nstop_reason={stop_reason}\\n")
           raise SystemExit(result.returncode)
           PY
       - name: Publish bounded Task Runner status
