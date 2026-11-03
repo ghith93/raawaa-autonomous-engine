@@ -335,3 +335,11 @@ Required owner-side activation after review: configure a newly generated, distin
 - **Next core priorities:** F1 (separate dry-run completion from actual execution in task state/reporting) next, then F5 (DAG priority/dependencies), each on its own branch with exact-head CI and parity tests. F3/F4 follow after core semantics.
 - **Developer tools:** Graphify is approved for a later bounded code-only evaluation (Apache-2.0; official PyPI `graphifyy`; local/offline Tree-Sitter code extraction; optional semantic docs/media extraction uses the configured model). It is not installed, executed, or a runtime dependency. Spec Kit remains deferred and optional (MIT).
 
+## F1 execution-mode separation — 2026-11-04
+
+- Additive migration `0008_task_execution_mode` adds `tasks.execution_mode` with constrained values `unknown`, `dry_run`, `live_inference`, and `codespace`, plus an index for status/mode aggregates. New and historical rows default to `unknown`; no historical task is retroactively labeled as real execution.
+- SQLite `TaskStore` adds the same field and safely upgrades existing local databases. The worker passes `dry_run` or `live_inference` on claim; the D1 Worker validates and persists the mode, while old claim clients remain compatible and are recorded as `unknown`.
+- The mobile status API and `/mobile` dashboard expose status and execution mode separately. Dry-run successes are labeled simulations and excluded from the executed-success count; live-inference and Codespace successes are shown separately; legacy/unknown successes are never inferred to be actual execution. The Task Runner issue status receives only sanitized aggregate counts.
+- Migration is additive and applies to Staging only through the existing post-merge pipeline. Production Worker/D1 promotion remains separately gated. No provider calls, paid spend, external writes, or Codespaces activation are part of F1.
+- Tests cover legacy SQLite/D1 rows, allowed/invalid modes, remote claim compatibility, local D1 claim/readback, dashboard aggregates, mobile probe outputs, and Staging authenticated status validation.
+
