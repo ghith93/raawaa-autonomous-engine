@@ -50,5 +50,23 @@ class ProviderWorkflowSecurityTests(unittest.TestCase):
         self.assertNotIn("    env:\n      GROQ_API_KEY:", source)
         self.assertIn("python scripts/groq_connection_check.py", step)
 
+    def test_ci_telemetry_publisher_is_main_only_and_staging_only(self):
+        workflow = ROOT / ".github" / "workflows" / "ci.yml"
+        source = workflow.read_text(encoding="utf-8")
+        marker = "  publish-staging-ops-telemetry:"
+        start = source.index(marker)
+        job = source[start:]
+        self.assertIn("needs: [test, staging-migrate, staging-worker-verify]", job)
+        self.assertIn("github.event_name == 'push'", job)
+        self.assertIn("github.ref == 'refs/heads/main'", job)
+        self.assertIn("python scripts/publish_staging_ops_telemetry.py", job)
+        self.assertIn("CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}", job)
+        self.assertNotIn("ENGINE_API_TOKEN", job)
+        self.assertNotIn("wrangler.toml", job)
+        script = (ROOT / "scripts" / "publish_staging_ops_telemetry.py").read_text(encoding="utf-8")
+        self.assertIn('STAGING_DATABASE_ID = "231dd948-04a0-49e3-ad73-444f77d69477"', script)
+        self.assertIn('PRODUCTION_DATABASE_ID = "f0ffbed3-940f-488d-a7d1-31cbc5fbf742"', script)
+        self.assertIn("client.query(", script)
+
 if __name__ == "__main__":
     unittest.main()
