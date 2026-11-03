@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import worker from "../worker/index.js";
 
 const TOKEN = "mobile-status-test-token";
-function dbMock(migrationVersions=["0003_durable_quota_ledger","0004_paper_event_ledger","0005_telegram_webhook_receipts"], workerCron={created_at:"2026-11-03T00:00:00.000Z",details_json:JSON.stringify({cron:"*/15 * * * *",requeued:2,failed:1})}, watchdogEvents=[], ciHealthRow=null, killSwitchRow=null, invocationCounts=[]) {
+function dbMock(migrationVersions=["0003_durable_quota_ledger","0004_paper_event_ledger","0005_telegram_webhook_receipts"], workerCron={created_at:"2026-11-03T00:00:00.000Z",details_json:JSON.stringify({cron:"*/15 * * * *",requeued:2,failed:1})}, watchdogEvents=[], ciHealthRow=null, killSwitchRow=null, invocationCounts=[], scanRow=null, sourceRows=[]) {
   const calls=[];
   return {
     calls,
@@ -11,7 +11,7 @@ function dbMock(migrationVersions=["0003_durable_quota_ledger","0004_paper_event
       return {
         sql, values: [],
         bind(...values){this.values=values;return this;},
-        async first(){calls.push({kind:"first",sql,values:this.values});if(sql.includes("worker_cron_tick"))return workerCron;if(sql.includes("ci_health_snapshot"))return ciHealthRow;if(sql.includes("kill_switch_snapshot"))return killSwitchRow;if(sql.includes("snapshot_captured"))return {candidate_id:"candidate-2",occurred_at:"2026-11-02T12:30:00.000Z",chain_id:1,block_number:123};return {event_type:"candidate_detected",candidate_id:"candidate-1",occurred_at:"2026-11-02T12:00:00.000Z"};},
+        async first(){calls.push({kind:"first",sql,values:this.values});if(sql.includes("worker_cron_tick"))return workerCron;if(sql.includes("ci_health_snapshot"))return ciHealthRow;if(sql.includes("kill_switch_snapshot"))return killSwitchRow;if(sql.includes("research_scan_completed"))return scanRow;if(sql.includes("snapshot_captured"))return {candidate_id:"candidate-2",occurred_at:"2026-11-02T12:30:00.000Z",chain_id:1,block_number:123};return {event_type:"candidate_detected",candidate_id:"candidate-1",occurred_at:"2026-11-02T12:00:00.000Z"};},
         async all(){
           calls.push({kind:"all",sql,values:this.values});
           if(sql.includes("FROM tasks")) return {results:[{status:"pending",count:2}]};
@@ -21,6 +21,7 @@ function dbMock(migrationVersions=["0003_durable_quota_ledger","0004_paper_event
           if(sql.includes("FROM quota_usage")) return {results:[{route_id:"groq:gpt-oss-20b",requests:3,tokens:1200}]};
           if(sql.includes("FROM model_usage")) return {results:[{provider:"groq",requests:2,input_tokens:900,output_tokens:300,cost_usd:0.0125}]};
           if(sql.includes("task_runner_dispatch_requested")) return {results:watchdogEvents};
+          if(sql.includes("research_source_observation")) return {results:sourceRows};
           return {results:[]};
         },
       };
@@ -42,6 +43,8 @@ test("mobile status page is public static HTML and never embeds an API token",as
  assert.match(body,/Telegram control readiness/);
  assert.match(body,/Worker Cron/);
  assert.match(body,/Task Runner watchdog/);
+ assert.match(body,/Latest explicit research scan/);
+ assert.match(body,/Research source freshness/);
  assert.match(body,/worker_cron/);
  assert.match(body,/model_costs_usd/);
  assert.match(body,/toFixed\(6\)/);
@@ -200,6 +203,44 @@ test("mobile status does not query invocation tables before migration 0007",asyn
  assert.equal(DB.calls.some(call=>call.sql.includes("FROM task_model_invocations")),false);
 });
 
+
+test("mobile status reports explicit scan and per-source freshness without disturbing task invocation aggregates",async()=>{
+ const now=new Date().toISOString();
+ const scan={scan_id:"123:1",scan_type:"github_crossref",workflow:"research-discovery.yml",
+  run_id:123,run_number:7,run_attempt:1,head_sha:"a".repeat(40),
+  started_at:now,completed_at:now,status:"partial",requests_made:6,academic_requests_made:1,
+  candidate_count:4,academic_candidate_count:2,unavailable_query_count:1};
+ const scanRow={created_at:now,details_json:JSON.stringify(scan)};
+ const sourceRows=[
+  {created_at:now,details_json:JSON.stringify({scan_id:"123:1",source:"github",status:"fresh",observed_at:now,freshness_hours:24,request_count:6,item_count:4,reason_code:null})},
+  {created_at:now,details_json:JSON.stringify({scan_id:"123:1",source:"crossref",status:"unavailable",observed_at:now,freshness_hours:24,request_count:1,item_count:0,reason_code:"http_429"})},
+ ];
+ const invocations=[{status:"ambiguous",count:1},{status:"settled",count:2}];
+ const DB=dbMock(undefined,undefined,[],null,null,invocations,scanRow,sourceRows);
+ const response=await worker.fetch(request("/v1/mobile/status"),{DB,ENGINE_API_TOKEN:TOKEN});
+ assert.equal(response.status,200);
+ const body=await response.json();
+ assert.equal(body.last_scan.scan_id,"123:1");
+ assert.equal(body.last_scan.status,"partial");
+ assert.equal(body.last_scan.unavailable_query_count,1);
+ assert.equal(body.source_freshness.status,"partial");
+ assert.equal(body.source_freshness.sources.github.status,"fresh");
+ assert.equal(body.source_freshness.sources.crossref.status,"unavailable");
+ assert.equal(body.source_freshness.sources.crossref.reason_code,"http_429");
+ assert.equal(body.task_invocations.ambiguous,1);
+ assert.equal(body.task_invocations.settled,2);
+ assert.equal(body.unavailable_metrics.last_scan,undefined);
+});
+test("mobile status keeps malformed scan and missing source observations explicitly unknown",async()=>{
+ const scanRow={created_at:"not-a-date",details_json:"not-json"};
+ const DB=dbMock(undefined,undefined,[],null,null,[],scanRow,[]);
+ const response=await worker.fetch(request("/v1/mobile/status"),{DB,ENGINE_API_TOKEN:TOKEN});
+ const body=await response.json();
+ assert.equal(body.last_scan,null);
+ assert.match(body.unavailable_metrics.last_scan,/invalid/);
+ assert.deepEqual(body.source_freshness,{status:"unknown",sources:null});
+ assert.match(body.unavailable_metrics.source_freshness,/No valid source observations/);
+});
 test("mobile status endpoint rejects writes",async()=>{
  const response=await worker.fetch(request("/v1/mobile/status",TOKEN,"POST"),{DB:dbMock(),ENGINE_API_TOKEN:TOKEN});
  assert.equal(response.status,405);
