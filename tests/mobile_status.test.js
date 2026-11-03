@@ -52,6 +52,8 @@ test("mobile status page is public static HTML and never embeds an API token",as
  assert.doesNotMatch(response.headers.get("content-security-policy"),/api\\.github\\.com/);
  assert.doesNotMatch(body,/api\\.github\\.com/); 
  assert.match(body,/Default Task Runner inference gate/);
+ assert.match(body,/Latest explicit scan/);
+ assert.match(body,/Research source freshness/);
 });
 
 test("mobile status endpoint requires the existing Engine bearer token",async()=>{
