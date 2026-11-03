@@ -170,7 +170,7 @@ class ToolBrokerTests(unittest.TestCase):
             action="publish_content", environment="staging",
         )
         broker = ToolBroker(
-            policy, MATRIX, self.adapters, audit_sink=self.events.append,
+            policy, MATRIX, self.adapters, agent_roster=ROSTER, audit_sink=self.events.append,
             approval_verifier=lambda _request: mismatch,
         )
         with self.assertRaises(ToolBrokerDenied):
