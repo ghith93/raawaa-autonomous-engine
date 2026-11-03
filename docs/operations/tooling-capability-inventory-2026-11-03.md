@@ -141,3 +141,11 @@ This section supersedes conflicting counts and connection/flow states in the ear
 - Cloudflare is not a direct ChatGPT connector. Existing GitHub Actions inventory workflow #41731268698 succeeded on main SHA `4f94e59924654b41ac8563c3c7f012e51180845e`: Worker `raawaa-autonomous-engine-control` exists, Workers API returned HTTP 200, workers.dev and preview URLs were enabled, and public `/health` returned HTTP 200. The workflow posted a sanitized report to tracking issue #34. It did not inspect authenticated Task Runner watchdog readiness or change Cloudflare settings.
 - Current standalone-engine main after documentation PR #434 is `d3c84919bea6e778c8062b8828fb681161b47ec3`. PR #434 exact-head CI #41731362709 passed; a separate post-merge main CI result was not confirmed in this cycle.
 - Do not treat this ChatGPT connector inventory as engine-side credentials. No Activepieces connection, ChatGPT tool, or skill was copied into engine secrets or runtime configuration.
+
+## Candidate developer tools — revalidated 2026-11-04
+
+| Tool | License / cost | Useful capability | Privacy / operational notes | Decision |
+|---|---|---|---|---|
+| [Graphify](https://github.com/Graphify-Labs/graphify) | Apache-2.0; official package `graphifyy`; code-only CLI path is free and offline | Local code knowledge graph for call/import/dependency tracing, architecture discovery and code review; supports graph JSON/report/HTML and assistant skill/MCP integration | Code-only Tree-sitter extraction stays local. Optional semantic extraction of docs/media may call a configured LLM backend. Install only official `graphifyy`; hosted Graphify is separate and not required. | Approved for later bounded code-only evaluation; not installed, not executed, and not a runtime dependency. |
+| [GitHub Spec Kit](https://github.com/github/spec-kit) | MIT; free/open source | Specification → plan → task breakdown for larger changes; can improve traceability and acceptance criteria | Developer workflow only; adds repository artifacts and process overhead if used on every small fix. | Deferred until core v1 reliability work stabilizes; selective use for F1/F5 or larger architecture changes. |
+
