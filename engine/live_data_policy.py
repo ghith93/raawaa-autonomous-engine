@@ -80,6 +80,9 @@ def validate_live_payload(
         return False, "task_type_not_allowed"
     if not isinstance(title, str) or not title.strip() or len(title) > 500 or not isinstance(payload, dict):
         return False, "task_payload_invalid"
+
+    # Classification and byte limits are checked before schema rejection so
+    # missing classification and oversized payloads retain precise block reasons.
     classification = payload.get("data_classification")
     if not isinstance(classification, str) or classification.lower() != "public":
         return False, "data_classification_required_or_disallowed"
@@ -92,6 +95,9 @@ def validate_live_payload(
         return False, "task_payload_invalid"
     if len(encoded) > max_bytes:
         return False, "task_payload_too_large"
+
+    # Inspect every supplied field before the allowlist check. This preserves
+    # specific sensitive-data findings even when the field itself is not allowed.
     fragments = tuple(
         item.lower().replace("_", "").replace("-", "")
         for item in (*BASE_BLOCKED_KEY_FRAGMENTS, *blocked_fragments)
@@ -116,6 +122,7 @@ def validate_live_payload(
         return False, "personal_data_detected"
     if any(pattern.search(title) for pattern in SECRET_PATTERNS):
         return False, "secret_pattern_detected"
+
     if set(payload) - set(allowed_payload_keys) or not REQUIRED_PAYLOAD_KEYS.issubset(payload):
         return False, "payload_schema_invalid"
     topic = payload.get("topic")
