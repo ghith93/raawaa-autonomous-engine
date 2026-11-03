@@ -43,6 +43,11 @@ def build_live_gateway(
         return None
     if validate_budget_policy(policy):
         return None
+    # Even a verified-free profile is not sufficient: the provider must have an
+    # independently documented hard stop before any live request can be sent.
+    model_policy = policy.get("model_policy", {})
+    if model_policy.get("provider_hard_stop_verified") is not True:
+        return None
     # Cloud runners must use the shared D1 ledger. Never fall back to ephemeral
     # SQLite when the control Worker is configured or when running in GitHub Actions.
     if source.get("RAAWAA_ENGINE_API_URL"):
