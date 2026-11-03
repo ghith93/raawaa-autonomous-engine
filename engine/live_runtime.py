@@ -11,6 +11,7 @@ from pathlib import Path
 
 from engine.live_adapters import OpenAICompatibleAdapter
 from engine.model_gateway import UsageLedger
+from engine.d1_monetary_ledger import D1MonetaryLedger
 from engine.quota_config import load_provider_profile_registry
 from engine.quota_live_gateway import QuotaAwareLiveGateway
 from engine.quota_manager import QuotaLedger, QuotaManager
@@ -41,14 +42,17 @@ def build_live_gateway(
         return None
     if validate_budget_policy(policy):
         return None
-    # The D1 quota ledger is durable, but the monetary UsageLedger is currently
-    # SQLite-backed. GitHub-hosted runners are ephemeral, so cloud live inference
-    # must remain blocked until a D1-backed monetary reservation/settlement ledger
-    # is implemented and its migration is safely verified.
+    # Cloud runners must use the shared D1 ledger. Never fall back to ephemeral
+    # SQLite when the control Worker is configured or when running in GitHub Actions.
     if source.get("RAAWAA_ENGINE_API_URL"):
-        raise RuntimeError(
-            "Cloud live inference is blocked until the durable D1 monetary ledger is implemented."
+        monetary_ledger = D1MonetaryLedger(
+            base_url=source.get("RAAWAA_ENGINE_API_URL"),
+            token=source.get("RAAWAA_ENGINE_API_TOKEN"),
         )
+    else:
+        if source.get("GITHUB_ACTIONS", "").lower() == "true":
+            raise RuntimeError("Cloud live inference requires the durable D1 monetary ledger.")
+        monetary_ledger = UsageLedger(db_path)
 
     entries = load_provider_profile_registry(registry_path)
     candidates = [
@@ -85,7 +89,7 @@ def build_live_gateway(
     return QuotaAwareLiveGateway(
         manager,
         adapters,
-        UsageLedger(db_path),
+        monetary_ledger,
         network_calls_enabled=True,
         environ=source,
         daily_budget_usd=policy.get("daily_budget_usd", 0),
