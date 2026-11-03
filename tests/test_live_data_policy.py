@@ -184,5 +184,16 @@ class LiveDataPolicyTests(unittest.TestCase):
         self.assertEqual(reason, "sensitive_content_detected")
 
 
+    def test_publicly_disclosed_ingredient_research_without_private_markers_is_allowed(self):
+        payload = self.valid_payload()
+        payload["topic"] = "Compare publicly disclosed shampoo ingredient lists"
+        payload["questions"] = ["Summarize ingredients disclosed on official product labels"]
+        allowed, reason = validate_live_payload(
+            "research_brief", "Public ingredient research", payload, POLICY
+        )
+        self.assertTrue(allowed)
+        self.assertEqual(reason, "allowed")
+
+
 if __name__ == "__main__":
     unittest.main()
