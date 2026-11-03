@@ -37,8 +37,11 @@ class CodespaceTaskStore:
 
     def preflight(self) -> dict[str, Any]:
         result = self._request("/v1/codespace/status")
+        task_types = result.get("task_types")
         if (result.get("ok") is not True or result.get("executor") != "codespace" or
-                set(result.get("task_types", [])) != self.ALLOWED_TASK_TYPES):
+                not isinstance(task_types, list) or
+                any(not isinstance(item, str) for item in task_types) or
+                set(task_types) != self.ALLOWED_TASK_TYPES):
             raise RemoteTaskStoreError("Codespace bridge preflight returned an unexpected scope")
         return result
 
