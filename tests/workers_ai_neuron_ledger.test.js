@@ -45,13 +45,13 @@ function dbMock(options = {}) {
         bind(...values) { this.values = values; return this; },
         async first() {
           state.calls.push({ kind: "first", sql, values: this.values });
+          if (sql.includes("INSERT INTO workers_ai_neuron_reservations")) {
+            return state.insertShouldSucceed ? { reservation_id: this.values[0] } : null;
+          }
           if (sql.includes("FROM workers_ai_neuron_policy")) return policy();
           if (sql.includes("WHERE idempotency_key=?")) return state.existing;
           if (sql.includes("WHERE reservation_id=?")) return state.reservation;
           if (sql.includes("FROM workers_ai_neuron_quarantines WHERE model_id=?")) return state.quarantine;
-          if (sql.includes("INSERT INTO workers_ai_neuron_reservations")) {
-            return state.insertShouldSucceed ? { reservation_id: this.values[0] } : null;
-          }
           if (sql.includes("SELECT COALESCE(SUM(")) return { total_neurons: state.totalNeurons };
           return null;
         },
