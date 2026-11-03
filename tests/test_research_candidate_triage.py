@@ -26,5 +26,31 @@ class ResearchCandidateTriageTests(unittest.TestCase):
         self.assertEqual(result["review_status"], "unreviewed")
 
 
+    def test_arxiv_candidate_is_scored_without_license_or_adoption_claims(self):
+        from scripts.triage_research_candidates import score_arxiv_candidate, triage_candidates
+        paper = {
+            "arxiv_id": "2611.00001v1",
+            "title": "Multi-agent LLM tool use and evaluation",
+            "url": "https://arxiv.org/abs/2611.00001v1",
+            "published": "2026-11-02T00:00:00Z",
+            "categories": ["cs.AI"],
+            "primary_category": "cs.AI",
+        }
+        scored = score_arxiv_candidate(paper, datetime(2026, 11, 3, tzinfo=timezone.utc).date())
+        self.assertEqual(scored["source"], "arxiv")
+        self.assertEqual(scored["source_key"], "arxiv:2611.00001v1")
+        self.assertTrue(scored["license_review_required"])
+        self.assertIn("license_not_verified", scored["risk_flags"])
+        self.assertFalse(scored["automatic_adoption"])
+        result = triage_candidates({
+            "candidates": [],
+            "academic_candidates": [],
+            "arxiv_candidates": [paper],
+        }, datetime(2026, 11, 3, tzinfo=timezone.utc))
+        self.assertEqual(result["source_counts"]["arxiv"], 1)
+        self.assertEqual(len(result["arxiv_candidates"]), 1)
+        self.assertEqual(result["all_candidates"][0]["source"], "arxiv")
+
+
 if __name__ == "__main__":
     unittest.main()
