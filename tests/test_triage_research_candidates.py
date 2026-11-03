@@ -33,6 +33,112 @@ class ResearchTriageTests(unittest.TestCase):
         self.assertFalse(item["automatic_adoption"])
         self.assertEqual(result["model_calls"], 0)
 
+    def test_low_adoption_repository_keeps_score_but_is_not_high_priority(self):
+        result = triage_candidates({
+            "candidates": [{
+                "full_name": "org/new-project",
+                "url": "https://github.com/org/new-project",
+                "license_spdx": "Apache-2.0",
+                "pushed_at": "2026-10-30T00:00:00Z",
+                "stars": 4,
+                "language": "Python",
+                "archived": False,
+                "description": "Agent framework",
+                "discovered_via": ["agent_frameworks"],
+            }],
+            "academic_candidates": [],
+        }, self.now)
+        item = result["github_candidates"][0]
+        self.assertGreaterEqual(item["score"], 70)
+        self.assertEqual(item["priority"], "medium")
+        self.assertIn("low_public_adoption_signal", item["risk_flags"])
+
+    def test_malformed_star_counts_do_not_pass_adoption_gate(self):
+        for stars in (None, -1, True, "1000", {}, []):
+            with self.subTest(stars=stars):
+                result = triage_candidates({
+                    "candidates": [{
+                        "full_name": "org/malformed-stars",
+                        "url": "https://github.com/org/malformed-stars",
+                        "license_spdx": "MIT",
+                        "pushed_at": "2026-10-30T00:00:00Z",
+                        "stars": stars,
+                        "language": "Python",
+                        "archived": False,
+                        "description": "Agent framework",
+                        "discovered_via": ["agent_frameworks"],
+                    }],
+                    "academic_candidates": [],
+                }, self.now)
+                item = result["github_candidates"][0]
+                self.assertGreaterEqual(item["score"], 70)
+                self.assertEqual(item["priority"], "medium")
+                self.assertEqual(item["stars"], 0)
+
+    def test_malformed_license_metadata_cannot_pass_permissive_license_gate(self):
+        for license_id in ([], {}, 123):
+            with self.subTest(license_id=license_id):
+                result = triage_candidates({
+                    "candidates": [{
+                        "full_name": "org/malformed-license",
+                        "url": "https://github.com/org/malformed-license",
+                        "license_spdx": license_id,
+                        "pushed_at": "2026-10-30T00:00:00Z",
+                        "stars": 5000,
+                        "language": "Python",
+                        "archived": False,
+                        "description": "Agent framework",
+                        "discovered_via": ["agent_frameworks"],
+                    }],
+                    "academic_candidates": [],
+                }, self.now)
+                item = result["github_candidates"][0]
+                self.assertGreaterEqual(item["score"], 70)
+                self.assertEqual(item["priority"], "medium")
+                self.assertFalse(item["permissive_license_signal"])
+
+    def test_missing_and_unrecognized_licenses_cannot_be_high_priority(self):
+        for license_id in (None, "NOASSERTION"):
+            with self.subTest(license_id=license_id):
+                result = triage_candidates({
+                    "candidates": [{
+                        "full_name": "org/license-unknown",
+                        "url": "https://github.com/org/license-unknown",
+                        "license_spdx": license_id,
+                        "pushed_at": "2026-10-30T00:00:00Z",
+                        "stars": 5000,
+                        "language": "Python",
+                        "archived": False,
+                        "description": "Agent framework",
+                        "discovered_via": ["agent_frameworks"],
+                    }],
+                    "academic_candidates": [],
+                }, self.now)
+                item = result["github_candidates"][0]
+                self.assertGreaterEqual(item["score"], 70)
+                self.assertEqual(item["priority"], "medium")
+
+    def test_copyleft_license_cannot_be_high_priority(self):
+        for license_id in ("GPL-3.0", "AGPL-3.0"):
+            with self.subTest(license_id=license_id):
+                result = triage_candidates({
+                    "candidates": [{
+                        "full_name": "org/copyleft-project",
+                        "url": "https://github.com/org/copyleft-project",
+                        "license_spdx": license_id,
+                        "pushed_at": "2026-10-30T00:00:00Z",
+                        "stars": 5000,
+                        "language": "Python",
+                        "archived": False,
+                        "description": "Agent framework",
+                        "discovered_via": ["agent_frameworks"],
+                    }],
+                    "academic_candidates": [],
+                }, self.now)
+                item = result["github_candidates"][0]
+                self.assertGreaterEqual(item["score"], 70)
+                self.assertEqual(item["priority"], "medium")
+
     def test_archived_and_unlicensed_repository_is_low_priority(self):
         result = triage_candidates({
             "candidates": [{
