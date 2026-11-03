@@ -148,8 +148,10 @@ jobs:
               production = tomllib.load(stream)
           expected_staging_id = "231dd948-04a0-49e3-ad73-444f77d69477"
           expected_production_id = "f0ffbed3-940f-488d-a7d1-31cbc5fbf742"
-          if staging.get("name") != "raawaa-autonomous-engine-staging":
-              raise SystemExit("Refusing deployment: unexpected Staging Worker name")
+          if staging.get("name") != "raawaa-autonomous-engine-staging" or staging.get("name") == production.get("name"):
+              raise SystemExit("Refusing deployment: unexpected or production-colliding Staging Worker name")
+          if staging.get("workers_dev") is not True or staging.get("routes") or staging.get("route"):
+              raise SystemExit("Refusing deployment: Staging Worker must use workers.dev only and no custom routes")
           staging_d1 = staging.get("d1_databases", [])
           production_d1 = production.get("d1_databases", [])
           if len(staging_d1) != 1 or len(production_d1) != 1:
