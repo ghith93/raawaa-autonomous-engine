@@ -46,7 +46,8 @@ h2{font-size:16px;margin:0 0 10px}.rows{display:grid;gap:8px}.item{display:flex;
 <section class="panel"><h2>Provider usage · D1</h2><div id="usage" class="rows"></div></section>
 <section class="panel"><h2>Recorded model inference costs · USD</h2><div id="modelCosts" class="rows"></div><p class="muted">Recorded provider costs only; external or unreported spend is not inferred.</p></section>
 <section class="panel"><h2>Durable monetary budget ledger · D1</h2><div id="monetaryLedger" class="rows"></div><p class="muted">Unresolved reservations count against all budget windows. A pending reservation is never released automatically.</p></section>
-<section class="panel"><h2>Latest market snapshot</h2><div id="snapshot" class="muted">—</div></section><section class="panel"><h2>Latest paper event</h2><div id="latest" class="muted">—</div></section><section class="panel"><h2>Telegram control readiness</h2><div id="telegramSchema" class="rows"></div><p class="muted">Schema presence only; webhook activation still requires operator-managed secrets and Telegram configuration.</p></section><section class="panel"><h2>Worker Cron heartbeat</h2><div id="workerCron" class="rows"></div></section><section class="panel"><h2>Task Runner watchdog</h2><div id="watchdog" class="rows"></div><p class="muted">Readiness only; secret values are never returned. Dispatch history is read from the D1 audit ledger.</p></section><section class="panel"><h2>GitHub CI health</h2><div id="ci" class="rows"></div></section>
+<section class="panel"><h2>Latest market snapshot</h2><div id="snapshot" class="muted">—</div></section><section class="panel"><h2>Latest paper event</h2><div id="latest" class="muted">—</div></section><section class="panel"><h2>Telegram control readiness</h2><div id="telegramSchema" class="rows"></div><p class="muted">Schema presence only; webhook activation still requires operator-managed secrets and Telegram configuration.</p></section><section class="panel"><h2>Worker Cron heartbeat</h2><div id="workerCron" class="rows"></div></section><section class="panel"><h2>Task Runner watchdog</h2><div id="watchdog" class="rows"></div><p class="muted">Readiness only; secret values are never returned. Dispatch history is read from the D1 audit ledger.</p></section><section class="panel"><h2>GitHub CI health · Staging snapshot</h2><div id="ci" class="rows"></div></section>
+<section class="panel"><h2>Default Task Runner inference gate</h2><div id="killSwitch" class="rows"></div><p class="muted">This reports the committed default Task Runner policy, not one-off Staging smoke workflows.</p></section>
 <section class="panel"><h2>Not yet connected to this status feed</h2><div id="gaps" class="rows"></div></section>
 <button id="refresh">Refresh</button><button class="secondary" id="disconnect">Disconnect</button>
 <p class="muted" id="updated"></p>
@@ -56,15 +57,6 @@ h2{font-size:16px;margin:0 0 10px}.rows{display:grid;gap:8px}.item{display:flex;
 let accessToken = "";
 const $ = id => document.getElementById(id);
 const escapeText = value => String(value ?? "—");
-async function loadCi() {
-  try {
-    const response=await fetch("https://api.github.com/repos/ghith93/raawaa-autonomous-engine/actions/runs?branch=main&per_page=10",{headers:{accept:"application/vnd.github+json"},cache:"no-store"});
-    if(!response.ok) throw new Error("GitHub API unavailable");
-    const data=await response.json();
-    const runs=(data.workflow_runs||[]).filter(run=>run.name==="Engine CI"||run.name==="Scheduled Open-Source Research Discovery").slice(0,4);
-    rows("ci",runs.map(run=>[run.name,run.status+(run.conclusion?" · "+run.conclusion:" · running")+" · "+run.updated_at]),"No recent CI runs");
-  } catch { rows("ci",[],"GitHub API unavailable or rate-limited"); }
-}
 function rows(target, values, empty) {
   $(target).replaceChildren();
   if (!values.length) { const p=document.createElement("div");p.className="muted";p.textContent=empty;$(target).append(p);return; }
@@ -117,7 +109,24 @@ async function load() {
     ["Last dispatch request",watchdog.last_dispatch_requested?.created_at||"None recorded"],
     ["Last dispatch intent",watchdog.last_dispatch_intent_at||"None recorded"]
   ],"Watchdog status unavailable");
-  await loadCi();
+  const ci=data.ci_health||null;
+  rows("ci",ci?[
+    ["Status",ci.status+" · "+ci.conclusion],
+    ["Run","#"+ci.run_number+" ("+ci.run_id+")"],
+    ["Commit",String(ci.head_sha||"").slice(0,8)],
+    ["Recorded",ci.recorded_at]
+  ]:[],data.unavailable_metrics?.ci_health||"No valid CI snapshot recorded");
+  const gate=data.kill_switch||null;
+  rows("killSwitch",gate?[
+    ["Status",gate.status],
+    ["Scope",gate.scope],
+    ["Policy mode",gate.policy_mode],
+    ["Live inference default",gate.live_inference_default],
+    ["Paid model calls",gate.allow_paid_model_calls?"Allowed":"Blocked"],
+    ["Paid fallback",gate.paid_fallback_enabled?"Enabled":"Disabled"],
+    ["External writes",gate.allow_external_writes?"Allowed":"Blocked"],
+    ["Recorded",gate.recorded_at]
+  ]:[],data.unavailable_metrics?.kill_switch||"No valid kill-switch snapshot recorded");
   rows("gaps",Object.entries(data.unavailable_metrics||{}),"No unavailable metrics");
   $("updated").textContent="Snapshot generated: "+data.generated_at;
   $("message").textContent="Connected · read-only";
@@ -136,7 +145,7 @@ export function handleMobilePage(request, url) {
     "cache-control": "no-store",
     "x-content-type-options": "nosniff",
     "referrer-policy": "no-referrer",
-    "content-security-policy": "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'self' https://api.github.com; base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
+    "content-security-policy": "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
   }});
 }
 
@@ -144,11 +153,13 @@ export async function handleMobileStatus(request, env, url) {
   if (url.pathname !== "/v1/mobile/status") return null;
   if (request.method !== "GET") return json({ error: "method_not_allowed" }, 405);
   try {
-    const [tasks, migrations, workerCron, watchdogEvents] = await Promise.all([
+    const [tasks, migrations, workerCron, watchdogEvents, ciHealthRow, killSwitchRow] = await Promise.all([
       env.DB.prepare("SELECT status,COUNT(*) AS count FROM tasks GROUP BY status").all(),
       env.DB.prepare("SELECT version FROM schema_migrations WHERE version IN ('0003_durable_quota_ledger','0004_paper_event_ledger','0005_telegram_webhook_receipts','0006_monetary_budget_ledger')").all(),
       env.DB.prepare("SELECT created_at,details_json FROM audit_log WHERE task_id IS NULL AND event='worker_cron_tick' ORDER BY created_at DESC LIMIT 1").first(),
       env.DB.prepare("SELECT event,created_at,details_json FROM audit_log WHERE task_id IS NULL AND event IN ('task_runner_dispatch_requested','task_runner_dispatch_intent') ORDER BY created_at DESC LIMIT 2").all(),
+      env.DB.prepare("SELECT created_at,details_json FROM audit_log WHERE task_id IS NULL AND event='ci_health_snapshot' ORDER BY created_at DESC LIMIT 1").first(),
+      env.DB.prepare("SELECT created_at,details_json FROM audit_log WHERE task_id IS NULL AND event='kill_switch_snapshot' ORDER BY created_at DESC LIMIT 1").first(),
     ]);
     const applied = new Set((migrations.results || []).map(row => row.version));
     const watchdogReadiness = getTaskRunnerWatchdogReadiness(env);
@@ -168,6 +179,70 @@ export async function handleMobileStatus(request, env, url) {
     }).filter(Boolean);
     const lastDispatchRequested = watchdogHistory.find(row => row.event === "task_runner_dispatch_requested") || null;
     const lastDispatchIntent = watchdogHistory.find(row => row.event === "task_runner_dispatch_intent") || null;
+    const telemetryAge = row => {
+      if (!row || typeof row.created_at !== "string" || !Number.isFinite(Date.parse(row.created_at))) return null;
+      const age = Date.now() - Date.parse(row.created_at);
+      return age >= 0 ? age : null;
+    };
+    const ciHealth = (() => {
+      const age = telemetryAge(ciHealthRow);
+      if (age === null || age > 24 * 60 * 60 * 1000) return null;
+      let details;
+      try { details = JSON.parse(ciHealthRow.details_json || "{}"); } catch { return null; }
+      const conclusions = new Set(["success", "failure", "incomplete"]);
+      const sha = details?.head_sha;
+      const jobs = details?.jobs;
+      if (
+        !details || details.workflow !== "Engine CI" || details.event !== "push" ||
+        details.branch !== "main" || !conclusions.has(details.conclusion) ||
+        !Number.isSafeInteger(details.run_id) || !Number.isSafeInteger(details.run_number) ||
+        typeof sha !== "string" || !/^[0-9a-f]{40,64}$/.test(sha) ||
+        !jobs || typeof jobs !== "object" || Array.isArray(jobs) ||
+        !["test", "staging_migrate", "staging_worker_verify"].every(key =>
+          ["success", "failure", "cancelled", "skipped"].includes(jobs[key]))
+      ) return null;
+      return {
+        available: true,
+        status: details.conclusion,
+        conclusion: details.conclusion,
+        workflow: details.workflow,
+        run_id: details.run_id,
+        run_number: details.run_number,
+        head_sha: sha,
+        jobs,
+        recorded_at: ciHealthRow.created_at,
+        freshness: "fresh",
+      };
+    })();
+    const killSwitch = (() => {
+      const age = telemetryAge(killSwitchRow);
+      if (age === null || age > 24 * 60 * 60 * 1000) return null;
+      let details;
+      try { details = JSON.parse(killSwitchRow.details_json || "{}"); } catch { return null; }
+      if (
+        !details || details.scope !== "scheduled_task_runner_default" ||
+        !["engaged", "not_engaged"].includes(details.status) ||
+        !["safe_dry_run", "unknown"].includes(details.policy_mode) ||
+        !["disabled", "configured"].includes(details.live_inference_default) ||
+        typeof details.allow_paid_model_calls !== "boolean" ||
+        typeof details.paid_fallback_enabled !== "boolean" ||
+        typeof details.allow_external_writes !== "boolean" ||
+        typeof details.source_sha !== "string" || !/^[0-9a-f]{40,64}$/.test(details.source_sha)
+      ) return null;
+      return {
+        available: true,
+        status: details.status,
+        scope: details.scope,
+        policy_mode: details.policy_mode,
+        live_inference_default: details.live_inference_default,
+        allow_paid_model_calls: details.allow_paid_model_calls,
+        paid_fallback_enabled: details.paid_fallback_enabled,
+        allow_external_writes: details.allow_external_writes,
+        source_sha: details.source_sha,
+        recorded_at: killSwitchRow.created_at,
+        freshness: "fresh",
+      };
+    })();
     const workerCronStatus = (() => {
       const invalid = { value: null, unavailable: "Latest Worker Cron heartbeat metadata is invalid" };
       if (!workerCron) return { value: null, unavailable: "No Worker Cron heartbeat has been recorded yet" };
@@ -245,6 +320,8 @@ export async function handleMobileStatus(request, env, url) {
           : "Migration 0005 is not applied to this database",
       },
       worker_cron: workerCronStatus.value,
+      ci_health: ciHealth,
+      kill_switch: killSwitch,
       task_runner_watchdog: {
         ready: watchdogReadiness.ready,
         missing: watchdogReadiness.missing,
@@ -273,8 +350,8 @@ export async function handleMobileStatus(request, env, url) {
       unavailable_metrics: {
         last_scan: "Scan-run heartbeat is not recorded; the latest captured market snapshot is shown separately",
         source_freshness: "Not yet aggregated from market-data adapters",
-        ci_health: "Not yet ingested from GitHub Actions",
-        kill_switch: "Engine policy state is not yet mirrored to the Worker",
+        ...(!ciHealth ? { ci_health: "No fresh validated Engine CI snapshot has been ingested from GitHub Actions" } : {}),
+        ...(!killSwitch ? { kill_switch: "No fresh validated default Task Runner inference-gate snapshot has been ingested" } : {}),
         ...(!workerCronStatus.value ? { worker_cron: workerCronStatus.unavailable } : {}),
         paper_ledger: applied.has("0004_paper_event_ledger") ? "Available" : "Migration 0004 is not applied to this database",
         provider_usage: applied.has("0003_durable_quota_ledger") ? "Available" : "Migration 0003 is not applied to this database",
