@@ -226,6 +226,52 @@ class QuotaAwareGatewayTests(unittest.TestCase):
             gateway.generate(self.request)
         self.assertEqual(self.usage.totals()["daily_usd"], 0.0)
 
+    def test_explicit_model_permission_403_settles_zero_and_rotates_to_other_free_model(self):
+        first = self.profile(model="openai/gpt-oss-120b", priority=10)
+        second = self.profile(model="openai/gpt-oss-20b", priority=20)
+        denied = FakeAdapter(
+            "groq",
+            LiveAdapterError(
+                "permission denied", status_code=403,
+                provider_error_code="model_permission_blocked_org",
+            ),
+        )
+        fallback = FakeAdapter("groq")
+        manager = QuotaManager([first, second], self.quota)
+        gateway = QuotaAwareLiveGateway(
+            manager,
+            {first.route_id: denied, second.route_id: fallback},
+            self.usage, True,
+            environ={"RAAWAA_ENGINE_LIVE_INFERENCE": "enabled"},
+        )
+        result = gateway.generate(self.request)
+        self.assertEqual(result.model, second.model)
+        self.assertEqual(denied.calls, 1)
+        self.assertEqual(fallback.calls, 1)
+        self.assertTrue(self.quota.cooldown_active(first.route_id))
+        self.assertEqual(self.usage.totals()["daily_usd"], 0.0)
+        self.assertEqual(self.usage.totals()["pending_reservations"], 0)
+        events = self.quota.audit_events()
+        denied_event = next(event for event in events if event["event"] == "provider_route_denied")
+        self.assertEqual(denied_event["details"]["provider_error_code"], "model_permission_blocked_org")
+
+    def test_unclassified_403_remains_ambiguous_and_stops_rotation(self):
+        first = self.profile(model="openai/gpt-oss-120b", priority=10)
+        second = self.profile(provider="cerebras", account="backup", priority=20)
+        denied = FakeAdapter("groq", LiveAdapterError("forbidden", status_code=403))
+        backup = FakeAdapter("cerebras")
+        manager = QuotaManager([first, second], self.quota)
+        gateway = QuotaAwareLiveGateway(
+            manager, {first.route_id: denied, second.route_id: backup},
+            self.usage, True,
+            environ={"RAAWAA_ENGINE_LIVE_INFERENCE": "enabled"},
+        )
+        with self.assertRaisesRegex(ProviderUnavailable, "route rotation stopped"):
+            gateway.generate(self.request)
+        self.assertEqual(denied.calls, 1)
+        self.assertEqual(backup.calls, 0)
+        self.assertEqual(self.usage.totals()["pending_reservations"], 1)
+
     def test_429_cools_down_and_rotates(self):
         first = self.profile()
         second = self.profile(provider="cerebras", account="backup", priority=20)
