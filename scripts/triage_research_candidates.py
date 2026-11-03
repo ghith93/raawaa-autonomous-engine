@@ -121,6 +121,7 @@ def score_github_candidate(item: dict, now: datetime) -> dict:
     return {
         "source": "github",
         "source_key": "github:" + str(item.get("full_name", "")).lower(),
+        "discovered_via": sorted(discovered_via),
         "title": item.get("full_name", ""),
         "url": item.get("url", ""),
         "score": min(100, max(0, score)),
