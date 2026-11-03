@@ -157,14 +157,22 @@ class ToolBroker:
         permission_matrix: dict[str, Any],
         adapters: Mapping[str, ToolAdapter],
         *,
+        agent_roster: dict[str, Any],
         audit_sink: AuditSink,
         approval_verifier: ApprovalVerifier | None = None,
     ):
         if not isinstance(policy, dict):
             raise ValueError("policy must be an object")
-        errors = validate_permission_matrix(permission_matrix)
+        errors = validate_permission_matrix(permission_matrix, agent_roster)
         if errors:
             raise ValueError("; ".join(errors))
+        agents = agent_roster.get("agents") if isinstance(agent_roster, dict) else None
+        if not isinstance(agents, list):
+            raise ValueError("trusted agent roster is required")
+        self._agent_by_id = {
+            item.get("id"): item for item in agents
+            if isinstance(item, dict) and isinstance(item.get("id"), str)
+        }
         if not isinstance(adapters, Mapping):
             raise ValueError("trusted adapter registry must be a mapping")
         if not callable(audit_sink):
@@ -220,6 +228,14 @@ class ToolBroker:
             return ToolDecision(False, False, "tool_not_allowlisted")
         if request.tool_name not in self._adapters:
             return ToolDecision(False, False, "trusted_adapter_not_registered")
+        agent = self._agent_by_id.get(request.agent_id)
+        if not agent or agent.get("enabled") is not True or agent.get("role") != request.agent_role:
+            return ToolDecision(False, False, "agent_identity_not_authorized")
+        assignment = TASK_AGENT_CONTRACTS.get(request.task_type)
+        if not assignment or assignment[0] != request.agent_id:
+            return ToolDecision(False, False, "task_agent_assignment_mismatch")
+        if assignment[1] not in agent.get("capabilities", []):
+            return ToolDecision(False, False, "agent_capability_missing")
         if request.action != spec.get("action"):
             return ToolDecision(False, False, "tool_action_mismatch")
         grants = spec.get("grants", [])
@@ -248,6 +264,8 @@ class ToolBroker:
             approval_actions = self._policy.get("require_human_approval_for", [])
             if request.action not in approval_actions:
                 return ToolDecision(False, False, "write_action_not_approval_gated")
+            if request.estimated_cost_usd > 0:
+                return ToolDecision(False, False, "tool_cost_requires_atomic_budget_reservation")
             if not request.approval_id or not request.idempotency_key:
                 return ToolDecision(False, True, "human_approval_and_idempotency_required")
             if self._approval_verifier is None:
@@ -261,7 +279,7 @@ class ToolBroker:
                 request.agent_role, request.tool_name, request.action,
                 request.environment,
             )
-            actual = None if evidence is None else (
+            actual = None if not isinstance(evidence, ApprovalEvidence) else (
                 evidence.approval_id, evidence.task_id, evidence.agent_id,
                 evidence.agent_role, evidence.tool_name, evidence.action,
                 evidence.environment,
