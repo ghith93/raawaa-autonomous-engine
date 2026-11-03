@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raawaa.example/schemas/skill-manifest.schema.json",
+  "title": "Raawaa Engine Skill Manifest",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "skill_id", "version", "source", "revision", "owner", "license", "purpose", "input_schema", "output_schema", "capabilities", "allowed_tools", "network_policy", "risk_classification", "content_sha256", "permissions", "approved"],
+  "properties": {
+    "schema_version": {"const": 1},
+    "skill_id": {"type": "string", "pattern": "^[a-z0-9][a-z0-9._-]{0,63}$"},
+    "version": {"type": "string", "minLength": 1},
+    "source": {"type": "string", "format": "uri"},
+    "revision": {"type": "string", "minLength": 7},
+    "owner": {"type": "string", "minLength": 1},
+    "license": {"type": "object", "additionalProperties": false, "required": ["spdx_id", "evidence_url"], "properties": {"spdx_id": {"type": "string", "minLength": 1}, "evidence_url": {"type": "string", "format": "uri"}}},
+    "purpose": {"type": "string", "minLength": 1},
+    "input_schema": {"type": "object"},
+    "output_schema": {"type": "object"},
+    "capabilities": {"type": "array", "items": {"type": "string"}},
+    "allowed_tools": {"type": "array", "items": {"type": "string"}},
+    "network_policy": {"enum": ["none", "allowlisted"]},
+    "risk_classification": {"enum": ["low", "medium", "high", "critical"]},
+    "content_sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+    "permissions": {"type": "object", "additionalProperties": {"type": "array", "items": {"type": "string"}}},
+    "approved": {"type": "boolean"}
+  }
+}
