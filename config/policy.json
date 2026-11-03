@@ -37,7 +37,8 @@
     },
     "stop_on_unknown_cost": true,
     "stop_on_unsettled_reservation": true,
-    "require_atomic_pre_call_reservation": true
+    "require_atomic_pre_call_reservation": true,
+    "external_spend_hard_stop_verified": false
   },
   "require_human_approval_for": [
     "publish_content",
