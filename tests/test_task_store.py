@@ -27,6 +27,7 @@ class TaskStoreTests(unittest.TestCase):
         self.assertEqual(result["status"], "succeeded")
         task = self.store.list_tasks()[0]
         self.assertEqual(task["status"], "succeeded")
+        self.assertEqual(task["execution_mode"], "dry_run")
         self.assertIn("dry_run", task["result_json"])
         self.assertIn('"agent_id": "researcher"', task["result_json"])
         self.assertIn('"execution_started": false', task["result_json"])
@@ -35,6 +36,25 @@ class TaskStoreTests(unittest.TestCase):
         self.store.enqueue("shell", "Do arbitrary shell work")
         result = run_once(self.store)
         self.assertEqual(result["status"], "blocked")
+
+    def test_claim_persists_explicit_execution_mode_and_audits_it(self):
+        task = self.store.enqueue("research_brief", "Live mode claim")
+        claimed = self.store.claim_next(execution_mode="live_inference")
+        self.assertEqual(claimed["id"], task["id"])
+        self.assertEqual(claimed["execution_mode"], "live_inference")
+        event = self.store.audit_events(1)[0]
+        self.assertEqual(event["event"], "task_claimed")
+        self.assertIn('"execution_mode": "live_inference"', event["details_json"])
+
+    def test_claim_defaults_legacy_callers_to_unknown_mode(self):
+        task = self.store.enqueue("research_brief", "Legacy caller")
+        claimed = self.store.claim_next()
+        self.assertEqual(claimed["id"], task["id"])
+        self.assertEqual(claimed["execution_mode"], "unknown")
+
+    def test_claim_rejects_invalid_execution_mode(self):
+        with self.assertRaisesRegex(ValueError, "invalid execution_mode"):
+            self.store.claim_next(execution_mode="pretend_success")
 
     def test_claim_empty_queue(self):
         self.assertIsNone(self.store.claim_next())
