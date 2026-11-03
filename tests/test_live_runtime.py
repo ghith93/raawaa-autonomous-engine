@@ -94,8 +94,10 @@ class LiveRuntimeFactoryTests(unittest.TestCase):
 
         fake_money = FakeMonetaryLedger()
         fake_quota = FakeQuotaLedger()
-        with patch("engine.live_runtime.D1MonetaryLedger", return_value=fake_money) as money_factory, \\
-             patch("engine.live_runtime.D1QuotaLedger", return_value=fake_quota) as quota_factory:
+        with (
+            patch("engine.live_runtime.D1MonetaryLedger", return_value=fake_money) as money_factory,
+            patch("engine.live_runtime.D1QuotaLedger", return_value=fake_quota) as quota_factory,
+        ):
             gateway = build_live_gateway(
                 self.db_path, self.policy_path, self.registry_path,
                 environ={
