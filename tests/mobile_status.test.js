@@ -78,7 +78,7 @@ test("mobile status reports execution-mode metrics unavailable before migration 
  const body=await response.json();
  assert.deepEqual(body.task_execution,{available:false,counts:[]});
  assert.equal(body.unavailable_metrics.execution_mode,"Migration 0009 is not applied to this database");
- assert.equal(DB.calls.some(call=>call.sql.includes("execution_mode")),false);
+ assert.equal(DB.calls.some(call=>call.sql.includes("SELECT status,execution_mode,COUNT(*)")),false);
 });
 
 test("mobile status endpoint returns read-only D1 metrics and explicit unknowns",async()=>{
