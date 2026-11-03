@@ -45,6 +45,10 @@ python -m unittest discover -s tests -v
 
 CI runs the policy/agent-roster audit and unit tests on pushes to `main` and on pull requests targeting `main`. A workflow file is not proof of a successful run; verify the Actions result for the exact commit SHA.
 
+## Executive management snapshot
+
+Run `python -m engine.cli executive-status` to inspect the existing task portfolio. This read-only command ranks pending work with explainable provisional weights, flags failed/blocked tasks and missing/expired running leases, and reports recommended next checks. It does not claim tasks, reorder the FIFO queue, call a model, or make network requests. Use the result as management decision support, not as proof of a continuously running agent team. See [Executive Intelligence v1](executive-intelligence.md).
+
 ## Task operations
 
 ```bash
