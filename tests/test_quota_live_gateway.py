@@ -24,6 +24,19 @@ class FakeAdapter:
         return GenerationResponse(self.provider, model, "ok", 5, 7, self.cost_usd, mocked=False)
 
 
+class LifecycleUsageLedger(UsageLedger):
+    def __init__(self, path):
+        super().__init__(path)
+        self.started = []
+        self.ambiguous = []
+
+    def mark_started(self, reservation_id):
+        self.started.append(reservation_id)
+
+    def mark_ambiguous(self, reservation_id, reason="transport_error"):
+        self.ambiguous.append((reservation_id, reason))
+
+
 class QuotaAwareGatewayTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
@@ -225,6 +238,61 @@ class QuotaAwareGatewayTests(unittest.TestCase):
         with self.assertRaisesRegex(ProviderUnavailable, "failed unexpectedly"):
             gateway.generate(self.request)
         self.assertEqual(self.usage.totals()["daily_usd"], 0.0)
+
+    def test_provider_io_is_marked_started_before_adapter_call(self):
+        usage = LifecycleUsageLedger(Path(self.tmp.name) / "lifecycle.db")
+
+        class ObservingAdapter(FakeAdapter):
+            def generate(inner_self, model, request):
+                self.assertEqual(len(usage.started), 1)
+                return super(ObservingAdapter, inner_self).generate(model, request)
+
+        adapter = ObservingAdapter("groq")
+        manager = QuotaManager([self.profile()], self.quota)
+        gateway = QuotaAwareLiveGateway(
+            manager, {"groq": adapter}, usage, True,
+            environ={"RAAWAA_ENGINE_LIVE_INFERENCE": "enabled"},
+        )
+        gateway.generate(self.request)
+        self.assertEqual(len(usage.started), 1)
+        self.assertEqual(usage.ambiguous, [])
+
+    def test_timeout_marks_durable_reservation_ambiguous_and_never_rotates(self):
+        usage = LifecycleUsageLedger(Path(self.tmp.name) / "ambiguous.db")
+        first = self.profile()
+        second = self.profile(provider="cerebras", account="backup", priority=20)
+        timed_out = FakeAdapter("groq", LiveAdapterError("request timed out"))
+        backup = FakeAdapter("cerebras")
+        manager = QuotaManager([first, second], self.quota)
+        gateway = QuotaAwareLiveGateway(
+            manager, {"groq": timed_out, "cerebras": backup}, usage, True,
+            environ={"RAAWAA_ENGINE_LIVE_INFERENCE": "enabled"},
+        )
+        with self.assertRaisesRegex(ProviderUnavailable, "route rotation stopped"):
+            gateway.generate(self.request)
+        self.assertEqual(timed_out.calls, 1)
+        self.assertEqual(backup.calls, 0)
+        self.assertEqual(len(usage.started), 1)
+        self.assertEqual(usage.ambiguous[0][1], "provider_timeout")
+        self.assertEqual(usage.totals()["pending_reservations"], 1)
+
+    def test_429_settles_zero_cost_after_provider_io_instead_of_releasing(self):
+        usage = LifecycleUsageLedger(Path(self.tmp.name) / "429.db")
+        first = self.profile()
+        second = self.profile(provider="cerebras", account="backup", priority=20)
+        limited = FakeAdapter("groq", LiveAdapterError("rate limited", status_code=429))
+        backup = FakeAdapter("cerebras")
+        manager = QuotaManager([first, second], self.quota)
+        gateway = QuotaAwareLiveGateway(
+            manager, {"groq": limited, "cerebras": backup}, usage, True,
+            environ={"RAAWAA_ENGINE_LIVE_INFERENCE": "enabled"},
+        )
+        result = gateway.generate(self.request)
+        self.assertEqual(result.provider, "cerebras")
+        self.assertEqual(len(usage.started), 2)
+        self.assertEqual(usage.ambiguous, [])
+        self.assertEqual(usage.totals()["pending_reservations"], 0)
+        self.assertEqual(usage.totals()["daily_usd"], 0.0)
 
     def test_429_cools_down_and_rotates(self):
         first = self.profile()
