@@ -65,6 +65,23 @@ OmniRoute and LiteLLM are both retained as explicit future evaluation/integratio
 - LiteLLM: candidate identified; installation and runtime deployment not started.
 - Next action: complete Phase 1 and produce a side-by-side deployment/feature assessment before installing either service.
 
+## Execution priorities for capability and speed
+
+The order is intentionally optimized to get one useful external model working before adding more infrastructure.
+
+1. **P0 — protect and verify the existing engine.** Keep dry-run as the default; verify CI, the durable quota/monetary ledgers, hard-stop evidence, task runner, and kill switch. Never expose provider keys in logs or source.
+2. **P1 — Nemotron 3 Ultra first (pinned OpenRouter free endpoint).** A model-specific profile is now staged for `nvidia/nemotron-3-ultra-550b-a55b:free`, with the exact OpenRouter endpoint, conservative provisional limits, zero listed token price, and all execution/commercial flags disabled. Add `OPENROUTER_API_KEY` as a GitHub Actions secret, then perform a public-prompt smoke test only after account quota, endpoint data policy, and the engine's live-inference gates are verified. Do not send customer, credential, or confidential business data to the free endpoint.
+3. **P2 — make the model useful to the agent team.** After the smoke test, add it first as a bounded research/reasoning/review worker. Measure task success, latency, failures, tool-call correctness, and quota consumption against the existing Groq/Gemini routes. Do not grant direct production writes; route proposed code changes through branches, tests, and review.
+4. **P3 — add resilient fallback.** Evaluate a second independently verified free route only after Nemotron's actual availability and account limits are known. Fail closed on quota exhaustion; never silently fall back to a paid model.
+5. **P4 — evaluate OmniRoute and LiteLLM.** Compare each separately in an isolated runtime only if the current gateway cannot provide the required routing, provider health, or quota controls. Avoid operating two extra gateway services before a measured need exists.
+6. **P5 — expand the agent roster and automation.** Increase parallelism only after measured throughput, durable idempotency, concurrency safety, and provider limits justify it.
+
+### Nemotron facts and limits
+- The OpenRouter model listing identifies 550B total / 55B active parameters, up to 1M context, tool calling, and a free endpoint. Its observed availability can fluctuate; free does not mean guaranteed uptime.
+- The model's weights are governed by NVIDIA OpenMDW-1.1, but the hosted API trial/service has separate provider terms. Model license alone does not approve commercial use or confidential-data handling.
+- The current profile is an integration configuration only. It does not download model weights, create an account, add a secret, or prove a successful inference request.
+- The model is hosted remotely. Self-hosting the full Ultra model is not practical on the user's iPhone/Android tablet; NVIDIA's own deployment guidance calls for multiple high-memory datacenter GPUs.
+
 ## References
 
 - OmniRoute: https://github.com/cheaper-inference/OmniRoute
