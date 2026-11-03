@@ -167,13 +167,37 @@ export async function handleMonetaryLedger(request, env, url) {
         return same ? json({ok:true,settled:true,replay:true}) : json({error:"settlement_conflict"},409);
       }
       if (!["in_flight","ambiguous"].includes(row.status)) return json({error:"invalid_reservation_state"},409);
-      const updated = await env.DB.prepare("UPDATE monetary_reservations SET status='settled',actual_cost_nanos=?,input_tokens=?,output_tokens=?,settled_at=? WHERE reservation_id=? AND status IN ('in_flight','ambiguous')").bind(input.actual_cost_nanos,input.input_tokens,input.output_tokens,now,input.reservation_id).run();
-      if (updated.meta?.changes !== 1) {
-        const current = await env.DB.prepare("SELECT status,actual_cost_nanos,input_tokens,output_tokens FROM monetary_reservations WHERE reservation_id=?").bind(input.reservation_id).first();
-        if (current?.status === "settled" && Number(current.actual_cost_nanos) === input.actual_cost_nanos &&
-            Number(current.input_tokens) === input.input_tokens && Number(current.output_tokens) === input.output_tokens) {
-          return json({ok:true,settled:true,replay:true});
-        }
+      const date = new Date(now);
+      const day = new Date(Date.UTC(date.getUTCFullYear(),date.getUTCMonth(),date.getUTCDate())).toISOString();
+      const month = new Date(Date.UTC(date.getUTCFullYear(),date.getUTCMonth(),1)).toISOString();
+      const pending = "status IN ('reserved','in_flight','ambiguous')";
+      // Settlement and quarantine are one D1 batch transaction. A lost response
+      // can be retried without leaving a settled over-budget route unquarantined.
+      await env.DB.batch([
+        env.DB.prepare("UPDATE monetary_reservations SET status='settled',actual_cost_nanos=?,input_tokens=?,output_tokens=?,settled_at=? WHERE reservation_id=? AND status IN ('in_flight','ambiguous')")
+          .bind(input.actual_cost_nanos,input.input_tokens,input.output_tokens,now,input.reservation_id),
+        env.DB.prepare(`
+          INSERT INTO monetary_route_quarantines(route_id,reason,reservation_id,quarantined_at)
+          SELECT provider || ':' || model,
+            CASE WHEN actual_cost_nanos > estimated_cost_nanos
+              THEN 'actual_cost_exceeded_estimate' ELSE 'monetary_budget_exceeded' END,
+            reservation_id,settled_at
+          FROM monetary_reservations
+          WHERE reservation_id=? AND status='settled' AND (
+            actual_cost_nanos > estimated_cost_nanos
+            OR (SELECT COALESCE(SUM(actual_cost_nanos),0) FROM monetary_reservations WHERE status='settled' AND settled_at>=?) +
+               (SELECT COALESCE(SUM(estimated_cost_nanos),0) FROM monetary_reservations WHERE ${pending}) > daily_budget_nanos
+            OR (SELECT COALESCE(SUM(actual_cost_nanos),0) FROM monetary_reservations WHERE status='settled' AND settled_at>=?) +
+               (SELECT COALESCE(SUM(estimated_cost_nanos),0) FROM monetary_reservations WHERE ${pending}) > monthly_budget_nanos
+            OR (SELECT COALESCE(SUM(actual_cost_nanos),0) FROM monetary_reservations WHERE task_id=monetary_reservations.task_id AND status='settled') +
+               (SELECT COALESCE(SUM(estimated_cost_nanos),0) FROM monetary_reservations WHERE task_id=monetary_reservations.task_id AND ${pending}) > per_task_budget_nanos
+          )
+          ON CONFLICT(route_id) DO UPDATE SET reason=excluded.reason,reservation_id=excluded.reservation_id,quarantined_at=excluded.quarantined_at
+        `).bind(input.reservation_id,day,month)
+      ]);
+      const current = await env.DB.prepare("SELECT status,actual_cost_nanos,input_tokens,output_tokens FROM monetary_reservations WHERE reservation_id=?").bind(input.reservation_id).first();
+      if (current?.status !== "settled" || Number(current.actual_cost_nanos) !== input.actual_cost_nanos ||
+          Number(current.input_tokens) !== input.input_tokens || Number(current.output_tokens) !== input.output_tokens) {
         return json({error:"settlement_conflict"},409);
       }
       const totals = await spendSnapshot(env.DB,row.task_id,now);
@@ -181,11 +205,7 @@ export async function handleMonetaryLedger(request, env, url) {
         totals.monthly_total_nanos > Number(row.monthly_budget_nanos) ||
         totals.task_total_nanos > Number(row.per_task_budget_nanos) ||
         input.actual_cost_nanos > Number(row.estimated_cost_nanos);
-      if (exceeded) {
-        const reason = input.actual_cost_nanos > Number(row.estimated_cost_nanos) ? "actual_cost_exceeded_estimate" : "monetary_budget_exceeded";
-        await env.DB.prepare("INSERT INTO monetary_route_quarantines(route_id,reason,reservation_id,quarantined_at) VALUES(?,?,?,?) ON CONFLICT(route_id) DO UPDATE SET reason=excluded.reason,reservation_id=excluded.reservation_id,quarantined_at=excluded.quarantined_at").bind(row.provider+":"+row.model,reason,row.reservation_id,now).run();
-      }
-      return json({ok:true,settled:true,over_budget:exceeded,totals});
+      return json({ok:true,settled:true,replay:row.status === "settled",over_budget:exceeded,totals});
     }
     return json({error:"unsupported_action"},400);
   } catch { return json({error:"storage_unavailable"},503); }
