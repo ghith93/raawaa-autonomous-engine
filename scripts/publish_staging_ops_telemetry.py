@@ -39,19 +39,17 @@ def _ci_conclusion(results: dict[str, str]) -> str:
     return "incomplete"
 
 
-def _policy_snapshot(root: Path) -> dict:
+def _policy_snapshot(root: Path, live_inference_value: str) -> dict:
     policy = json.loads((root / "config" / "policy.json").read_text(encoding="utf-8"))
     workflow = (root / ".github" / "workflows" / "task-runner.yml").read_text(encoding="utf-8")
-    start_marker = "      - name: Process bounded D1 task batch"
-    start = workflow.find(start_marker)
-    if start < 0:
-        raise TelemetryPublishError("Task Runner batch step is missing")
-    end = workflow.find("      - name: Publish bounded Task Runner status", start)
-    if end < 0:
-        raise TelemetryPublishError("Task Runner status step is missing")
-    batch_step = workflow[start:end]
-    configured = bool(re.search(r"^\s*RAAWAA_ENGINE_LIVE_INFERENCE\s*:", batch_step, re.MULTILINE))
-    live_default = "configured" if configured else "disabled"
+    if "RAAWAA_ENGINE_LIVE_INFERENCE:" not in workflow:
+        raise TelemetryPublishError("Task Runner live-inference gate is not wired")
+    if live_inference_value == "enabled":
+        live_default = "enabled"
+    elif live_inference_value in ("", "disabled"):
+        live_default = "disabled"
+    else:
+        live_default = "unknown"
     safe = (
         policy.get("mode") == "safe_dry_run"
         and policy.get("allow_paid_model_calls") is False
@@ -64,11 +62,10 @@ def _policy_snapshot(root: Path) -> dict:
         "status": "engaged" if safe else "not_engaged",
         "policy_mode": policy.get("mode") if isinstance(policy.get("mode"), str) else "unknown",
         "live_inference_default": live_default,
-        "allow_paid_model_calls": policy.get("allow_paid_model_calls") is False,
+        "allow_paid_model_calls": policy.get("allow_paid_model_calls") is True,
         "paid_fallback_enabled": policy.get("model_policy", {}).get("paid_fallback_enabled") is True,
         "allow_external_writes": policy.get("allow_external_writes") is True,
     }
-
 
 def _validate_database_targets(root: Path) -> None:
     with (root / "wrangler.staging.toml").open("rb") as stream:
@@ -130,7 +127,7 @@ def build_telemetry_sql(environ: dict[str, str], root: Path, now: datetime | Non
         "jobs": job_results,
         "recorded_at": recorded_at,
     }
-    kill_switch = _policy_snapshot(root)
+    kill_switch = _policy_snapshot(root, environ.get("RAAWAA_ENGINE_LIVE_INFERENCE", "disabled"))
     kill_switch["source_sha"] = environ["GITHUB_SHA"]
     kill_switch["recorded_at"] = recorded_at
     values = [
