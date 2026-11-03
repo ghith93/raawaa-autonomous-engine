@@ -180,3 +180,6 @@ Sources:
 The code gate is stricter than a documentation warning: only `research_brief` tasks explicitly classified `public` may pass the live-inference data policy. The payload schema is limited to `data_classification`, `topic`, `questions`, and public HTTPS `source_urls`; internal, code-review, marketing/content, and system-audit tasks are blocked from provider submission. Credentials in URLs, query strings, local/private hosts, common secret patterns, email addresses, oversized topics, and unknown payload fields fail closed.
 
 This is a structural guard, not semantic proof that arbitrary text is public. The task creator must classify accurately; never put Raawaa's confidential formula, exact ingredient composition, customer records, credentials, or other proprietary material into a task marked public. All live profiles remain disabled.
+
+
+Known sensitive terms in free-text fields are also blocked (including formula/ingredient/composition, proprietary/confidential/internal, customer/order/payment, contact-data, and credential terms). This keyword layer is intentionally conservative and is not proof that arbitrary prose is public.
