@@ -11,7 +11,7 @@ The watchdog is a fallback. It does not replace the GitHub schedule or the Pytho
 
 ## Disabled-by-default behavior
 
-The watchdog requires all three Cloudflare Worker settings below. If any is missing, the handler returns disabled before making a network request or writing to D1.
+The watchdog requires three Cloudflare Worker secrets and one explicit non-secret activation variable. If any secret or the activation variable is missing, the handler returns disabled before any D1 access or network request.
 
 - GITHUB_APP_ID
 - GITHUB_APP_INSTALLATION_ID
