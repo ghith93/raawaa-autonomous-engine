@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import worker from "../worker/index.js";
+import { generateKeyPairSync } from "node:crypto";
 
 const TOKEN = "test-worker-token";
 
@@ -24,6 +25,7 @@ function dbMock() {
         bind(...values) { this.values = values; return this; },
         async first() {
           calls.push({ kind: "first", sql, values: this.values });
+          if (sql.includes("FROM audit_log")) return null;
           if (sql.includes("SELECT 1")) return { ok: 1 };
           if (sql.includes("UPDATE tasks SET status='running'")) return null;
           if (sql.includes("SELECT id,status,attempts")) return {
@@ -163,6 +165,86 @@ test("scheduled handler runs bounded stale lease recovery and records a heartbea
   assert.ok(Number.isFinite(Date.parse(heartbeat.values[2])));
 });
 
+
+test("Task Runner watchdog Cron is dormant without App settings and does not run lease recovery", async () => {
+  const DB = dbMock();
+  await worker.scheduled(
+    { cron: "1,6,11,16,21,26,31,36,41,46,51,56 * * * *", scheduledTime: 1_800_000_000_000 },
+    { DB },
+  );
+  assert.equal(DB.calls.length, 0);
+});
+
+test("offset watchdog Cron dispatches after the primary Task Runner phase", async () => {
+  const DB = dbMock();
+  const { privateKey } = generateKeyPairSync("rsa", {
+    modulusLength: 2048,
+    publicKeyEncoding: { type: "spki", format: "pem" },
+    privateKeyEncoding: { type: "pkcs1", format: "pem" },
+  });
+  const originalFetch = globalThis.fetch;
+  const calls = [];
+  globalThis.fetch = async (url, options = {}) => {
+    const target = String(url);
+    calls.push({ url: target, options });
+    if (target.endsWith("/app/installations/67890/access_tokens")) {
+      return new Response(JSON.stringify({ token: "ghs_test_watchdog_token" }), {
+        status: 201, headers: { "content-type": "application/json" },
+      });
+    }
+    if (target.includes("/actions/workflows/task-runner.yml/runs?")) {
+      return new Response(JSON.stringify({ workflow_runs: [] }), {
+        status: 200, headers: { "content-type": "application/json" },
+      });
+    }
+    if (target.endsWith("/actions/workflows/task-runner.yml/dispatches")) {
+      return new Response(null, { status: 204 });
+    }
+    throw new Error("unexpected_url");
+  };
+  try {
+    await worker.scheduled(
+      { cron: "1,6,11,16,21,26,31,36,41,46,51,56 * * * *", scheduledTime: 1_800_000_000_000 },
+      {
+        DB,
+        GITHUB_APP_ID: "12345",
+        GITHUB_APP_INSTALLATION_ID: "67890",
+        GITHUB_APP_PRIVATE_KEY: privateKey,
+      },
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+  assert.equal(calls.length, 3);
+  assert.equal(calls[2].url.endsWith("/actions/workflows/task-runner.yml/dispatches"), true);
+  assert.ok(DB.calls.some(call => call.kind === "run" && call.values[0] === "task_runner_dispatch_intent"));
+});
+
+test("15-minute recovery Cron never calls GitHub App dispatch", async () => {
+  const DB = dbMock();
+  const originalFetch = globalThis.fetch;
+  let calls = 0;
+  globalThis.fetch = async () => {
+    calls += 1;
+    throw new Error("GitHub fetch must not run on the recovery Cron");
+  };
+  try {
+    await worker.scheduled(
+      { cron: "*/15 * * * *", scheduledTime: 1_800_000_000_000 },
+      {
+        DB,
+        GITHUB_APP_ID: "12345",
+        GITHUB_APP_INSTALLATION_ID: "67890",
+        GITHUB_APP_PRIVATE_KEY: "unused-on-recovery-cron",
+      },
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+  assert.equal(calls, 0);
+  assert.ok(DB.calls.some(x => x.kind === "all" && x.sql.includes("LIMIT 100")));
+  assert.ok(DB.calls.some(x => x.kind === "run" && x.values[0] === "worker_cron_tick"));
+});
 
 test("scheduled handler fails visibly when the heartbeat audit write fails", async () => {
   const DB = dbMock();

@@ -2,6 +2,7 @@ import { handleQuota } from "./quota.js";
 import { handlePaperLedger } from "./paper-ledger.js";
 import { handleTelegramWebhook } from "./telegram-webhook.js";
 import { handleMobilePage, handleMobileStatus } from "./mobile-status.js";
+import { dispatchTaskRunnerIfStale } from "./task-runner-watchdog.js";
 const JSON_HEADERS = { "content-type": "application/json; charset=utf-8", "cache-control": "no-store" };
 const MAX_BODY_BYTES = 32 * 1024;
 
@@ -159,12 +160,22 @@ function validText(value, max) {
 
 export default {
   async scheduled(controller, env) {
+    const cron = typeof controller?.cron === "string" ? controller.cron : "";
+    if (cron === "1,6,11,16,21,26,31,36,41,46,51,56 * * * *") {
+      await dispatchTaskRunnerIfStale({
+        env,
+        scheduledTime: controller?.scheduledTime,
+      });
+      return;
+    }
+    if (cron !== "*/15 * * * *") return;
+
     const recovery = await recoverStaleTasks(env);
     const occurredAt = new Date().toISOString();
     const heartbeat = await env.DB.prepare(
       "INSERT INTO audit_log(task_id,event,details_json,created_at) VALUES(NULL,?,?,?)"
     ).bind("worker_cron_tick", JSON.stringify({
-      cron: typeof controller?.cron === "string" ? controller.cron : "unknown",
+      cron,
       requeued: recovery.requeued,
       failed: recovery.failed,
     }), occurredAt).run();
