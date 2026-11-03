@@ -180,6 +180,22 @@ test("scheduled handler fails visibly when the heartbeat audit write fails", asy
   );
 });
 
+test("scheduled handler rejects an unsuccessful D1 heartbeat result", async () => {
+  const DB = dbMock();
+  const prepare = DB.prepare.bind(DB);
+  DB.prepare = sql => {
+    const statement = prepare(sql);
+    if (sql.includes("INSERT INTO audit_log")) {
+      statement.run = async () => ({ success: false });
+    }
+    return statement;
+  };
+  await assert.rejects(
+    () => worker.scheduled({ cron: "*/15 * * * *" }, { DB }),
+    /Worker Cron heartbeat insert failed/,
+  );
+});
+
 test("authenticated POST diagnostic probe confirms application auth without writes", async () => {
   const DB = dbMock();
   const response = await worker.fetch(request("/v1/diagnostics/auth", {
