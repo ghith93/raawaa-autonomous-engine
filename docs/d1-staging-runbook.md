@@ -6,15 +6,14 @@ The dedicated `raawaa-engine-staging` database is the only remote target for aut
 
 ## Automatic staging migration gate
 
-The workflow `.github/workflows/d1-staging-migrate.yml` runs only after an `Engine CI` workflow run:
+The `staging-migrate` job inside `.github/workflows/ci.yml` runs only for a push to `main` and only after the full `test` job has succeeded:
 
-- has completed successfully;
-- was triggered by a push to `main`;
-- checked out the exact `head_sha` that passed CI.
+- it is a `push` event to `main` (not a pull-request or manual dispatch);
+- the `test` job passed for the same commit SHA.
 
-Before applying anything, it parses both Wrangler configurations and verifies the exact approved staging database name and ID, the single `DB` binding, and that the staging ID/name do not appear in production configuration. It then lists pending migrations, applies pending migrations to Staging only, and lists the final state.
+Before applying anything, it parses both Wrangler configurations and verifies the exact approved staging database name and ID, the single `DB` binding, the migrations directory, and the reviewed production database identity. It then lists pending migrations, applies pending migrations to Staging only, and lists the final state.
 
-The workflow does not deploy the Worker, alter secrets, or access production D1. Pull-request CI runs do not trigger staging migrations. A failed CI run does not trigger them either.
+The job does not deploy the Worker, alter secrets, or access production D1. Pull-request CI, failed test jobs, and manual Engine CI runs do not trigger staging migrations.
 
 ## Current baseline
 
@@ -24,7 +23,7 @@ At the first successful remote inventory on 2026-11-03:
 - Wrangler reported migrations `0001_initial.sql` through `0005_telegram_webhook_receipts.sql` as pending.
 - No migration had been applied at that checkpoint.
 
-The first successful staging migration workflow run is the evidence required to mark those migrations applied. Do not infer schema readiness from the inventory-only workflow.
+The first successful `staging-migrate` job in Engine CI is the evidence required to mark those migrations applied. Do not infer schema readiness from the inventory-only workflow.
 
 ## Production remains separate
 
