@@ -89,7 +89,7 @@ function normalizeResearchCandidate(item) {
     let parsed;
     try { parsed = new URL(item.url); } catch { return null; }
     if (parsed.protocol !== "https:" || parsed.hostname !== "arxiv.org"
-        || parsed.pathname !== "/abs/" + arxivId || parsed.search || parsed.hash
+        || parsed.pathname !== "/abs/" + arxivId || parsed.search || parsed.hash || parsed.port
         || parsed.username || parsed.password) return null;
     const metadata = {
       authors: Array.isArray(item.authors) ? item.authors.filter(x => typeof x === "string").slice(0, 8).map(x => x.slice(0, 200)) : [],
