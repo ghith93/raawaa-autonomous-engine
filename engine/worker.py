@@ -146,6 +146,7 @@ def run_once(store: TaskStore, live_gateway=None, environ=None) -> dict | None:
                     f"provider_not_called:{exc.reason_code}",
                     lease_token=task["lease_token"],
                     retry_after_seconds=retry_delay,
+                    execution_mode="live_inference",
                 )
                 return {
                     "id": task["id"], "status": status,
@@ -163,6 +164,7 @@ def run_once(store: TaskStore, live_gateway=None, environ=None) -> dict | None:
                     task["id"], "blocked",
                     error=f"live_inference_blocked:{type(exc).__name__}",
                     lease_token=task["lease_token"],
+                    execution_mode="live_inference",
                 )
                 return {"id": task["id"], "status": "blocked",
                         "reason": "live_inference_failed_no_replay", "recovery": recovery}
