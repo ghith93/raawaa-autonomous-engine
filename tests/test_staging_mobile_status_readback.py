@@ -1,5 +1,7 @@
+import io
 import json
 import unittest
+from urllib.error import HTTPError
 from unittest.mock import patch
 
 from scripts.verify_staging_mobile_status import verify
@@ -56,6 +58,31 @@ class StagingMobileStatusReadbackTests(unittest.TestCase):
         self.assertEqual(result["ci_health"], "success")
         self.assertEqual(result["kill_switch"], "engaged")
         self.assertFalse(result["paid_model_calls"])
+
+    def test_retries_transient_401_until_ephemeral_token_is_visible(self):
+        attempts = 0
+
+        def open_url(request, timeout=20):
+            nonlocal attempts
+            attempts += 1
+            if attempts == 1:
+                raise HTTPError(request.full_url, 401, "Unauthorized", {}, io.BytesIO(b"{}"))
+            return Response(self.payload)
+
+        with patch("scripts.verify_staging_mobile_status.time.sleep") as sleep:
+            result = verify(self.env, opener=open_url, readiness_timeout_seconds=10)
+        self.assertEqual(result["status"], "verified")
+        self.assertEqual(attempts, 2)
+        sleep.assert_called_once_with(2)
+
+    def test_fails_fast_on_non_transient_authenticated_status(self):
+        def forbidden(request, timeout=20):
+            raise HTTPError(request.full_url, 403, "Forbidden", {}, io.BytesIO(b"{}"))
+
+        with patch("scripts.verify_staging_mobile_status.time.sleep") as sleep:
+            with self.assertRaisesRegex(RuntimeError, "HTTP 403"):
+                verify(self.env, opener=forbidden, readiness_timeout_seconds=10)
+        sleep.assert_not_called()
 
     def test_rejects_snapshot_for_different_commit(self):
         self.payload["ci_health"]["head_sha"] = "b" * 40
