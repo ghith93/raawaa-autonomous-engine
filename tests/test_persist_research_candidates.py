@@ -1,4 +1,6 @@
+import sqlite3
 import unittest
+from pathlib import Path
 
 from scripts.persist_research_candidates import (
     ResearchPersistenceError,
@@ -66,6 +68,38 @@ class ResearchPersistenceTests(unittest.TestCase):
         self.assertEqual(result["verified"], 4)
         self.assertEqual(result["persisted"], 4)
         self.assertEqual(calls, [["github", "crossref", "arxiv", "searxng"]])
+
+    def test_source_expansion_migration_preserves_existing_review_history(self):
+        root = Path(__file__).resolve().parents[1]
+        connection = sqlite3.connect(":memory:")
+        connection.execute("CREATE TABLE schema_migrations(version TEXT PRIMARY KEY)")
+        connection.executescript((root / "migrations" / "0002_research_candidates.sql").read_text(encoding="utf-8"))
+        connection.execute(
+            """INSERT INTO research_candidates(
+                source_key,source,title,url,metadata_json,review_status,review_note,
+                first_seen_at,last_seen_at,reviewed_at,discovery_count,updated_at
+            ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)""",
+            ("github:org/agent", "github", "org/agent", "https://github.com/org/agent", "{}",
+             "accepted", "reviewed before source expansion", "2026-01-01", "2026-01-02",
+             "2026-01-02", 3, "2026-01-02"),
+        )
+        connection.executescript((root / "migrations" / "0008_research_source_expansion.sql").read_text(encoding="utf-8"))
+        existing = connection.execute(
+            "SELECT source,review_status,review_note,first_seen_at,last_seen_at,reviewed_at,discovery_count FROM research_candidates WHERE source_key=?",
+            ("github:org/agent",),
+        ).fetchone()
+        self.assertEqual(existing, ("github", "accepted", "reviewed before source expansion",
+                                    "2026-01-01", "2026-01-02", "2026-01-02", 3))
+        for source in ("arxiv", "searxng"):
+            connection.execute(
+                """INSERT INTO research_candidates(
+                    source_key,source,title,url,metadata_json,first_seen_at,last_seen_at,updated_at
+                ) VALUES(?,?,?,?,?,?,?,?)""",
+                (source + ":candidate", source, "Candidate", "https://example.org/item", "{}",
+                 "2026-11-03", "2026-11-03", "2026-11-03"),
+            )
+        self.assertEqual(connection.execute("SELECT COUNT(*) FROM research_candidates").fetchone()[0], 3)
+        connection.close()
 
     def test_empty_snapshot_does_not_need_credentials_or_network(self):
         result = persist_candidates({"candidates": [], "academic_candidates": []}, environ={})
