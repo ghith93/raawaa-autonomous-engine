@@ -36,9 +36,20 @@ When actual cost exceeds its estimate, or the settled total exceeds the daily/mo
 ## Python integration
 
 - `engine/d1_monetary_ledger.py` implements the existing `UsageLedger` interface against the authenticated Worker endpoint.
-- `engine/live_runtime.py` selects D1 when `RAAWAA_ENGINE_API_URL` is configured and requires `RAAWAA_ENGINE_API_TOKEN`.
+- `engine/live_runtime.py` selects both `D1MonetaryLedger` and `D1QuotaLedger` when `RAAWAA_ENGINE_API_URL` is configured and requires `RAAWAA_ENGINE_API_TOKEN`.
 - In GitHub Actions, absence of the control Worker URL blocks cloud live runtime construction. It never silently falls back to ephemeral local SQLite.
 - Local CLI development may continue to use the existing SQLite ledger.
+
+## Cloudflare infrastructure billing boundary
+
+Cloudflare documents account-level Spend Policies with a `usage_block` action for Workers and Durable Objects. This blocks further usage of the selected Cloudflare product until the billing period ends; it is not scoped to this Raawaa Worker. The current account inventory workflow receives HTTP 404 from the Spend Policies endpoint, so no account-level Cloudflare hard stop has been verified. We do not create or enable a product-wide usage block because it could disable unrelated and production Workers.
+
+Cloudflare's Billable Usage dashboard and budget alerts are documented as Pay-as-you-go features; budget alerts are informational notifications, not a usage cap. Keep paid overages disabled and the infrastructure spend allowance at zero. The D1 monetary policy in this document controls model-provider spend, not Cloudflare infrastructure billing.
+
+References:
+- [Cloudflare Spend Policies API](https://developers.cloudflare.com/api/resources/billing/subresources/spend_policies/)
+- [Cloudflare Budget Alerts](https://developers.cloudflare.com/billing/manage/budget-alerts/)
+- [Cloudflare Billable Usage](https://developers.cloudflare.com/billing/manage/billable-usage/)
 
 ## Verification and remaining gates
 
