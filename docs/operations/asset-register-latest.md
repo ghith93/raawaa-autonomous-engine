@@ -18,3 +18,13 @@
 - Required manual Cloudflare configuration remains: restore the non-secret Worker variable `GITHUB_APP_WATCHDOG_ENABLED=enabled` in the Production environment, then perform a protected deployment and require authenticated `/v1/mobile/status` to report `task_runner_watchdog.ready=true` and `missing=[]`. No production variable or secret was changed in this cycle.
 - Open implementation PRs #428 (Executive Brain) and #427 (Codespaces bridge) remain unmerged and require fresh exact-head CI/security review against the current main. Their earlier CI evidence is historical and must not be treated as current-main validation.
 - No model inference, paid API call, task enqueue, D1 migration, Production deployment, secret mutation, or Codespaces activation was performed in this revalidation cycle.
+
+
+## Post-PR #434 continuation — 2026-11-03 22:33 UTC
+
+- Documentation PR #434 was merged after exact-head Engine CI #41731362709 passed. The merge commit is `d3c84919bea6e778c8062b8828fb681161b47ec3`. CI test job passed; Staging jobs were skipped. This is not a production deployment.
+- Current Activepieces verification: one ACTIVE GitHub connection; one ENABLED/published Manual Trigger → GitHub Task Runner dispatch flow; latest TESTING run succeeded. See `docs/operations/tooling-capability-inventory-2026-11-03.md` for the exact IDs and limits.
+- ChatGPT Daily Ops automation remains enabled but not scheduler-verified: next_run_time is null despite reapplying its existing schedule and toggling enabled state. Manual run_now returned inline execution only.
+- PR #428 (Executive Brain) and PR #427 (Codespaces bridge) are each five commits behind current main and have historical exact-head CI only. Do not merge without syncing to current main and rerunning CI. PR #427 also has a security finding recorded in its discussion (#issuecomment-6617117212): same-UID child processes can potentially inspect the bridge process environment and filesystem; keep Codespaces disabled until a real sandbox boundary or trusted-code-only contract is implemented.
+- Cloudflare production Worker inventory is healthy at the public layer, but Task Runner watchdog readiness remains unverified/not ready because `GITHUB_APP_WATCHDOG_ENABLED` is missing. Restore that non-secret Production Worker variable manually; do not confuse Worker `/health` HTTP 200 with watchdog readiness.
+- No model inference, paid API call, production deployment, production D1 migration, secret mutation, Codespaces activation, or task queue execution occurred in this continuation cycle.
