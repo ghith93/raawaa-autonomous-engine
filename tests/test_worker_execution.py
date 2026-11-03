@@ -34,7 +34,7 @@ class WorkerExecutionTests(unittest.TestCase):
         self.usage = UsageLedger(root / "usage.db")
         self.task = self.store.enqueue(
             "research_brief", "Research the requested topic",
-            {"topic": "test topic", "constraints": ["no external writes"], "data_classification": "public"},
+            {"topic": "test topic", "questions": ["no external writes"], "data_classification": "public"},
             idempotency_key="worker-live-test",
         )
 
@@ -168,7 +168,7 @@ class WorkerExecutionTests(unittest.TestCase):
 
     def test_data_policy_cannot_be_weakened_to_allow_confidential_classification(self):
         from engine.live_data_policy import validate_live_payload
-        allowed, reason = validate_live_payload("title", {"data_classification": "confidential"}, {"require_explicit_classification": True, "allowed_classifications": ["public", "internal", "confidential"], "blocked_key_fragments": [], "max_prompt_bytes": 7000})
+        allowed, reason = validate_live_payload("research_brief", "title", {"data_classification": "confidential", "topic": "test"}, {"require_explicit_classification": True, "allowed_classifications": ["public", "internal", "confidential"], "allowed_task_types": ["research_brief"], "allowed_payload_keys": ["data_classification", "topic"], "blocked_key_fragments": [], "max_prompt_bytes": 7000})
         self.assertFalse(allowed)
         self.assertEqual(reason, "data_policy_invalid")
     def test_live_switch_without_gateway_blocks_instead_of_silent_dry_run(self):
