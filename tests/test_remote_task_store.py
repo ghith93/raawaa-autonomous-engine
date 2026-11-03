@@ -70,7 +70,7 @@ class RemoteTaskStoreTests(unittest.TestCase):
         payload = json.loads(open_url.call_args.args[0].data)
         self.assertEqual(payload["execution_mode"], "dry_run")
         self.assertEqual(payload["lease_token"], "lease-1")
-        self.assertEqual(payload["result"], {"safe": True})
+        self.assertEqual(payload["result"], {"safe": True, "mode": "dry_run"})
 
     @patch("engine.remote_task_store.urlopen")
     def test_recovery_is_bounded_and_validated(self, open_url):
