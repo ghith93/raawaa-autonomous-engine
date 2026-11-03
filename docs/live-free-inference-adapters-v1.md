@@ -18,3 +18,6 @@ Next: integrate with QuotaManager and ModelGateway, reserve quota before calls, 
 ## Data policy boundary
 
 The live data gate is public-only and task-specific: `research_brief` is the sole allowlisted task type. The payload schema accepts only a topic, optional bounded questions, optional public HTTPS source URLs, and an explicit `data_classification=public`. All other task types and classifications fail closed before provider I/O. This gate does not detect every possible proprietary fact in free text; task authors must never mark confidential formulae, customer data, or credentials as public.
+
+
+The free-text sensitive-content guard is contextual rather than a blanket ban on ordinary words such as “ingredients” or “order”. It blocks Raawaa-branded formula/ingredient/composition references, confidential/proprietary/internal data phrases, and customer/order/payment or personal-data combinations, while allowing clearly public ingredient-label research. This remains a conservative heuristic, not semantic proof that all text is public.
