@@ -10,6 +10,7 @@ from engine.remote_task_store import RemoteTaskStoreError
 
 
 TASK_ID = "11111111-1111-4111-8111-111111111111"
+CODE_TOKEN = "codespace-test-token-0123456789abcdef0123456789abcdef"
 
 
 class FakeResponse:
@@ -35,19 +36,19 @@ class CodespaceTaskStoreTests(unittest.TestCase):
         self.env.stop()
 
     def test_requires_a_distinct_codespace_token(self):
-        with self.assertRaisesRegex(ValueError, "distinct scoped token"):
+        with self.assertRaisesRegex(ValueError, "distinct high-entropy scoped token"):
             CodespaceTaskStore("https://engine.example", "general-token")
         with self.assertRaisesRegex(ValueError, "distinct scoped token"):
             CodespaceTaskStore("https://engine.example", "admin-token")
 
     def test_rejects_task_path_injection_and_non_origin_base_urls(self):
-        store = CodespaceTaskStore("https://engine.example", "codespace-token")
+        store = CodespaceTaskStore("https://engine.example", CODE_TOKEN)
         with self.assertRaisesRegex(ValueError, "task identifier"):
             store.heartbeat("../v1/tasks", "lease-1")
         with self.assertRaisesRegex(ValueError, "clean HTTPS Worker origin"):
-            CodespaceTaskStore("https://engine.example/path", "codespace-token")
+            CodespaceTaskStore("https://engine.example/path", CODE_TOKEN)
         with self.assertRaisesRegex(ValueError, "clean HTTPS Worker origin"):
-            CodespaceTaskStore("https://user:pass@engine.example", "codespace-token")
+            CodespaceTaskStore("https://user:pass@engine.example", CODE_TOKEN)
 
     @patch("engine.remote_task_store.build_opener")
     def test_scoped_client_rejects_redirects(self, build):
@@ -55,7 +56,7 @@ class CodespaceTaskStoreTests(unittest.TestCase):
         build.return_value.open.side_effect = HTTPError(
             "https://engine.example/v1/codespace/status", 302, "redirect", headers, None
         )
-        store = CodespaceTaskStore("https://engine.example", "codespace-token")
+        store = CodespaceTaskStore("https://engine.example", CODE_TOKEN)
         with self.assertRaisesRegex(RemoteTaskStoreError, "HTTP 302"):
             store.preflight()
         build.assert_called_once()
@@ -66,7 +67,7 @@ class CodespaceTaskStoreTests(unittest.TestCase):
             "ok": True, "executor": "codespace",
             "task_types": ["codespace_inspect", "codespace_test"],
         })
-        store = CodespaceTaskStore("https://engine.example", "codespace-token")
+        store = CodespaceTaskStore("https://engine.example", CODE_TOKEN)
         self.assertEqual(store.preflight()["executor"], "codespace")
         request = build.return_value.open.call_args.args[0]
         self.assertEqual(request.full_url, "https://engine.example/v1/codespace/status")
@@ -85,7 +86,7 @@ class CodespaceTaskStoreTests(unittest.TestCase):
                 "lease_token": "lease-2",
             }),
         ]
-        store = CodespaceTaskStore("https://engine.example", "codespace-token")
+        store = CodespaceTaskStore("https://engine.example", CODE_TOKEN)
         task = store.claim_next()
         self.assertEqual(task["lease_token"], "lease-1")
         self.assertEqual(build.return_value.open.call_args_list[0].args[0].full_url,
@@ -99,7 +100,7 @@ class CodespaceTaskStoreTests(unittest.TestCase):
             FakeResponse({"lease_expires_at": "2999-01-01T00:00:00Z"}),
             FakeResponse({"ok": True, "status": "succeeded"}),
         ]
-        store = CodespaceTaskStore("https://engine.example", "codespace-token")
+        store = CodespaceTaskStore("https://engine.example", CODE_TOKEN)
         store.heartbeat(TASK_ID, "lease-1")
         store.finish(TASK_ID, "succeeded", {"external_writes": 0}, lease_token="lease-1")
         calls = build.return_value.open.call_args_list
