@@ -80,22 +80,9 @@ def validate_live_payload(
         return False, "task_type_not_allowed"
     if not isinstance(title, str) or not title.strip() or len(title) > 500 or not isinstance(payload, dict):
         return False, "task_payload_invalid"
-    if set(payload) - set(allowed_payload_keys) or not REQUIRED_PAYLOAD_KEYS.issubset(payload):
-        return False, "payload_schema_invalid"
     classification = payload.get("data_classification")
     if not isinstance(classification, str) or classification.lower() != "public":
         return False, "data_classification_required_or_disallowed"
-    topic = payload.get("topic")
-    if not isinstance(topic, str) or not topic.strip() or len(topic) > 500:
-        return False, "payload_schema_invalid"
-    questions = payload.get("questions", [])
-    if (not isinstance(questions, list) or len(questions) > 5
-            or any(not isinstance(item, str) or not item.strip() or len(item) > 500 for item in questions)):
-        return False, "payload_schema_invalid"
-    source_urls = payload.get("source_urls", [])
-    if (not isinstance(source_urls, list) or len(source_urls) > 5
-            or any(not _valid_public_source_url(item) for item in source_urls)):
-        return False, "source_url_invalid"
     try:
         encoded = json.dumps(
             {"task_type": task_type, "title": title, "payload": payload},
@@ -129,4 +116,17 @@ def validate_live_payload(
         return False, "personal_data_detected"
     if any(pattern.search(title) for pattern in SECRET_PATTERNS):
         return False, "secret_pattern_detected"
+    if set(payload) - set(allowed_payload_keys) or not REQUIRED_PAYLOAD_KEYS.issubset(payload):
+        return False, "payload_schema_invalid"
+    topic = payload.get("topic")
+    if not isinstance(topic, str) or not topic.strip() or len(topic) > 500:
+        return False, "payload_schema_invalid"
+    questions = payload.get("questions", [])
+    if (not isinstance(questions, list) or len(questions) > 5
+            or any(not isinstance(item, str) or not item.strip() or len(item) > 500 for item in questions)):
+        return False, "payload_schema_invalid"
+    source_urls = payload.get("source_urls", [])
+    if (not isinstance(source_urls, list) or len(source_urls) > 5
+            or any(not _valid_public_source_url(item) for item in source_urls)):
+        return False, "source_url_invalid"
     return True, "allowed"
