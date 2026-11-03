@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 import os
+import xml.etree.ElementTree as ET
 from datetime import datetime, timezone
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
@@ -15,6 +16,9 @@ from urllib.request import Request, urlopen
 API = "https://api.github.com/search/repositories"
 MAX_RESPONSE_BYTES = 1048576
 CROSSREF_API = "https://api.crossref.org/works"
+ARXIV_API = "https://export.arxiv.org/api/query"
+ATOM_NS = "http://www.w3.org/2005/Atom"
+ARXIV_NS = "http://arxiv.org/schemas/atom"
 USER_AGENT = "RaawaaAutonomousEngine-Research/1.0 (+https://github.com/ghith93/raawaa-autonomous-engine)"
 DEFAULT_QUERIES = {
     "agent_frameworks": "agent framework orchestration topic:agents archived:false",
