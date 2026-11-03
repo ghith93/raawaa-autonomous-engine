@@ -104,8 +104,9 @@ async function recordResearchScan(request, env) {
     ).bind(JSON.stringify(item), now, scanId, item.source)),
   ];
   try {
-    await env.DB.batch(statements);
-    return json({ ok: true, scan_id: scanId, recorded_events: statements.length }, 201);
+    const results = await env.DB.batch(statements);
+    const recordedEvents = (results || []).reduce((sum, item) => sum + (Number(item?.meta?.changes) || 0), 0);
+    return json({ ok: true, scan_id: scanId, recorded_events: recordedEvents }, recordedEvents ? 201 : 200);
   } catch { return json({ error: "storage_unavailable" }, 503); }
 }
 
