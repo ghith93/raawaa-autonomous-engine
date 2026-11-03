@@ -54,26 +54,27 @@ jobs:
               payload = json.load(stream)
           if payload.get("success") is not True or not isinstance(payload.get("result"), list):
               raise SystemExit("Cloudflare returned an unsuccessful or unexpected billing-policy response.")
-          safe = []
-          for item in payload["result"]:
-              state = item.get("current_state") or {}
-              safe.append({
-                  "id": item.get("id"),
-                  "product_id": item.get("product_id"),
-                  "action": item.get("action"),
-                  "enabled": item.get("enabled"),
-                  "threshold_cents": item.get("threshold_cents"),
-                  "current_state_status": state.get("status"),
-                  "current_balance_cents": state.get("balance_cents"),
-              })
-          print(json.dumps({
+          policies = payload["result"]
+          summary = {
               "inventory": "spend_policies",
               "read_only": True,
               "mutations": 0,
-              "policy_count": len(safe),
-              "policies": safe,
-              "note": "Notification policies do not block usage. Only enabled usage_block policies are hard stops, and they apply per product."
-          }, indent=2))
+              "policy_count": len(policies),
+              "enabled_workers_usage_block": any(
+                  item.get("product_id") == "workers"
+                  and item.get("action") == "usage_block"
+                  and item.get("enabled") is True
+                  for item in policies
+              ),
+              "enabled_durable_objects_usage_block": any(
+                  item.get("product_id") == "durable_objects"
+                  and item.get("action") == "usage_block"
+                  and item.get("enabled") is True
+                  for item in policies
+              ),
+              "note": "Detailed billing thresholds, balances, and identifiers are intentionally not printed because this repository is public."
+          }
+          print(json.dumps(summary, indent=2))
           PY
 
           subscriptions_file="$(mktemp)"
@@ -96,26 +97,24 @@ jobs:
               payload = json.load(stream)
           if payload.get("success") is not True or not isinstance(payload.get("result"), list):
               raise SystemExit("Cloudflare returned an unsuccessful or unexpected subscription response.")
-          safe = []
-          for item in payload["result"]:
-              plan = item.get("rate_plan") or {}
-              safe.append({
-                  "id": item.get("id"),
-                  "frequency": item.get("frequency"),
-                  "price_usd": item.get("price"),
-                  "state": item.get("state"),
-                  "plan_id": plan.get("id"),
-                  "plan_name": plan.get("public_name"),
-                  "scope": plan.get("scope"),
-                  "current_period_start": item.get("current_period_start"),
-                  "current_period_end": item.get("current_period_end"),
-              })
+          subscriptions = payload["result"]
+          active = [
+              item for item in subscriptions
+              if item.get("state") not in {"Cancelled", "Failed", "Expired"}
+          ]
+          paid = [
+              item for item in active
+              if isinstance(item.get("price"), (int, float))
+              and item.get("price", 0) > 0
+          ]
           print(json.dumps({
               "inventory": "subscriptions",
               "read_only": True,
               "mutations": 0,
-              "subscription_count": len(safe),
-              "subscriptions": safe,
-              "note": "Subscription inventory reports fixed recurring fees separately from usage-based spend policies."
+              "subscription_count": len(subscriptions),
+              "active_subscription_count": len(active),
+              "active_paid_subscription_count": len(paid),
+              "fixed_fee_amounts_printed": False,
+              "note": "Detailed prices, plan names, identifiers, and billing dates are intentionally not printed because this repository is public. Review exact fixed fees privately in Cloudflare Billing."
           }, indent=2))
           PY
