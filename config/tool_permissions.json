@@ -5,29 +5,35 @@
     "repository.read_file": {
       "access": "read",
       "action": "inspect_code",
-      "agent_roles": ["engineering", "quality_and_security", "operations_and_monitoring"],
-      "task_types": ["code_review", "system_audit"],
+      "grants": [
+        {"agent_role": "quality_and_security", "task_types": ["code_review"]},
+        {"agent_role": "operations_and_monitoring", "task_types": ["system_audit"]}
+      ],
       "environments": ["local", "staging"]
     },
     "repository.list_files": {
       "access": "read",
       "action": "inspect_code",
-      "agent_roles": ["engineering", "quality_and_security", "operations_and_monitoring"],
-      "task_types": ["code_review", "system_audit"],
+      "grants": [
+        {"agent_role": "quality_and_security", "task_types": ["code_review"]},
+        {"agent_role": "operations_and_monitoring", "task_types": ["system_audit"]}
+      ],
       "environments": ["local", "staging"]
     },
     "tests.run": {
       "access": "read",
       "action": "run_tests",
-      "agent_roles": ["engineering", "quality_and_security"],
-      "task_types": ["code_review", "system_audit"],
+      "grants": [
+        {"agent_role": "quality_and_security", "task_types": ["code_review"]}
+      ],
       "environments": ["local", "staging"]
     },
     "research.public_search": {
       "access": "read",
       "action": "research",
-      "agent_roles": ["research"],
-      "task_types": ["research_brief"],
+      "grants": [
+        {"agent_role": "research", "task_types": ["research_brief"]}
+      ],
       "environments": ["local", "staging"]
     }
   }
