@@ -84,7 +84,7 @@ def run_once(store: TaskStore, live_gateway=None, environ=None) -> dict | None:
             except (OSError, ValueError, TypeError):
                 data_policy = None
             allowed, data_reason = validate_live_payload(
-                contract["title"], contract["payload_received"], data_policy
+                task_type, contract["title"], contract["payload_received"], data_policy
             )
             if not allowed:
                 heartbeat.stop()
