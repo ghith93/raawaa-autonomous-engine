@@ -61,6 +61,9 @@ References:
 - [Gemini API Billing and Spend Caps](https://ai.google.dev/gemini-api/docs/billing)
 - [OpenRouter Pricing and Free-plan controls](https://openrouter.ai/pricing)
 - [OpenRouter API key limits and budgets](https://github.com/OpenRouterTeam/docs/blob/main/api_reference/limits.mdx)
+- [OpenRouter team spend controls and per-key limits](https://openrouter.ai/blog/tutorials/team-spend-controls-setup/)
+- [OpenRouter Guardrails, budget enforcement and model/provider allowlists](https://openrouter.ai/blog/announcements/guardrails/)
+- [OpenRouter Guardrail policy changes, 30 October 2026](https://openrouter.ai/blog/announcements/guardrail-policies/)
 
 ## Cloudflare infrastructure billing boundary
 
