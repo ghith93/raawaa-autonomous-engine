@@ -415,7 +415,7 @@ try {
     method: "POST",
     body: {
       action: "settle", reservation_id: inFlight,
-      actual_cost_nanos: 25_000_000, input_tokens: 11, output_tokens: 7,
+      actual_cost_nanos: 250_000_000, input_tokens: 11, output_tokens: 7,
     },
   });
   assertStatus(duplicateSettlement, 200, "duplicate settlement is idempotent");
