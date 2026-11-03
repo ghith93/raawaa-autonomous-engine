@@ -23,8 +23,9 @@ class CodespaceTaskStore:
         code_token = token if token is not None else os.environ.get("RAAWAA_ENGINE_CODESPACE_TOKEN", "")
         shared_token = os.environ.get("RAAWAA_ENGINE_API_TOKEN", "")
         admin_token = os.environ.get("RAAWAA_ENGINE_QUOTA_ADMIN_TOKEN", "")
-        if not code_token or code_token == shared_token or code_token == admin_token:
-            raise ValueError("Codespace bridge requires a distinct scoped token")
+        if (not code_token or len(code_token) < 32 or
+                code_token == shared_token or code_token == admin_token):
+            raise ValueError("Codespace bridge requires a distinct high-entropy scoped token")
         resolved_url = (base_url or os.environ.get("RAAWAA_ENGINE_API_URL", "")).rstrip("/")
         parsed = urlsplit(resolved_url)
         if (parsed.scheme != "https" or not parsed.hostname or parsed.username or parsed.password
