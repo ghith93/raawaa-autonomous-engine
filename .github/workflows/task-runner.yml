@@ -377,6 +377,11 @@ jobs:
           MOBILE_KILL_SWITCH: ${{ steps.mobile.outputs.kill_switch }}
           MOBILE_TASKS_PENDING: ${{ steps.mobile.outputs.tasks_pending }}
           MOBILE_TASKS_RUNNING: ${{ steps.mobile.outputs.tasks_running }}
+          MOBILE_TASK_EXECUTION_MODES: ${{ steps.mobile.outputs.task_execution_modes }}
+          MOBILE_DRY_RUN_SUCCEEDED: ${{ steps.mobile.outputs.tasks_dry_run_succeeded }}
+          MOBILE_LIVE_SUCCEEDED: ${{ steps.mobile.outputs.tasks_live_inference_succeeded }}
+          MOBILE_CODESPACE_SUCCEEDED: ${{ steps.mobile.outputs.tasks_codespace_succeeded }}
+          MOBILE_UNKNOWN_SUCCEEDED: ${{ steps.mobile.outputs.tasks_unknown_succeeded }}
           MOBILE_PAPER_EVENTS: ${{ steps.mobile.outputs.paper_events }}
           MOBILE_WORKER_CRON_STATUS: ${{ steps.mobile.outputs.worker_cron_status }}
           MOBILE_WORKER_CRON_LAST_SEEN: ${{ steps.mobile.outputs.worker_cron_last_seen }}
@@ -406,6 +411,11 @@ jobs:
               "D1 paper ledger / quota ledger: " + (process.env.MOBILE_PAPER_LEDGER || "unknown") + " / " + (process.env.MOBILE_PROVIDER_USAGE || "unknown"),
               "Telegram receipt schema: " + (process.env.MOBILE_TELEGRAM_RECEIPTS || "unknown") + " (schema only; webhook activation separately gated)",
               "D1 pending / running tasks: " + (process.env.MOBILE_TASKS_PENDING || "unknown") + " / " + (process.env.MOBILE_TASKS_RUNNING || "unknown"),
+              "D1 execution modes: " + (process.env.MOBILE_TASK_EXECUTION_MODES || "unknown") +
+                " · dry-run simulated: " + (process.env.MOBILE_DRY_RUN_SUCCEEDED || "unknown") +
+                " · live inference completed: " + (process.env.MOBILE_LIVE_SUCCEEDED || "unknown") +
+                " · Codespace completed: " + (process.env.MOBILE_CODESPACE_SUCCEEDED || "unknown") +
+                " · legacy/unknown succeeded: " + (process.env.MOBILE_UNKNOWN_SUCCEEDED || "unknown"),
               "D1 paper events: " + (process.env.MOBILE_PAPER_EVENTS || "unknown"),
               "Worker Cron heartbeat: " + (process.env.MOBILE_WORKER_CRON_STATUS || "unknown") +
                 " · last seen: " + (process.env.MOBILE_WORKER_CRON_LAST_SEEN || "unknown") +
