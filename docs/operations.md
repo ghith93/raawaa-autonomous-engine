@@ -344,3 +344,9 @@ Required owner-side activation after review: configure a newly generated, distin
 - The authenticated D1 task list/claim/finish APIs expose and preserve the mode. Mobile Status displays execution-mode aggregates separately from task terminal statuses, making clear that dry-run success is simulation, not live work.
 - `live_inference` means the live execution path was selected for the task; it does not by itself prove a provider request completed. Existing kill-switch, preflight, quota reservation, ambiguity/no-replay and zero-spend policies are unchanged.
 - No remote migration or Worker deployment has been performed from this branch. CI and local D1 smoke verification are required before merge.
+
+## F1 dashboard accuracy follow-up — 2026-11-04
+
+- The Mobile Status API now groups task rows by both `execution_mode` and terminal/current `status`, while retaining total counts per mode for compatibility.
+- The “Executed successfully” headline counts only `succeeded` + `live_inference`; “Dry-run simulations” counts `succeeded` + `dry_run`. Legacy `unknown` successes are displayed separately and are never inferred as live execution.
+- The Task Runner issue status and authenticated Staging mobile readback expose sanitized aggregate counts only. No task IDs, prompts, request IDs, lease tokens, or model cost details are added to the summary.
