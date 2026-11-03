@@ -26,8 +26,8 @@
 - PKCS#1 versus PKCS#8 PEM inputs must both import correctly without logging key material.
 - GitHub API errors, invalid JSON, and malformed responses must fail closed with sanitized errors.
 - A queued/running workflow must suppress a new dispatch.
-- A recent scheduled run must suppress a new dispatch even if it completed unsuccessfully.
-- A stale or absent scheduled run must cause one fixed workflow dispatch, not a caller-controlled target.
+- Any recent Task Runner run on main must suppress a new dispatch, regardless of trigger type or conclusion.
+- A stale or absent Task Runner run must cause at most one fixed workflow dispatch, protected by an atomic D1 dispatch-intent lock.
 - The watchdog Cron and recovery Cron must not execute each other's work.
 
 ---
@@ -62,7 +62,7 @@
 - Fixed ref: main
 - Stale threshold: 10 minutes.
 
-- [ ] Step 1: Write failing tests for absent settings (zero network calls), active-run suppression, recent-schedule suppression, stale-schedule dispatch, HTTP 200/204 success, malformed responses, and sanitized errors.
+- [ ] Step 1: Write failing tests for absent settings (zero network calls), active-run suppression, recent-run suppression for schedule/workflow_dispatch/push events, D1 intent deduplication, stale-run dispatch, HTTP 200/204 success, malformed responses, and sanitized errors.
 - [ ] Step 2: Run targeted tests and confirm expected failures.
 - [ ] Step 3: Implement run inspection and fixed workflow dispatch using the Task 1 token helper.
 - [ ] Step 4: Verify that no caller input can alter repository, workflow, branch, permission, or API host.
@@ -77,7 +77,7 @@
 
 **Interfaces:**
 - Recovery Cron: */15 * * * * — unchanged.
-- Watchdog Cron: 2,7,12,17,22,27,32,37,42,47,52,57 * * * *.
+- Watchdog Cron: 1,6,11,16,21,26,31,36,41,46,51,56 * * * * (two minutes after the primary Task Runner cron).
 - Dispatch configuration: GITHUB_APP_ID, GITHUB_APP_INSTALLATION_ID, GITHUB_APP_PRIVATE_KEY.
 
 - [ ] Step 1: Write failing Worker tests proving each Cron expression invokes only its intended handler and the watchdog is dormant with missing configuration.
