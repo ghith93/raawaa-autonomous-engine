@@ -21,7 +21,7 @@ def status_payload():
         },
         "task_runner_watchdog": {
             "ready": False,
-            "missing": ["GITHUB_APP_ID", "GITHUB_APP_INSTALLATION_ID", "GITHUB_APP_PRIVATE_KEY", "GITHUB_APP_WATCHDOG_ENABLED"],
+            "missing": ["GITHUB_APP_ID", "GITHUB_APP_INSTALLATION_ID", "GITHUB_APP_PRIVATE_KEY"],
             "last_dispatch_requested": None,
             "last_dispatch_intent_at": None,
         },
@@ -78,7 +78,7 @@ class MobileStatusProbeTests(unittest.TestCase):
             "provider_usage": "available",
             "telegram_receipts": "available",
             "watchdog_ready": "not_ready",
-            "watchdog_missing": "GITHUB_APP_ID,GITHUB_APP_INSTALLATION_ID,GITHUB_APP_PRIVATE_KEY,GITHUB_APP_WATCHDOG_ENABLED",
+            "watchdog_missing": "GITHUB_APP_ID,GITHUB_APP_INSTALLATION_ID,GITHUB_APP_PRIVATE_KEY",
             "watchdog_last_dispatch_requested": "none",
             "watchdog_last_dispatch_intent_at": "none",
             "worker_cron_status": "recorded",
@@ -102,7 +102,7 @@ class MobileStatusProbeTests(unittest.TestCase):
         self.assertEqual(result["watchdog_ready"], "not_ready")
         self.assertEqual(
             result["watchdog_missing"],
-            "GITHUB_APP_ID,GITHUB_APP_INSTALLATION_ID,GITHUB_APP_PRIVATE_KEY,GITHUB_APP_WATCHDOG_ENABLED",
+            "GITHUB_APP_ID,GITHUB_APP_INSTALLATION_ID,GITHUB_APP_PRIVATE_KEY",
         )
         self.assertEqual(result["watchdog_last_dispatch_requested"], "none")
         self.assertEqual(result["watchdog_last_dispatch_intent_at"], "none")
