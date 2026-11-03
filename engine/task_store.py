@@ -35,6 +35,8 @@ class TaskStore:
               id TEXT PRIMARY KEY, idempotency_key TEXT NOT NULL UNIQUE,
               task_type TEXT NOT NULL, title TEXT NOT NULL, payload_json TEXT NOT NULL,
               status TEXT NOT NULL CHECK(status IN ('pending','running','succeeded','failed','blocked')),
+              execution_mode TEXT NOT NULL DEFAULT 'not_started'
+                CHECK(execution_mode IN ('not_started','dry_run','live_inference')),
               attempts INTEGER NOT NULL DEFAULT 0, max_attempts INTEGER NOT NULL DEFAULT 2,
               created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
               result_json TEXT, error TEXT, lease_token TEXT, lease_expires_at TEXT, next_attempt_at TEXT
@@ -54,6 +56,9 @@ class TaskStore:
                 db.execute("ALTER TABLE tasks ADD COLUMN lease_expires_at TEXT")
             if "next_attempt_at" not in columns:
                 db.execute("ALTER TABLE tasks ADD COLUMN next_attempt_at TEXT")
+            if "execution_mode" not in columns:
+                db.execute("ALTER TABLE tasks ADD COLUMN execution_mode TEXT NOT NULL DEFAULT 'not_started' "
+                           "CHECK(execution_mode IN ('not_started','dry_run','live_inference'))")
             db.execute("CREATE INDEX IF NOT EXISTS idx_tasks_due ON tasks(status,next_attempt_at,created_at)")
 
     def _audit(self, db, task_id: str | None, event: str, details: dict[str, Any]):
@@ -129,9 +134,15 @@ class TaskStore:
             raise ValueError("lease expired; worker must not complete the task")
 
     def finish(self, task_id: str, status: str, result: dict[str, Any] | None = None,
-               error: str | None = None, lease_token: str | None = None):
+               error: str | None = None, lease_token: str | None = None,
+               execution_mode: str | None = None):
         if status not in {"succeeded", "failed", "blocked"}:
             raise ValueError("invalid terminal status")
+        if execution_mode is None and isinstance(result, dict):
+            candidate = result.get("mode")
+            execution_mode = candidate if candidate in {"dry_run", "live_inference"} else None
+        if execution_mode is not None and execution_mode not in {"not_started", "dry_run", "live_inference"}:
+            raise ValueError("invalid execution_mode")
         with self._connect() as db:
             db.execute("BEGIN IMMEDIATE")
             row = db.execute("SELECT * FROM tasks WHERE id=?", (task_id,)).fetchone()
@@ -140,18 +151,23 @@ class TaskStore:
             self._assert_lease(row, lease_token)
             now = utc_now()
             changed = db.execute("""UPDATE tasks SET status=?,result_json=?,error=?,updated_at=?,next_attempt_at=NULL,
-                lease_token=NULL,lease_expires_at=NULL
+                execution_mode=COALESCE(?,execution_mode),lease_token=NULL,lease_expires_at=NULL
                 WHERE id=? AND status='running' AND lease_token=?""",
                 (status, json.dumps(result, sort_keys=True) if result is not None else None,
-                 error, now, task_id, lease_token)).rowcount
+                 error, now, execution_mode, task_id, lease_token)).rowcount
             if changed != 1:
                 raise ValueError("lease ownership lost")
-            self._audit(db, task_id, "task_" + status, {"error": error} if error else (result or {}))
+            audit_details = {"error": error} if error else (result or {})
+            if execution_mode is not None:
+                audit_details["execution_mode"] = execution_mode
+            self._audit(db, task_id, "task_" + status, audit_details)
 
     def retry_or_fail(self, task_id: str, error: str, lease_token: str | None = None,
-                      retry_after_seconds: int = 0) -> str:
+                      retry_after_seconds: int = 0, execution_mode: str | None = None) -> str:
         if type(retry_after_seconds) is not int or not 0 <= retry_after_seconds <= 86400:
             raise ValueError("retry_after_seconds must be an integer from 0 to 86400")
+        if execution_mode is not None and execution_mode not in {"not_started", "dry_run", "live_inference"}:
+            raise ValueError("invalid execution_mode")
         with self._connect() as db:
             db.execute("BEGIN IMMEDIATE")
             row = db.execute("SELECT * FROM tasks WHERE id=?", (task_id,)).fetchone()
@@ -165,13 +181,13 @@ class TaskStore:
                 if status == "pending" and retry_after_seconds else None
             )
             db.execute("""UPDATE tasks SET status=?,error=?,updated_at=?,next_attempt_at=?,
-                lease_token=NULL,lease_expires_at=NULL
+                execution_mode=COALESCE(?,execution_mode),lease_token=NULL,lease_expires_at=NULL
                 WHERE id=? AND status='running' AND lease_token=?""",
-                (status, error, now.isoformat(), next_attempt_at, task_id, lease_token))
+                (status, error, now.isoformat(), next_attempt_at, execution_mode, task_id, lease_token))
             self._audit(db, task_id, "task_retry_scheduled" if status == "pending" else "task_failed",
                         {"attempt": row["attempts"], "max_attempts": row["max_attempts"],
                          "error": error, "retry_after_seconds": retry_after_seconds if status == "pending" else 0,
-                         "next_attempt_at": next_attempt_at})
+                         "next_attempt_at": next_attempt_at, "execution_mode": execution_mode})
             return status
 
     def recover_stale(self, lease_timeout_seconds: int = 900) -> dict[str, int]:
