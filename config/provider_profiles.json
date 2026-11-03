@@ -4,7 +4,7 @@
   "routes": [
     {
       "id": "groq-free-gpt-oss-20b-primary",
-      "enabled": true,
+      "enabled": false,
       "provider": "groq",
       "account": "primary",
       "account_tier": "free",
@@ -28,7 +28,7 @@
       "quota_source_url": "https://console.groq.com/docs/rate-limits",
       "terms_source_url": "https://console.groq.com/docs/legal/services-agreement",
       "verified_at": "2026-11-01T00:00:00Z",
-      "verification_note": "Operator-confirmed Free-plan account and model visibility. Account-console quotas supplied for this model: 30 RPM, 8,000 TPM, 1,000 RPD, 200,000 TPD. Groq lists GPT-OSS 20B as a Production Model. Model licence is Apache-2.0 subject to OpenAI gpt-oss usage policy. Free-plan use within limits is fee-free. Route remains disabled until operator-approved live inference wiring and the kill switch are explicitly enabled. One-shot public research opt-in is wired through workflow_dispatch; scheduled runs keep the live switch off.",
+      "verification_note": "Operator-confirmed Free-plan account and model visibility. Account-console quotas supplied for this model: 30 RPM, 8,000 TPM, 1,000 RPD, 200,000 TPD. Groq lists GPT-OSS 20B as a Production Model. Model licence is Apache-2.0 subject to OpenAI gpt-oss usage policy. Free-plan use within limits is fee-free. Route remains disabled until operator-approved live inference wiring and the kill switch are explicitly enabled.",
       "production_use_allowed": true,
       "model_stage": "production",
       "priority": 10,
