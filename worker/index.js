@@ -44,6 +44,15 @@ async function readJson(request) {
   try { return JSON.parse(raw); } catch { throw new Error("invalid_json"); }
 }
 
+async function readOptionalJson(request) {
+  const declared = Number(request.headers.get("content-length") || 0);
+  if (declared > MAX_BODY_BYTES) throw new Error("body_too_large");
+  const raw = await request.text();
+  if (new TextEncoder().encode(raw).byteLength > MAX_BODY_BYTES) throw new Error("body_too_large");
+  if (!raw.trim()) return {};
+  try { return JSON.parse(raw); } catch { throw new Error("invalid_json"); }
+}
+
 
 function safeResearchString(value, max) {
   return typeof value === "string" && value.trim().length > 0 && value.length <= max;
@@ -296,7 +305,7 @@ export default {
         (url.pathname === "/v1/tasks/claim" || url.pathname === "/v1/codespace/tasks/claim")) {
       const codespaceClaim = url.pathname === "/v1/codespace/tasks/claim";
       let claimInput;
-      try { claimInput = await readJson(request); }
+      try { claimInput = await readOptionalJson(request); }
       catch (error) {
         return json({ error: error.message === "body_too_large" ? "body_too_large" : "invalid_json" }, 400);
       }
