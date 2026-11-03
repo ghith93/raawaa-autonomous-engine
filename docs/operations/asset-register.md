@@ -119,3 +119,8 @@ At every session start, refresh counts, account/connection status, app permissio
 - Updated D1 Worker task list/claim/finish endpoints and Mobile Status to expose execution-mode aggregates.
 - Values: `not_started`, `dry_run`, `live_inference`, `unknown`. Legacy rows remain `unknown`; new tasks begin `not_started`.
 - Status: implementation on unmerged branch `feat/task-execution-mode-v2`; no migration has been applied to Staging or Production and no Worker deployment has occurred.
+
+## F1 dashboard accuracy follow-up — 2026-11-04
+
+- Mobile Status now separates successful live-inference tasks from successful dry-run simulations; unknown legacy successes are not included in executed totals.
+- Task Runner status and Staging mobile verification expose aggregate execution-mode/status counts only.
