@@ -482,7 +482,14 @@ test("quota administrative operations reject the shared runner token", async () 
 });
 
 test("quota admin token is restricted to quota admin operations", async () => {
-  const DB = dbMock();
+  const DB = {
+    prepare() {
+      return {
+        bind() { return this; },
+        async first() { return { until_at: "2099-01-01T00:00:00.000Z" }; },
+      };
+    },
+  };
   const adminResponse = await worker.fetch(request("/v1/quota", { method: "POST", token: ADMIN_TOKEN, body: { action: "cool_down", route_id: "groq:main:model", seconds: 60 } }),
     { DB, ENGINE_API_TOKEN: TOKEN, ENGINE_QUOTA_ADMIN_TOKEN: ADMIN_TOKEN });
   assert.equal(adminResponse.status, 200);
