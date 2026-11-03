@@ -10,7 +10,7 @@ import os
 import xml.etree.ElementTree as ET
 from datetime import datetime, timezone
 from urllib.error import HTTPError, URLError
-from urllib.parse import urlencode
+from urllib.parse import urlencode, urlparse
 from urllib.request import Request, urlopen
 
 API = "https://api.github.com/search/repositories"
@@ -102,11 +102,20 @@ def _request_arxiv(query: str, max_results: int = 10, timeout: int = 20) -> dict
         with urlopen(request, timeout=timeout) as response:
             if response.status != 200:
                 raise ResearchDiscoveryError(f"arXiv returned HTTP {response.status}")
+            final_url = response.geturl() if callable(getattr(response, "geturl", None)) else request.full_url
+            parsed_url = urlparse(final_url)
+            if (parsed_url.scheme != "https" or parsed_url.hostname != "export.arxiv.org"
+                    or parsed_url.port not in (None, 443) or parsed_url.username or parsed_url.password):
+                raise ResearchDiscoveryError("arXiv response redirected outside the fixed HTTPS host")
             raw = response.read(MAX_RESPONSE_BYTES + 1)
             if len(raw) > MAX_RESPONSE_BYTES:
                 raise ResearchDiscoveryError("arXiv response exceeded the 1 MiB safety limit")
-            if b"<!DOCTYPE" in raw.upper() or b"<!ENTITY" in raw.upper():
-                raise ResearchDiscoveryError("arXiv XML declarations with DTD/entities are not accepted")
+            try:
+                xml_text = raw.decode("utf-8-sig")
+            except UnicodeDecodeError:
+                raise ResearchDiscoveryError("arXiv Atom response must be valid UTF-8") from None
+            if chr(0) in xml_text or "<!DOCTYPE" in xml_text.upper() or "<!ENTITY" in xml_text.upper():
+                raise ResearchDiscoveryError("arXiv XML declarations with DTD/entities or invalid null bytes are not accepted")
             root = ET.fromstring(raw)
     except HTTPError as exc:
         raise ResearchDiscoveryError(f"arXiv returned HTTP {exc.code}") from exc
