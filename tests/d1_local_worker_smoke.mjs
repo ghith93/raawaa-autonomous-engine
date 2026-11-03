@@ -247,6 +247,63 @@ try {
   const acceptedMoney = monetaryAttempts.filter(item => item.status === 201);
   const preCall = acceptedMoney[0].payload.reservation_id;
   const inFlight = acceptedMoney[1].payload.reservation_id;
+
+  const idempotentBase = {
+    ...monetaryBase,
+    task_id: "d1-local-idempotency-task",
+    estimated_cost_nanos: 2_000_000,
+    per_task_budget_nanos: 10_000_000,
+  };
+  const idemId = randomUUID();
+  const idemKey = randomUUID();
+  const idemFirst = await api("/v1/monetary-ledger", {
+    method: "POST", body: { ...idempotentBase, reservation_id: idemId, idempotency_key: idemKey },
+  });
+  assertStatus(idemFirst, 201, "initial monetary idempotency reservation");
+  const idemReplay = await api("/v1/monetary-ledger", {
+    method: "POST", body: { ...idempotentBase, reservation_id: randomUUID(), idempotency_key: idemKey },
+  });
+  assertStatus(idemReplay, 200, "monetary idempotency replay");
+  assert.equal(idemReplay.payload.reservation_id, idemId);
+  assert.equal(idemReplay.payload.replay, true);
+  const idemRelease = await api("/v1/monetary-ledger", {
+    method: "POST", body: { action: "release", reservation_id: idemId },
+  });
+  assertStatus(idemRelease, 200, "release idempotent reservation before I/O");
+
+  const globalBase = {
+    ...monetaryBase,
+    estimated_cost_nanos: 10_000_000,
+    daily_budget_nanos: 30_000_000,
+    monthly_budget_nanos: 50_000_000,
+    per_task_budget_nanos: 10_000_000,
+  };
+  const globalAttempts = await Promise.all([1, 2, 3].map(index => {
+    const reservation_id = randomUUID();
+    return api("/v1/monetary-ledger", {
+      method: "POST",
+      body: {
+        ...globalBase,
+        provider: "d1-local-global-provider-" + index,
+        model: "d1-local-global-model-" + index,
+        task_id: "d1-local-global-task-" + index,
+        reservation_id,
+        idempotency_key: randomUUID(),
+      },
+    });
+  }));
+  assert.deepEqual(
+    globalAttempts.map(item => item.status).sort((a,b) => a-b),
+    [201, 201, 409],
+    "daily monetary cap must be global across providers and concurrent tasks",
+  );
+  for (const item of globalAttempts.filter(item => item.status === 201)) {
+    const releasedGlobal = await api("/v1/monetary-ledger", {
+      method: "POST", body: { action: "release", reservation_id: item.payload.reservation_id },
+    });
+    assertStatus(releasedGlobal, 200, "release global-cap test reservation before I/O");
+  }
+
   const released = await api("/v1/monetary-ledger", {
     method: "POST", body: { action: "release", reservation_id: preCall },
   });
