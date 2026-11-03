@@ -41,7 +41,7 @@ When actual cost exceeds its estimate, or the settled total exceeds the daily/mo
 
 ## Verification and remaining gates
 
-The local D1/Workerd integration suite exercises concurrent per-task reservations, pre-I/O-only release, post-start release rejection, ambiguous state, idempotent settlement, over-estimate quarantine, route rejection, and authenticated mobile status. Python adapter tests cover nano-USD conversion, authentication, status reads, and fail-closed transport behavior.
+The local D1/Workerd integration suite exercises concurrent global daily/monthly and per-task reservations, pre-I/O-only release, post-start release rejection, ambiguous state across restart, idempotent settlement, over-estimate quarantine, route rejection, legacy spend backfill, and authenticated mobile status. The remote Staging harness also tests concurrent D1 token quota reservations and settlement. Python adapter tests cover nano-USD conversion, authentication, status reads, and fail-closed transport behavior.
 
 The issue is not complete until:
 1. This branch is reviewed and merged.
