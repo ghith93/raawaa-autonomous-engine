@@ -666,7 +666,8 @@ try {
   status = await api("/v1/mobile/status");
   assertStatus(status, 200, "mobile status after D1 writes");
   assert.equal(status.payload.paper_events.find(row => row.event_type === "candidate_detected")?.count, 1);
-  assert.equal(status.payload.tasks.find(row => row.status === "succeeded")?.count, 1);
+  assert.equal(status.payload.tasks.find(row => row.status === "succeeded")?.count, 2,
+    "both the legacy task and isolated Codespace task should be durably succeeded");
   assert.equal(status.payload.monetary_ledger.available, true);
   assert.equal(status.payload.monetary_ledger.pending_count, 1);
   assert.equal(status.payload.monetary_ledger.ambiguous_count, 1);
