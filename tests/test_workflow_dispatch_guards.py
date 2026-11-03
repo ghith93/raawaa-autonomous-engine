@@ -28,6 +28,15 @@ jobs:
 """
         self.assertEqual(len(workflow_violations("deploy.yml", content)), 1)
 
+    def test_staging_replay_jobs_are_explicitly_main_guarded(self):
+        workflow = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+        for job in ("staging-migrate", "staging-worker-verify",
+                    "publish-staging-ops-telemetry", "staging-mobile-status-verify"):
+            block = next((content for name, content in job_blocks(workflow) if name == job), "")
+            self.assertIn("github.ref == 'refs/heads/main'", block)
+            self.assertIn("github.event_name == 'workflow_dispatch'", block)
+            self.assertIn("github.event_name == 'push'", block)
+
     def test_non_secret_or_non_dispatch_workflows_are_not_restricted(self):
         no_secret = """on:
   workflow_dispatch:
