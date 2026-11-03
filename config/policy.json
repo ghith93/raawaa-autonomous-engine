@@ -1,5 +1,5 @@
 {
-  "mode": "live_inference_opt_in",
+  "mode": "safe_dry_run",
   "daily_budget_usd": 0.4,
   "monthly_budget_usd": 12,
   "per_task_budget_usd": 0.2,
@@ -18,19 +18,8 @@
     "paid_fallback_monthly_cap_usd": 12,
     "no_automatic_plan_upgrade": true,
     "no_trial_or_promotional_credit_as_permanent_capacity": true,
-    "provider_hard_stop_verified": true,
-    "provider_hard_stop_evidence": {
-      "provider": "Groq",
-      "scope": "Groq Cloud Free plan, account=primary; only the explicitly enabled production GPT-OSS routes",
-      "hard_limit": "Free-plan use is fee-free; requests exceeding the Free-plan model limits return HTTP 429; moving from Free to Developer requires an explicit upgrade and a valid payment method. Automatic plan upgrades and paid fallback remain disabled. Internal monthly and per-task limits are additional conservative engine caps, not provider-published quotas.",
-      "verified_at": "2026-11-03T04:40:00Z",
-      "source_url": "https://console.groq.com/docs/billing-faqs",
-      "supporting_source_urls": [
-        "https://console.groq.com/docs/rate-limits",
-        "https://community.groq.com/t/do-i-get-charged-for-anything-on-the-groq-free-plan/832"
-      ],
-      "account_verification": "Existing operator-confirmed Free-plan account and model visibility recorded 2026-11-01 in config/provider_profiles.json; API key presence re-confirmed by Task Runner on 2026-11-03. Revalidate account tier before any future plan change."
-    }
+    "provider_hard_stop_verified": false,
+    "provider_hard_stop_evidence": null
   },
   "budget_envelope": {
     "currency": "USD",
