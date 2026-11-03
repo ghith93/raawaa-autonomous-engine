@@ -13,7 +13,7 @@ class ProviderProfileConfigTests(unittest.TestCase):
 
     def test_staged_groq_profile_loads_but_is_not_route_ready(self):
         entries = load_provider_profile_registry(self.source)
-        self.assertEqual(len(entries), 4)
+        self.assertEqual(len(entries), 5)
         entry = next(item for item in entries if item.profile.model == "qwen/qwen3.8-27b")
         self.assertEqual(entry.profile.provider, "groq")
         self.assertEqual(entry.profile.minute_request_limit, 30)
