@@ -6,6 +6,7 @@ This module retrieves public repository metadata only. It never clones, imports,
 from __future__ import annotations
 
 import json
+import math
 import os
 import ipaddress
 import xml.etree.ElementTree as ET
@@ -275,7 +276,7 @@ def _normalize_searxng_result(item: dict, retrieved_at: str) -> dict | None:
     }
 
 
-def discover_repositories(queries=None, environ=None, max_per_query=5, max_queries=6, request_fn=None, now=None, academic_query=None, max_academic_results=10, academic_request_fn=None, arxiv_query=None, max_arxiv_results=10, arxiv_request_fn=None):
+def discover_repositories(queries=None, environ=None, max_per_query=5, max_queries=6, request_fn=None, now=None, academic_query=None, max_academic_results=10, academic_request_fn=None, arxiv_query=None, max_arxiv_results=10, arxiv_request_fn=None, searxng_query=None, searxng_base_url=None, max_searxng_results=10, searxng_request_fn=None):
     """Search a bounded set of GitHub topics and return unreviewed candidates."""
     if isinstance(max_per_query, bool) or not isinstance(max_per_query, int) or not 1 <= max_per_query <= 10:
         raise ValueError("max_per_query must be an integer between 1 and 10")
@@ -289,6 +290,10 @@ def discover_repositories(queries=None, environ=None, max_per_query=5, max_queri
         raise ValueError("arxiv_query must be a non-empty string when supplied")
     if isinstance(max_arxiv_results, bool) or not isinstance(max_arxiv_results, int) or not 1 <= max_arxiv_results <= 10:
         raise ValueError("max_arxiv_results must be an integer between 1 and 10")
+    if searxng_query is not None and (not isinstance(searxng_query, str) or not searxng_query.strip()):
+        raise ValueError("searxng_query must be a non-empty string when supplied")
+    if isinstance(max_searxng_results, bool) or not isinstance(max_searxng_results, int) or not 1 <= max_searxng_results <= 10:
+        raise ValueError("max_searxng_results must be an integer between 1 and 10")
     query_map = DEFAULT_QUERIES if queries is None else queries
     if not isinstance(query_map, dict) or not 1 <= len(query_map) <= 10:
         raise ValueError("queries must contain between 1 and 10 named queries")
@@ -382,17 +387,38 @@ def discover_repositories(queries=None, environ=None, max_per_query=5, max_queri
             arxiv_candidates.sort(key=lambda item: (item.get("published") or "", item["title"]), reverse=True)
         except ResearchDiscoveryError as exc:
             arxiv_unavailable = str(exc)
+    searxng_candidates, searxng_unavailable, searxng_requests_made = [], None, 0
+    if searxng_query:
+        if not searxng_base_url:
+            searxng_unavailable = "endpoint_not_configured"
+        else:
+            try:
+                searxng_fetch = searxng_request_fn or _request_searxng
+                searxng_requests_made = 1
+                payload = searxng_fetch(searxng_query, searxng_base_url, max_searxng_results)
+                results = payload.get("results", []) if isinstance(payload, dict) else None
+                if not isinstance(results, list):
+                    raise ResearchDiscoveryError("SearXNG result list is malformed")
+                for item in results[:max_searxng_results]:
+                    if isinstance(item, dict):
+                        candidate = _normalize_searxng_result(item, retrieved_at)
+                        if candidate is not None:
+                            searxng_candidates.append(candidate)
+            except ResearchDiscoveryError as exc:
+                searxng_unavailable = str(exc)
     return {
         "schema_version": 1, "discovery_only": True, "source": "multi_source_public_research_metadata",
         "retrieved_at": retrieved_at, "queries_attempted": len(query_items),
         "requests_made": requests_made, "academic_requests_made": academic_requests_made,
-        "total_requests_made": requests_made + academic_requests_made + arxiv_requests_made,
+        "total_requests_made": requests_made + academic_requests_made + arxiv_requests_made + searxng_requests_made,
         "academic_candidates": academic_candidates, "academic_unavailable": academic_unavailable,
         "arxiv_candidates": arxiv_candidates, "arxiv_unavailable": arxiv_unavailable,
         "arxiv_requests_made": arxiv_requests_made,
+        "searxng_candidates": searxng_candidates, "searxng_unavailable": searxng_unavailable,
+        "searxng_requests_made": searxng_requests_made,
         "generation_requests": 0, "code_execution": False,
         "installation_or_cloning": False, "candidate_count": len(ordered),
-        "total_metadata_candidate_count": len(ordered) + len(academic_candidates) + len(arxiv_candidates),
+        "total_metadata_candidate_count": len(ordered) + len(academic_candidates) + len(arxiv_candidates) + len(searxng_candidates),
         "candidates": ordered,
         "unavailable": unavailable, "review_required": True,
     }
