@@ -97,6 +97,22 @@ class MobileStatusProbeTests(unittest.TestCase):
         self.assertNotIn("model_costs", result)
         self.assertNotIn("99.99", json.dumps(result))
 
+    def test_ci_health_and_kill_switch_snapshots_override_unavailable_placeholders(self):
+        payload = status_payload()
+        payload["ci_health"] = {"status": "success", "freshness": "fresh"}
+        payload["kill_switch"] = {"status": "engaged", "freshness": "fresh"}
+        result = probe.summarize_mobile_status(payload)
+        self.assertEqual(result["ci_health"], "success")
+        self.assertEqual(result["kill_switch"], "engaged")
+
+    def test_stale_ci_health_and_kill_switch_snapshots_remain_stale(self):
+        payload = status_payload()
+        payload["ci_health"] = {"status": "stale", "freshness": "stale"}
+        payload["kill_switch"] = {"status": "stale", "freshness": "stale"}
+        result = probe.summarize_mobile_status(payload)
+        self.assertEqual(result["ci_health"], "stale")
+        self.assertEqual(result["kill_switch"], "stale")
+
     def test_watchdog_readiness_reports_missing_setting_names_only(self):
         result = probe.summarize_mobile_status(status_payload())
         self.assertEqual(result["watchdog_ready"], "not_ready")
