@@ -87,7 +87,8 @@ class RemoteTaskStore:
                     metadata.append(f"cf-mitigated {mitigated}")
                 detail = f" (response metadata: {', '.join(metadata)})" if metadata else ""
                 raise RemoteTaskStoreError(
-                    f"Remote task API returned HTTP 403; inspect edge/access policy{detail}"
+                    f"Remote task API returned HTTP 403; inspect edge/access policy{detail}",
+                    http_status=403,
                 ) from None
             if exc.code == 409:
                 error_code = None
