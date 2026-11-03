@@ -1,7 +1,8 @@
 import unittest
+import xml.etree.ElementTree as ET
 from unittest.mock import patch
 from datetime import datetime, timezone
-from engine.research_discovery import DEFAULT_QUERIES, MAX_RESPONSE_BYTES, ResearchDiscoveryError, _request_crossref, _request_json, discover_repositories
+from engine.research_discovery import DEFAULT_QUERIES, MAX_RESPONSE_BYTES, ResearchDiscoveryError, _request_arxiv, _request_crossref, _request_json, discover_repositories
 
 class ResearchDiscoveryTests(unittest.TestCase):
     def test_default_queries_target_skill_scanners_and_evaluation_benchmarks(self):
@@ -106,5 +107,88 @@ class ResearchDiscoveryTests(unittest.TestCase):
         self.assertEqual(result["requests_made"], 1)
         self.assertIn("agents", result["unavailable"])
         self.assertEqual(result["candidate_count"], 0)
+
+    def test_arxiv_atom_metadata_is_bounded_and_does_not_ingest_abstract(self):
+        atom = b'''<?xml version="1.0" encoding="UTF-8"?>
+        <feed xmlns="http://www.w3.org/2005/Atom" xmlns:arxiv="http://arxiv.org/schemas/atom">
+          <entry>
+            <id>https://arxiv.org/abs/2611.01234v1</id>
+            <title>  Safe   Multi-Agent Research </title>
+            <summary>untrusted abstract must not be retained</summary>
+            <published>2026-11-02T00:00:00Z</published>
+            <updated>2026-11-02T00:00:00Z</updated>
+            <author><name>Example Author</name></author>
+            <category term="cs.AI"/>
+            <arxiv:primary_category term="cs.AI"/>
+            <arxiv:doi>10.1234/example</arxiv:doi>
+          </entry>
+        </feed>'''
+        class Response:
+            status = 200
+            def __enter__(self): return self
+            def __exit__(self, *args): return False
+            def read(self, limit): return atom
+        with patch("engine.research_discovery.urlopen", return_value=Response()):
+            payload = _request_arxiv('all:"multi-agent"', 5)
+        self.assertEqual(len(payload["entries"]), 1)
+        from engine.research_discovery import _normalize_arxiv_entry
+        normalized = _normalize_arxiv_entry(payload["entries"][0], "2026-11-03T00:00:00+00:00")
+        self.assertEqual(normalized["arxiv_id"], "2611.01234v1")
+        self.assertEqual(normalized["title"], "Safe Multi-Agent Research")
+        self.assertEqual(normalized["authors"], ["Example Author"])
+        self.assertEqual(normalized["categories"], ["cs.AI"])
+        self.assertEqual(normalized["doi"], "10.1234/example")
+        self.assertFalse(normalized["abstract_retrieved"])
+        self.assertFalse(normalized["full_text_retrieved"])
+        self.assertNotIn("summary", normalized)
+
+    def test_arxiv_rejects_dtd_and_oversized_or_malformed_xml(self):
+        class Response:
+            status = 200
+            def __init__(self, body): self.body = body
+            def __enter__(self): return self
+            def __exit__(self, *args): return False
+            def read(self, limit): return self.body
+        for body, expected in (
+            (b'<!DOCTYPE feed [<!ENTITY x "y">]><feed/>', "DTD/entities"),
+            (b"<feed>", "malformed Atom XML"),
+            (b"x" * (MAX_RESPONSE_BYTES + 1), "1 MiB"),
+        ):
+            with patch("engine.research_discovery.urlopen", return_value=Response(body)):
+                with self.assertRaisesRegex(ResearchDiscoveryError, expected):
+                    _request_arxiv("all:agents", 5)
+
+    def test_arxiv_discovery_is_one_bounded_request_and_failure_is_nonfatal(self):
+        calls = []
+        def fake_arxiv(query, limit):
+            calls.append((query, limit))
+            return {"entries": [{
+                "arxiv_id": "2611.00001v1",
+                "title": "LLM agent tool use",
+                "url": "https://arxiv.org/abs/2611.00001v1",
+                "published": "2026-11-02T00:00:00Z",
+            }]}
+        result = discover_repositories(
+            {"agents": "agent framework"}, {},
+            request_fn=lambda query, token: {"items": []},
+            arxiv_query="all:agents", max_arxiv_results=3, arxiv_request_fn=fake_arxiv,
+        )
+        self.assertEqual(calls, [("all:agents", 3)])
+        self.assertEqual(result["arxiv_requests_made"], 1)
+        self.assertEqual(result["total_requests_made"], 2)
+        self.assertEqual(result["arxiv_candidates"][0]["source"], "arxiv")
+        self.assertFalse(result["arxiv_candidates"][0]["full_text_retrieved"])
+
+        def fail(query, limit):
+            raise ResearchDiscoveryError("arXiv returned HTTP 503")
+        failed = discover_repositories(
+            {"agents": "agent framework"}, {},
+            request_fn=lambda query, token: {"items": []},
+            arxiv_query="all:agents", arxiv_request_fn=fail,
+        )
+        self.assertEqual(failed["arxiv_requests_made"], 1)
+        self.assertIn("503", failed["arxiv_unavailable"])
+        self.assertEqual(failed["arxiv_candidates"], [])
+
 
 if __name__ == "__main__": unittest.main()

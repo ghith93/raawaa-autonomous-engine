@@ -220,7 +220,7 @@ class ResearchTriageTests(unittest.TestCase):
             "candidates": [{"full_name": "org/no-date", "pushed_at": "not-a-date", "stars": -1}],
             "academic_candidates": [{"doi": "10.1234/x", "title": "Other", "published": "bad"}],
         }, self.now)
-        self.assertEqual(result["source_counts"], {"github": 1, "crossref": 1})
+        self.assertEqual(result["source_counts"], {"github": 1, "crossref": 1, "arxiv": 0})
         self.assertIn("stale_or_missing_activity_timestamp", result["github_candidates"][0]["risk_flags"])
         self.assertIn("publication_date_missing", result["academic_candidates"][0]["risk_flags"])
         self.assertFalse(result["automatic_adoption"])

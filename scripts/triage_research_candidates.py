@@ -195,6 +195,54 @@ def score_academic_candidate(item: dict, today: date) -> dict:
     }
 
 
+def score_arxiv_candidate(item: dict, today: date) -> dict:
+    """Score only bibliographic metadata; never treat it as an adoption or license signal."""
+    title = item.get("title") if isinstance(item.get("title"), str) else ""
+    published_raw = item.get("published")
+    published = _parse_date(published_raw[:10]) if isinstance(published_raw, str) else None
+    age_days = (today - published).days if published else None
+    score, reasons, risks = 0, [], []
+    if age_days is not None and age_days <= 730:
+        score += 30
+        reasons.append("published_within_2_years")
+    elif age_days is not None and age_days <= 1825:
+        score += 20
+        reasons.append("published_within_5_years")
+    elif age_days is not None:
+        score += 8
+        risks.append("older_research")
+    else:
+        risks.append("publication_date_missing")
+    matches = sorted(term for term in RELEVANT_PAPER_TERMS if term in title.lower())
+    if matches:
+        score += min(50, 10 + len(matches) * 5)
+        reasons.append("relevant_research_terms:" + ",".join(matches[:6]))
+    else:
+        risks.append("weak_topic_match")
+    categories = item.get("categories", [])
+    if not isinstance(categories, list):
+        categories = []
+    return {
+        "source": "arxiv",
+        "source_key": "arxiv:" + str(item.get("arxiv_id", "")).lower(),
+        "title": title,
+        "url": item.get("url", ""),
+        "score": min(100, max(0, score)),
+        "priority": _priority(score),
+        "published": published_raw,
+        "categories": [value for value in categories[:8] if isinstance(value, str)],
+        "primary_category": item.get("primary_category"),
+        "license_review_required": True,
+        "full_text_rights_review_required": True,
+        "cost_review_required": True,
+        "relevance_terms": matches,
+        "reasons": reasons,
+        "risk_flags": risks + ["license_not_verified", "citation_count_not_available_in_this_feed"],
+        "review_status": "unreviewed",
+        "automatic_adoption": False,
+    }
+
+
 def triage_candidates(snapshot: dict, now: datetime | None = None) -> dict:
     if not isinstance(snapshot, dict):
         raise ValueError("research snapshot must be an object")
@@ -205,16 +253,18 @@ def triage_candidates(snapshot: dict, now: datetime | None = None) -> dict:
     today = current.date()
     github = [score_github_candidate(x, current) for x in snapshot.get("candidates", []) if isinstance(x, dict)]
     academic = [score_academic_candidate(x, today) for x in snapshot.get("academic_candidates", []) if isinstance(x, dict)]
-    combined = sorted(github + academic, key=lambda x: (x["score"], x["title"]), reverse=True)
+    arxiv = [score_arxiv_candidate(x, today) for x in snapshot.get("arxiv_candidates", []) if isinstance(x, dict)]
+    combined = sorted(github + academic + arxiv, key=lambda x: (x["score"], x["title"]), reverse=True)
     return {
         "schema_version": 1,
         "triage_only": True,
         "review_required": True,
         "automatic_adoption": False,
         "model_calls": 0,
-        "source_counts": {"github": len(github), "crossref": len(academic)},
+        "source_counts": {"github": len(github), "crossref": len(academic), "arxiv": len(arxiv)},
         "github_candidates": sorted(github, key=lambda x: x["score"], reverse=True),
         "academic_candidates": sorted(academic, key=lambda x: x["score"], reverse=True),
+        "arxiv_candidates": sorted(arxiv, key=lambda x: x["score"], reverse=True),
         "recommended_for_manual_review": [x for x in combined if x["priority"] == "high"][:10],
         "all_candidates": combined,
     }
