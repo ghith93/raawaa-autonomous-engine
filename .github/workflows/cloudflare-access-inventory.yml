@@ -19,6 +19,9 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 3
     steps:
+      - name: Check out reviewed source
+        uses: actions/checkout@v7
+
       - name: Read-only Access applications and service-token inventory
         env:
           CF_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
@@ -30,6 +33,8 @@ jobs:
           import urllib.error
           import urllib.request
 
+          from engine.cloudflare_access_audit import is_access_not_enabled
+
           token = os.environ.get("CF_API_TOKEN", "")
           account = os.environ.get("CF_ACCOUNT_ID", "")
           if not token or not account:
@@ -37,6 +42,7 @@ jobs:
               raise SystemExit(1)
 
           base = f"https://api.cloudflare.com/client/v4/accounts/{account}"
+          failures = []
           headers = {"Authorization": f"Bearer {token}", "Accept": "application/json"}
 
           def get_inventory(label, path, relevant):
@@ -46,15 +52,25 @@ jobs:
                       payload = json.loads(response.read().decode("utf-8"))
                       status = response.status
               except urllib.error.HTTPError as error:
+                  try:
+                      body = json.loads(error.read(8192).decode("utf-8", errors="replace"))
+                  except ValueError:
+                      body = {}
+                  if is_access_not_enabled(error.code, body.get("errors", []) if isinstance(body, dict) else []):
+                      print(f"{label}: Cloudflare Access is not enabled; this inventory is not applicable.")
+                      return
                   print(f"{label}: HTTP {error.code}; API read not available (check token permission).")
+                  failures.append(label)
                   return
               except (urllib.error.URLError, TimeoutError, OSError, ValueError) as error:
                   print(f"{label}: request failed ({type(error).__name__}).")
+                  failures.append(label)
                   return
 
               if not payload.get("success"):
                   codes = [str(item.get("code", "unknown")) for item in payload.get("errors", [])]
                   print(f"{label}: API success=false; error codes: " + (", ".join(codes) or "not supplied"))
+                  failures.append(label)
                   return
 
               items = payload.get("result") or []
@@ -84,4 +100,7 @@ jobs:
               "/access/service_tokens?per_page=1000&page=1",
               lambda item: "raawaa" in (item.get("name", "")).lower(),
           )
+          if failures:
+              print("Failed inventory checks: " + ", ".join(failures))
+              raise SystemExit(1)
           PY
