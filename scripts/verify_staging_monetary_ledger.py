@@ -289,53 +289,53 @@ def cleanup_test_reservations() -> None:
 
 
 def verify_token_quota_concurrency(run_tag: str) -> None:
-    route_id = f"{PREFIX}{run_tag}-token-quota"
+    # Use a real configured route. The Worker, not this fixture, owns every cap.
+    route_id = "groq:primary:openai/gpt-oss-20b"
     task_id = f"{PREFIX}{run_tag}-token-task"
 
     def attempt(_index: int):
-        status, body = api("POST", "/v1/quota", {
-            "action": "reserve",
-            "route_id": route_id,
-            "task_id": task_id,
-            "estimated_tokens": 10,
-            "daily_request_limit": 2,
-            "daily_token_limit": 20,
-            "monthly_request_limit": 2,
-            "monthly_token_limit": 20,
-            "minute_request_limit": 2,
-            "minute_token_limit": 20,
-            "per_task_request_limit": 2,
-            "per_task_token_limit": 20,
+        return api("POST", "/v1/quota", {
+            "action": "reserve", "route_id": route_id, "task_id": task_id,
+            "estimated_tokens": 6000,
+            # Deliberately permissive caller values must have no effect.
+            "daily_request_limit": 999999, "daily_token_limit": 999999999,
+            "monthly_request_limit": 999999, "monthly_token_limit": 999999999,
+            "minute_request_limit": 999999, "minute_token_limit": 999999999,
+            "per_task_request_limit": 999999, "per_task_token_limit": 999999999,
         })
-        return status, body
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=3) as pool:
         results = list(pool.map(attempt, range(3)))
     require(sorted(item[0] for item in results) == [201, 201, 409],
-            "D1 token quota did not enforce concurrent request/token caps")
+            "Worker did not enforce the configured per-task token cap under concurrency")
     for status, body in results:
         if status == 201:
             reservation_id = int(body["reservation_id"])
-            settled, _ = api("POST", "/v1/quota", {
-                "action": "settle", "reservation_id": reservation_id, "actual_tokens": 10,
-            })
+            settlement_key = body.get("settlement_key")
+            require(isinstance(settlement_key, str) and len(settlement_key) > 20,
+                    "Worker did not issue an opaque settlement proof")
+            settlement = {
+                "action": "settle", "reservation_id": reservation_id,
+                "actual_tokens": 6000, "settlement_key": settlement_key,
+                "route_id": route_id, "task_id": task_id,
+            }
+            settled, _ = api("POST", "/v1/quota", settlement)
             require(settled == 200, "D1 token quota reservation did not settle")
-            replay, replay_body = api("POST", "/v1/quota", {
-                "action": "settle", "reservation_id": reservation_id, "actual_tokens": 10,
-            })
+            replay, replay_body = api("POST", "/v1/quota", settlement)
             require(replay == 200 and replay_body.get("replay") is True,
                     "D1 token quota settlement replay was not idempotent")
+            cross_task, _ = api("POST", "/v1/quota", {**settlement, "task_id": task_id + "-other"})
+            require(cross_task == 404, "Quota settlement proof was accepted for a different task")
         else:
             require(body.get("error") == "quota_unavailable",
-                    "D1 token quota returned an unexpected concurrent rejection")
-    from urllib.parse import quote
-    query = f"/v1/quota?route_id={quote(route_id, safe='')}&task_id={quote(task_id, safe='')}"
-    status, body = api("GET", query)
-    usage = body.get("usage", {})
-    require(status == 200 and usage.get("daily", {}).get("requests") == 2 and
-            usage.get("daily", {}).get("tokens") == 20 and
-            usage.get("task", {}).get("requests") == 2,
-            "D1 token quota status does not match the two settled reservations")
+                    "Configured quota rejection returned an unexpected error")
+
+    unknown_status, unknown_body = api("POST", "/v1/quota", {
+        "action": "reserve", "route_id": f"{PREFIX}{run_tag}-unknown",
+        "task_id": task_id, "estimated_tokens": 1,
+    })
+    require(unknown_status == 403 and unknown_body.get("error") == "unknown_quota_route",
+            "Worker accepted an unregistered quota route")
 
 
 def cap_test(label: str, run_tag: str, cap_kind: str) -> None:
