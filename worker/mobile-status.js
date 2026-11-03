@@ -183,7 +183,7 @@ export async function handleMobileStatus(request, env, url) {
         unavailable: null,
       };
     })();
-    const [paper, latest, snapshot, usage, modelCosts] = await Promise.all([
+    const [paper, latest, snapshot, usage, modelCosts, monetary] = await Promise.all([
       applied.has("0004_paper_event_ledger")
         ? env.DB.prepare("SELECT event_type,COUNT(*) AS count FROM paper_events GROUP BY event_type ORDER BY event_type").all()
         : Promise.resolve({ results: [] }),
