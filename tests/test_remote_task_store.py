@@ -88,6 +88,7 @@ class RemoteTaskStoreTests(unittest.TestCase):
             self.store.retry_or_fail("task-1", "retry", lease_token="lease-1",
                                      retry_after_seconds=86401)
 
+    @patch("engine.remote_task_store.urlopen")
     def test_recovery_is_bounded_and_validated(self, open_url):
         open_url.return_value = FakeResponse({"requeued": 2, "failed": 1})
         self.assertEqual(self.store.recover_stale(), {"requeued": 2, "failed": 1})
