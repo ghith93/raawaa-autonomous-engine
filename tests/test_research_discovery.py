@@ -264,6 +264,23 @@ class ResearchDiscoveryTests(unittest.TestCase):
         self.assertEqual(normalized["engines"], ["duckduckgo", "brave"])
         self.assertFalse(normalized["license_verified"])
 
+    def test_searxng_result_normalization_rejects_unsafe_or_malformed_urls(self):
+        from engine.research_discovery import _normalize_searxng_result
+        base = {"title": "Candidate", "content": "metadata only"}
+        for url in (
+            "http://docs.example.org/page",
+            "https://localhost/page",
+            "https://127.0.0.1/admin",
+            "https://[::1]/admin",
+            "https://docs.example.org:invalid/page",
+            "https://docs.example.org/page#fragment",
+            "https://user:pass@docs.example.org/page",
+        ):
+            with self.subTest(url=url):
+                self.assertIsNone(_normalize_searxng_result(
+                    {**base, "url": url}, "2026-11-03T00:00:00+00:00"
+                ))
+
     def test_searxng_is_skipped_without_endpoint_and_failure_is_nonfatal(self):
         calls = []
         skipped = discover_repositories(
