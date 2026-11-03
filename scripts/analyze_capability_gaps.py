@@ -181,7 +181,7 @@ def _baseline(root: Path) -> dict[str, dict[str, Any]]:
         "research_discovery": {
             "status": "github_crossref_arxiv_searxng_optional" if query_names and academic_source and arxiv_source and searxng_source else ("github_crossref_arxiv_metadata" if query_names and academic_source and arxiv_source else ("github_plus_academic_metadata" if query_names and academic_source else ("github_metadata_only" if query_names else "not_configured"))),
             "evidence_paths": ["config/research_sources.json", "engine/research_discovery.py"],
-            "evidence": "Configured discovery includes the listed GitHub topics and the named academic metadata adapters; source configuration does not prove successful retrieval in the latest run.",
+            "evidence": "Configured discovery includes GitHub topics, Crossref and arXiv metadata, and an optional SearXNG adapter; configuration does not prove endpoint availability or successful retrieval in the latest run.",
             "configured_topics": query_names,
             "academic_source": academic_source,
             "arxiv_source": arxiv_source,
