@@ -315,9 +315,6 @@ class CliTests(unittest.TestCase):
         self.assertEqual(json.loads(output.getvalue()), expected)
 
 
-if __name__ == "__main__":
-    unittest.main()
-
     def test_executive_status_cli_is_read_only_and_uses_existing_store(self):
         with tempfile.TemporaryDirectory() as tmp:
             db_path = Path(tmp) / "engine.db"
@@ -334,3 +331,7 @@ if __name__ == "__main__":
             self.assertEqual(result["next_best_tasks"][0]["task_type"], "system_audit")
             self.assertEqual(result["side_effects"]["tasks_claimed"], 0)
             self.assertEqual(len(task_store.list_tasks()), 1)
+
+
+if __name__ == "__main__":
+    unittest.main()
