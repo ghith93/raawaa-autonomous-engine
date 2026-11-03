@@ -6,11 +6,11 @@ The engine now has a bounded, read-only GitHub repository discovery capability. 
 
 ## What it does
 
-- Searches six curated areas: agent frameworks, coding agents, agent memory, MCP ecosystem, model routing, and durable execution.
+- Searches nine curated areas configured in `config/research_sources.json`: agent frameworks, coding agents, agent memory, MCP ecosystem, model routing, durable execution, agent-skill security, agent evaluation, and skill benchmarks.
 - Uses GitHub public repository Search API with an optional GITHUB_TOKEN for authenticated API rate limits, plus one daily Crossref public scholarly-metadata query without an API key.
 - Caps GitHub and Crossref responses at 1 MiB before parsing and reports invalid UTF-8 as a safe discovery failure.
 - Counts attempted source requests, including failures, in run telemetry.
-- Limits each run to six queries and at most five candidates per query.
+- Limits each run to the configured nine GitHub queries and at most five candidates per query; it also makes one sequential Crossref metadata request for up to ten academic candidates. The configuration is authoritative for these bounds.
 - Deduplicates repositories and records source query, discovery time, stars, last push, language, SPDX licence label, and topics.
 - Marks every result unreviewed. A licence label is metadata only, not a legal/licence review.
 - Makes no model-generation requests, repository clones, code execution, installations, writes, or permission changes.
