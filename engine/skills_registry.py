@@ -89,7 +89,10 @@ def load_approved_skill(
     if not isinstance(task_type, str) or not task_type.strip():
         raise SkillRegistryError("task type is required")
 
-    root = Path(registry_root).resolve(strict=True)
+    repository_root = Path(registry_root).resolve(strict=True)
+    root = repository_root / "skills"
+    if root.is_symlink() or not root.is_dir():
+        raise SkillRegistryError("skills directory is missing or symlinked")
     manifest_path = _inside(root, root / skill_id / "skill.json")
     instruction_path = _inside(root, root / skill_id / "SKILL.md")
     manifest = _json_object(manifest_path)
@@ -133,7 +136,6 @@ def load_approved_skill(
     if not isinstance(role_tasks, list) or task_type not in role_tasks:
         raise SkillRegistryError("skill is not approved for this role and task type")
 
-    repository_root = root.parent
     revocations = repository_root / "config" / "skills" / "revocations.json"
     if revocations.exists():
         revoked = _json_object(_inside(repository_root, revocations))
