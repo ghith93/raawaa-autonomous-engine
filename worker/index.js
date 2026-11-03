@@ -161,7 +161,7 @@ function validText(value, max) {
 export default {
   async scheduled(controller, env) {
     const cron = typeof controller?.cron === "string" ? controller.cron : "";
-    if (cron === "1,6,11,16,21,26,31,36,41,46,51,56 * * * *") {
+    if (cron === "2,7,12,17,22,27,32,37,42,47,52,57 * * * *") {
       await dispatchTaskRunnerIfStale({
         env,
         scheduledTime: controller?.scheduledTime,
