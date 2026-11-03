@@ -27,8 +27,9 @@ class RemoteTaskStoreTests(unittest.TestCase):
             "task": {"id": "task-1", "payload_json": "{}", "status": "running"},
             "lease_token": "lease-1",
         })
-        task = self.store.claim_next()
+        task = self.store.claim_next(execution_mode="dry_run")
         self.assertEqual(task["lease_token"], "lease-1")
+        self.assertEqual(json.loads(open_url.call_args.args[0].data), {"execution_mode": "dry_run"})
         request = open_url.call_args.args[0]
         self.assertEqual(request.full_url, "https://engine.example/v1/tasks/claim")
         self.assertEqual(request.get_method(), "POST")
@@ -65,8 +66,9 @@ class RemoteTaskStoreTests(unittest.TestCase):
     @patch("engine.remote_task_store.urlopen")
     def test_finish_sends_lease_and_terminal_result(self, open_url):
         open_url.return_value = FakeResponse({"ok": True, "status": "succeeded"})
-        self.store.finish("task-1", "succeeded", {"safe": True}, lease_token="lease-1")
+        self.store.finish("task-1", "succeeded", {"safe": True, "mode": "dry_run"}, lease_token="lease-1")
         payload = json.loads(open_url.call_args.args[0].data)
+        self.assertEqual(payload["execution_mode"], "dry_run")
         self.assertEqual(payload["lease_token"], "lease-1")
         self.assertEqual(payload["result"], {"safe": True})
 
