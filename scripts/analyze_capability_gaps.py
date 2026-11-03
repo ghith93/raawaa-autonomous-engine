@@ -95,7 +95,7 @@ def _candidate_summary(item: dict[str, Any]) -> dict[str, Any] | None:
         "title": title[:240],
         "url": url[:1000],
         "triage_score": score,
-        "triage_priority": item.get("priority") if item.get("priority") in {"high", "medium", "low"} else "unknown",
+        "triage_priority": item.get("priority") if isinstance(item.get("priority"), str) and item.get("priority") in {"high", "medium", "low"} else "unknown",
         "license_review_required": item.get("license_review_required") is True,
         "security_review_required": item.get("security_review_required") is True,
     }
