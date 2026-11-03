@@ -90,6 +90,13 @@ export async function handleTaskInvocation(request, env, url) {
     if (action === "reject") {
       if (!validText(input.route_id,200) || !validText(input.rejection_code,80))
         return json({error:"invalid_rejection"},400);
+      if (invocation.status === "prepared") {
+        const prior = await env.DB.prepare(
+          "SELECT status,rejection_code FROM task_model_invocation_attempts WHERE invocation_id=? AND route_id=?"
+        ).bind(invocation.invocation_id,input.route_id).first();
+        if (prior?.status === "rejected" && prior.rejection_code === input.rejection_code)
+          return json({ok:true,status:"prepared",replay:true});
+      }
       if (invocation.status !== "in_flight" || invocation.last_route_id !== input.route_id)
         return json({error:"invocation_state_conflict"},409);
       const batch = await env.DB.batch([
@@ -111,9 +118,15 @@ export async function handleTaskInvocation(request, env, url) {
     }
 
     if (action === "ambiguous" || action === "settle") {
+      const terminal = action === "ambiguous" ? "ambiguous" : "settled";
+      if (invocation.status === terminal) {
+        const prior = await env.DB.prepare(
+          "SELECT status FROM task_model_invocation_attempts WHERE invocation_id=? AND route_id=?"
+        ).bind(invocation.invocation_id,invocation.last_route_id).first();
+        if (prior?.status === terminal) return json({ok:true,status:terminal,replay:true});
+      }
       if (invocation.status !== "in_flight" || !invocation.last_route_id)
         return json({error:"invocation_state_conflict"},409);
-      const terminal = action === "ambiguous" ? "ambiguous" : "settled";
       const batch = await env.DB.batch([
         env.DB.prepare(
           "UPDATE task_model_invocation_attempts SET status=?,updated_at=? WHERE invocation_id=? AND route_id=? AND status='in_flight' " +
