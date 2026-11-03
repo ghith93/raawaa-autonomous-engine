@@ -166,6 +166,24 @@ jobs:
               raise SystemExit("Refusing deployment: Staging and production D1 IDs must differ")
           print("Validated isolated Staging Worker and D1 target.")
           PY
+      - name: Verify Neuron ledger is Staging-only and has no AI binding
+        run: |
+          python - <<'PY'
+          import tomllib
+          from pathlib import Path
+
+          with Path("wrangler.staging.toml").open("rb") as stream:
+              staging = tomllib.load(stream)
+          with Path("wrangler.toml").open("rb") as stream:
+              production = tomllib.load(stream)
+          if staging.get("vars", {}).get("WORKERS_AI_LEDGER_CONTROL") != "staging-only":
+              raise SystemExit("Staging Neuron ledger control flag is missing")
+          if production.get("vars", {}).get("WORKERS_AI_LEDGER_CONTROL") is not None:
+              raise SystemExit("Production must not expose the Neuron ledger route")
+          if "ai" in staging or "ai" in production:
+              raise SystemExit("Accounting-only milestone must not add an AI binding")
+          print("Staging-only ledger guard verified; no AI binding configured.")
+          PY
       - name: Generate an ephemeral Staging-only bearer token
         shell: bash
         run: |
@@ -198,6 +216,14 @@ jobs:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         run: python scripts/verify_staging_monetary_ledger.py
+      - name: Verify remote Staging Workers AI Neuron ledger (accounting only)
+        env:
+          RAAWAA_ENGINE_STAGING_URL: https://raawaa-autonomous-engine-staging.ghith-shikhkhaled.workers.dev
+          RAAWAA_ENGINE_STAGING_API_TOKEN: ${{ env.RAAWAA_ENGINE_STAGING_API_TOKEN }}
+          RAAWAA_ENGINE_STAGING_QUOTA_ADMIN_TOKEN: ${{ env.RAAWAA_ENGINE_STAGING_QUOTA_ADMIN_TOKEN }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: python scripts/verify_staging_workers_ai_neuron_ledger.py
       - name: Revoke the ephemeral Staging quota-admin token
         if: ${{ always() && steps.install_staging_quota_admin_token.outcome == 'success' }}
         env:
