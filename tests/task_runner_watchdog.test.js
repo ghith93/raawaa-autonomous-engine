@@ -151,9 +151,9 @@ test("an absent or stale schedule dispatches only the fixed Task Runner workflow
   assert.equal(calls[2].options.method, "POST");
   assert.deepEqual(JSON.parse(calls[2].options.body), { ref: "main" });
   assert.equal(DB.calls.filter(call => call.kind === "run").length, 2);
-  assert.equal(DB.calls[0].values[0], "task_runner_dispatch_intent");
-  assert.equal(DB.calls[1].values[0], "task_runner_dispatch_requested");
-  const audit = JSON.parse(DB.calls[1].values[1]);
+  assert.equal(DB.calls[1].values[0], "task_runner_dispatch_intent");
+  assert.equal(DB.calls[2].values[0], "task_runner_dispatch_requested");
+  const audit = JSON.parse(DB.calls[2].values[1]);
   assert.deepEqual(audit, {
     workflow: "task-runner.yml",
     ref: "main",
