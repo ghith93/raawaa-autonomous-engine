@@ -202,6 +202,15 @@ class LiveDataPolicyTests(unittest.TestCase):
         self.assertTrue(allowed)
         self.assertEqual(reason, "allowed")
 
+    def test_payment_details_linked_to_customer_account_are_blocked(self):
+        payload = self.valid_payload()
+        payload["topic"] = "Review payment details linked to a customer account"
+        allowed, reason = validate_live_payload(
+            "research_brief", "Public research", payload, POLICY
+        )
+        self.assertFalse(allowed)
+        self.assertEqual(reason, "sensitive_content_detected")
+
     def test_public_customer_satisfaction_research_is_not_blocked(self):
         payload = self.valid_payload()
         payload["topic"] = "Analyze customer satisfaction trends in public product reviews"
