@@ -113,7 +113,7 @@ function env(DB, control = "staging-only") {
 
 test("Workers AI Neuron ledger is not exposed outside the Staging-only control", async () => {
   const DB = dbMock({ enabled: 1 });
-  const response = await worker.fetch(request({ action: "enable" }), env(DB, undefined));
+  const response = await worker.fetch(request({ action: "enable" }), env(DB, ""));
   assert.equal(response.status, 404);
   assert.deepEqual(await response.json(), { error: "not_found" });
 });
