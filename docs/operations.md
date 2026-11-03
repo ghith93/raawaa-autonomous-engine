@@ -6,7 +6,7 @@ The [Master Autonomous Execution Directive](master-autonomous-execution-directiv
 
 ## Continuous improvement operating charter
 
-The [Continuous Improvement and Research Charter](continuous-improvement-charter.md) is an additive layer over the established architecture and policy; it does not authorize a rewrite or override safety gates. Use the [Reusable Task-Completion Handoff Prompt](task-completion-handoff-prompt.md) or its [Arabic version](task-completion-handoff-prompt.ar.md) to resume work from the latest verified repository state after each cycle. Existing architecture, zero-spend policy, dry-run defaults, provider quotas, and approval gates remain authoritative.
+The [Continuous Improvement and Research Charter](continuous-improvement-charter.md) is an additive layer over the established architecture and policy; it does not authorize a rewrite or override safety gates. Use the [Reusable Task-Completion Handoff Prompt](task-completion-handoff-prompt.md) or its [Arabic version](task-completion-handoff-prompt.ar.md) to resume work from the latest verified repository state after each cycle. Existing architecture, the operator-approved USD 15 all-in monthly hard cap, dry-run defaults, provider quotas, and approval gates remain authoritative.
 
 ## Current operating mode
 
@@ -75,9 +75,9 @@ python -m engine.cli free-models --provider all
 
 The provider-profile-status command reads the provider registry locally and reports account tier, model stage, production-use eligibility, quota caps, and eligibility blockers. The quota-status command reads the SQLite ledger and reports minute/day/month usage, eligible routes, and warnings at 80% or critical alerts at 100%; it performs no provider calls. Preview models remain blocked from the live gateway unless production use is explicitly permitted by the verified model terms. It never reads API key values or enables network execution. Provider catalog discovery is a deliberate, read-only network command. It requires the relevant provider credential and lists model identifiers only; it does not generate text or establish that a model is free. Treat unknown pricing, quota, regional availability, and commercial-use eligibility as unavailable.
 
-The `UsageLedger` and active `QuotaAwareLiveGateway` now use atomic pre-call monetary reservations, integer nano-USD accounting, idempotent actual-cost settlement, and conservative retention of ambiguous reservations across daily/monthly windows. The live gateway reserves estimated spend before provider I/O, releases only reservations for explicit HTTP 429 or other pre-call rejection, records actual cost before rejecting an over-budget response, and blocks subsequent requests after an unexpected charge when the configured budget is zero. The current runtime still accepts verified zero-cost profiles exclusively and requires daily, monthly, and per-task budgets to be numeric zero with paid calls disabled. Boolean, missing, malformed, or non-zero budget values fail closed. No non-zero-cost route is eligible. `python -m engine.cli monetary-status` reports actual spend, reserved spend, configured hard caps, and unresolved reservation metadata without making network calls. Ambiguous reservations must not be released until provider-side evidence establishes whether the request was billed.
+The `UsageLedger` and active `QuotaAwareLiveGateway` now use atomic pre-call monetary reservations, integer nano-USD accounting, idempotent actual-cost settlement, and conservative retention of ambiguous reservations across daily/monthly windows. The live gateway reserves estimated spend before provider I/O, releases only reservations for explicit HTTP 429 or other pre-call rejection, records actual cost before rejecting an over-budget response, and blocks subsequent requests after a configured cap is reached. The repository now enforces a USD 15 all-in monthly envelope: USD 12 model spend (USD 0.40/day and USD 0.20/task), USD 0 infrastructure paid-overage allowance, and USD 3 unallocated reserve. Verified-free profiles remain the only eligible routes today; paid fallback remains disabled. Missing, malformed, unknown, or inconsistent budget values fail closed. `python -m engine.cli monetary-status` reports actual spend, reserved spend, configured hard caps, and unresolved reservation metadata without making network calls. Ambiguous reservations must not be released until provider-side evidence establishes whether the request was billed.
 
-Per-task, daily, and monthly atomic spend caps are now integrated and tested; the configured per-task, daily, and monthly budgets remain zero, and only verified zero-cost profiles are eligible. Before any future paid route, verify provider-specific credit/billing settlement semantics, add reconciliation for ambiguous provider-side billing, and obtain explicit operator authorization for the policy change.
+Per-task, daily, and monthly atomic spend caps are integrated and tested; the active caps are USD 0.20/task, USD 0.40/day, and USD 12/month. Only verified zero-cost profiles are eligible today. Before any paid route, verify provider-specific spend-block semantics, set a provider-side hard stop no greater than the remaining model allocation, add reconciliation for ambiguous billing, and update the policy only after explicit operator approval.
 
 The model gateway and quota controls provide foundations for opt-in inference. Keep live inference disabled until:
 1. the provider's current free-tier and commercial-use terms are verified;
@@ -94,7 +94,7 @@ Never add paid fallback or automatic billing upgrades without explicit approval.
 The CLI and scheduled Task Runner now use the same local live-runtime factory. It constructs OpenAI-compatible adapters only when all of these independent gates pass:
 
 1. The operator environment switch RAAWAA_ENGINE_LIVE_INFERENCE is exactly enabled.
-2. config/policy.json uses live_inference_opt_in while paid calls, daily/monthly budgets, and external writes remain disabled/zero.
+2. config/policy.json uses live_inference_opt_in, paid calls and external writes remain disabled, and the validated USD 12 monthly / USD 0.40 daily / USD 0.20 per-task model caps remain in force.
 3. At least one provider profile is explicitly enabled in config/provider_profiles.json and passes the static zero-cost, free-tier, commercial-use, production-stage, and quota checks.
 4. The profile's API-key environment variable is present. The factory checks presence only and never logs or prints the key.
 
@@ -185,3 +185,47 @@ The quota ledger enforces rolling 60-second request/token limits atomically alon
 The worker accepts an optional, programmatically constructed `QuotaAwareLiveGateway`. The default CLI and scheduled Task Runner do not construct or inject one, so the normal execution path remains a deterministic zero-network dry run. Live execution is considered only when the operator switch `RAAWAA_ENGINE_LIVE_INFERENCE=enabled` is present **and** a gateway has been explicitly injected. The gateway independently requires its programmatic network flag, a task ID, and at least one currently verified eligible provider profile with atomic per-task/rolling-minute/daily/monthly request and token reservations.
 
 The worker sends the task title and JSON payload to the selected provider only in that explicitly enabled path. Treat queued payloads as untrusted input and do not enqueue secrets, passwords, private customer records, or other sensitive data. The live request is bounded to 256 output tokens. Provider/gateway failures are terminally blocked for that attempt rather than automatically retried, because a timeout or transport failure may mean the provider already processed the request. Lease heartbeat renewal and ownership fencing are enforced before result persistence. No provider profile or credential is shipped/configured by this change; therefore this wiring alone does not enable live inference or change scheduled jobs from dry-run mode.
+
+
+## Operator-approved permanent budget policy (2026-11-03)
+
+The project-wide spending ceiling is **USD 15 per billing month**, inclusive of model inference and infrastructure. The current enforceable allocation is deliberately more conservative:
+
+| Envelope | Hard cap | Execution rule |
+|---|---:|---|
+| All-in project ceiling | $15.00/month | Never raise automatically |
+| Model inference | $12.00/month | Atomic pre-call reservation; actual + pending reservations count |
+| Model inference daily | $0.40/day | Stops new paid reservations for the UTC day |
+| Model inference per task | $0.20/task | Aggregates across providers/routes |
+| Cloudflare/GitHub Actions paid overages | $0.00 | Free/included allowances only |
+| Unallocated reserve | $3.00/month | Not spendable; requires a separate explicit reallocation |
+
+**Hybrid routing:** use verified-free, production-eligible providers first. The paid fallback is intentionally configured but disabled. It may only be enabled after the provider account exposes a verified provider-enforced spend block or prepaid balance no greater than the remaining USD 12 model allocation. A dashboard alert, estimated-cost check, or delayed billing report is not a hard stop. Never auto-upgrade a provider plan.
+
+**Provider selection evidence (reviewed 2026-11-03):**
+- **Groq Free — first candidate:** the current account/model/quota profile was operator-confirmed. Groq documents Free-tier over-limit behavior as rate-limit errors rather than charges. Keep the configured free route disabled until the durable D1 monetary ledger is ready and live inference is separately approved. [Groq rate limits](https://console.groq.com/docs/rate-limits) · [Groq billing FAQ](https://console.groq.com/docs/billing-faqs).
+- **Groq Developer — possible paid fallback, not activated:** Groq documents organization-level spend limits that block API access at the cap. This is a better hard-stop candidate than a warning-only budget, but it requires a paid-tier account and owner-level billing configuration. Do not upgrade the account automatically; if later approved, set its organization cap no higher than the remaining USD 12 model allocation and verify the block behavior first. [Groq spend limits](https://console.groq.com/docs/spend-limits).
+- **Cloudflare Workers AI — conditional free candidate:** Cloudflare documents 10,000 Neurons/day at no charge on Workers Free; exceeding the free allocation fails rather than billing. Workers Paid charges USD 0.011 per 1,000 Neurons above the daily free allocation. The account's actual plan is not yet verified, so do not activate Workers AI or assume it is free. [Workers AI pricing](https://developers.cloudflare.com/workers-ai/platform/pricing/).
+- **Gemini API — free tier only for now:** Google's project spend-cap feature is experimental and may allow around 10 minutes of overage while billing data catches up. It is therefore not the preferred paid hard-stop fallback under a strict no-overrun requirement. [Gemini billing and spend caps](https://ai.google.dev/gemini-api/docs/billing).
+
+
+
+**Cloudflare billing is a separate external control.** Cloudflare budget alerts are informational and do not stop usage. Cloudflare's billing API does expose per-product spend policies with an `usage_block` action for Workers and Durable Objects, but these policies are product-specific and do not cover fixed subscription fees or every Cloudflare product. The current deployment token's Billing permissions and account spend policies have not yet been verified. Do not claim the all-in cap is externally enforced until the account's existing subscriptions, product policies, and token permissions have been inspected. If the Worker/DO spend-block policy is applied, preserve enough headroom to avoid unexpectedly disabling the control plane; any policy change must be checked against current usage and the service's rollback plan.
+
+**Current activation state:** configuration and code-level validation are in this PR; live inference remains disabled, all provider profiles remain disabled, paid fallback remains disabled, and no Cloudflare billing policy has been changed. The existing monetary `UsageLedger` is SQLite-backed and is not durable across ephemeral GitHub-hosted runners. The live-runtime factory now explicitly blocks cloud live inference while `RAAWAA_ENGINE_API_URL` is set until a D1-backed monetary reservation/settlement ledger is implemented. Therefore the USD 12 cap is configured and locally testable, but it is not yet a production-shared spend ledger; no paid call can run through the cloud worker path. This change cannot by itself prove account-wide spend blocking. The next steps are: (1) complete the read-only Cloudflare subscription/spend-policy inventory; (2) implement the D1-backed monetary ledger and test it against a dedicated non-production D1 database; (3) only after those checks, review product-specific Cloudflare usage-block policies and configure a safe threshold that preserves service recovery.
+
+**Operational commands:**
+```bash
+python -m engine.cli audit
+python -m engine.cli monetary-status
+python -m engine.cli provider-profile-status
+```
+
+These commands are read-only. Monitor actual provider invoices and Cloudflare/GitHub billing dashboards; unresolved provider reservations must continue consuming budget until reconciled with provider-side evidence.
+
+
+### Mandatory blocker before any cloud inference or paid model routing
+
+The model-usage ledger currently uses local SQLite. That is suitable for local testing, but it does not aggregate spend across separate ephemeral GitHub Actions runners. The runtime therefore refuses to construct a live gateway whenever `RAAWAA_ENGINE_API_URL` is set. Do not remove this guard or enable the cloud live-inference switch until a D1-backed monetary ledger is implemented with atomic cross-runner reservations, idempotent settlement, retained ambiguous reservations, and a tested status endpoint. The production D1 database has migrations through `0005`; no dedicated non-production D1 database is currently configured, so migration `0006` must not be applied to production as a shortcut.
+
+The USD 12/month model cap, USD 0.40/day cap, and USD 0.20/task cap are configured policy ceilings. Until the durable ledger and provider-side billing hard stop are both verified, the only permitted model routes are verified-free routes, and the cloud production runtime remains dry-run.
