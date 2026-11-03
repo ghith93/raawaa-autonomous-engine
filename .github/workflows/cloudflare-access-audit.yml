@@ -21,6 +21,9 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
+      - name: Check out reviewed source
+        uses: actions/checkout@v7
+
       - name: Read Access configuration using dedicated read-only token
         id: audit
         env:
@@ -34,6 +37,8 @@ jobs:
           import urllib.error
           import urllib.parse
           import urllib.request
+
+          from engine.cloudflare_access_audit import is_access_not_enabled
 
           token = os.environ.get("CF_ACCESS_AUDIT_TOKEN", "")
           account = os.environ.get("CF_ACCOUNT_ID", "")
@@ -54,8 +59,10 @@ jobs:
               return text[:300]
 
           failures = []
+          access_disabled = False
 
           def fetch_all(label, path):
+              nonlocal access_disabled
               collected = []
               page = 1
               while page <= 20:
@@ -74,6 +81,10 @@ jobs:
                           body = {}
                       details = body.get("errors") or []
                       print(f"{label}: HTTP {error.code}; CF-RAY={safe_text(error.headers.get('CF-RAY', 'not supplied'))}.")
+                      if is_access_not_enabled(error.code, details):
+                          access_disabled = True
+                          print("Cloudflare Access is not enabled for this account; this is an optional product state, not a token permission failure.")
+                          return []
                       if details:
                           for item in details[:5]:
                               print(f"  Cloudflare error {safe_text(item.get('code', 'unknown'))}: {safe_text(item.get('message', 'No message supplied'))}")
@@ -111,15 +122,23 @@ jobs:
           apps = fetch_all("Access applications", "/access/apps")
           service_tokens = fetch_all("Access service tokens", "/access/service_tokens")
 
-          summary = {
+          summary = ({
+              "access_status": "not_enabled_optional",
+              "access_applications": "not_applicable",
+              "access_service_tokens": "not_applicable",
+          } if access_disabled and not failures else {
+              "access_status": "enabled_or_unknown",
               "access_applications": "failed" if apps is None else f"ok; records={len(apps)}",
               "access_service_tokens": "failed" if service_tokens is None else f"ok; records={len(service_tokens)}",
-          }
+          })
           with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
               output.write("summary=" + json.dumps(summary, separators=(",", ":")) + "\n")
 
+          if access_disabled:
+              print("\nCloudflare Access is not enabled for this account. No Access applications or service tokens are available to audit.")
+              print("The engine's authenticated Worker API routes continue to enforce ENGINE_API_TOKEN directly; no Cloudflare Access configuration was changed.")
           print("\n--- Access application summary ---")
-          if not apps:
+          if not apps and not access_disabled:
               print("No Access applications returned for this account.")
           for app in apps or []:
               name = app.get("name") or "unnamed"
@@ -138,7 +157,7 @@ jobs:
                   for policy in policies:
                       print(f"    policy: {policy.get('name') or 'unnamed'}; decision={policy.get('decision') or policy.get('action') or 'not reported'}")
           print("\n--- Access service-token summary ---")
-          if not service_tokens:
+          if not service_tokens and not access_disabled:
               print("No Access service tokens returned for this account.")
           for item in service_tokens or []:
               name = item.get("name") or "unnamed"
