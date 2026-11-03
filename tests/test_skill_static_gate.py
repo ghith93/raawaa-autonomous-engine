@@ -40,6 +40,8 @@ class SkillStaticGateTests(unittest.TestCase):
         self.assertTrue(result["sandbox_validation_required"])
         self.assertTrue(result["signature_verification_required"])
         self.assertTrue(result["license_review_required"])
+        self.assertTrue(result["dependency_review_required"])
+        self.assertTrue(result["source_provenance_review_required"])
 
     def test_prompt_override_secret_exfiltration_and_dynamic_execution_block(self):
         content = (
