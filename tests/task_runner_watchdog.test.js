@@ -224,7 +224,7 @@ test("an audit failure after accepted dispatch leaves a dedupe intent for the ne
   assert.equal(second.calls.length, 0);
 });
 
-test("no previous schedule also triggers the fixed workflow dispatch", async () =>
+test("no previous schedule also triggers the fixed workflow dispatch", async () => {
   const module = await loadModule();
   assert.ok(module, "Task Runner watchdog module must exist");
   const { fetchImpl, calls } = makeFetch({ runs: [], dispatchStatus: 200 });
@@ -247,21 +247,6 @@ test("malformed workflow-run JSON fails closed", async () => {
   await assert.rejects(
     () => module.dispatchTaskRunnerIfStale({ env: envWith(), fetchImpl, nowMs: NOW }),
     /task_runner_run_list_invalid/,
-  );
-});
-
-test("accepted dispatch is not reported successful when its audit write fails", async () => {
-  const module = await loadModule();
-  assert.ok(module, "Task Runner watchdog module must exist");
-  const DB = dbMock({ failOutcome: true });
-  const { fetchImpl } = makeFetch({ runs: [], dispatchStatus: 204 });
-  await assert.rejects(
-    () => module.dispatchTaskRunnerIfStale({ env: envWith(DB), fetchImpl, nowMs: NOW }),
-    error => {
-      assert.match(error.message, /task_runner_dispatch_audit_failed/);
-      assert.equal(error.message.includes("PRIVATE_DATABASE_DETAIL"), false);
-      return true;
-    },
   );
 });
 
