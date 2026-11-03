@@ -12,6 +12,8 @@ import subprocess
 import urllib.error
 import urllib.request
 import uuid
+import time
+from urllib.parse import quote
 from typing import Any
 
 
@@ -35,9 +37,9 @@ def api(method: str, path: str, payload: dict[str, Any] | None = None,
         headers["Content-Type"] = "application/json"
     request = urllib.request.Request(BASE_URL + path, data=data, headers=headers, method=method)
     try:
-        response = urllib.request.urlopen(request, timeout=20)
-        status = response.status
-        raw = response.read()
+        with urllib.request.urlopen(request, timeout=20) as response:
+            status = response.status
+            raw = response.read()
     except urllib.error.HTTPError as exc:
         status = exc.code
         raw = exc.read()
@@ -57,8 +59,23 @@ def require(condition: bool, message: str) -> None:
         raise RuntimeError(message)
 
 
-def snapshot() -> dict[str, Any]:
-    status, body = api("GET", "/v1/monetary-ledger")
+def wait_for_worker(timeout_seconds: int = 45) -> None:
+    deadline = time.monotonic() + timeout_seconds
+    last_status = None
+    while time.monotonic() < deadline:
+        try:
+            last_status, _ = api("GET", "/health", authenticated=False)
+            if last_status == 200:
+                return
+        except RuntimeError:
+            pass
+        time.sleep(2)
+    raise RuntimeError(f"Staging Worker did not become healthy (last HTTP status: {last_status})")
+
+
+def snapshot(task_id: str | None = None) -> dict[str, Any]:
+    suffix = "" if task_id is None else "?task_id=" + quote(task_id, safe="")
+    status, body = api("GET", "/v1/monetary-ledger" + suffix)
     require(status == 200 and isinstance(body.get("snapshot"), dict),
             f"Monetary status failed (HTTP {status}, error={body.get('error')})")
     return body["snapshot"]
@@ -153,6 +170,7 @@ def cap_test(label: str, run_tag: str, cap_kind: str) -> None:
 def run() -> None:
     require(BASE_URL.startswith("https://"), "Staging Worker URL must use HTTPS")
     require(bool(TOKEN), "RAAWAA_ENGINE_STAGING_API_TOKEN is required")
+    wait_for_worker()
     health, _ = api("GET", "/health", authenticated=False)
     require(health == 200, f"Staging Worker health returned HTTP {health}")
     unauth, _ = api("GET", "/v1/monetary-ledger", authenticated=False)
@@ -265,8 +283,9 @@ def run() -> None:
     )
     if deploy.returncode != 0:
         raise RuntimeError("Staging Worker redeploy failed: " + (deploy.stderr or deploy.stdout)[-1200:])
+    wait_for_worker()
 
-    current = snapshot()
+    current = snapshot(crash_task)
     unresolved_ids = {item.get("reservation_id") for item in current.get("unresolved", [])}
     require(crash_id in unresolved_ids, "Ambiguous reservation did not survive Staging Worker redeploy")
     settled, _ = action("settle", crash_id, actual_cost_nanos=0, input_tokens=0, output_tokens=0)
