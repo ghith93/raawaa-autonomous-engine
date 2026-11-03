@@ -264,7 +264,7 @@ def cap_test(label: str, run_tag: str, cap_kind: str) -> None:
         int(policy["per_task_budget_nanos"]),
     )
     daily, monthly, task_cap = original_policy
-    restore_policy = False
+    policy_override = None
     if cap_kind == "daily":
         remaining = daily - int(current["daily_total_nanos"])
         estimate = min(task_cap, remaining // 2)
@@ -278,8 +278,7 @@ def cap_test(label: str, run_tag: str, cap_kind: str) -> None:
         daily = int(current["daily_total_nanos"]) + 100 * estimate
         monthly = int(current["monthly_total_nanos"]) + 2 * estimate
         task_cap = estimate
-        set_staging_policy(daily, monthly, task_cap)
-        restore_policy = True
+        policy_override = (daily, monthly, task_cap)
     elif cap_kind == "task":
         estimate = task_cap // 2
         require(estimate > 0, "Staging per-task monetary cap is too small for a concurrency test")
@@ -287,6 +286,9 @@ def cap_test(label: str, run_tag: str, cap_kind: str) -> None:
         raise ValueError("unknown cap kind")
 
     try:
+        if policy_override is not None:
+            set_staging_policy(*policy_override)
+
         def attempt(index: int):
             task_id = f"{PREFIX}{run_tag}-{label}-task" if cap_kind == "task" else f"{PREFIX}{run_tag}-{label}-{index}"
             return reserve(
@@ -309,7 +311,7 @@ def cap_test(label: str, run_tag: str, cap_kind: str) -> None:
                 require(body.get("error") == "budget_exceeded",
                         f"{label} cap returned an unexpected rejection")
     finally:
-        if restore_policy:
+        if policy_override is not None:
             set_staging_policy(*original_policy)
 
 
