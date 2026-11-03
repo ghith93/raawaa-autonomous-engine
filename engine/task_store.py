@@ -130,7 +130,8 @@ class TaskStore:
             raise ValueError("lease expired; worker must not complete the task")
 
     def finish(self, task_id: str, status: str, result: dict[str, Any] | None = None,
-               error: str | None = None, lease_token: str | None = None):
+               error: str | None = None, lease_token: str | None = None,
+               execution_mode: str | None = None):
         if status not in {"succeeded", "failed", "blocked"}:
             raise ValueError("invalid terminal status")
         with self._connect() as db:
@@ -140,11 +141,17 @@ class TaskStore:
                 raise KeyError(task_id)
             self._assert_lease(row, lease_token)
             now = utc_now()
-            changed = db.execute("""UPDATE tasks SET status=?,result_json=?,error=?,updated_at=?,
+            mode = execution_mode or (
+                result.get("mode") if isinstance(result, dict) and
+                result.get("mode") in {"dry_run", "live_inference"} else row["execution_mode"]
+            )
+            if mode not in {"unknown", "not_started", "dry_run", "live_inference"}:
+                raise ValueError("invalid execution_mode")
+            changed = db.execute("""UPDATE tasks SET status=?,result_json=?,error=?,execution_mode=?,updated_at=?,
                 lease_token=NULL,lease_expires_at=NULL
                 WHERE id=? AND status='running' AND lease_token=?""",
                 (status, json.dumps(result, sort_keys=True) if result is not None else None,
-                 error, now, task_id, lease_token)).rowcount
+                 error, mode, now, task_id, lease_token)).rowcount
             if changed != 1:
                 raise ValueError("lease ownership lost")
             self._audit(db, task_id, "task_" + status, {"error": error} if error else (result or {}))
