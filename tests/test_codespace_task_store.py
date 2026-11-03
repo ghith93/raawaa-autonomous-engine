@@ -57,48 +57,49 @@ class CodespaceTaskStoreTests(unittest.TestCase):
             store.preflight()
         build.assert_called_once()
 
-    @patch("engine.remote_task_store.urlopen")
-    def test_preflight_uses_scoped_read_only_route(self, open_url):
-        open_url.return_value = FakeResponse({
+    @patch("engine.remote_task_store.build_opener")
+    def test_preflight_uses_scoped_read_only_route(self, build):
+        build.return_value.open.return_value = FakeResponse({
             "ok": True, "executor": "codespace", "task_types": ["codespace_inspect", "codespace_test"],
         })
         store = CodespaceTaskStore("https://engine.example", "codespace-token")
         self.assertEqual(store.preflight()["executor"], "codespace")
-        request = open_url.call_args.args[0]
+        request = build.return_value.open.call_args.args[0]
         self.assertEqual(request.full_url, "https://engine.example/v1/codespace/status")
         self.assertEqual(request.get_header("Authorization"), "Bearer codespace-token")
 
-    @patch("engine.remote_task_store.urlopen")
-    def test_claim_uses_only_codespace_endpoint_and_validates_task_type(self, open_url):
-        open_url.return_value = FakeResponse({
+    @patch("engine.remote_task_store.build_opener")
+    def test_claim_uses_only_codespace_endpoint_and_validates_task_type(self, build):
+        build.return_value.open.side_effect = [FakeResponse({
             "task": {"id": "11111111-1111-4111-8111-111111111111", "task_type": "codespace_test"},
             "lease_token": "lease-1",
-        })
+        }), FakeResponse({
+            "task": {"id": "22222222-2222-4222-8222-222222222222", "task_type": "research_brief"},
+            "lease_token": "lease-2",
+        })]
         store = CodespaceTaskStore("https://engine.example", "codespace-token")
         task = store.claim_next()
         self.assertEqual(task["lease_token"], "lease-1")
-        self.assertEqual(open_url.call_args.args[0].full_url,
+        self.assertEqual(build.return_value.open.call_args.args[0].full_url,
                          "https://engine.example/v1/codespace/tasks/claim")
-        open_url.return_value = FakeResponse({
-            "task": {"id": "22222222-2222-4222-8222-222222222222", "task_type": "research_brief"},
-            "lease_token": "lease-2",
-        })
         with self.assertRaisesRegex(RemoteTaskStoreError, "out-of-scope"):
             store.claim_next()
 
-    @patch("engine.remote_task_store.urlopen")
-    def test_heartbeat_and_finish_use_codespace_scoped_paths(self, open_url):
+    @patch("engine.remote_task_store.build_opener")
+    def test_heartbeat_and_finish_use_codespace_scoped_paths(self, build):
         store = CodespaceTaskStore("https://engine.example", "codespace-token")
-        open_url.return_value = FakeResponse({"lease_expires_at": "2999-01-01T00:00:00Z"})
+        build.return_value.open.side_effect = [
+            FakeResponse({"lease_expires_at": "2999-01-01T00:00:00Z"}),
         store.heartbeat("11111111-1111-4111-8111-111111111111", "lease-1")
-        self.assertEqual(open_url.call_args.args[0].full_url,
+        self.assertEqual(build.return_value.open.call_args_list[0].args[0].full_url,
                          "https://engine.example/v1/codespace/tasks/11111111-1111-4111-8111-111111111111/heartbeat")
-        open_url.return_value = FakeResponse({"ok": True, "status": "succeeded"})
+        
         store.finish("11111111-1111-4111-8111-111111111111", "succeeded", {"external_writes": 0}, lease_token="lease-1")
-        self.assertEqual(open_url.call_args.args[0].full_url,
+        self.assertEqual(build.return_value.open.call_args_list[1].args[0].full_url,
                          "https://engine.example/v1/codespace/tasks/11111111-1111-4111-8111-111111111111/finish")
-        payload = json.loads(open_url.call_args.args[0].data)
+        payload = json.loads(build.return_value.open.call_args_list[1].args[0].data)
         self.assertEqual(payload["lease_token"], "lease-1")
+        ]
 
 
 if __name__ == "__main__":
