@@ -49,3 +49,9 @@
 - [x] Review exact diff: numeric scoring and academic priority are unchanged; no external side effects were introduced.
 - [x] Open PR #275; exact-head validation passed on implementation head cd36663a2f2d542b2d9e6e5a1fa3ecc524fd64f4. Final documentation commit will receive its own exact-head CI.
 
+
+## Final Review
+
+- Final review: self-review (no subagent tool available).
+- Strengths: isolated priority gates, stable numeric relevance score, strict type handling for stars and license metadata, deterministic regression coverage, no side effects.
+- Findings: no critical or important issues found in the changed scope. High priority remains a manual-review signal, not legal or security approval.
