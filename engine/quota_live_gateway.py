@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import math
 import os
+import uuid
 
 from engine.live_adapters import LiveAdapterError
 from engine.model_gateway import BudgetExceeded, ProviderUnavailable, UsageLedger
@@ -57,6 +58,16 @@ class QuotaAwareLiveGateway:
             raise ValueError("prompt is required")
         if not isinstance(request.task_id, str) or not request.task_id.strip():
             raise ProviderUnavailable("A task ID is required for per-task quota enforcement.")
+        if not isinstance(request.request_id, str) or not request.request_id.strip():
+            raise ProviderUnavailable(
+                "A stable request_id is required; persist it with the task step before inference."
+            )
+        try:
+            request_uuid = uuid.UUID(request.request_id)
+        except (ValueError, TypeError, AttributeError):
+            raise ProviderUnavailable("request_id must be a valid UUID.") from None
+        if str(request_uuid) != request.request_id.lower():
+            raise ProviderUnavailable("request_id must use canonical UUID form.")
         if not 1 <= request.max_output_tokens <= 4096:
             raise ValueError("max_output_tokens must be between 1 and 4096")
 
@@ -93,12 +104,21 @@ class QuotaAwareLiveGateway:
                 estimated_input_tokens * input_price
                 + request.max_output_tokens * output_price
             ) / 1_000_000
+            # Route-scoped deterministic identities make a retry of the same
+            # logical request return the original D1 reservation even if the first
+            # HTTP response was lost after commit. A different route gets a distinct
+            # reservation if an explicit HTTP 429 permits safe route rotation.
+            identity_scope = f"raawaa-engine:{request.request_id}:{profile.route_id}"
+            idempotency_key = str(uuid.uuid5(uuid.NAMESPACE_URL, identity_scope + ":idem"))
+            reservation_id = str(uuid.uuid5(uuid.NAMESPACE_URL, identity_scope + ":reservation"))
             try:
                 monetary_reservation_id = self.usage_ledger.reserve(
                     profile.provider, profile.model, request.task_kind,
                     estimated_cost_usd, self.daily_budget_usd, self.monthly_budget_usd,
                     task_id=request.task_id,
                     per_task_budget_usd=self.per_task_budget_usd,
+                    idempotency_key=idempotency_key,
+                    reservation_id=reservation_id,
                 )
             except BudgetExceeded as exc:
                 last_error = exc
