@@ -166,6 +166,7 @@ class MobileStatusProbeTests(unittest.TestCase):
         self.assertEqual(result["http"], "404")
         self.assertEqual(result["paper_ledger"], "route_not_deployed")
         self.assertEqual(result["last_scan"], "route_not_deployed")
+        self.assertEqual(result["worker_cron_status"], "route_not_deployed")
         self.assertEqual(result["tasks_pending"], "unknown")
 
     def test_non_404_http_errors_still_fail_closed(self):
