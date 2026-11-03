@@ -520,6 +520,9 @@ try {
   assert.equal(status.payload.monetary_ledger.ambiguous_count, 1);
   assert.equal(status.payload.monetary_ledger.daily_spent_usd, 0.25);
   assert.equal(status.payload.model_costs_usd.total, 0.25);
+  assert.deepEqual(Object.keys(status.payload.provider_usage).sort(), ["requests", "tokens"]);
+  assert.equal("by_provider" in status.payload.model_costs_usd, false);
+  assert.equal("unresolved" in status.payload.monetary_ledger, false);
 
   const webhookDisabled = await api("/v1/telegram/webhook", {
     method: "POST",
