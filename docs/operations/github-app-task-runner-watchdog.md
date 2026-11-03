@@ -41,6 +41,12 @@ The Worker requests an installation token narrowed again to repository ID 144135
 
 No GitHub Actions secret is required for this integration. No D1 migration is required.
 
+## Production deployment status — 2026-11-03
+
+The watchdog code was deployed to the production Worker at 01:25 UTC from main SHA `4800d2aa3fb9dcd31c7dd0aaffe2e4d1b1b5638e` (Worker version `546a233f-5d93-4328-b71f-f3afed990b4c`). Deployment workflow [#41559599177](https://github.com/ghith93/raawaa-autonomous-engine/actions/runs/41559599177) completed successfully, and the public health endpoint returned `{"ok":true}`.
+
+This verifies deployment and Worker health only. No watchdog-triggered `workflow_dispatch` Task Runner run has yet been observed. The GitHub connector cannot inspect Cloudflare Worker secret values, so the presence of `GITHUB_APP_ID`, `GITHUB_APP_INSTALLATION_ID`, and `GITHUB_APP_PRIVATE_KEY` is not independently confirmed. Do not treat the fallback as active until a real dispatch event and completed bounded Task Runner batch are verified.
+
 ## Verify activation
 
 1. Wait for the next watchdog Cron event (the watchdog runs at minutes 1, 6, 11, 16, 21, 26, 31, 36, 41, 46, 51, and 56 UTC, two minutes after the primary Task Runner schedule).
