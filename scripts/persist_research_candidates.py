@@ -36,6 +36,20 @@ def load_candidates(snapshot: dict) -> list[dict]:
         if key not in seen:
             seen.add(key)
             candidates.append({**item, "source": "crossref"})
+    for item in snapshot.get("arxiv_candidates", []):
+        if not isinstance(item, dict) or not isinstance(item.get("arxiv_id"), str):
+            continue
+        key = "arxiv:" + item["arxiv_id"].lower()
+        if key not in seen:
+            seen.add(key)
+            candidates.append({**item, "source": "arxiv"})
+    for item in snapshot.get("searxng_candidates", []):
+        if not isinstance(item, dict) or not isinstance(item.get("url"), str):
+            continue
+        key = "searxng:" + item["url"][:900]
+        if key not in seen:
+            seen.add(key)
+            candidates.append({**item, "source": "searxng"})
     return candidates
 
 
@@ -141,11 +155,16 @@ def persist_candidates(snapshot: dict, environ=None, request_fn=None, batch_size
     if not isinstance(rows, list):
         raise ResearchPersistenceError("research readback endpoint returned an invalid candidate list")
     found = {row.get("source_key") for row in rows if isinstance(row, dict)}
-    expected = {
-        ("github:" + item["full_name"].lower()) if item["source"] == "github"
-        else ("crossref:" + item["doi"].lower())
-        for item in candidates
-    }
+    expected = set()
+    for item in candidates:
+        if item["source"] == "github":
+            expected.add("github:" + item["full_name"].lower())
+        elif item["source"] == "crossref":
+            expected.add("crossref:" + item["doi"].lower())
+        elif item["source"] == "arxiv":
+            expected.add("arxiv:" + item["arxiv_id"].lower())
+        elif item["source"] == "searxng":
+            expected.add("searxng:" + item["url"][:900])
     if expected - found:
         raise ResearchPersistenceError("research D1 readback did not confirm every submitted candidate")
     return {"discovered": len(candidates), "persisted": persisted, "verified": len(expected), "batches": batches, "sources": sources}
