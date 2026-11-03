@@ -20,8 +20,9 @@ function envWith(db = dbMock()) {
   };
 }
 
-function dbMock() {
+function dbMock({ recentIntent = false, failOutcome = false } = {}) {
   const calls = [];
+  let intentCreated = recentIntent;
   return {
     calls,
     prepare(sql) {
@@ -29,8 +30,16 @@ function dbMock() {
         sql,
         values: [],
         bind(...values) { this.values = values; return this; },
+        async first() {
+          calls.push({ kind: "first", sql, values: this.values });
+          return intentCreated ? { recent: 1 } : null;
+        },
         async run() {
-          calls.push({ sql, values: this.values });
+          calls.push({ kind: "run", sql, values: this.values });
+          if (this.values[0] === "task_runner_dispatch_intent") intentCreated = true;
+          if (failOutcome && this.values[0] === "task_runner_dispatch_requested") {
+            throw new Error("PRIVATE_DATABASE_DETAIL");
+          }
           return { success: true, meta: { changes: 1 } };
         },
       };
@@ -121,7 +130,7 @@ test("a recent schedule run suppresses watchdog dispatch", async () => {
   const result = await module.dispatchTaskRunnerIfStale({
     env: envWith(), fetchImpl, nowMs: NOW,
   });
-  assert.deepEqual(result, { status: "skipped", reason: "recent_schedule" });
+  assert.deepEqual(result, { status: "skipped", reason: "recent_task_runner_run" });
   assert.equal(calls.length, 2);
 });
 
@@ -141,9 +150,10 @@ test("an absent or stale schedule dispatches only the fixed Task Runner workflow
   assert.equal(calls[2].url, "https://api.github.com/repos/ghith93/raawaa-autonomous-engine/actions/workflows/task-runner.yml/dispatches");
   assert.equal(calls[2].options.method, "POST");
   assert.deepEqual(JSON.parse(calls[2].options.body), { ref: "main" });
-  assert.equal(DB.calls.length, 1);
-  assert.equal(DB.calls[0].values[0], "task_runner_dispatch_requested");
-  const audit = JSON.parse(DB.calls[0].values[1]);
+  assert.equal(DB.calls.filter(call => call.kind === "run").length, 2);
+  assert.equal(DB.calls[0].values[0], "task_runner_dispatch_intent");
+  assert.equal(DB.calls[1].values[0], "task_runner_dispatch_requested");
+  const audit = JSON.parse(DB.calls[1].values[1]);
   assert.deepEqual(audit, {
     workflow: "task-runner.yml",
     ref: "main",
@@ -153,7 +163,68 @@ test("an absent or stale schedule dispatches only the fixed Task Runner workflow
   assert.equal(JSON.stringify(audit).includes("ghs_short_lived_test_token"), false);
 });
 
-test("no previous schedule also triggers the fixed workflow dispatch", async () => {
+test("a recent completed workflow_dispatch run suppresses another dispatch", async () => {
+  const module = await loadModule();
+  assert.ok(module, "Task Runner watchdog module must exist");
+  const { fetchImpl, calls } = makeFetch({
+    runs: [{ event: "workflow_dispatch", status: "completed", created_at: new Date(NOW - 2 * 60_000).toISOString() }],
+  });
+  const result = await module.dispatchTaskRunnerIfStale({
+    env: envWith(), fetchImpl, nowMs: NOW,
+  });
+  assert.deepEqual(result, { status: "skipped", reason: "recent_task_runner_run" });
+  assert.equal(calls.some(call => call.url.endsWith("/dispatches")), false);
+});
+
+test("a recent push-triggered Task Runner run also suppresses fallback dispatch", async () => {
+  const module = await loadModule();
+  assert.ok(module, "Task Runner watchdog module must exist");
+  const { fetchImpl, calls } = makeFetch({
+    runs: [{ event: "push", status: "completed", created_at: new Date(NOW - 2 * 60_000).toISOString() }],
+  });
+  const result = await module.dispatchTaskRunnerIfStale({
+    env: envWith(), fetchImpl, nowMs: NOW,
+  });
+  assert.deepEqual(result, { status: "skipped", reason: "recent_task_runner_run" });
+  assert.equal(calls.some(call => call.url.endsWith("/dispatches")), false);
+});
+
+test("a recent durable dispatch intent suppresses network calls", async () => {
+  const module = await loadModule();
+  assert.ok(module, "Task Runner watchdog module must exist");
+  let calls = 0;
+  const result = await module.dispatchTaskRunnerIfStale({
+    env: envWith(dbMock({ recentIntent: true })),
+    fetchImpl: async () => { calls += 1; throw new Error("network must not run"); },
+    nowMs: NOW,
+  });
+  assert.deepEqual(result, { status: "skipped", reason: "recent_dispatch_intent" });
+  assert.equal(calls, 0);
+});
+
+test("an audit failure after accepted dispatch leaves a dedupe intent for the next tick", async () => {
+  const module = await loadModule();
+  assert.ok(module, "Task Runner watchdog module must exist");
+  const DB = dbMock({ failOutcome: true });
+  const first = makeFetch({ runs: [], dispatchStatus: 204 });
+  await assert.rejects(
+    () => module.dispatchTaskRunnerIfStale({ env: envWith(DB), fetchImpl: first.fetchImpl, nowMs: NOW }),
+    error => {
+      assert.match(error.message, /task_runner_dispatch_audit_failed/);
+      assert.equal(error.message.includes("PRIVATE_DATABASE_DETAIL"), false);
+      return true;
+    },
+  );
+  assert.equal(DB.calls[1].values[0], "task_runner_dispatch_intent");
+  const second = makeFetch({ runs: [] });
+  const result = await module.dispatchTaskRunnerIfStale({
+    env: envWith(DB), fetchImpl: second.fetchImpl, nowMs: NOW + 5 * 60_000,
+  });
+  assert.deepEqual(result, { status: "skipped", reason: "recent_dispatch_intent" });
+  assert.equal(second.calls.length, 0);
+});
+
+test("no previous schedule also triggers the fixed workflow dispatch", async () =>
   const module = await loadModule();
   assert.ok(module, "Task Runner watchdog module must exist");
   const { fetchImpl, calls } = makeFetch({ runs: [], dispatchStatus: 200 });
@@ -182,14 +253,7 @@ test("malformed workflow-run JSON fails closed", async () => {
 test("accepted dispatch is not reported successful when its audit write fails", async () => {
   const module = await loadModule();
   assert.ok(module, "Task Runner watchdog module must exist");
-  const DB = {
-    prepare() {
-      return {
-        bind() { return this; },
-        async run() { throw new Error("PRIVATE_DATABASE_DETAIL"); },
-      };
-    },
-  };
+  const DB = dbMock({ failOutcome: true });
   const { fetchImpl } = makeFetch({ runs: [], dispatchStatus: 204 });
   await assert.rejects(
     () => module.dispatchTaskRunnerIfStale({ env: envWith(DB), fetchImpl, nowMs: NOW }),
