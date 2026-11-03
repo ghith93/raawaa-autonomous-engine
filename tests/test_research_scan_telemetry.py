@@ -23,9 +23,14 @@ def env(**changes):
 def snapshot(**changes):
     value = {
         "requests_made": 6, "academic_requests_made": 1,
+        "arxiv_requests_made": 1, "searxng_requests_made": 0,
+        "searxng_endpoint_configured": False,
         "candidates": [{"full_name": "org/project"}],
         "academic_candidates": [{"doi": "10.1234/test"}],
+        "arxiv_candidates": [{"arxiv_id": "2611.00001"}],
+        "searxng_candidates": [],
         "unavailable": {}, "academic_unavailable": None,
+        "arxiv_unavailable": None, "searxng_unavailable": "endpoint_not_configured",
     }
     value.update(changes)
     return value
@@ -66,13 +71,15 @@ class FakeD1:
         return [{"meta":{"changes":1}} for _ in statements]
 
 class ResearchScanTelemetryTests(unittest.TestCase):
-    def test_builds_successful_explicit_scan_and_two_source_observations(self):
+    def test_builds_successful_multi_source_scan_and_four_source_observations(self):
         payload = build_payload(snapshot(), env(), datetime(2026,11,3,12,5,tzinfo=timezone.utc))
         self.assertEqual(payload["scan"]["status"], "success")
         self.assertEqual(payload["scan"]["scan_id"], "123:1")
-        self.assertEqual({x["source"] for x in payload["source_observations"]}, {"github","crossref"})
-        self.assertTrue(all(x["status"] == "fresh" for x in payload["source_observations"]))
+        self.assertEqual({x["source"] for x in payload["source_observations"]}, {"github","crossref","arxiv","searxng"})
+        statuses = {x["source"]: x["status"] for x in payload["source_observations"]}
+        self.assertEqual(statuses, {"github": "fresh", "crossref": "fresh", "arxiv": "fresh", "searxng": "not_configured"})
         self.assertEqual(payload["source_observations"][0]["freshness_hours"], 24)
+        self.assertEqual(payload["scan"]["total_candidate_count"], 3)
 
     def test_marks_partial_when_one_source_is_unavailable_without_exposing_raw_error(self):
         payload = build_payload(snapshot(academic_unavailable="Crossref returned HTTP 429 with secret-body"),
@@ -84,9 +91,22 @@ class ResearchScanTelemetryTests(unittest.TestCase):
         self.assertNotIn("secret-body", json.dumps(payload))
 
     def test_marks_failure_when_both_sources_unavailable(self):
-        payload = build_payload(snapshot(unavailable={"q":"HTTP 403"},academic_unavailable="HTTP 503"),
+        payload = build_payload(snapshot(unavailable={"q":"HTTP 403"},academic_unavailable="HTTP 503",arxiv_unavailable="HTTP 429"),
                                 env(), datetime(2026,11,3,12,5,tzinfo=timezone.utc))
         self.assertEqual(payload["scan"]["status"], "failure")
+
+    def test_configured_searxng_failure_is_partial_but_unconfigured_is_not_failure(self):
+        configured = snapshot(
+            searxng_endpoint_configured=True,
+            searxng_requests_made=1,
+            searxng_unavailable="SearXNG returned HTTP 403",
+        )
+        payload = build_payload(configured, env(), datetime(2026,11,3,12,5,tzinfo=timezone.utc))
+        self.assertEqual(payload["scan"]["status"], "partial")
+        item = next(x for x in payload["source_observations"] if x["source"] == "searxng")
+        self.assertEqual(item["status"], "unavailable")
+        self.assertEqual(item["reason_code"], "http_403")
+
 
     def test_rejects_missing_workflow_identity_or_naive_timestamp(self):
         for changes in ({"GITHUB_WORKFLOW":"other"}, {"GITHUB_SHA":"bad"},
@@ -97,7 +117,7 @@ class ResearchScanTelemetryTests(unittest.TestCase):
     def test_builds_idempotent_parameterized_staging_audit_statements(self):
         payload = build_payload(snapshot(), env(), datetime(2026,11,3,12,5,tzinfo=timezone.utc))
         statements = build_statements(payload)
-        self.assertEqual(len(statements),3)
+        self.assertEqual(len(statements),5)
         self.assertTrue(all("NOT EXISTS" in item["sql"] for item in statements))
         self.assertNotIn("synthetic-staging-token", json.dumps(statements))
         self.assertEqual(statements[0]["params"][2],"123:1")
@@ -113,12 +133,12 @@ class ResearchScanTelemetryTests(unittest.TestCase):
         finally:
             temp.cleanup()
         self.assertEqual(result["database_id"],"231dd948-04a0-49e3-ad73-444f77d69477")
-        self.assertEqual(result["verified_events"],3)
-        self.assertEqual(result["inserted_events"],3)
+        self.assertEqual(result["verified_events"],5)
+        self.assertEqual(result["inserted_events"],5)
         self.assertEqual(len(clients),1)
         self.assertEqual(clients[0].kwargs["database_id"],"231dd948-04a0-49e3-ad73-444f77d69477")
         self.assertEqual(clients[0].calls[1][0],"batch")
-        self.assertEqual(len(clients[0].calls[1][1]),3)
+        self.assertEqual(len(clients[0].calls[1][1]),5)
 
     def test_refuses_production_database_identity_before_client_creation(self):
         payload=build_payload(snapshot(),env(),datetime(2026,11,3,12,5,tzinfo=timezone.utc))
