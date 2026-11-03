@@ -11,8 +11,40 @@ function uuid(value) {
   return typeof value === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
 }
 async function readBody(request) {
-  const raw = await request.text();
-  if (new TextEncoder().encode(raw).byteLength > 8192) throw new Error("body_too_large");
+  const limit = 8192;
+  const declaredLength = request.headers.get("content-length");
+  if (declaredLength !== null) {
+    const parsedLength = Number(declaredLength);
+    if (Number.isFinite(parsedLength) && parsedLength > limit) {
+      try { await request.body?.cancel("body_too_large"); } catch { /* stream may already be closed */ }
+      throw new Error("body_too_large");
+    }
+  }
+  if (!request.body) throw new Error("invalid_json");
+  const reader = request.body.getReader();
+  const chunks = [];
+  let total = 0;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      total += value.byteLength;
+      if (total > limit) {
+        try { await reader.cancel("body_too_large"); } catch { /* cancellation is best effort */ }
+        throw new Error("body_too_large");
+      }
+      chunks.push(value);
+    }
+  } finally {
+    reader.releaseLock();
+  }
+  const bytes = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  const raw = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
   try { return JSON.parse(raw); } catch { throw new Error("invalid_json"); }
 }
 function sameReservation(row, input) {
