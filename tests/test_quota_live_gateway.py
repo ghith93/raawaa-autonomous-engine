@@ -249,7 +249,7 @@ class QuotaAwareGatewayTests(unittest.TestCase):
             "research", "hello world", 20, task_id="task-1",
             step_key="research:primary", lease_token="lease-1",
         )
-        with self.assertRaisesRegex(ProviderUnavailable, "route rotation was stopped"):
+        with self.assertRaisesRegex(ProviderUnavailable, "route rotation stopped"):
             gateway.generate(request)
         self.assertEqual(timed_out.calls, 1)
         self.assertEqual(backup.calls, 0)
