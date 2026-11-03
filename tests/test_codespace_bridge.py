@@ -4,6 +4,7 @@ from unittest.mock import patch
 
 from engine.codespace_bridge import execute_task, run_once, TEST_COMMANDS
 from engine.remote_task_store import RemoteTaskStoreError
+from engine.operating_policy import OperatingPolicyError
 
 
 class FakeCompleted:
@@ -30,7 +31,7 @@ class FakeStore:
 class CodespaceBridgeTests(unittest.TestCase):
     def test_only_fixed_test_commands_are_available(self):
         self.assertEqual(set(TEST_COMMANDS), {
-            "python_tests", "worker_tests", "workflow_tests", "d1_local_tests"
+            "python_tests", "worker_tests", "workflow_tests"
         })
         result = execute_task({
             "task_type": "codespace_test",
@@ -72,6 +73,8 @@ class CodespaceBridgeTests(unittest.TestCase):
         self.assertFalse(seen["shell"])
         self.assertEqual(seen["command"], TEST_COMMANDS["worker_tests"])
         self.assertEqual(seen["timeout"], 240)
+        self.assertEqual(set(seen["env"]), {"PATH", "HOME", "USERPROFILE", "CI", "LANG", "PYTHONDONTWRITEBYTECODE"})
+        self.assertNotIn("RAAWAA_ENGINE_API_TOKEN", seen["env"])
 
     def test_timeout_is_reported_as_failure(self):
         import subprocess
@@ -87,7 +90,7 @@ class CodespaceBridgeTests(unittest.TestCase):
     def test_policy_load_failure_prevents_any_task_claim(self):
         store = FakeStore({"id": "x", "lease_token": "l", "task_type": "codespace_test",
                            "payload_json": '{"operation":"python_tests"}'})
-        with patch("engine.codespace_bridge.load_operating_policy", side_effect=Exception("blocked")):
+        with patch("engine.codespace_bridge.load_operating_policy", side_effect=OperatingPolicyError("blocked")):
             result = run_once(store)
         self.assertEqual(result["reason"], "operating_policy_unavailable")
         self.assertEqual(store.calls, [])
@@ -106,6 +109,42 @@ class CodespaceBridgeTests(unittest.TestCase):
         self.assertEqual(finish[0:3], ("finish", "task-1", "succeeded"))
         self.assertEqual(finish[3]["policy_fingerprints"], {"AGENTS.md": "abc"})
         self.assertEqual(finish[3]["external_writes"], 0)
+
+
+    def test_inspection_uses_only_fixed_git_commands(self):
+        calls = []
+        def runner(command, **kwargs):
+            calls.append(command)
+            return FakeCompleted(0, "abc123\\n" if command[-1] == "HEAD" else "## main\\n")
+        result = execute_task({
+            "task_type": "codespace_inspect",
+            "payload_json": '{"operation":"inspect"}',
+        }, runner=runner)
+        self.assertEqual(result["status"], "succeeded")
+        self.assertEqual(calls, [["git", "rev-parse", "HEAD"], ["git", "status", "--short", "--branch"]])
+        self.assertTrue(result["working_tree_clean"])
+
+    def test_output_is_bounded(self):
+        result = execute_task({
+            "task_type": "codespace_test",
+            "payload_json": '{"operation":"worker_tests"}',
+        }, runner=lambda *a, **k: FakeCompleted(1, "x" * 12000))
+        self.assertLessEqual(len(result["stdout"]), 8020)
+        self.assertIn("output truncated", result["stdout"])
+
+    def test_execution_exception_is_finished_as_blocked(self):
+        task = {"id": "task-2", "lease_token": "lease-2", "task_type": "codespace_test",
+                "payload_json": '{"operation":"python_tests"}'}
+        store = FakeStore(task)
+        policy = {"documents_loaded": [], "fingerprints": {}}
+        def broken_runner(*args, **kwargs):
+            raise OSError("do not expose exception details")
+        with patch("engine.codespace_bridge.load_operating_policy", return_value=policy):
+            result = run_once(store, runner=broken_runner)
+        self.assertEqual(result["status"], "blocked")
+        finish = [call for call in store.calls if isinstance(call, tuple) and call[0] == "finish"][0]
+        self.assertEqual(finish[2], "blocked")
+        self.assertIn("bridge_execution_failed:OSError", finish[3]["reason"])
 
     def test_lease_loss_never_writes_completion(self):
         class LostStore(FakeStore):
