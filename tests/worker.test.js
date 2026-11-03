@@ -956,3 +956,10 @@ test("Codespace token must differ from shared API and quota-admin tokens", async
   });
   assert.equal(response.status, 401);
 });
+
+test("Codespace principal has no retry route", async () => {
+  const response = await worker.fetch(request("/v1/codespace/tasks/task-code/retry", {
+    method: "POST", token: "separate-codespace-token", body: { lease_token: "lease-1" },
+  }), { DB: dbMock(), ENGINE_API_TOKEN: TOKEN, ENGINE_CODESPACE_TOKEN: "separate-codespace-token" });
+  assert.equal(response.status, 404);
+});
