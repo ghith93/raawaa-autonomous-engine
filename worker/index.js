@@ -208,7 +208,7 @@ export default {
     if (url.pathname !== "/v1/tasks" && url.pathname !== "/v1/tasks/enqueue" &&
         url.pathname !== "/v1/tasks/claim" && url.pathname !== "/v1/codespace/status" &&
         url.pathname !== "/v1/codespace/tasks/claim" &&
-        !/^\/v1\/codespace\/tasks\/[A-Za-z0-9-]+\/(heartbeat|finish|retry)$/.test(url.pathname) &&
+        !/^\/v1\/codespace\/tasks\/[A-Za-z0-9-]+\/(heartbeat|finish)$/.test(url.pathname) &&
         url.pathname !== "/v1/tasks/recover" &&
         url.pathname !== "/v1/diagnostics/auth" &&
         url.pathname !== "/v1/research/candidates" &&
@@ -218,12 +218,12 @@ export default {
         url.pathname !== "/v1/mobile/status" &&
         !/^\/v1\/tasks\/[A-Za-z0-9-]+\/invocations$/.test(url.pathname) &&
         url.pathname !== "/v1/research/candidates/review" &&
-        !/^\/v1\/tasks\/[A-Za-z0-9-]+\/(heartbeat|finish|retry)$/.test(url.pathname)) {
+        !/^\/v1\/tasks\/[A-Za-z0-9-]+\/(heartbeat|finish)$/.test(url.pathname)) {
       return json({ error: "not_found" }, 404);
     }
     const codespaceClaimRoute = url.pathname === "/v1/codespace/tasks/claim";
     const codespaceStatusRoute = url.pathname === "/v1/codespace/status";
-    const codespaceActionRoute = /^\/v1\/codespace\/tasks\/[A-Za-z0-9-]+\/(heartbeat|finish|retry)$/.test(url.pathname);
+    const codespaceActionRoute = /^\/v1\/codespace\/tasks\/[A-Za-z0-9-]+\/(heartbeat|finish)$/.test(url.pathname);
     const codespaceRoute = codespaceClaimRoute || codespaceStatusRoute || codespaceActionRoute;
     const codespaceAuthorized = Boolean(env.ENGINE_CODESPACE_TOKEN) &&
       env.ENGINE_CODESPACE_TOKEN !== env.ENGINE_API_TOKEN &&
@@ -319,8 +319,8 @@ export default {
       }
     }
 
-    const taskAction = url.pathname.match(/^\/v1\/tasks\/([A-Za-z0-9-]+)\/(heartbeat|finish|retry)$/);
-    const codespaceTaskAction = url.pathname.match(/^\/v1\/codespace\/tasks\/([A-Za-z0-9-]+)\/(heartbeat|finish|retry)$/);
+    const taskAction = url.pathname.match(/^\/v1\/tasks\/([A-Za-z0-9-]+)\/(heartbeat|finish)$/);
+    const codespaceTaskAction = url.pathname.match(/^\/v1\/codespace\/tasks\/([A-Za-z0-9-]+)\/(heartbeat|finish)$/);
     if (request.method === "POST" && (taskAction || codespaceTaskAction)) {
       const codespaceAction = Boolean(codespaceTaskAction);
       const [, taskId, action] = codespaceAction ? codespaceTaskAction : taskAction;
