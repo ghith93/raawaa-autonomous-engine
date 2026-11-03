@@ -25,7 +25,6 @@ BASE_BLOCKED_KEY_FRAGMENTS = (
     "composition", "proprietary", "orderdata", "email", "phone", "address",
     "username", "contact", "birthdate", "dateofbirth", "ipaddress",
 )
-KNOWN_TASK_TYPES = {"research_brief", "code_review", "content_draft", "system_audit"}
 SUPPORTED_PAYLOAD_KEYS = {"data_classification", "topic", "questions", "source_urls"}
 REQUIRED_PAYLOAD_KEYS = {"data_classification", "topic"}
 
@@ -67,8 +66,7 @@ def validate_live_payload(
             or not isinstance(allowed, list) or not allowed
             or any(not isinstance(item, str) for item in allowed)
             or {item.lower() for item in allowed} != {"public"}
-            or not isinstance(allowed_task_types, list) or not allowed_task_types
-            or any(not isinstance(item, str) or item not in KNOWN_TASK_TYPES for item in allowed_task_types)
+            or allowed_task_types != ["research_brief"]
             or not isinstance(allowed_payload_keys, list) or not allowed_payload_keys
             or any(not isinstance(item, str) or item not in SUPPORTED_PAYLOAD_KEYS for item in allowed_payload_keys)
             or not REQUIRED_PAYLOAD_KEYS.issubset(set(allowed_payload_keys))
