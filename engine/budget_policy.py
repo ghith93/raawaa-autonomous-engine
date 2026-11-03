@@ -11,12 +11,19 @@ from typing import Any
 
 
 def _finite_nonnegative(value: Any) -> bool:
-    return type(value) in (int, float) and math.isfinite(value) and value >= 0
+    if type(value) not in (int, float) or value < 0:
+        return False
+    try:
+        return math.isfinite(value)
+    except OverflowError:
+        return False
 
 
 def validate_budget_policy(policy: dict[str, Any]) -> list[str]:
     """Return policy violations; callers must fail closed when this is non-empty."""
     errors: list[str] = []
+    if not isinstance(policy, dict):
+        return ["policy must be an object"]
     envelope = policy.get("budget_envelope")
     model = policy.get("model_policy")
     if not isinstance(envelope, dict) or not isinstance(model, dict):
@@ -62,7 +69,7 @@ def validate_budget_policy(policy: dict[str, Any]) -> list[str]:
         errors.append("daily_budget_usd must equal the daily model cap and not exceed the monthly model cap")
     if policy["per_task_budget_usd"] != task or task > daily:
         errors.append("per_task_budget_usd must equal the per-task cap and not exceed the daily model cap")
-    if model["strategy"] != "hybrid":
+    if model.get("strategy") != "hybrid":
         errors.append("model strategy must be hybrid")
     if model.get("prefer_free_first") is not True:
         errors.append("hybrid routing must prefer verified-free providers first")
