@@ -137,6 +137,18 @@ class QuotaAwareLiveGateway:
                 estimated_tokens=estimated_tokens,
             )
             try:
+                self.usage_ledger.mark_started(monetary_reservation_id)
+            except Exception as exc:
+                self._audit(
+                    "monetary_start_failed", request, profile,
+                    error_type=type(exc).__name__, reason="provider_not_called",
+                )
+                # The start response may have been lost. Leave the reservation counted;
+                # do not call the provider and do not attempt an unsafe release.
+                raise ProviderUnavailable(
+                    "Could not confirm durable monetary reservation start; provider was not called."
+                ) from exc
+            try:
                 response = adapter.generate(profile.model, request)
                 if response.provider != profile.provider or response.model != profile.model:
                     raise ValueError("adapter response route does not match reserved profile")
@@ -165,8 +177,9 @@ class QuotaAwareLiveGateway:
                 # reservation conservatively; request count is already consumed.
                 self.quota_manager.ledger.settle(reservation_id, estimated_tokens)
                 if exc.status_code == 429:
-                    # An explicit 429 rejects the request; no provider charge is expected.
-                    self.usage_ledger.release(monetary_reservation_id)
+                    # A 429 is after provider I/O began, so it is settled at zero rather
+                    # than released. Release is reserved strictly for pre-I/O failures.
+                    self.usage_ledger.settle(monetary_reservation_id, 0, 0, 0.0)
                     self.quota_manager.ledger.cool_down(
                         profile.route_id, self.cooldown_seconds, "http_429"
                     )
@@ -179,7 +192,8 @@ class QuotaAwareLiveGateway:
                     continue
                 # A timeout, transport failure, malformed response, 5xx, or
                 # non-429 HTTP error may follow provider-side processing. Never
-                # replay the same request against another route in this case.
+                # replay or release the reservation in this case.
+                self.usage_ledger.mark_ambiguous(monetary_reservation_id)
                 self._audit(
                     "provider_failure_stopped", request, profile,
                     reason="non_429_no_route_rotation",
@@ -193,6 +207,7 @@ class QuotaAwareLiveGateway:
                 # Unknown adapter failures have ambiguous remote execution status.
                 # Keep the reservation rather than making possibly-used quota reusable.
                 self.quota_manager.ledger.settle(reservation_id, estimated_tokens)
+                self.usage_ledger.mark_ambiguous(monetary_reservation_id)
                 self._audit(
                     "adapter_failure", request, profile,
                     error_type=type(exc).__name__, reason="ambiguous_adapter_failure",
