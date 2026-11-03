@@ -19,6 +19,7 @@ class TaskStoreTests(unittest.TestCase):
         first = self.store.enqueue("research_brief", "Market scan", idempotency_key="same")
         second = self.store.enqueue("research_brief", "Market scan duplicate", idempotency_key="same")
         self.assertEqual(first["id"], second["id"])
+        self.assertEqual(first["execution_mode"], "unknown")
         self.assertEqual(len(self.store.list_tasks()), 1)
 
     def test_worker_processes_safe_task_as_dry_run(self):
