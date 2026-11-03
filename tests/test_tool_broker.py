@@ -10,6 +10,12 @@ from engine.tool_broker import (
 )
 
 
+ROSTER = {"agents": [
+    {"id": "reviewer", "role": "quality_and_security", "enabled": True, "capabilities": ["review"]},
+    {"id": "marketer", "role": "marketing_and_content", "enabled": True, "capabilities": ["draft_content"]},
+]}
+
+
 MATRIX = {
     "schema_version": 1,
     "default_effect": "deny",
@@ -17,7 +23,7 @@ MATRIX = {
         "repository.read_file": {
             "access": "read",
             "action": "inspect_code",
-            "grants": [{"agent_role": "engineering", "task_types": ["code_review"]}],
+            "grants": [{"agent_role": "quality_and_security", "task_types": ["code_review"]}],
             "environments": ["local", "staging"],
         },
         "storefront.publish": {
@@ -33,8 +39,8 @@ MATRIX = {
 def request(**overrides):
     values = {
         "task_id": "task-1",
-        "agent_id": "engineer",
-        "agent_role": "engineering",
+        "agent_id": "reviewer",
+        "agent_role": "quality_and_security",
         "task_type": "code_review",
         "tool_name": "repository.read_file",
         "action": "inspect_code",
@@ -60,13 +66,15 @@ class ToolBrokerTests(unittest.TestCase):
             "storefront.publish": lambda req: self.calls.append(req) or "published",
         }
         self.broker = ToolBroker(
-            self.policy, MATRIX, self.adapters, audit_sink=self.events.append
+            self.policy, MATRIX, self.adapters, agent_roster=ROSTER, audit_sink=self.events.append
         )
 
     def test_permission_matrix_is_valid_and_deny_by_default(self):
         self.assertEqual(validate_permission_matrix(MATRIX), [])
         invalid = {**MATRIX, "default_effect": "allow"}
         self.assertTrue(validate_permission_matrix(invalid))
+        mismatched = {"agents": ROSTER["agents"][:1]}
+        self.assertTrue(validate_permission_matrix(MATRIX, mismatched))
 
     def test_authorized_read_executes_through_registered_adapter(self):
         result = self.broker.execute(request())
@@ -85,8 +93,8 @@ class ToolBrokerTests(unittest.TestCase):
 
     def test_role_task_action_and_environment_must_all_match(self):
         cases = [
-            ({"agent_role": "marketing_and_content"}, "role_task_not_authorized"),
-            ({"task_type": "system_audit"}, "role_task_not_authorized"),
+            ({"agent_role": "marketing_and_content"}, "agent_identity_not_authorized"),
+            ({"task_type": "system_audit"}, "task_agent_assignment_mismatch"),
             ({"action": "publish_content"}, "tool_action_mismatch"),
             ({"environment": "production"}, "environment_not_authorized"),
         ]
@@ -98,7 +106,7 @@ class ToolBrokerTests(unittest.TestCase):
 
     def test_unregistered_adapter_is_denied(self):
         broker = ToolBroker(
-            self.policy, MATRIX, {}, audit_sink=self.events.append
+            self.policy, MATRIX, {}, agent_roster=ROSTER, audit_sink=self.events.append
         )
         decision = broker.authorize(request())
         self.assertFalse(decision.allowed)
@@ -171,7 +179,7 @@ class ToolBrokerTests(unittest.TestCase):
         def broken_audit(_record):
             raise OSError("audit unavailable")
         broker = ToolBroker(
-            self.policy, MATRIX, self.adapters, audit_sink=broken_audit
+            self.policy, MATRIX, self.adapters, agent_roster=ROSTER, audit_sink=broken_audit
         )
         decision = broker.authorize(request())
         self.assertFalse(decision.allowed)
@@ -185,7 +193,7 @@ class ToolBrokerTests(unittest.TestCase):
             if count["value"] == 2:
                 raise OSError("audit unavailable")
         broker = ToolBroker(
-            self.policy, MATRIX, self.adapters, audit_sink=fail_after_authorization
+            self.policy, MATRIX, self.adapters, agent_roster=ROSTER, audit_sink=fail_after_authorization
         )
         with self.assertRaises(ToolBrokerAuditError):
             broker.execute(request())
