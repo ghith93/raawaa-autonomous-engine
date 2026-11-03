@@ -285,6 +285,9 @@ def _normalize_searxng_result(item: dict, retrieved_at: str) -> dict | None:
         return None
     try:
         parsed.port
+    except ValueError:
+        return None
+    try:
         ipaddress.ip_address(hostname)
     except ValueError:
         pass
