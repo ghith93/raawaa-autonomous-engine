@@ -8,8 +8,8 @@ The scheduled public discovery workflow records a separate `research_scan_comple
 - Scan metadata contains only timestamps, workflow identity, aggregate request/candidate counts, unavailable-query count, and success/partial/failure state.
 - Source observations are limited to GitHub public repository search and Crossref public works search. They contain observed time, request/item counts, a 24-hour freshness threshold, and a bounded reason code when unavailable.
 - Raw provider errors, response bodies, candidate titles, prompts, API tokens, and credentials are not copied into telemetry.
-- The authenticated `POST /v1/research/scan-runs` endpoint validates the workflow identity, timestamps, counters, source allowlist, and matching scan IDs. It is idempotent for the same scan ID and source.
-- The existing D1 `audit_log` is reused; no schema migration is required.
+- The publisher validates the workflow identity, timestamps, counters, source allowlist, and matching scan IDs before writing. Parameterized D1 statements use `NOT EXISTS` guards, making retries idempotent for the same scan ID and source.
+- The existing D1 `audit_log` is reused through the Cloudflare D1 REST client. The publisher hard-pins the Staging database ID, verifies it against `wrangler.staging.toml`, verifies that it differs from the production ID in `wrangler.toml`, then reads back the three events. No Worker API token or production Worker route is used, and no schema migration is required.
 - The mobile status endpoint reports only a validated latest scan and the two source observations belonging to that scan. Missing, malformed, future-dated, or old records remain unknown/stale rather than inferred from a scheduler heartbeat.
 - Candidate persistence remains separately gated. Recording scan telemetry does not enable candidate persistence, repository cloning, installation, execution, model calls, or external actions.
 
@@ -19,4 +19,4 @@ A source observation is fresh for up to 24 hours from its timezone-aware `observ
 
 ## Rollout
 
-The workflow publishes telemetry to the existing Engine Worker and D1. This change does not deploy a production Worker or modify the production database. The PR CI and Staging verification must pass before any deployment decision.
+The workflow publishes telemetry directly to the verified Staging D1 database. It does not call the production Worker or write to the production database. The PR CI and Staging verification must pass before any deployment decision.
