@@ -309,6 +309,64 @@ Crossref returned 10 records. Most were foundational or older multi-agent work w
 - [LittleGuys repository](https://github.com/herval/littleguys).
 - [Crossref public REST API](https://api.crossref.org/).
 
+
+## 11. Python agent runtimes and skill governance — reviewed 2026-11-03
+
+### Framework comparison against the current engine
+
+The current production architecture is deliberately framework-light: deterministic Python task contracts, D1 task/lease state, a bounded GitHub Actions consumer, policy enforcement, a quota-aware model gateway, and a separate Cloudflare Worker. The agent roster and workflow planner do not themselves execute model-driven agents. The Microsoft Agent Framework remains an isolated evaluation with zero provider requests; its checkpoint adapter is a test prototype, not production D1 storage.
+
+| Candidate | Verified current signal | Strength | Main cost / risk in this repository | Decision |
+|---|---|---|---|---|
+| [PydanticAI](https://github.com/pydantic/pydantic-ai) | v2.64.0 released 2026-10-30 | Typed Python agent contracts, structured outputs, provider flexibility, validation and evaluation ecosystem | Must integrate its model calls through the existing quota-aware gateway; otherwise it bypasses budgets, classification and the usage ledger. | **Best next isolated agent-loop candidate**, not a production dependency yet. |
+| [OpenAI Agents SDK](https://github.com/openai/openai-agents-python) | v0.24.0 released 2026-10-15 | Small primitives for agents, tools, handoffs, guardrails, sessions, MCP and built-in tracing | OpenAI-first operational path; direct SDK use could bypass the engine gateway. Trace content and tool outputs require redaction and retention review. | Keep as the alternate if first-party OpenAI orchestration is materially better in a measured task. |
+| [LangGraph](https://github.com/langchain-ai/langgraph) | 1.2.19 released 2026-10-30; SQLite checkpoint package 3.1.3 | Explicit state graph, checkpointing, interrupts and recovery for complex branching workflows | Overlaps the existing deterministic planner, D1 task ledger and Workflow spike; more concepts and state adapters to maintain. | Defer until graph complexity exceeds the current DAG planner and a benchmark demonstrates value. |
+| [Temporal Python SDK](https://github.com/temporalio/sdk-python) | 1.34.0 released 2026-09-30 | Mature event-history replay and durable orchestration across services | Requires a Temporal server/Cloud service and operational ownership; this is a second durable scheduler and may add recurring infrastructure cost. | Do not adopt for the current single bounded consumer. Revisit for multi-service long-running workflows. |
+| [Microsoft Agent Framework](https://github.com/microsoft/agent-framework) | Existing isolated evaluation pins core 1.24.0 and OpenAI 1.18.0 | Parallel workflow branches and checkpoint/resume prototype already tested in this repository | Durable storage is not implemented; its direct provider client can bypass the engine gateway. | Keep the current evaluation; do not expand production scope until a secure D1 adapter and gateway integration pass. |
+| [Cloudflare Agents SDK](https://developers.cloudflare.com/agents/) | Durable Object lifecycle with SQLite-backed state, alarms and fibers | Useful for addressable long-lived agent identities and event-driven sessions | TypeScript/DO runtime and another state store/scheduler would duplicate D1 + current Worker Cron and increase migration surface. | Defer; retain the existing Cloudflare Worker as the narrow control plane. |
+
+### Runtime decision
+
+Do not add a second orchestrator, task queue, scheduler, memory database, or provider gateway. Keep the existing D1 task ledger and Python consumer as the canonical execution path. When the live-inference gate is explicitly enabled for a public-only research task, run a small isolated PydanticAI spike first, with a custom model adapter that calls only `QuotaAwareLiveGateway`. Compare it against the existing Microsoft Agent Framework evaluation and a direct minimal gateway loop.
+
+Acceptance criteria for any runtime experiment:
+1. All provider requests pass through the existing classification gate, atomic quota reservation, usage ledger, and kill switch.
+2. A fake provider proves the workflow without network calls; live calls remain disabled.
+3. Typed tool arguments and outputs are schema-validated and deny-by-default.
+4. Tool execution is separated from model decisions; external writes require operation-specific policy and approvals.
+5. Interrupt/resume, duplicate delivery, timeout, retry and idempotency are tested.
+6. Traces/logs exclude credentials, private task payloads and confidential business data.
+7. The experiment shows a measurable improvement over the current baseline before any production dependency is added.
+
+### Agent Skills open standard
+
+The [Agent Skills specification](https://agentskills.io/specification) defines a portable directory with a required `SKILL.md` containing YAML frontmatter (`name`, `description`) and optional scripts, references and assets. Optional `allowed-tools` metadata is experimental and support varies by agent implementation. It is a packaging/discovery convention, **not** a runtime authorization boundary or a sandbox.
+
+The repository currently has no local `skills/` runtime or skill loader. ChatGPT's connected environment exposes 248 skill definitions across 31 skill packs, but those definitions and connected-app credentials do not automatically exist inside the standalone Python engine. Do not copy third-party skills into the engine and execute them merely because they are available in ChatGPT.
+
+### Skill and tool supply-chain security baseline
+
+The [OWASP Agentic Skills Top 10](https://github.com/OWASP/www-project-agentic-skills-top-10) highlights risks including malicious skills, supply-chain compromise, excessive privileges, unsafe metadata, untrusted external instructions, weak isolation, update drift, poor scanning, missing governance and cross-platform reuse. Apply the following baseline before introducing an engine-local skill registry:
+
+- Inventory every skill with canonical source URL, immutable commit/version, licence, owner, review date and content hash.
+- Parse YAML with safe loaders; validate required fields and size/type limits before reading skill instructions.
+- Treat skill text, linked documents, repository READMEs, browser results and model outputs as untrusted data. They cannot override the trusted operating policy.
+- Do not fetch mutable remote instructions at runtime. Vendor or pin reviewed references to an immutable revision and rescan updates.
+- Never treat `allowed-tools` or prompt text as enforcement. Enforce tool permissions in the backend with per-operation allowlists and deny-by-default schemas.
+- Do not execute skill scripts by default. If a future skill needs scripts, run them in an isolated ephemeral environment with read-only source mounts, minimal network, no ambient credentials, CPU/time/output limits and auditable results.
+- Keep secrets outside skill folders and prompts. Inject short-lived, task-scoped credentials only into the one approved adapter that needs them.
+- Require independent review for skills that can access credentials, write repositories, deploy, message users, move money or modify customer data.
+- Record skill source, hash, version, invoking task, tool calls and sanitized result metadata in the audit trail.
+
+### Research sources checked
+
+- [PydanticAI releases](https://github.com/pydantic/pydantic-ai/releases) — v2.64.0 (2026-10-30).
+- [OpenAI Agents SDK releases](https://github.com/openai/openai-agents-python/releases) — v0.24.0 (2026-10-15).
+- [LangGraph releases](https://github.com/langchain-ai/langgraph/releases) — 1.2.19 (2026-10-30).
+- [Temporal Python SDK releases](https://github.com/temporalio/sdk-python/releases) — 1.34.0 (2026-09-30).
+- [Agent Skills specification](https://agentskills.io/specification) and [reference repository](https://github.com/agentskills/agentskills).
+- [OWASP Agentic Skills Top 10](https://github.com/OWASP/www-project-agentic-skills-top-10) and [OWASP AI Agent Security Cheat Sheet](https://cheatsheetseries.owasp.org/cheatsheets/AI_Agent_Security_Cheat_Sheet.html).
+
 ## Adoption rule
 
 No framework, agent, plugin, vector database or hosted provider is adopted because it is popular or feature-rich. It must solve a measured limitation, fit zero-spend or have a separately approved budget, preserve policy/quota enforcement, support bounded execution and auditability, have a maintained upstream and clear license, and pass isolated tests before production integration.
