@@ -134,5 +134,14 @@ class OrchestratorTests(unittest.TestCase):
             validate_and_plan(wf, ROSTER)
 
 
+    def test_mobile_test_is_rejected_until_a_real_worker_exists(self):
+        wf = {"id": "mobile", "steps": [
+            {"id": "device", "task_type": "mobile_test", "title": "Test device",
+             "acceptance_checks": ["Device test evidence is returned"]}
+        ]}
+        with self.assertRaisesRegex(WorkflowValidationError, "task type is not allowlisted"):
+            validate_and_plan(wf, ROSTER)
+
+
 if __name__ == "__main__":
     unittest.main()
