@@ -126,7 +126,7 @@ def _baseline(root: Path) -> dict[str, dict[str, Any]]:
     worker_files = _exists(root, "engine/agent_runtime.py") and _exists(root, "engine/task_store.py")
     bounded_remote_runner = (
         _exists(root, "engine/remote_task_store.py")
-        and _exists(root, ".github" / "workflows" / "task-runner.yml")
+        and _exists(root, ".github/workflows/task-runner.yml")
     )
     agent_note = str(agents.get("note", "")).lower()
 
