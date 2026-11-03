@@ -13,6 +13,10 @@ class GenerationRequest:
     # Stable UUID created and persisted by the task-step owner before first inference.
     # Reuse it only when replaying the same logical model call after an ambiguous result.
     request_id: str | None = None
+    # Durable D1 task-step identity; required when the live gateway uses TaskInvocationStore.
+    step_key: str | None = None
+    lease_token: str | None = None
+    invocation_id: str | None = None
 
 
 @dataclass(frozen=True)

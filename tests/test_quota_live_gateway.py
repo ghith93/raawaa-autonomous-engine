@@ -24,6 +24,33 @@ class FakeAdapter:
         return GenerationResponse(self.provider, model, "ok", 5, 7, self.cost_usd, mocked=False)
 
 
+class FakeInvocationStore:
+    def __init__(self):
+        self.calls = []
+        self.prepared = {
+            "invocation_id": "00000000-0000-4000-8000-000000000099",
+            "request_id": "00000000-0000-4000-8000-000000000098",
+            "step_key": "research:primary",
+            "status": "prepared",
+        }
+
+    def prepare(self, task_id, lease_token, step_key, task_kind):
+        self.calls.append(("prepare", task_id, lease_token, step_key, task_kind))
+        return dict(self.prepared)
+
+    def start(self, task_id, lease_token, invocation_id, route_id):
+        self.calls.append(("start", task_id, lease_token, invocation_id, route_id))
+
+    def reject(self, task_id, lease_token, invocation_id, route_id, rejection_code):
+        self.calls.append(("reject", task_id, lease_token, invocation_id, route_id, rejection_code))
+
+    def mark_ambiguous(self, task_id, lease_token, invocation_id):
+        self.calls.append(("ambiguous", task_id, lease_token, invocation_id))
+
+    def settle(self, task_id, lease_token, invocation_id):
+        self.calls.append(("settle", task_id, lease_token, invocation_id))
+
+
 class QuotaAwareGatewayTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
@@ -162,6 +189,86 @@ class QuotaAwareGatewayTests(unittest.TestCase):
         with self.assertRaises(ProviderUnavailable):
             gateway.generate(self.request)
         self.assertEqual(adapter.calls, 0)
+
+    def test_durable_invocation_store_supplies_request_identity_and_settles(self):
+        adapter = FakeAdapter("groq")
+        invocation_store = FakeInvocationStore()
+        manager = QuotaManager([self.profile()], self.quota)
+        gateway = QuotaAwareLiveGateway(
+            manager, {"groq": adapter}, self.usage, True,
+            environ={"RAAWAA_ENGINE_LIVE_INFERENCE": "enabled"},
+            invocation_store=invocation_store,
+        )
+        request = GenerationRequest(
+            "research", "hello world", 20, task_id="task-1",
+            step_key="research:primary", lease_token="lease-1",
+        )
+        result = gateway.generate(request)
+        self.assertEqual(result.text, "ok")
+        self.assertEqual(adapter.calls, 1)
+        self.assertEqual(invocation_store.calls[0][0], "prepare")
+        self.assertEqual(invocation_store.calls[1][0], "start")
+        self.assertEqual(invocation_store.calls[1][3], invocation_store.prepared["invocation_id"])
+        self.assertEqual(invocation_store.calls[-1][0], "settle")
+
+    def test_durable_invocation_store_reopens_only_after_explicit_429(self):
+        first = self.profile()
+        second = self.profile(provider="cerebras", account="backup", priority=20)
+        invocation_store = FakeInvocationStore()
+        limited = FakeAdapter("groq", LiveAdapterError("rate limited", status_code=429))
+        backup = FakeAdapter("cerebras")
+        manager = QuotaManager([first, second], self.quota)
+        gateway = QuotaAwareLiveGateway(
+            manager, {"groq": limited, "cerebras": backup}, self.usage, True,
+            environ={"RAAWAA_ENGINE_LIVE_INFERENCE": "enabled"},
+            invocation_store=invocation_store,
+        )
+        request = GenerationRequest(
+            "research", "hello world", 20, task_id="task-1",
+            step_key="research:primary", lease_token="lease-1",
+        )
+        gateway.generate(request)
+        actions = [call[0] for call in invocation_store.calls]
+        self.assertEqual(actions, ["prepare", "start", "reject", "start", "settle"])
+        self.assertEqual(limited.calls, 1)
+        self.assertEqual(backup.calls, 1)
+
+    def test_durable_invocation_store_marks_timeout_ambiguous_and_never_retries(self):
+        first = self.profile()
+        second = self.profile(provider="cerebras", account="backup", priority=20)
+        invocation_store = FakeInvocationStore()
+        timed_out = FakeAdapter("groq", LiveAdapterError("request timed out"))
+        backup = FakeAdapter("cerebras")
+        manager = QuotaManager([first, second], self.quota)
+        gateway = QuotaAwareLiveGateway(
+            manager, {"groq": timed_out, "cerebras": backup}, self.usage, True,
+            environ={"RAAWAA_ENGINE_LIVE_INFERENCE": "enabled"},
+            invocation_store=invocation_store,
+        )
+        request = GenerationRequest(
+            "research", "hello world", 20, task_id="task-1",
+            step_key="research:primary", lease_token="lease-1",
+        )
+        with self.assertRaisesRegex(ProviderUnavailable, "route rotation stopped"):
+            gateway.generate(request)
+        self.assertEqual(timed_out.calls, 1)
+        self.assertEqual(backup.calls, 0)
+        self.assertEqual([call[0] for call in invocation_store.calls],
+                         ["prepare", "start", "ambiguous"])
+
+    def test_durable_invocation_store_blocks_without_step_or_lease(self):
+        adapter = FakeAdapter("groq")
+        invocation_store = FakeInvocationStore()
+        manager = QuotaManager([self.profile()], self.quota)
+        gateway = QuotaAwareLiveGateway(
+            manager, {"groq": adapter}, self.usage, True,
+            environ={"RAAWAA_ENGINE_LIVE_INFERENCE": "enabled"},
+            invocation_store=invocation_store,
+        )
+        with self.assertRaisesRegex(ProviderUnavailable, "step_key"):
+            gateway.generate(GenerationRequest("research", "prompt", 20, task_id="task-1"))
+        self.assertEqual(adapter.calls, 0)
+        self.assertEqual(invocation_store.calls, [])
 
     def test_success_reserves_and_settles_actual_usage(self):
         adapter = FakeAdapter("groq")

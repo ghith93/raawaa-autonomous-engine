@@ -1,6 +1,7 @@
 import { handleQuota } from "./quota.js";
 import { handleMonetaryLedger } from "./monetary-ledger.js";
 import { handlePaperLedger } from "./paper-ledger.js";
+import { handleTaskInvocation } from "./task-invocations.js";
 import { handleTelegramWebhook } from "./telegram-webhook.js";
 import { handleMobilePage, handleMobileStatus } from "./mobile-status.js";
 import { dispatchTaskRunnerIfStale } from "./task-runner-watchdog.js";
@@ -210,6 +211,7 @@ export default {
         url.pathname !== "/v1/monetary-ledger" &&
         url.pathname !== "/v1/paper-ledger" &&
         url.pathname !== "/v1/mobile/status" &&
+        !/^\/v1\/tasks\/[A-Za-z0-9-]+\/invocations$/.test(url.pathname) &&
         url.pathname !== "/v1/research/candidates/review" &&
         !/^\/v1\/tasks\/[A-Za-z0-9-]+\/(heartbeat|finish|retry)$/.test(url.pathname)) {
       return json({ error: "not_found" }, 404);
@@ -225,6 +227,8 @@ export default {
     if (monetaryResponse) return monetaryResponse;
     const paperLedgerResponse = await handlePaperLedger(request, env, url);
     if (paperLedgerResponse) return paperLedgerResponse;
+    const invocationResponse = await handleTaskInvocation(request, env, url);
+    if (invocationResponse) return invocationResponse;
 
     if (url.pathname === "/v1/research/candidates" && request.method === "GET") return listResearchCandidates(url, env);
     if (url.pathname === "/v1/research/candidates" && request.method === "POST") return ingestResearchCandidates(request, env);

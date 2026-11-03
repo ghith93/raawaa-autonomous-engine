@@ -207,6 +207,110 @@ try {
   });
   assertStatus(staleLease, 409, "finished task must reject stale lease");
 
+  // Durable model invocation identities survive retries and distinguish steps.
+  const invocationTask = await api("/v1/tasks/enqueue", {
+    method: "POST",
+    body: {
+      task_type: "system_audit",
+      title: "Invocation lifecycle integration",
+      payload: { provider_calls: false },
+      idempotency_key: "d1-local-invocation-" + randomUUID(),
+      max_attempts: 2,
+    },
+  });
+  assertStatus(invocationTask, 201, "invocation task enqueue");
+  const invocationClaim = await api("/v1/tasks/claim", { method: "POST", body: {} });
+  assertStatus(invocationClaim, 200, "invocation task claim");
+  const invocationTaskId = invocationTask.payload.task.id;
+  const invocationLease = invocationClaim.payload.lease_token;
+  const invocationPath = "/v1/tasks/" + invocationTaskId + "/invocations";
+  const prepareBody = {
+    action: "prepare",
+    lease_token: invocationLease,
+    step_key: "research:primary",
+    task_kind: "research",
+  };
+  const prepared = await api(invocationPath, { method: "POST", body: prepareBody });
+  assertStatus(prepared, 201, "prepare durable invocation");
+  const replayPrepared = await api(invocationPath, { method: "POST", body: prepareBody });
+  assertStatus(replayPrepared, 201, "prepared invocation replay");
+  assert.equal(replayPrepared.payload.invocation.request_id, prepared.payload.invocation.request_id);
+  assert.equal(replayPrepared.payload.invocation.invocation_id, prepared.payload.invocation.invocation_id);
+
+  const secondStep = await api(invocationPath, {
+    method: "POST",
+    body: { ...prepareBody, step_key: "research:review" },
+  });
+  assertStatus(secondStep, 201, "second logical step");
+  assert.notEqual(secondStep.payload.invocation.request_id, prepared.payload.invocation.request_id);
+  assert.notEqual(secondStep.payload.invocation.invocation_id, prepared.payload.invocation.invocation_id);
+
+  const invocationId = prepared.payload.invocation.invocation_id;
+  const invocationStarted = await api(invocationPath, {
+    method: "POST",
+    body: { action: "start", lease_token: invocationLease, invocation_id: invocationId, route_id: "groq:model-a" },
+  });
+  assertStatus(invocationStarted, 200, "start first route attempt");
+  const duplicateRoute = await api(invocationPath, {
+    method: "POST",
+    body: { action: "start", lease_token: invocationLease, invocation_id: invocationId, route_id: "groq:model-a" },
+  });
+  assertStatus(duplicateRoute, 409, "same route replay is blocked");
+  const rejected429 = await api(invocationPath, {
+    method: "POST",
+    body: { action: "reject", lease_token: invocationLease, invocation_id: invocationId,
+      route_id: "groq:model-a", rejection_code: "http_429" },
+  });
+  assertStatus(rejected429, 200, "explicit 429 permits a new route attempt");
+  const replayRejected429 = await api(invocationPath, {
+    method: "POST",
+    body: { action: "reject", lease_token: invocationLease, invocation_id: invocationId,
+      route_id: "groq:model-a", rejection_code: "http_429" },
+  });
+  assertStatus(replayRejected429, 200, "lost reject response is idempotently replayable");
+  assert.equal(replayRejected429.payload.replay, true);
+  const alternateRoute = await api(invocationPath, {
+    method: "POST",
+    body: { action: "start", lease_token: invocationLease, invocation_id: invocationId, route_id: "cerebras:model-b" },
+  });
+  assertStatus(alternateRoute, 200, "start alternate route");
+  const settledInvocation = await api(invocationPath, {
+    method: "POST",
+    body: { action: "settle", lease_token: invocationLease, invocation_id: invocationId },
+  });
+  assertStatus(settledInvocation, 200, "settle logical invocation");
+  const replaySettled = await api(invocationPath, {
+    method: "POST",
+    body: { action: "settle", lease_token: invocationLease, invocation_id: invocationId },
+  });
+  assertStatus(replaySettled, 200, "lost settle response is idempotently replayable");
+  assert.equal(replaySettled.payload.replay, true);
+  const settledReplay = await api(invocationPath, { method: "POST", body: prepareBody });
+  assertStatus(settledReplay, 409, "settled invocation cannot be replayed");
+
+  const secondInvocationId = secondStep.payload.invocation.invocation_id;
+  const ambiguousStart = await api(invocationPath, {
+    method: "POST",
+    body: { action: "start", lease_token: invocationLease, invocation_id: secondInvocationId, route_id: "groq:model-a" },
+  });
+  assertStatus(ambiguousStart, 200, "start second logical step");
+  const invocationAmbiguous = await api(invocationPath, {
+    method: "POST",
+    body: { action: "ambiguous", lease_token: invocationLease, invocation_id: secondInvocationId },
+  });
+  assertStatus(invocationAmbiguous, 200, "mark ambiguous provider outcome");
+  const replayAmbiguous = await api(invocationPath, {
+    method: "POST",
+    body: { action: "ambiguous", lease_token: invocationLease, invocation_id: secondInvocationId },
+  });
+  assertStatus(replayAmbiguous, 200, "lost ambiguous response is idempotently replayable");
+  assert.equal(replayAmbiguous.payload.replay, true);
+  const ambiguousReplay = await api(invocationPath, {
+    method: "POST",
+    body: { ...prepareBody, step_key: "research:review" },
+  });
+  assertStatus(ambiguousReplay, 409, "ambiguous invocation cannot be replayed");
+
   const quotaBase = {
     action: "reserve",
     route_id: "d1-local:concurrency",

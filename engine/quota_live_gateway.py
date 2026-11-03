@@ -4,6 +4,7 @@ from __future__ import annotations
 import math
 import os
 import uuid
+from dataclasses import replace
 
 from engine.live_adapters import LiveAdapterError
 from engine.model_gateway import BudgetExceeded, ProviderUnavailable, UsageLedger
@@ -17,12 +18,14 @@ class QuotaAwareLiveGateway:
     def __init__(self, quota_manager: QuotaManager, adapters: dict, usage_ledger: UsageLedger,
                  network_calls_enabled: bool = False, cooldown_seconds: int = 900,
                  environ=None, daily_budget_usd: float = 0.0,
-                 monthly_budget_usd: float = 0.0, per_task_budget_usd: float = 0.0):
+                 monthly_budget_usd: float = 0.0, per_task_budget_usd: float = 0.0,
+                 invocation_store=None):
         if cooldown_seconds < 1:
             raise ValueError("cooldown_seconds must be positive")
         self.quota_manager = quota_manager
         self.adapters = adapters
         self.usage_ledger = usage_ledger
+        self.invocation_store = invocation_store
         self.network_calls_enabled = network_calls_enabled
         self.cooldown_seconds = cooldown_seconds
         self.environ = os.environ if environ is None else environ
@@ -58,6 +61,18 @@ class QuotaAwareLiveGateway:
             raise ValueError("prompt is required")
         if not isinstance(request.task_id, str) or not request.task_id.strip():
             raise ProviderUnavailable("A task ID is required for per-task quota enforcement.")
+        if self.invocation_store is not None:
+            if not isinstance(request.step_key, str) or not request.step_key.strip():
+                raise ProviderUnavailable("A durable step_key is required for invocation checkpoints.")
+            if not isinstance(request.lease_token, str) or not request.lease_token.strip():
+                raise ProviderUnavailable("A current task lease_token is required for invocation checkpoints.")
+            try:
+                checkpoint = self.invocation_store.prepare(
+                    request.task_id, request.lease_token, request.step_key, request.task_kind
+                )
+            except Exception as exc:
+                raise ProviderUnavailable("Could not prepare a durable task-step invocation; provider was not called.") from exc
+            request = replace(request, request_id=checkpoint["request_id"], invocation_id=checkpoint["invocation_id"])
         if not isinstance(request.request_id, str) or not request.request_id.strip():
             raise ProviderUnavailable(
                 "A stable request_id is required; persist it with the task step before inference."
@@ -128,6 +143,13 @@ class QuotaAwareLiveGateway:
                 )
                 continue
 
+            if self.invocation_store is not None:
+                try:
+                    self.invocation_store.start(request.task_id, request.lease_token, request.invocation_id, profile.route_id)
+                except Exception as exc:
+                    self.usage_ledger.release(monetary_reservation_id)
+                    raise ProviderUnavailable("Could not durably start the task-step invocation; provider was not called.") from exc
+
             try:
                 reservation_id = self.quota_manager.ledger.reserve(
                     profile.route_id,
@@ -146,10 +168,14 @@ class QuotaAwareLiveGateway:
                 # Another worker may have reserved the remaining token capacity.
                 # No provider request was sent, so releasing the monetary reservation is safe.
                 self.usage_ledger.release(monetary_reservation_id)
+                if self.invocation_store is not None:
+                    self.invocation_store.reject(request.task_id, request.lease_token, request.invocation_id, profile.route_id, "quota_capacity_unavailable")
                 continue
             except Exception:
                 # The token reservation did not return, so no provider request was sent.
                 self.usage_ledger.release(monetary_reservation_id)
+                if self.invocation_store is not None:
+                    self.invocation_store.reject(request.task_id, request.lease_token, request.invocation_id, profile.route_id, "quota_reservation_error")
                 raise
 
             self._audit(
@@ -201,6 +227,8 @@ class QuotaAwareLiveGateway:
                     # A 429 is after provider I/O began, so it is settled at zero rather
                     # than released. Release is reserved strictly for pre-I/O failures.
                     self.usage_ledger.settle(monetary_reservation_id, 0, 0, 0.0)
+                    if self.invocation_store is not None:
+                        self.invocation_store.reject(request.task_id, request.lease_token, request.invocation_id, profile.route_id, "http_429")
                     self.quota_manager.ledger.cool_down(
                         profile.route_id, self.cooldown_seconds, "http_429"
                     )
@@ -220,6 +248,8 @@ class QuotaAwareLiveGateway:
                     # The model request was rejected before inference. Settle zero,
                     # quarantine this exact route, and try another verified-free model.
                     self.usage_ledger.settle(monetary_reservation_id, 0, 0, 0.0)
+                    if self.invocation_store is not None:
+                        self.invocation_store.reject(request.task_id, request.lease_token, request.invocation_id, profile.route_id, "provider_permission_denied")
                     self.quota_manager.ledger.cool_down(
                         profile.route_id, self.cooldown_seconds,
                         "provider_model_permission_denied",
@@ -236,6 +266,8 @@ class QuotaAwareLiveGateway:
                 # unclassified HTTP error may follow provider-side processing. Never
                 # replay or release the reservation in this case.
                 self.usage_ledger.mark_ambiguous(monetary_reservation_id)
+                if self.invocation_store is not None:
+                    self.invocation_store.mark_ambiguous(request.task_id, request.lease_token, request.invocation_id)
                 self._audit(
                     "provider_failure_stopped", request, profile,
                     reason="non_429_no_route_rotation",
@@ -251,6 +283,8 @@ class QuotaAwareLiveGateway:
                 # Keep the reservation rather than making possibly-used quota reusable.
                 self.quota_manager.ledger.settle(reservation_id, estimated_tokens)
                 self.usage_ledger.mark_ambiguous(monetary_reservation_id)
+                if self.invocation_store is not None:
+                    self.invocation_store.mark_ambiguous(request.task_id, request.lease_token, request.invocation_id)
                 self._audit(
                     "adapter_failure", request, profile,
                     error_type=type(exc).__name__, reason="ambiguous_adapter_failure",
@@ -283,6 +317,8 @@ class QuotaAwareLiveGateway:
                 settled_cost_usd,
             )
             self.quota_manager.ledger.settle(reservation_id, actual_tokens)
+            if self.invocation_store is not None:
+                self.invocation_store.settle(request.task_id, request.lease_token, request.invocation_id)
             self._audit(
                 "completion_received", request, profile,
                 actual_tokens=actual_tokens,

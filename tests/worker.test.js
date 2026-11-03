@@ -98,6 +98,13 @@ test("unknown routes are not exposed", async () => {
   assert.equal(response.status, 404);
 });
 
+test("task invocation lifecycle route is authenticated", async () => {
+  const response = await worker.fetch(request("/v1/tasks/task-1/invocations", {
+    method: "POST", token: null, body: { action: "prepare" },
+  }), { DB: dbMock(), ENGINE_API_TOKEN: TOKEN });
+  assert.equal(response.status, 401);
+});
+
 
 test("claim endpoint is authenticated and returns an empty queue safely", async () => {
   const DB = dbMock();
