@@ -6,7 +6,7 @@ on:
     paths:
       - ".github/workflows/task-runner.yml"
   schedule:
-    - cron: "3,8,13,18,23,28,33,38,43,48,53,58 * * * *"
+    - cron: "4,9,14,19,24,29,34,39,44,49,54,59 * * * *"
   workflow_dispatch:
 
 permissions:
