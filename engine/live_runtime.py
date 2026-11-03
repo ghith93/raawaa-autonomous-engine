@@ -44,10 +44,13 @@ def build_live_gateway(
         return None
     if validate_budget_policy(policy):
         return None
-    # Even a verified-free profile is not sufficient: the provider must have an
-    # independently documented hard stop before any live request can be sent.
+    # Provider-side spend hard stops are required only for paid routes.
+    # This gateway intentionally admits verified-free routes only: the registry
+    # loader requires explicit zero input/output pricing, commercial and
+    # production permission, current verification, and finite minute/day/month/
+    # per-task quotas. Paid fallback remains disabled by budget-policy validation.
     model_policy = policy.get("model_policy", {})
-    if model_policy.get("provider_hard_stop_verified") is not True:
+    if model_policy.get("paid_fallback_enabled") is not False:
         return None
     # Cloud runners must use the shared D1 ledger. Never fall back to ephemeral
     # SQLite when the control Worker is configured or when running in GitHub Actions.
