@@ -20,7 +20,7 @@ The official [SearXNG Search API documentation](https://docs.searxng.org/dev/sea
 - Stores bounded titles, URLs, snippets and engine names as untrusted metadata only.
 - Does not fetch result pages, execute content, install tools, or approve candidates.
 - All results remain `unreviewed`; license, source quality, security and compatibility review remain mandatory.
-- A reviewed feature-branch change now proposes a data-preserving migration and strict Worker normalizers for arXiv and SearXNG metadata. Until that change passes CI, is merged, and the Staging migration/readback are verified, the deployed D1 API remains limited to GitHub and Crossref. SearXNG itself remains inactive until an owner-controlled endpoint is configured.
+- PR #421 proposes a data-preserving migration and strict Worker normalizers plus persistence/readback for arXiv and SearXNG metadata. Until that PR passes exact-head CI, is independently reviewed and merged, and the Staging migration/readback are verified, the deployed D1 API remains limited to GitHub and Crossref. SearXNG itself remains inactive until an owner-controlled endpoint is configured.
 
 ## Why deployment is not included
 
