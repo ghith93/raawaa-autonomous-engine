@@ -709,8 +709,8 @@ try {
   status = await api("/v1/mobile/status");
   assertStatus(status, 200, "mobile status after D1 writes");
   assert.equal(status.payload.paper_events.find(row => row.event_type === "candidate_detected")?.count, 1);
-  assert.equal(status.payload.tasks.find(row => row.status === "succeeded")?.count, 1,
-    "only the legacy task should be durably succeeded while Codespaces is release-gated");
+  assert.equal(status.payload.tasks.find(row => row.status === "succeeded")?.count, 2,
+    "only the two legacy D1 smoke tasks should succeed while Codespaces is release-gated");
   assert.equal(status.payload.monetary_ledger.available, true);
   assert.equal(status.payload.monetary_ledger.pending_count, 1);
   assert.equal(status.payload.monetary_ledger.ambiguous_count, 1);
