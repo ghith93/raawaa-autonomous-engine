@@ -2,6 +2,8 @@ import json
 import unittest
 import xml.etree.ElementTree as ET
 from unittest.mock import patch
+from urllib.error import HTTPError
+from urllib.request import Request
 from datetime import datetime, timezone
 from engine.research_discovery import DEFAULT_QUERIES, MAX_RESPONSE_BYTES, ResearchDiscoveryError, _request_arxiv, _request_crossref, _request_json, _request_searxng, _validate_searxng_base_url, discover_repositories
 
@@ -129,7 +131,7 @@ class ResearchDiscoveryTests(unittest.TestCase):
             def __enter__(self): return self
             def __exit__(self, *args): return False
             def read(self, limit): return atom
-        with patch("engine.research_discovery.urlopen", return_value=Response()):
+        with patch("engine.research_discovery._open_without_redirects", return_value=Response()):
             payload = _request_arxiv('all:"multi-agent"', 5)
         self.assertEqual(len(payload["entries"]), 1)
         from engine.research_discovery import _normalize_arxiv_entry
@@ -155,7 +157,7 @@ class ResearchDiscoveryTests(unittest.TestCase):
             (b"<feed>", "malformed Atom XML"),
             (b"x" * (MAX_RESPONSE_BYTES + 1), "1 MiB"),
         ):
-            with patch("engine.research_discovery.urlopen", return_value=Response(body)):
+            with patch("engine.research_discovery._open_without_redirects", return_value=Response(body)):
                 with self.assertRaisesRegex(ResearchDiscoveryError, expected):
                     _request_arxiv("all:agents", 5)
 
@@ -192,6 +194,15 @@ class ResearchDiscoveryTests(unittest.TestCase):
         self.assertEqual(failed["arxiv_candidates"], [])
 
 
+    def test_fixed_host_metadata_requests_refuse_redirects_before_following(self):
+        from engine.research_discovery import _RejectRedirects
+        handler = _RejectRedirects()
+        request = Request("https://search.example.org/search")
+        with self.assertRaises(HTTPError):
+            handler.redirect_request(
+                request, None, 302, "Found", {}, "https://169.254.169.254/latest/meta-data",
+            )
+
     def test_searxng_requires_operator_configured_public_https_endpoint(self):
         self.assertEqual(
             _validate_searxng_base_url("https://search.example.org"),
@@ -226,7 +237,7 @@ class ResearchDiscoveryTests(unittest.TestCase):
             def __exit__(self, *args): return False
             def geturl(self): return "https://search.example.org/search?q=agents&format=json"
             def read(self, limit): return payload
-        with patch("engine.research_discovery.urlopen", return_value=Response()) as opened:
+        with patch("engine.research_discovery._open_without_redirects", return_value=Response()) as opened:
             result = _request_searxng("agent security", "https://search.example.org", 5)
         request = opened.call_args.args[0]
         self.assertIn("format=json", request.full_url)
@@ -270,7 +281,7 @@ class ResearchDiscoveryTests(unittest.TestCase):
             def __exit__(self, *args): return False
             def geturl(self): return "https://other.example.org/search"
             def read(self, limit): return b'{"results":[]}'
-        with patch("engine.research_discovery.urlopen", return_value=Response()):
+        with patch("engine.research_discovery._open_without_redirects", return_value=Response()):
             with self.assertRaisesRegex(ResearchDiscoveryError, "redirected outside"):
                 _request_searxng("agent security", "https://search.example.org", 5)
 
@@ -283,7 +294,7 @@ class ResearchDiscoveryTests(unittest.TestCase):
             def __exit__(self, *args): return False
             def geturl(self): return "https://search.example.org/search"
             def read(self, limit): return b"x" * (MAX_RESPONSE_BYTES + 1)
-        with patch("engine.research_discovery.urlopen", return_value=Response()):
+        with patch("engine.research_discovery._open_without_redirects", return_value=Response()):
             with self.assertRaisesRegex(ResearchDiscoveryError, "1 MiB"):
                 _request_searxng("agent security", "https://search.example.org", 5)
 
