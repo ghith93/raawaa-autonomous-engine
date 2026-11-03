@@ -1,3 +1,242 @@
+"""Bounded, read-only multi-source discovery for proactive research.
+
+This module retrieves public metadata only. It never clones, imports, executes,
+installs, or modifies discovered projects. Search results remain untrusted data.
+"""
+from __future__ import annotations
+
+import json
+import math
+import os
+import ipaddress
+import xml.etree.ElementTree as ET
+from datetime import datetime, timezone
+from urllib.error import HTTPError, URLError
+from urllib.parse import urlencode, urlsplit
+from urllib.request import HTTPRedirectHandler, Request, build_opener, urlopen
+
+API = "https://api.github.com/search/repositories"
+MAX_RESPONSE_BYTES = 1048576
+CROSSREF_API = "https://api.crossref.org/works"
+ARXIV_API = "https://export.arxiv.org/api/query"
+ATOM_NS = "http://www.w3.org/2005/Atom"
+ARXIV_NS = "http://arxiv.org/schemas/atom"
+USER_AGENT = "RaawaaAutonomousEngine-Research/1.0 (+https://github.com/ghith93/raawaa-autonomous-engine)"
+DEFAULT_QUERIES = {
+    "agent_frameworks": "agent framework orchestration topic:agents archived:false",
+    "coding_agents": "open source coding agent archived:false",
+    "agent_memory": "agent memory long term memory framework archived:false",
+    "mcp_ecosystem": "MCP server tools model context protocol archived:false",
+    "model_routing": "LLM model router inference gateway quota archived:false",
+    "durable_execution": "durable workflow orchestration agent execution archived:false",
+    "agent_skills_security": "agent skill scanner archived:false",
+    "agent_evaluation": "agent evaluation benchmark harness archived:false",
+    "skill_benchmarks": "skillsbench archived:false",
+}
+
+class ResearchDiscoveryError(RuntimeError):
+    """A bounded research metadata request failed safely."""
+
+
+class _RejectRedirects(HTTPRedirectHandler):
+    """Refuse redirects for fixed-host metadata and configured search endpoints."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        raise HTTPError(req.full_url, code, "redirects are disabled for fixed-host discovery requests", headers, fp)
+
+
+def _open_without_redirects(request: Request, timeout: int):
+    return build_opener(_RejectRedirects).open(request, timeout=timeout)
+
+
+def _request_json(query: str, token: str = "", timeout: int = 15) -> dict:
+    url = API + "?" + urlencode({"q": query, "sort": "updated", "order": "desc", "per_page": "10"})
+    headers = {"Accept": "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28", "User-Agent": USER_AGENT}
+    if token:
+        headers["Authorization"] = "Bearer " + token
+    request = Request(url, headers=headers, method="GET")
+    try:
+        with urlopen(request, timeout=timeout) as response:
+            if response.status != 200:
+                raise ResearchDiscoveryError(f"GitHub search returned HTTP {response.status}")
+            raw = response.read(MAX_RESPONSE_BYTES + 1)
+            if len(raw) > MAX_RESPONSE_BYTES:
+                raise ResearchDiscoveryError("Research response exceeded the 1 MiB safety limit")
+            payload = json.loads(raw.decode("utf-8"))
+    except HTTPError as exc:
+        remaining = exc.headers.get("X-RateLimit-Remaining", "unknown")
+        reset = exc.headers.get("X-RateLimit-Reset", "unknown")
+        raise ResearchDiscoveryError(f"GitHub search returned HTTP {exc.code}; rate_limit_remaining={remaining}; reset_epoch={reset}") from exc
+    except (URLError, TimeoutError, OSError, json.JSONDecodeError, UnicodeDecodeError) as exc:
+        raise ResearchDiscoveryError(f"GitHub search failed: {type(exc).__name__}") from exc
+    if not isinstance(payload, dict) or not isinstance(payload.get("items"), list):
+        raise ResearchDiscoveryError("GitHub search returned an unexpected response shape")
+    return payload
+
+
+def _request_crossref(query: str, max_results: int = 10, timeout: int = 20) -> dict:
+    """Retrieve public Crossref scholarly metadata; one bounded request per run."""
+    params = {"query.bibliographic": query, "rows": str(max_results),
+              "select": "DOI,title,author,published,URL,container-title,is-referenced-by-count,license,type"}
+    request = Request(CROSSREF_API + "?" + urlencode(params),
+                      headers={"Accept": "application/json", "User-Agent": USER_AGENT}, method="GET")
+    try:
+        with urlopen(request, timeout=timeout) as response:
+            if response.status != 200:
+                raise ResearchDiscoveryError(f"Crossref returned HTTP {response.status}")
+            raw = response.read(MAX_RESPONSE_BYTES + 1)
+            if len(raw) > MAX_RESPONSE_BYTES:
+                raise ResearchDiscoveryError("Research response exceeded the 1 MiB safety limit")
+            payload = json.loads(raw.decode("utf-8"))
+    except HTTPError as exc:
+        limit = exc.headers.get("X-Rate-Limit-Limit", "unknown") if exc.headers else "unknown"
+        interval = exc.headers.get("X-Rate-Limit-Interval", "unknown") if exc.headers else "unknown"
+        raise ResearchDiscoveryError(f"Crossref returned HTTP {exc.code}; rate_limit={limit}; interval={interval}") from exc
+    except (URLError, TimeoutError, OSError, json.JSONDecodeError, UnicodeDecodeError) as exc:
+        raise ResearchDiscoveryError(f"Crossref request failed: {type(exc).__name__}") from exc
+    message = payload.get("message") if isinstance(payload, dict) else None
+    if not isinstance(message, dict) or not isinstance(message.get("items"), list):
+        raise ResearchDiscoveryError("Crossref returned an unexpected response shape")
+    return message
+
+
+def _request_arxiv(query: str, max_results: int = 10, timeout: int = 20) -> dict:
+    """Retrieve one bounded arXiv Atom metadata page; never fetch paper full text."""
+    if not isinstance(query, str) or not query.strip():
+        raise ValueError("arxiv query must be a non-empty string")
+    if isinstance(max_results, bool) or not isinstance(max_results, int) or not 1 <= max_results <= 10:
+        raise ValueError("arxiv max_results must be an integer between 1 and 10")
+    params = {"search_query": query, "start": "0", "max_results": str(max_results),
+              "sortBy": "submittedDate", "sortOrder": "descending"}
+    request = Request(ARXIV_API + "?" + urlencode(params),
+                      headers={"Accept": "application/atom+xml", "User-Agent": USER_AGENT},
+                      method="GET")
+    try:
+        with _open_without_redirects(request, timeout) as response:
+            if response.status != 200:
+                raise ResearchDiscoveryError(f"arXiv returned HTTP {response.status}")
+            final_url = response.geturl() if callable(getattr(response, "geturl", None)) else request.full_url
+            final = urlsplit(final_url)
+            if final.scheme != "https" or final.hostname != "export.arxiv.org" or final.port not in (None, 443) or final.username or final.password:
+                raise ResearchDiscoveryError("arXiv response is outside the fixed HTTPS host")
+            raw = response.read(MAX_RESPONSE_BYTES + 1)
+            if len(raw) > MAX_RESPONSE_BYTES:
+                raise ResearchDiscoveryError("arXiv response exceeded the 1 MiB safety limit")
+            try:
+                xml_text = raw.decode("utf-8-sig")
+            except UnicodeDecodeError:
+                raise ResearchDiscoveryError("arXiv Atom response must be valid UTF-8") from None
+            if chr(0) in xml_text or "<!DOCTYPE" in xml_text.upper() or "<!ENTITY" in xml_text.upper():
+                raise ResearchDiscoveryError("arXiv XML declarations with DTD/entities or invalid null bytes are not accepted")
+            root = ET.fromstring(xml_text)
+    except HTTPError as exc:
+        raise ResearchDiscoveryError(f"arXiv returned HTTP {exc.code}") from exc
+    except (URLError, TimeoutError, OSError) as exc:
+        raise ResearchDiscoveryError(f"arXiv request failed: {type(exc).__name__}") from exc
+    except ET.ParseError as exc:
+        raise ResearchDiscoveryError(f"arXiv returned malformed Atom XML: {type(exc).__name__}") from exc
+    if root.tag != f"{{{ATOM_NS}}}feed":
+        raise ResearchDiscoveryError("arXiv returned an unexpected Atom response shape")
+    return {"entries": root.findall(f"{{{ATOM_NS}}}entry")}
+
+
+def _normalize_arxiv_entry(entry: ET.Element, retrieved_at: str) -> dict | None:
+    """Keep bounded bibliographic metadata only; abstracts/full text stay un-ingested."""
+    def value(tag: str) -> str | None:
+        node = entry.find(f"{{{ATOM_NS}}}{tag}")
+        text = " ".join((node.text or "").split()) if node is not None else ""
+        return text[:1000] if text else None
+
+    paper_id = value("id")
+    title = value("title")
+    if not paper_id or not title or not paper_id.startswith(("https://arxiv.org/abs/", "http://arxiv.org/abs/")):
+        return None
+    authors = []
+    for author in entry.findall(f"{{{ATOM_NS}}}author")[:5]:
+        name = author.find(f"{{{ATOM_NS}}}name")
+        if name is not None and isinstance(name.text, str) and name.text.strip():
+            authors.append(" ".join(name.text.split())[:160])
+    categories = []
+    for category in entry.findall(f"{{{ATOM_NS}}}category")[:8]:
+        term = category.attrib.get("term")
+        if isinstance(term, str) and term:
+            categories.append(term[:80])
+    primary = entry.find(f"{{{ARXIV_NS}}}primary_category")
+    primary_category = primary.attrib.get("term") if primary is not None else None
+    doi_node = entry.find(f"{{{ARXIV_NS}}}doi")
+    doi = " ".join((doi_node.text or "").split())[:160] if doi_node is not None and doi_node.text else None
+    return {
+        "arxiv_id": paper_id.rsplit("/", 1)[-1],
+        "title": title,
+        "url": paper_id,
+        "authors": authors,
+        "published": value("published"),
+        "updated": value("updated"),
+        "categories": categories,
+        "primary_category": primary_category[:80] if isinstance(primary_category, str) else None,
+        "doi": doi,
+        "source": "arxiv",
+        "discovered_at": retrieved_at,
+        "review_status": "unreviewed",
+        "license_verified": False,
+        "abstract_retrieved": False,
+        "full_text_retrieved": False,
+    }
+
+
+def _normalize_crossref_item(item: dict, retrieved_at: str) -> dict | None:
+    doi, titles = item.get("DOI"), item.get("title")
+    if not isinstance(doi, str) or not doi or not isinstance(titles, list) or not titles:
+        return None
+    title = titles[0] if isinstance(titles[0], str) else ""
+    if not title:
+        return None
+    authors = []
+    for author in item.get("author", [])[:5] if isinstance(item.get("author"), list) else []:
+        if isinstance(author, dict):
+            name = " ".join(part for part in (author.get("given"), author.get("family")) if isinstance(part, str))
+            if name:
+                authors.append(name)
+    published = item.get("published")
+    date_parts = published.get("date-parts") if isinstance(published, dict) else None
+    date_label = "-".join(str(part) for part in date_parts[0][:3]) if isinstance(date_parts, list) and date_parts and isinstance(date_parts[0], list) else None
+    licenses = item.get("license")
+    license_urls = [entry["URL"] for entry in licenses if isinstance(entry, dict) and isinstance(entry.get("URL"), str)] if isinstance(licenses, list) else []
+    containers = item.get("container-title")
+    journal = containers[0] if isinstance(containers, list) and containers and isinstance(containers[0], str) else None
+    citations = item.get("is-referenced-by-count")
+    return {"doi": doi, "title": title, "url": item.get("URL") if isinstance(item.get("URL"), str) else "https://doi.org/" + doi,
+            "authors": authors, "published": date_label, "container_title": journal,
+            "citation_count": citations if type(citations) is int and citations >= 0 else 0,
+            "license_urls": license_urls, "work_type": item.get("type") if isinstance(item.get("type"), str) else None,
+            "source": "crossref", "discovered_at": retrieved_at, "review_status": "unreviewed",
+            "license_verified": False, "abstract_retrieved": False}
+
+def _validate_searxng_base_url(base_url: str) -> str:
+    """Accept only an operator-configured public HTTPS SearXNG origin/path."""
+    if not isinstance(base_url, str) or not base_url.strip() or len(base_url) > 500:
+        raise ResearchDiscoveryError("SearXNG endpoint is missing or malformed")
+    try:
+        parsed = urlsplit(base_url.strip())
+        _ = parsed.port
+    except ValueError:
+        raise ResearchDiscoveryError("SearXNG endpoint URL is malformed") from None
+    host = parsed.hostname
+    if (parsed.scheme != "https" or not host or parsed.username or parsed.password
+            or parsed.query or parsed.fragment):
+        raise ResearchDiscoveryError("SearXNG endpoint must be HTTPS without credentials, query, or fragment")
+    normalized_host = host.lower().rstrip(".")
+    if normalized_host in {"localhost", "localhost.localdomain"} or normalized_host.endswith((".local", ".internal")):
+        raise ResearchDiscoveryError("SearXNG endpoint must not target a local hostname")
+    try:
+        address = ipaddress.ip_address(normalized_host)
+    except ValueError:
+        address = None
+    if address is not None and not address.is_global:
+        raise ResearchDiscoveryError("SearXNG endpoint must not target a private or reserved IP")
+    return base_url.strip().rstrip("/")
+
+
 def _request_searxng(query: str, base_url: str, max_results: int = 10, timeout: int = 15) -> dict:
     """Request one JSON page from an operator-configured SearXNG instance."""
     if not isinstance(query, str) or not query.strip():
