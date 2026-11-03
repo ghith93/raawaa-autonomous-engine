@@ -31,7 +31,8 @@ Groq Free account access and model-catalog visibility were verified through a re
 
 ## Safety and cost model
 
-- Free-first: paid API calls and infrastructure are disabled by default.
+- Hybrid/free-first: verified free providers are preferred; paid fallback remains disabled until provider-enforced spend blocking is verified.
+- Hard budget: USD 15/month all-in; USD 12/month model cap, USD 0.40/day, USD 0.20/task; USD 0 paid infrastructure overages; USD 3 unallocated reserve.
 - Unknown provider pricing, quota, or commercial eligibility is treated as unavailable until verified.
 - Secrets never belong in source control; use narrowly scoped repository secrets only for deliberately enabled integrations.
 - Agents propose work; policy gates determine what may execute.
@@ -63,7 +64,7 @@ python -m engine.cli monetary-status
 
 ## Next engineering priorities
 
-1. Verify provider-specific credit settlement semantics and add reconciliation for ambiguous billing outcomes; daily/monthly/per-task atomic spend caps are integrated, but all budgets remain zero and non-zero-cost routes remain ineligible.
+1. Verify provider-specific credit settlement semantics and add reconciliation for ambiguous billing outcomes; daily/monthly/per-task atomic spend caps are integrated, but the USD 15 all-in monthly cap is configured, the model allocation is capped at USD 12, paid fallback remains disabled, and non-zero-cost routes remain ineligible.
 2. Complete provider-specific data-classification and retention review for each intended workload; keep confidential formulae, credentials, and customer/order data out of unsuitable provider tiers.
 3. Add operation-specific idempotency contracts and explicit approval gates before enabling side-effecting handlers or external writes.
 4. Validate the D1 provider quota ledger against a dedicated non-production D1 database, including applying the migration sequence there, concurrency, restart recovery, and settlement idempotency. Production D1 migrations `0001`–`0005` are already applied; do not enable live inference until the non-production verification gate passes. Memory and model-usage ledgers remain local SQLite.
