@@ -16,6 +16,7 @@ approval evidence.
 
 Trusted host code constructs the broker with:
 - the validated repository policy;
+- the trusted agent roster (the broker verifies enabled status, role, capability, and task assignment);
 - the reviewed `config/tool_permissions.json` matrix;
 - a static registry of trusted adapter functions;
 - a durable audit sink;
@@ -45,8 +46,8 @@ Production writes are not granted by this initial permission matrix.
 
 ## Audit and ambiguous outcomes
 
-Authorization is durably recorded before the adapter is called. Completion or
-failure is recorded afterward. If completion auditing fails after an adapter
+Both allowed and denied decisions are durably recorded before any adapter is
+called. Completion or failure is recorded afterward. If completion auditing fails after an adapter
 returns, the broker raises `ToolBrokerAuditError`: the action may have happened,
 so callers must not replay it automatically. Write adapters must implement
 idempotency and reconciliation.
