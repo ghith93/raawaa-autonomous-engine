@@ -64,7 +64,7 @@ class CliTests(unittest.TestCase):
         with contextlib.redirect_stdout(output):
             self.assertEqual(cli.audit(), 0)
         self.assertIn("3 provider profiles", output.getvalue())
-        self.assertIn("4 deny-by-default tool definitions", output.getvalue())
+        self.assertIn("2 deny-by-default tool definitions", output.getvalue())
         self.assertIn("safe dry-run", output.getvalue())
 
 
