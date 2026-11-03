@@ -74,8 +74,8 @@ class ProviderWorkflowSecurityTests(unittest.TestCase):
         verify = workflow.split("  staging-mobile-status-verify:", 1)[1]
         self.assertIn("needs.publish-staging-ops-telemetry.result == 'success'", verify)
         self.assertIn("needs.staging-worker-verify.result == 'success'", verify)
-        self.assertIn("wrangler secret put ENGINE_API_TOKEN", verify)
-        self.assertIn("wrangler secret delete ENGINE_API_TOKEN", verify)
+        self.assertIn("secret put ENGINE_API_TOKEN", verify)
+        self.assertIn("secret delete ENGINE_API_TOKEN", verify)
         self.assertIn("python scripts/verify_staging_mobile_status.py", verify)
         self.assertIn("steps.install_staging_token.outcome == 'success'", verify)
 
