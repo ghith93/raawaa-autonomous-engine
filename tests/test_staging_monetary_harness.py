@@ -101,9 +101,29 @@ class StagingMonetaryHarnessTests(unittest.TestCase):
         with patch.object(harness, "verify_staging_target") as verify:
             with patch.object(harness.time, "sleep") as sleep:
                 harness.execute_staging_sql(
-                    "DELETE FROM monetary_reservations WHERE provider LIKE 'staging-verification-%'"
+                    "DELETE FROM monetary_reservations WHERE provider LIKE 'staging-verification-%'",
+                    retry_safe=True,
                 )
         verify.assert_called_once_with()
+        self.assertEqual(run.call_count, 2)
+        sleep.assert_called_once_with(2)
+
+    @patch.dict(os.environ, {
+        "CLOUDFLARE_API_TOKEN": "test-cloudflare-token",
+        "CLOUDFLARE_ACCOUNT_ID": "test-account",
+    })
+    @patch("scripts.verify_staging_monetary_ledger.subprocess.run")
+    def test_idempotent_insert_or_ignore_retries_only_with_explicit_opt_in(self, run):
+        run.side_effect = [
+            SimpleNamespace(returncode=1, stdout="", stderr="internal error [code: 7429]"),
+            SimpleNamespace(returncode=0, stdout="ok", stderr=""),
+        ]
+        with patch.object(harness, "verify_staging_target"):
+            with patch.object(harness.time, "sleep") as sleep:
+                harness.execute_staging_sql(
+                    "INSERT OR IGNORE INTO tasks(id) VALUES ('staging-verification-fixture')",
+                    retry_safe=True,
+                )
         self.assertEqual(run.call_count, 2)
         sleep.assert_called_once_with(2)
 
