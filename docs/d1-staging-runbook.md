@@ -15,15 +15,13 @@ Before applying anything, it parses both Wrangler configurations and verifies th
 
 The job does not deploy the Worker, alter secrets, or access production D1. Pull-request CI, failed test jobs, and manual Engine CI runs do not trigger staging migrations.
 
-## Current baseline
+## Verified staging schema baseline
 
-At the first successful remote inventory on 2026-11-03:
+At the first successful remote inventory on 2026-11-03, D1 `SELECT 1` succeeded and Wrangler reported `0001_initial.sql` through `0005_telegram_webhook_receipts.sql` as pending. No migration had been applied at that checkpoint.
 
-- D1 `SELECT 1` healthcheck succeeded against Staging.
-- Wrangler reported migrations `0001_initial.sql` through `0005_telegram_webhook_receipts.sql` as pending.
-- No migration had been applied at that checkpoint.
+The five existing migrations were then applied successfully to Staging only in [run #41572155554](https://github.com/ghith93/raawaa-autonomous-engine/actions/runs/41572155554). Its final Wrangler output marked all five migrations applied and returned `No migrations to apply`. The CI-gated `staging-migrate` job in [main CI run #41572391383](https://github.com/ghith93/raawaa-autonomous-engine/actions/runs/41572391383) independently rechecked the exact Staging/production separation and again returned `No migrations to apply`.
 
-The first successful `staging-migrate` job in Engine CI is the evidence required to mark those migrations applied. Do not infer schema readiness from the inventory-only workflow.
+This proves the existing `0001`–`0005` schema is present in Staging. It does not prove the monetary ledger required by issue #332 exists, and it does not verify cross-runner monetary concurrency, crash/restart, or ambiguous provider outcomes. No Staging Worker was deployed; production D1 and Worker remain unchanged.
 
 ## Production remains separate
 
