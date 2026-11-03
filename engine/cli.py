@@ -1,7 +1,6 @@
 """CLI for policy audit, local task runtime, memory, and explicit read-only discovery."""
 import argparse
 import json
-import math
 import os
 from pathlib import Path
 
@@ -16,6 +15,7 @@ from engine.quota_config import load_provider_profile_registry
 from engine.quota_manager import QuotaLedger, QuotaManager
 from engine.live_runtime import build_live_gateway
 from engine.research_discovery import discover_repositories
+from engine.budget_policy import validate_budget_policy
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -59,18 +59,7 @@ def audit() -> int:
             errors.append("live_inference_opt_in requires at least one explicitly enabled provider profile.")
         if any(not entry.ready_for_routing for entry in enabled_profiles):
             errors.append("Every enabled provider profile must pass static eligibility checks.")
-    budget_values = (
-        policy.get("daily_budget_usd"),
-        policy.get("monthly_budget_usd"),
-        policy.get("per_task_budget_usd"),
-    )
-    if any(
-        type(value) not in (int, float) or not math.isfinite(value) or value != 0
-        for value in budget_values
-    ):
-        errors.append("Initial release requires daily, monthly, and per-task spend budgets to be numeric zero.")
-    if policy.get("allow_paid_model_calls") is not False:
-        errors.append("Paid model calls must remain disabled.")
+    errors.extend(validate_budget_policy(policy))
     if policy.get("allow_external_writes") is not False:
         errors.append("External writes must remain disabled.")
     parallel_limit = policy.get("max_parallel_agents")
@@ -86,7 +75,7 @@ def audit() -> int:
             print(f"FAIL: {error}")
         return 1
     mode_label = "safe dry-run" if mode == "safe_dry_run" else "live opt-in configured; operator kill switch still required"
-    print(f"Audit passed: {len(ids)} agent roles; {len(provider_profiles)} provider profiles; {mode_label}; zero spend; external writes disabled.")
+    print("Audit passed: hybrid/free-first; model cap USD 12.00/month; all-in hard cap USD 15.00/month; paid fallback and infrastructure overages disabled; external writes disabled.")
     return 0
 
 
