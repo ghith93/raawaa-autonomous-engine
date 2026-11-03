@@ -56,7 +56,7 @@ def _request_json(query: str, token: str = "", timeout: int = 15) -> dict:
         headers["Authorization"] = "Bearer " + token
     request = Request(url, headers=headers, method="GET")
     try:
-        with _open_without_redirects(request, timeout) as response:
+        with urlopen(request, timeout=timeout) as response:
             if response.status != 200:
                 raise ResearchDiscoveryError(f"GitHub search returned HTTP {response.status}")
             raw = response.read(MAX_RESPONSE_BYTES + 1)
@@ -112,7 +112,7 @@ def _request_arxiv(query: str, max_results: int = 10, timeout: int = 20) -> dict
                       headers={"Accept": "application/atom+xml", "User-Agent": USER_AGENT},
                       method="GET")
     try:
-        with urlopen(request, timeout=timeout) as response:
+        with _open_without_redirects(request, timeout) as response:
             if response.status != 200:
                 raise ResearchDiscoveryError(f"arXiv returned HTTP {response.status}")
             raw = response.read(MAX_RESPONSE_BYTES + 1)
@@ -241,7 +241,7 @@ def _request_searxng(query: str, base_url: str, max_results: int = 10, timeout: 
     request_url = endpoint + "/search?" + urlencode(params)
     request = Request(request_url, headers={"Accept": "application/json", "User-Agent": USER_AGENT}, method="GET")
     try:
-        with urlopen(request, timeout=timeout) as response:
+        with _open_without_redirects(request, timeout) as response:
             if response.status != 200:
                 raise ResearchDiscoveryError(f"SearXNG returned HTTP {response.status}")
             final_url = response.geturl() if callable(getattr(response, "geturl", None)) else request_url
