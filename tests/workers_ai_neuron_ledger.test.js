@@ -199,6 +199,17 @@ test("idempotent reservation replay must match the original reservation", async 
   assert.equal((await response.json()).replay, true);
 });
 
+test("reserved work cannot enter provider I/O after the ledger is disabled", async () => {
+  const DB = dbMock({ enabled: 0, reservation: {
+    reservation_id: RESERVATION, model_id: MODEL, task_kind: "research_brief",
+    task_id: "research-1", status: "reserved", estimated_neurons: 500,
+    actual_neurons: null,
+  }});
+  const response = await worker.fetch(request({ action: "mark_in_flight", reservation_id: RESERVATION }), env(DB));
+  assert.equal(response.status, 403);
+  assert.deepEqual(await response.json(), { error: "neuron_ledger_disabled" });
+});
+
 test("ambiguous provider outcome preserves its reservation and cannot be released", async () => {
   const DB = dbMock({ enabled: 1, reservation: {
     reservation_id: RESERVATION, model_id: MODEL, task_kind: "research_brief",
