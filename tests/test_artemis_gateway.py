@@ -84,7 +84,6 @@ class ArtemisGatewayTests(unittest.TestCase):
     def test_probe_reports_connected_devices_without_enabling_task_execution(self):
         base = "http://127.0.0.1:8000"
         opener = FakeOpener([
-            FakeResponse({"status": "running"}, base + "/api/status"),
             FakeResponse({"devices": [
                 {"serial": "emulator-5554", "state": "device", "model": "Pixel_8"},
                 {"serial": "offline-device", "state": "offline"},
@@ -93,22 +92,21 @@ class ArtemisGatewayTests(unittest.TestCase):
         with patch.object(gateway, "build_opener", return_value=opener):
             result = gateway.probe_artemis({"ARTEMIS_BASE_URL": base})
         self.assertEqual(result["status"], "CONNECTED")
-        self.assertEqual(result["network_calls"], 2)
+        self.assertEqual(result["network_calls"], 1)
         self.assertEqual(result["device_count"], 2)
-        self.assertEqual(result["daemon_state"], "running")
+        self.assertEqual(result["api_status"], "reachable")
         self.assertFalse(result["task_submission_enabled"])
+        self.assertEqual(len(opener.calls), 1)
         self.assertEqual(opener.calls[0][0].get_method(), "GET")
-        self.assertEqual(opener.calls[1][0].get_method(), "GET")
+        self.assertTrue(opener.calls[0][0].full_url.endswith("/api/devices"))
 
-    def test_probe_rejects_non_object_health_payload(self):
+    def test_probe_rejects_unexpected_device_list_shape(self):
         base = "http://127.0.0.1:8000"
-        opener = FakeOpener([
-            FakeResponse([], base + "/api/status"),
-            FakeResponse([], base + "/api/devices"),
-        ])
+        opener = FakeOpener([FakeResponse({"unexpected": []}, base + "/api/devices")])
         with patch.object(gateway, "build_opener", return_value=opener):
             result = gateway.probe_artemis({"ARTEMIS_BASE_URL": base})
         self.assertEqual(result["status"], "INVALID_RESPONSE")
+        self.assertEqual(result["network_calls"], 1)
         self.assertFalse(result["task_submission_enabled"])
 
     def test_redirect_is_not_followed(self):
