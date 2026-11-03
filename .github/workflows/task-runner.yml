@@ -348,11 +348,11 @@ jobs:
                       or not results[0].get("output_preview")):
                   raise SystemExit("One-shot research did not complete through the expected live Groq route.")
               with open(os.environ["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8") as summary:
-                  summary.write("## One-shot public research result\\n\\n")
-                  summary.write("Provider: Groq · Model: openai/gpt-oss-20b\\n\\n")
-                  summary.write(results[0]["output_preview"][:3500] + "\\n")
+                  summary.write("## One-shot public research result\n\n")
+                  summary.write("Provider: Groq · Model: openai/gpt-oss-20b\n\n")
+                  summary.write(results[0]["output_preview"][:3500] + "\n")
           with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
-              output.write(f"tasks_processed={tasks_processed}\\nstop_reason={stop_reason}\\n")
+              output.write(f"tasks_processed={tasks_processed}\nstop_reason={stop_reason}\n")
           raise SystemExit(result.returncode)
           PY
       - name: Publish bounded Task Runner status
