@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from unittest.mock import Mock, patch
 
-from engine.model_gateway import UsageLedger
+from engine.model_gateway import ProviderNotCalled, UsageLedger
 from engine.provider import GenerationResponse
 from engine.quota_manager import QuotaLedger, QuotaManager, QuotaProfile
 from engine.quota_live_gateway import QuotaAwareLiveGateway
@@ -189,6 +189,28 @@ class WorkerExecutionTests(unittest.TestCase):
         self.assertEqual(result["status"], "blocked")
         self.assertEqual(result["reason"], "live_gateway_unavailable")
         self.assertEqual(self.store.list_tasks(1)[0]["status"], "blocked")
+
+    def test_confirmed_pre_provider_failure_is_deferred_with_backoff(self):
+        class CapacityUnavailableGateway:
+            def generate(self, request):
+                raise ProviderNotCalled(
+                    "no verified free route currently has capacity",
+                    retry_after_seconds=600,
+                    reason_code="provider_capacity_unavailable",
+                )
+
+        result = run_once(
+            self.store, live_gateway=CapacityUnavailableGateway(),
+            environ={"RAAWAA_ENGINE_LIVE_INFERENCE": "enabled"},
+        )
+        self.assertEqual(result["status"], "pending")
+        self.assertEqual(result["reason"], "provider_not_called_retry_scheduled")
+        self.assertEqual(result["retry_after_seconds"], 600)
+        saved = self.store.list_tasks(1)[0]
+        self.assertEqual(saved["status"], "pending")
+        self.assertEqual(saved["attempts"], 1)
+        self.assertIsNotNone(saved["next_attempt_at"])
+        self.assertEqual(saved["error"], "provider_not_called:provider_capacity_unavailable")
 
     def test_live_failure_is_blocked_and_never_auto_retried(self):
         class FailingGateway:

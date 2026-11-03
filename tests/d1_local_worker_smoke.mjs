@@ -171,6 +171,9 @@ try {
   server = launchWorker();
 
   await waitForWorker(server, () => logs);
+  const health = await api("/health", { token: null });
+  assertStatus(health, 200, "Worker health capability readback");
+  assert.ok(health.payload.capabilities.includes("task_retry_schedule_v1"));
 
   const unauthenticated = await api("/v1/mobile/status", { token: null });
   assertStatus(unauthenticated, 401, "mobile status must require bearer auth");
@@ -217,6 +220,53 @@ try {
     body: { lease_token: claimed.payload.lease_token },
   });
   assertStatus(staleLease, 409, "finished task must reject stale lease");
+
+  // A safe pre-provider retry must remain pending but ineligible until due.
+  const deferredEnqueue = await api("/v1/tasks/enqueue", {
+    method: "POST",
+    body: {
+      task_type: "system_audit",
+      title: "Delayed retry integration",
+      payload: { external_writes: false },
+      idempotency_key: "d1-local-delayed-retry-" + randomUUID(),
+      max_attempts: 3,
+    },
+  });
+  assertStatus(deferredEnqueue, 201, "delayed retry enqueue");
+  const deferredId = deferredEnqueue.payload.task.id;
+  const deferredClaim = await api("/v1/tasks/claim", { method: "POST", body: {} });
+  assertStatus(deferredClaim, 200, "delayed retry initial claim");
+  assert.equal(deferredClaim.payload.task.id, deferredId);
+  const deferred = await api("/v1/tasks/" + deferredId + "/retry", {
+    method: "POST",
+    body: {
+      lease_token: deferredClaim.payload.lease_token,
+      error: "provider_not_called:provider_capacity_unavailable",
+      retry_after_seconds: 5,
+    },
+  });
+  assertStatus(deferred, 200, "schedule delayed retry");
+  assert.equal(deferred.payload.status, "pending");
+  assert.ok(deferred.payload.next_attempt_at, "retry response must confirm its due time");
+  const listedDeferred = await api("/v1/tasks?limit=20");
+  assertStatus(listedDeferred, 200, "read delayed retry schedule");
+  const deferredRow = listedDeferred.payload.tasks.find(task => task.id === deferredId);
+  assert.ok(deferredRow?.next_attempt_at, "D1 must persist next_attempt_at");
+  assert.ok(Date.parse(deferredRow.next_attempt_at) > Date.now(), "retry must not be due immediately");
+  const prematureClaim = await api("/v1/tasks/claim", { method: "POST", body: {} });
+  assertStatus(prematureClaim, 200, "claim while retry is deferred");
+  assert.equal(prematureClaim.payload.task, null, "deferred task must not be claimed early");
+  await delay(5100);
+  const resumedClaim = await api("/v1/tasks/claim", { method: "POST", body: {} });
+  assertStatus(resumedClaim, 200, "claim after retry becomes due");
+  assert.equal(resumedClaim.payload.task.id, deferredId);
+  assert.equal(resumedClaim.payload.task.attempts, 2);
+  const resumedFinish = await api("/v1/tasks/" + deferredId + "/finish", {
+    method: "POST",
+    body: { lease_token: resumedClaim.payload.lease_token, status: "succeeded",
+      result: { delayed_retry_verified: true } },
+  });
+  assertStatus(resumedFinish, 200, "finish resumed task");
 
   // Codespaces remains hard-disabled until issue #440's adversarial sandbox
   // acceptance criteria pass. Verify the real local D1 Worker rejects every
@@ -663,8 +713,8 @@ try {
   status = await api("/v1/mobile/status");
   assertStatus(status, 200, "mobile status after D1 writes");
   assert.equal(status.payload.paper_events.find(row => row.event_type === "candidate_detected")?.count, 1);
-  assert.equal(status.payload.tasks.find(row => row.status === "succeeded")?.count, 1,
-    "only the legacy task should be durably succeeded while Codespaces is release-gated");
+  assert.equal(status.payload.tasks.find(row => row.status === "succeeded")?.count, 2,
+    "only the two legacy D1 smoke tasks should succeed while Codespaces is release-gated");
   assert.equal(status.payload.monetary_ledger.available, true);
   assert.equal(status.payload.monetary_ledger.pending_count, 1);
   assert.equal(status.payload.monetary_ledger.ambiguous_count, 1);

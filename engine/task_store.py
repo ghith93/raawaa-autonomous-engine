@@ -37,7 +37,7 @@ class TaskStore:
               status TEXT NOT NULL CHECK(status IN ('pending','running','succeeded','failed','blocked')),
               attempts INTEGER NOT NULL DEFAULT 0, max_attempts INTEGER NOT NULL DEFAULT 2,
               created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
-              result_json TEXT, error TEXT, lease_token TEXT, lease_expires_at TEXT
+              result_json TEXT, error TEXT, lease_token TEXT, lease_expires_at TEXT, next_attempt_at TEXT
             );
             CREATE INDEX IF NOT EXISTS idx_tasks_status_created ON tasks(status, created_at);
             CREATE TABLE IF NOT EXISTS audit_log (
@@ -52,6 +52,9 @@ class TaskStore:
                 db.execute("ALTER TABLE tasks ADD COLUMN lease_token TEXT")
             if "lease_expires_at" not in columns:
                 db.execute("ALTER TABLE tasks ADD COLUMN lease_expires_at TEXT")
+            if "next_attempt_at" not in columns:
+                db.execute("ALTER TABLE tasks ADD COLUMN next_attempt_at TEXT")
+            db.execute("CREATE INDEX IF NOT EXISTS idx_tasks_due ON tasks(status,next_attempt_at,created_at)")
 
     def _audit(self, db, task_id: str | None, event: str, details: dict[str, Any]):
         db.execute("INSERT INTO audit_log(task_id,event,details_json,created_at) VALUES(?,?,?,?)",
@@ -81,13 +84,18 @@ class TaskStore:
             raise ValueError("lease_timeout_seconds must be positive")
         with self._connect() as db:
             db.execute("BEGIN IMMEDIATE")
-            row = db.execute("SELECT * FROM tasks WHERE status='pending' ORDER BY created_at,id LIMIT 1").fetchone()
+            now = datetime.now(timezone.utc)
+            now_iso = now.isoformat()
+            row = db.execute(
+                "SELECT * FROM tasks WHERE status='pending' "
+                "AND (next_attempt_at IS NULL OR next_attempt_at<=?) ORDER BY created_at,id LIMIT 1",
+                (now_iso,),
+            ).fetchone()
             if row is None:
                 return None
-            now = datetime.now(timezone.utc)
             token = str(uuid.uuid4())
             expires = (now + timedelta(seconds=lease_timeout_seconds)).isoformat()
-            changed = db.execute("""UPDATE tasks SET status='running',attempts=attempts+1,
+            changed = db.execute("""UPDATE tasks SET status='running',attempts=attempts+1,next_attempt_at=NULL,
                          updated_at=?,lease_token=?,lease_expires_at=?
                          WHERE id=? AND status='pending'""",
                          (now.isoformat(), token, expires, row["id"])).rowcount
@@ -131,7 +139,7 @@ class TaskStore:
                 raise KeyError(task_id)
             self._assert_lease(row, lease_token)
             now = utc_now()
-            changed = db.execute("""UPDATE tasks SET status=?,result_json=?,error=?,updated_at=?,
+            changed = db.execute("""UPDATE tasks SET status=?,result_json=?,error=?,updated_at=?,next_attempt_at=NULL,
                 lease_token=NULL,lease_expires_at=NULL
                 WHERE id=? AND status='running' AND lease_token=?""",
                 (status, json.dumps(result, sort_keys=True) if result is not None else None,
@@ -140,7 +148,10 @@ class TaskStore:
                 raise ValueError("lease ownership lost")
             self._audit(db, task_id, "task_" + status, {"error": error} if error else (result or {}))
 
-    def retry_or_fail(self, task_id: str, error: str, lease_token: str | None = None) -> str:
+    def retry_or_fail(self, task_id: str, error: str, lease_token: str | None = None,
+                      retry_after_seconds: int = 0) -> str:
+        if type(retry_after_seconds) is not int or not 0 <= retry_after_seconds <= 86400:
+            raise ValueError("retry_after_seconds must be an integer from 0 to 86400")
         with self._connect() as db:
             db.execute("BEGIN IMMEDIATE")
             row = db.execute("SELECT * FROM tasks WHERE id=?", (task_id,)).fetchone()
@@ -148,11 +159,19 @@ class TaskStore:
                 raise KeyError(task_id)
             self._assert_lease(row, lease_token)
             status = "pending" if row["attempts"] < row["max_attempts"] else "failed"
-            db.execute("""UPDATE tasks SET status=?,error=?,updated_at=?,lease_token=NULL,
-                lease_expires_at=NULL WHERE id=? AND status='running' AND lease_token=?""",
-                (status, error, utc_now(), task_id, lease_token))
+            now = datetime.now(timezone.utc)
+            next_attempt_at = (
+                (now + timedelta(seconds=retry_after_seconds)).isoformat()
+                if status == "pending" and retry_after_seconds else None
+            )
+            db.execute("""UPDATE tasks SET status=?,error=?,updated_at=?,next_attempt_at=?,
+                lease_token=NULL,lease_expires_at=NULL
+                WHERE id=? AND status='running' AND lease_token=?""",
+                (status, error, now.isoformat(), next_attempt_at, task_id, lease_token))
             self._audit(db, task_id, "task_retry_scheduled" if status == "pending" else "task_failed",
-                        {"attempt": row["attempts"], "max_attempts": row["max_attempts"], "error": error})
+                        {"attempt": row["attempts"], "max_attempts": row["max_attempts"],
+                         "error": error, "retry_after_seconds": retry_after_seconds if status == "pending" else 0,
+                         "next_attempt_at": next_attempt_at})
             return status
 
     def recover_stale(self, lease_timeout_seconds: int = 900) -> dict[str, int]:

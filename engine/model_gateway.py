@@ -23,6 +23,20 @@ class ProviderUnavailable(RuntimeError):
     pass
 
 
+class ProviderNotCalled(ProviderUnavailable):
+    """The provider call is proven not to have started; a delayed retry is safe."""
+
+    def __init__(self, message: str, retry_after_seconds: int = 900,
+                 reason_code: str = "provider_not_called"):
+        if type(retry_after_seconds) is not int or not 1 <= retry_after_seconds <= 86400:
+            raise ValueError("retry_after_seconds must be an integer from 1 to 86400")
+        if not isinstance(reason_code, str) or not reason_code or len(reason_code) > 80:
+            raise ValueError("reason_code must be a non-empty string up to 80 characters")
+        super().__init__(message)
+        self.retry_after_seconds = retry_after_seconds
+        self.reason_code = reason_code
+
+
 def _money_nanos(value: float | int, *, round_up: bool) -> int:
     """Convert USD to integer nano-dollars; round estimates/actuals up and caps down."""
     if isinstance(value, bool):

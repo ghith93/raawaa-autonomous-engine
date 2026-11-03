@@ -23,13 +23,18 @@ class RemoteTaskStoreTests(unittest.TestCase):
 
     @patch("engine.remote_task_store.urlopen")
     def test_claim_returns_server_lease_token(self, open_url):
-        open_url.return_value = FakeResponse({
-            "task": {"id": "task-1", "payload_json": "{}", "status": "running"},
-            "lease_token": "lease-1",
-        })
+        self.store.require_retry_schedule = True
+        open_url.side_effect = [
+            FakeResponse({"ok": True, "capabilities": ["task_retry_schedule_v1"]}),
+            FakeResponse({
+                "task": {"id": "task-1", "payload_json": "{}", "status": "running",
+                         "next_attempt_at": None},
+                "lease_token": "lease-1",
+            }),
+        ]
         task = self.store.claim_next()
         self.assertEqual(task["lease_token"], "lease-1")
-        request = open_url.call_args.args[0]
+        request = open_url.call_args_list[-1].args[0]
         self.assertEqual(request.full_url, "https://engine.example/v1/tasks/claim")
         self.assertEqual(request.get_method(), "POST")
         self.assertEqual(request.get_header("Authorization"), "Bearer secret-test-token")
@@ -45,7 +50,7 @@ class RemoteTaskStoreTests(unittest.TestCase):
             access_client_secret="access-client-secret",
         )
         self.assertIsNone(store.claim_next())
-        request = open_url.call_args.args[0]
+        request = open_url.call_args_list[-1].args[0]
         self.assertEqual(request.get_header("Cf-access-client-id"), "access-client-id")
         self.assertEqual(request.get_header("Cf-access-client-secret"), "access-client-secret")
         self.assertEqual(request.get_header("Authorization"), "Bearer app-bearer")
@@ -69,6 +74,57 @@ class RemoteTaskStoreTests(unittest.TestCase):
         payload = json.loads(open_url.call_args.args[0].data)
         self.assertEqual(payload["lease_token"], "lease-1")
         self.assertEqual(payload["result"], {"safe": True})
+
+    @patch("engine.remote_task_store.urlopen")
+    def test_retry_sends_bounded_delay_to_remote_queue(self, open_url):
+        open_url.return_value = FakeResponse({
+            "ok": True, "status": "pending",
+            "next_attempt_at": "2026-11-04T00:00:00Z",
+        })
+        status = self.store.retry_or_fail(
+            "task-1", "provider_not_called:provider_capacity_unavailable",
+            lease_token="lease-1", retry_after_seconds=600,
+        )
+        self.assertEqual(status, "pending")
+        request = open_url.call_args.args[0]
+        self.assertEqual(request.full_url, "https://engine.example/v1/tasks/task-1/retry")
+        payload = json.loads(request.data)
+        self.assertEqual(payload["retry_after_seconds"], 600)
+        self.assertEqual(open_url.return_value.value["next_attempt_at"], "2026-11-04T00:00:00Z")
+
+    @patch("engine.remote_task_store.urlopen")
+    def test_attempt_exhaustion_can_fail_without_retry_due_time(self, open_url):
+        open_url.return_value = FakeResponse({"ok": True, "status": "failed", "next_attempt_at": None})
+        status = self.store.retry_or_fail(
+            "task-1", "provider_not_called:capacity",
+            lease_token="lease-1", retry_after_seconds=600,
+        )
+        self.assertEqual(status, "failed")
+
+    @patch("engine.remote_task_store.urlopen")
+    def test_claim_fails_closed_before_claim_if_worker_lacks_retry_schedule(self, open_url):
+        open_url.return_value = FakeResponse({"ok": True})
+        gated_store = RemoteTaskStore(
+            "https://engine.example", "secret-test-token", require_retry_schedule=True,
+        )
+        with self.assertRaisesRegex(RemoteTaskStoreError, "task_retry_schedule_v1"):
+            gated_store.claim_next()
+        self.assertEqual(open_url.call_count, 1)
+        self.assertEqual(open_url.call_args.args[0].full_url, "https://engine.example/health")
+
+    @patch("engine.remote_task_store.urlopen")
+    def test_retry_requires_remote_confirmation_of_due_time(self, open_url):
+        open_url.return_value = FakeResponse({"ok": True, "status": "pending"})
+        with self.assertRaisesRegex(RemoteTaskStoreError, "did not confirm"):
+            self.store.retry_or_fail(
+                "task-1", "provider_not_called:capacity",
+                lease_token="lease-1", retry_after_seconds=60,
+            )
+
+    def test_retry_rejects_unbounded_delay(self):
+        with self.assertRaises(ValueError):
+            self.store.retry_or_fail("task-1", "retry", lease_token="lease-1",
+                                     retry_after_seconds=86401)
 
     @patch("engine.remote_task_store.urlopen")
     def test_recovery_is_bounded_and_validated(self, open_url):

@@ -14,7 +14,13 @@ from typing import Any
 
 
 class RemoteTaskStoreError(RuntimeError):
-    """Remote task API failure with a safe, non-secret message."""
+    """Remote task API failure with safe metadata for retry classification."""
+
+    def __init__(self, message: str, *, http_status: int | None = None,
+                 error_code: str | None = None):
+        super().__init__(message)
+        self.http_status = http_status
+        self.error_code = error_code
 
 
 class _RejectRedirects(HTTPRedirectHandler):
@@ -25,7 +31,8 @@ class _RejectRedirects(HTTPRedirectHandler):
 class RemoteTaskStore:
     def __init__(self, base_url: str | None = None, token: str | None = None,
                  timeout: float = 15.0, access_client_id: str | None = None,
-                 access_client_secret: str | None = None, reject_redirects: bool = False):
+                 access_client_secret: str | None = None, reject_redirects: bool = False,
+                 require_retry_schedule: bool | None = None):
         self.base_url = (base_url or os.environ.get("RAAWAA_ENGINE_API_URL", "")).rstrip("/")
         self.token = token or os.environ.get("RAAWAA_ENGINE_API_TOKEN", "")
         self.access_client_id = (
@@ -38,6 +45,10 @@ class RemoteTaskStore:
         )
         self.timeout = timeout
         self.reject_redirects = bool(reject_redirects)
+        self.require_retry_schedule = (
+            os.environ.get("RAAWAA_ENGINE_LIVE_INFERENCE", "").strip().lower() == "enabled"
+            if require_retry_schedule is None else bool(require_retry_schedule)
+        )
         if not self.base_url.startswith("https://") or not self.token:
             raise ValueError("Remote task store requires an HTTPS API URL and token")
         if bool(self.access_client_id) != bool(self.access_client_secret):
@@ -70,7 +81,7 @@ class RemoteTaskStore:
         except HTTPError as exc:
             # Do not include response bodies, request headers, or credentials in errors.
             if exc.code == 401:
-                raise RemoteTaskStoreError("Remote task API authentication failed") from None
+                raise RemoteTaskStoreError("Remote task API authentication failed", http_status=401) from None
             if exc.code == 403:
                 metadata = []
                 ray_id = exc.headers.get("CF-Ray") if exc.headers else None
@@ -81,17 +92,31 @@ class RemoteTaskStore:
                     metadata.append(f"cf-mitigated {mitigated}")
                 detail = f" (response metadata: {', '.join(metadata)})" if metadata else ""
                 raise RemoteTaskStoreError(
-                    f"Remote task API returned HTTP 403; inspect edge/access policy{detail}"
+                    f"Remote task API returned HTTP 403; inspect edge/access policy{detail}",
+                    http_status=403,
                 ) from None
             if exc.code == 409:
-                raise RemoteTaskStoreError("Remote task lease was lost") from None
+                error_code = None
+                try:
+                    parsed = json.loads(exc.read().decode("utf-8"))
+                    error_code = parsed.get("error") if isinstance(parsed, dict) else None
+                except Exception:
+                    pass
+                safe_code = error_code if isinstance(error_code, str) and error_code.replace("_", "").isalnum() else "conflict"
+                raise RemoteTaskStoreError(
+                    f"Remote task API conflict ({safe_code})",
+                    http_status=409, error_code=error_code,
+                ) from None
             if exc.code == 404:
-                raise RemoteTaskStoreError("Remote task was not found") from None
+                raise RemoteTaskStoreError("Remote task was not found", http_status=404) from None
             if exc.code == 429:
-                raise RemoteTaskStoreError("Remote task API rate limit reached; retry in a later run") from None
+                raise RemoteTaskStoreError("Remote task API rate limit reached; retry in a later run",
+                                           http_status=429) from None
             if 500 <= exc.code <= 599 or exc.code == 408:
-                raise RemoteTaskStoreError(f"Remote task API temporarily unavailable (HTTP {exc.code})") from None
-            raise RemoteTaskStoreError(f"Remote task API returned HTTP {exc.code}") from None
+                raise RemoteTaskStoreError(f"Remote task API temporarily unavailable (HTTP {exc.code})",
+                                           http_status=exc.code) from None
+            raise RemoteTaskStoreError(f"Remote task API returned HTTP {exc.code}",
+                                       http_status=exc.code) from None
         except (URLError, TimeoutError, OSError, json.JSONDecodeError, UnicodeDecodeError):
             raise RemoteTaskStoreError("Remote task API is unavailable or returned invalid JSON") from None
 
@@ -119,12 +144,27 @@ class RemoteTaskStore:
     def claim_next(self, lease_timeout_seconds: int = 900) -> dict[str, Any] | None:
         if not 1 <= int(lease_timeout_seconds) <= 900:
             raise ValueError("remote lease timeout must be between 1 and 900 seconds")
+        # Live inference can encounter pre-provider capacity failures that must
+        # be deferred. Require the matching Worker/migration only in that mode;
+        # default dry-run queue processing remains compatible with the current
+        # production Worker during the staged rollout.
+        if self.require_retry_schedule:
+            health = self._request("/health")
+            capabilities = health.get("capabilities")
+            if not isinstance(capabilities, list) or "task_retry_schedule_v1" not in capabilities:
+                raise RemoteTaskStoreError(
+                    "Remote Worker lacks task_retry_schedule_v1; apply migration 0008 and deploy the updated Worker before live inference"
+                )
         result = self._request("/v1/tasks/claim", "POST", {})
         task = result.get("task")
         if task is None:
             return None
         if not isinstance(task, dict) or not result.get("lease_token"):
             raise RemoteTaskStoreError("Remote task API returned an invalid lease")
+        if self.require_retry_schedule and "next_attempt_at" not in task:
+            raise RemoteTaskStoreError(
+                "Remote Worker claimed a live task without retry-schedule metadata; task was not executed"
+            )
         task["lease_token"] = result["lease_token"]
         return task
 
@@ -151,12 +191,20 @@ class RemoteTaskStore:
         self._request(f"/v1/tasks/{task_id}/finish", "POST", payload)
 
     def retry_or_fail(self, task_id: str, error: str,
-                      lease_token: str | None = None) -> str:
+                      lease_token: str | None = None,
+                      retry_after_seconds: int = 0) -> str:
+        if type(retry_after_seconds) is not int or not 0 <= retry_after_seconds <= 86400:
+            raise ValueError("retry_after_seconds must be an integer from 0 to 86400")
         response = self._request(f"/v1/tasks/{task_id}/retry", "POST",
-                                 {"lease_token": lease_token, "error": error})
+                                 {"lease_token": lease_token, "error": error,
+                                  "retry_after_seconds": retry_after_seconds})
         status = response.get("status")
         if status not in {"pending", "failed"}:
             raise RemoteTaskStoreError("Remote task API returned an invalid retry status")
+        if status == "pending" and retry_after_seconds > 0 and not isinstance(response.get("next_attempt_at"), str):
+            raise RemoteTaskStoreError(
+                "Remote Worker did not confirm the delayed retry schedule; task runner stopped"
+            )
         return status
 
     def recover_stale(self, lease_timeout_seconds: int = 900) -> dict[str, int]:
