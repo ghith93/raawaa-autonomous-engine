@@ -261,6 +261,34 @@ class QuotaAwareGatewayTests(unittest.TestCase):
         events = self.quota.audit_events()
         self.assertIn("provider_failure_stopped", {event["event"] for event in events})
 
+    def test_safe_provider_error_code_is_audited_without_response_message(self):
+        first = self.profile()
+        second = self.profile(provider="cerebras", account="backup", priority=20)
+        denied = FakeAdapter(
+            "groq",
+            LiveAdapterError(
+                "Provider returned HTTP 403",
+                status_code=403,
+                error_code="model_permission_blocked_org",
+            ),
+        )
+        backup = FakeAdapter("cerebras")
+        manager = QuotaManager([first, second], self.quota)
+        gateway = QuotaAwareLiveGateway(
+            manager, {"groq": denied, "cerebras": backup}, self.usage, True,
+            environ={"RAAWAA_ENGINE_LIVE_INFERENCE": "enabled"},
+        )
+        with self.assertRaisesRegex(ProviderUnavailable, "route rotation stopped"):
+            gateway.generate(self.request)
+        self.assertEqual(denied.calls, 1)
+        self.assertEqual(backup.calls, 0)
+        events = self.quota.audit_events()
+        provider_error = next(event for event in events if event["event"] == "provider_error")
+        self.assertEqual(provider_error["details"]["error_code"], "model_permission_blocked_org")
+        stopped = next(event for event in events if event["event"] == "provider_failure_stopped")
+        self.assertEqual(stopped["details"]["error_code"], "model_permission_blocked_org")
+        self.assertNotIn("Provider returned HTTP 403", str(events))
+
     def test_unexpected_adapter_error_stops_rotation_and_retains_reserved_quota(self):
         class BrokenAdapter:
             def generate(self, model, request):
