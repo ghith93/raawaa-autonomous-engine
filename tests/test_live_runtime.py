@@ -123,6 +123,50 @@ class LiveRuntimeFactoryTests(unittest.TestCase):
         self.assertIsInstance(adapter, GeminiAdapter)
         # Construction must not send an inference request.
 
+    def test_openrouter_only_accepts_pinned_free_router_alias(self):
+        route = dict(self.registry["routes"][0])
+        route.update({
+            "id": "openrouter-free-test",
+            "provider": "openrouter",
+            "account": "primary",
+            "model": "openrouter/free",
+            "api_key_env": "OPENROUTER_API_KEY",
+            "endpoint_url": "https://openrouter.ai/api/v1",
+            "pricing_source_url": "https://openrouter.ai/collections/free-models",
+            "quota_source_url": "https://openrouter.ai/docs/api-reference/limits",
+            "terms_source_url": "https://openrouter.ai/terms",
+            "model_terms_source_url": "https://openrouter.ai/collections/free-models",
+            "verified_at": datetime.now(timezone.utc).isoformat(),
+            "enabled": True,
+        })
+        self.registry["routes"] = [route]
+        self.write_files()
+        gateway = build_live_gateway(
+            self.db_path, self.policy_path, self.registry_path,
+            environ={"RAAWAA_ENGINE_LIVE_INFERENCE": "enabled", "OPENROUTER_API_KEY": "test-key"},
+        )
+        self.assertIsNotNone(gateway)
+        self.assertIn("openrouter:primary:openrouter/free", gateway.adapters)
+
+    def test_openrouter_paid_or_unpinned_model_fails_closed(self):
+        route = dict(self.registry["routes"][0])
+        route.update({
+            "id": "openrouter-paid-test",
+            "provider": "openrouter",
+            "account": "primary",
+            "model": "openai/gpt-4o",
+            "api_key_env": "OPENROUTER_API_KEY",
+            "endpoint_url": "https://openrouter.ai/api/v1",
+            "enabled": True,
+        })
+        self.registry["routes"] = [route]
+        self.write_files()
+        gateway = build_live_gateway(
+            self.db_path, self.policy_path, self.registry_path,
+            environ={"RAAWAA_ENGINE_LIVE_INFERENCE": "enabled", "OPENROUTER_API_KEY": "test-key"},
+        )
+        self.assertIsNone(gateway)
+
     def test_unknown_provider_and_arbitrary_endpoint_fail_closed(self):
         route = dict(self.registry["routes"][0])
         route.update({
