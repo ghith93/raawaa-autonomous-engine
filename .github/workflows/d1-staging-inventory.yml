@@ -2,6 +2,12 @@ name: D1 Staging Inventory (Read Only)
 
 on:
   workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'wrangler.staging.toml'
+      - 'migrations/**'
+      - '.github/workflows/d1-staging-inventory.yml'
 
 permissions:
   contents: read
