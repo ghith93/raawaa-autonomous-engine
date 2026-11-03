@@ -201,15 +201,20 @@ export async function handleMobileStatus(request, env, url) {
         !["test", "staging_migrate", "staging_worker_verify"].every(key =>
           ["success", "failure", "cancelled", "skipped"].includes(jobs[key]))
       ) return null;
+      const safeJobs = {
+        test: jobs.test,
+        staging_migrate: jobs.staging_migrate,
+        staging_worker_verify: jobs.staging_worker_verify,
+      };
       return {
         available: true,
         status: age > 24 * 60 * 60 * 1000 ? "stale" : details.conclusion,
         conclusion: details.conclusion,
-        workflow: details.workflow,
+        workflow: "Engine CI",
         run_id: details.run_id,
         run_number: details.run_number,
         head_sha: sha,
-        jobs,
+        jobs: safeJobs,
         recorded_at: ciHealthRow.created_at,
         freshness: age > 24 * 60 * 60 * 1000 ? "stale" : "fresh",
       };
