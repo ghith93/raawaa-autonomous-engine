@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 import os
+import xml.etree.ElementTree as ET
 from datetime import datetime, timezone
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
@@ -15,6 +16,9 @@ from urllib.request import Request, urlopen
 API = "https://api.github.com/search/repositories"
 MAX_RESPONSE_BYTES = 1048576
 CROSSREF_API = "https://api.crossref.org/works"
+ARXIV_API = "https://export.arxiv.org/api/query"
+ATOM_NS = "http://www.w3.org/2005/Atom"
+ARXIV_NS = "http://arxiv.org/schemas/atom"
 USER_AGENT = "RaawaaAutonomousEngine-Research/1.0 (+https://github.com/ghith93/raawaa-autonomous-engine)"
 DEFAULT_QUERIES = {
     "agent_frameworks": "agent framework orchestration topic:agents archived:false",
@@ -83,6 +87,82 @@ def _request_crossref(query: str, max_results: int = 10, timeout: int = 20) -> d
     return message
 
 
+def _request_arxiv(query: str, max_results: int = 10, timeout: int = 20) -> dict:
+    """Retrieve one bounded arXiv Atom metadata page; never fetch paper full text."""
+    if not isinstance(query, str) or not query.strip():
+        raise ValueError("arxiv query must be a non-empty string")
+    if isinstance(max_results, bool) or not isinstance(max_results, int) or not 1 <= max_results <= 10:
+        raise ValueError("arxiv max_results must be an integer between 1 and 10")
+    params = {"search_query": query, "start": "0", "max_results": str(max_results),
+              "sortBy": "submittedDate", "sortOrder": "descending"}
+    request = Request(ARXIV_API + "?" + urlencode(params),
+                      headers={"Accept": "application/atom+xml", "User-Agent": USER_AGENT},
+                      method="GET")
+    try:
+        with urlopen(request, timeout=timeout) as response:
+            if response.status != 200:
+                raise ResearchDiscoveryError(f"arXiv returned HTTP {response.status}")
+            raw = response.read(MAX_RESPONSE_BYTES + 1)
+            if len(raw) > MAX_RESPONSE_BYTES:
+                raise ResearchDiscoveryError("arXiv response exceeded the 1 MiB safety limit")
+            if b"<!DOCTYPE" in raw.upper() or b"<!ENTITY" in raw.upper():
+                raise ResearchDiscoveryError("arXiv XML declarations with DTD/entities are not accepted")
+            root = ET.fromstring(raw)
+    except HTTPError as exc:
+        raise ResearchDiscoveryError(f"arXiv returned HTTP {exc.code}") from exc
+    except (URLError, TimeoutError, OSError) as exc:
+        raise ResearchDiscoveryError(f"arXiv request failed: {type(exc).__name__}") from exc
+    except ET.ParseError as exc:
+        raise ResearchDiscoveryError(f"arXiv returned malformed Atom XML: {type(exc).__name__}") from exc
+    if root.tag != f"{{{ATOM_NS}}}feed":
+        raise ResearchDiscoveryError("arXiv returned an unexpected Atom response shape")
+    return {"entries": root.findall(f"{{{ATOM_NS}}}entry")}
+
+
+def _normalize_arxiv_entry(entry: ET.Element, retrieved_at: str) -> dict | None:
+    """Keep bounded bibliographic metadata only; abstracts/full text stay un-ingested."""
+    def value(tag: str) -> str | None:
+        node = entry.find(f"{{{ATOM_NS}}}{tag}")
+        text = " ".join((node.text or "").split()) if node is not None else ""
+        return text[:1000] if text else None
+
+    paper_id = value("id")
+    title = value("title")
+    if not paper_id or not title or not paper_id.startswith(("https://arxiv.org/abs/", "http://arxiv.org/abs/")):
+        return None
+    authors = []
+    for author in entry.findall(f"{{{ATOM_NS}}}author")[:5]:
+        name = author.find(f"{{{ATOM_NS}}}name")
+        if name is not None and isinstance(name.text, str) and name.text.strip():
+            authors.append(" ".join(name.text.split())[:160])
+    categories = []
+    for category in entry.findall(f"{{{ATOM_NS}}}category")[:8]:
+        term = category.attrib.get("term")
+        if isinstance(term, str) and term:
+            categories.append(term[:80])
+    primary = entry.find(f"{{{ARXIV_NS}}}primary_category")
+    primary_category = primary.attrib.get("term") if primary is not None else None
+    doi_node = entry.find(f"{{{ARXIV_NS}}}doi")
+    doi = " ".join((doi_node.text or "").split())[:160] if doi_node is not None and doi_node.text else None
+    return {
+        "arxiv_id": paper_id.rsplit("/", 1)[-1],
+        "title": title,
+        "url": paper_id,
+        "authors": authors,
+        "published": value("published"),
+        "updated": value("updated"),
+        "categories": categories,
+        "primary_category": primary_category[:80] if isinstance(primary_category, str) else None,
+        "doi": doi,
+        "source": "arxiv",
+        "discovered_at": retrieved_at,
+        "review_status": "unreviewed",
+        "license_verified": False,
+        "abstract_retrieved": False,
+        "full_text_retrieved": False,
+    }
+
+
 def _normalize_crossref_item(item: dict, retrieved_at: str) -> dict | None:
     doi, titles = item.get("DOI"), item.get("title")
     if not isinstance(doi, str) or not doi or not isinstance(titles, list) or not titles:
@@ -111,7 +191,7 @@ def _normalize_crossref_item(item: dict, retrieved_at: str) -> dict | None:
             "source": "crossref", "discovered_at": retrieved_at, "review_status": "unreviewed",
             "license_verified": False, "abstract_retrieved": False}
 
-def discover_repositories(queries=None, environ=None, max_per_query=5, max_queries=6, request_fn=None, now=None, academic_query=None, max_academic_results=10, academic_request_fn=None):
+def discover_repositories(queries=None, environ=None, max_per_query=5, max_queries=6, request_fn=None, now=None, academic_query=None, max_academic_results=10, academic_request_fn=None, arxiv_query=None, max_arxiv_results=10, arxiv_request_fn=None):
     """Search a bounded set of GitHub topics and return unreviewed candidates."""
     if isinstance(max_per_query, bool) or not isinstance(max_per_query, int) or not 1 <= max_per_query <= 10:
         raise ValueError("max_per_query must be an integer between 1 and 10")
@@ -121,6 +201,10 @@ def discover_repositories(queries=None, environ=None, max_per_query=5, max_queri
         raise ValueError("max_academic_results must be an integer between 1 and 10")
     if academic_query is not None and (not isinstance(academic_query, str) or not academic_query.strip()):
         raise ValueError("academic_query must be a non-empty string when supplied")
+    if arxiv_query is not None and (not isinstance(arxiv_query, str) or not arxiv_query.strip()):
+        raise ValueError("arxiv_query must be a non-empty string when supplied")
+    if isinstance(max_arxiv_results, bool) or not isinstance(max_arxiv_results, int) or not 1 <= max_arxiv_results <= 10:
+        raise ValueError("max_arxiv_results must be an integer between 1 and 10")
     query_map = DEFAULT_QUERIES if queries is None else queries
     if not isinstance(query_map, dict) or not 1 <= len(query_map) <= 10:
         raise ValueError("queries must contain between 1 and 10 named queries")
@@ -184,13 +268,47 @@ def discover_repositories(queries=None, environ=None, max_per_query=5, max_queri
             academic_candidates.sort(key=lambda item: (item["published"] or "", item["citation_count"]), reverse=True)
         except ResearchDiscoveryError as exc:
             academic_unavailable = str(exc)
+    arxiv_candidates, arxiv_unavailable, arxiv_requests_made = [], None, 0
+    if arxiv_query:
+        try:
+            arxiv_fetch = arxiv_request_fn or _request_arxiv
+            # One bounded request per daily run; upstream guidance asks clients
+            # to leave at least three seconds between consecutive requests.
+            arxiv_requests_made = 1
+            payload = arxiv_fetch(arxiv_query, max_arxiv_results)
+            entries = payload.get("entries", []) if isinstance(payload, dict) else None
+            if not isinstance(entries, list):
+                raise ResearchDiscoveryError("arXiv result entries are malformed")
+            for entry in entries[:max_arxiv_results]:
+                if isinstance(entry, ET.Element):
+                    candidate = _normalize_arxiv_entry(entry, retrieved_at)
+                    if candidate is not None:
+                        arxiv_candidates.append(candidate)
+                elif isinstance(entry, dict):
+                    allowed = {"arxiv_id", "title", "url", "authors", "published", "updated",
+                               "categories", "primary_category", "doi"}
+                    candidate = {key: entry[key] for key in allowed if key in entry}
+                    if all(isinstance(candidate.get(key), str) and candidate[key].strip()
+                           for key in ("arxiv_id", "title", "url")):
+                        arxiv_candidates.append({
+                            **candidate, "source": "arxiv", "discovered_at": retrieved_at,
+                            "review_status": "unreviewed", "license_verified": False,
+                            "abstract_retrieved": False, "full_text_retrieved": False,
+                        })
+            arxiv_candidates.sort(key=lambda item: (item.get("published") or "", item["title"]), reverse=True)
+        except ResearchDiscoveryError as exc:
+            arxiv_unavailable = str(exc)
     return {
-        "schema_version": 1, "discovery_only": True, "source": "github_public_repository_search",
+        "schema_version": 1, "discovery_only": True, "source": "multi_source_public_research_metadata",
         "retrieved_at": retrieved_at, "queries_attempted": len(query_items),
         "requests_made": requests_made, "academic_requests_made": academic_requests_made,
-        "total_requests_made": requests_made + academic_requests_made,
+        "total_requests_made": requests_made + academic_requests_made + arxiv_requests_made,
         "academic_candidates": academic_candidates, "academic_unavailable": academic_unavailable,
+        "arxiv_candidates": arxiv_candidates, "arxiv_unavailable": arxiv_unavailable,
+        "arxiv_requests_made": arxiv_requests_made,
         "generation_requests": 0, "code_execution": False,
-        "installation_or_cloning": False, "candidate_count": len(ordered), "candidates": ordered,
+        "installation_or_cloning": False, "candidate_count": len(ordered),
+        "total_metadata_candidate_count": len(ordered) + len(academic_candidates) + len(arxiv_candidates),
+        "candidates": ordered,
         "unavailable": unavailable, "review_required": True,
     }
