@@ -7,7 +7,7 @@ The Cloudflare Worker has two independent scheduled responsibilities:
 - Every 15 minutes: bounded stale-lease recovery in D1.
 - Every five minutes on an offset schedule: check whether GitHub's Task Runner schedule is stale and, only if necessary, dispatch the existing Task Runner workflow.
 
-The watchdog is a fallback. It does not replace the GitHub schedule or the Python Task Runner. It skips dispatch when a Task Runner run is queued/running or when a schedule-triggered run was created within the previous 10 minutes.
+The watchdog is a fallback. It does not replace the GitHub schedule or the Python Task Runner. It skips dispatch when a Task Runner run is queued/running, when any Task Runner run on main was created within the previous 10 minutes (regardless of trigger type), or when a durable D1 dispatch intent was reserved within the previous 10 minutes.
 
 ## Disabled-by-default behavior
 
@@ -43,9 +43,9 @@ No GitHub Actions secret is required for this integration. No D1 migration is re
 
 ## Verify activation
 
-1. Wait for the next watchdog Cron event (the watchdog runs at minutes 2, 7, 12, 17, 22, 27, 32, 37, 42, 47, 52, and 57 UTC).
+1. Wait for the next watchdog Cron event (the watchdog runs at minutes 1, 6, 11, 16, 21, 26, 31, 36, 41, 46, 51, and 56 UTC, two minutes after the primary Task Runner schedule).
 2. If the GitHub schedule has resumed recently, the watchdog will skip dispatch. This is expected.
-3. If no schedule-triggered Task Runner run exists within the last 10 minutes and no active run exists, the Worker dispatches only task-runner.yml on main.
+3. If no Task Runner run of any trigger type exists within the last 10 minutes, no active run exists, and no recent D1 dispatch intent exists, the Worker atomically reserves an intent and dispatches only task-runner.yml on main.
 4. In GitHub Actions, verify a new Scheduled D1 Task Runner run whose event is workflow_dispatch.
 5. Inspect the run's logs and bounded batch result. A successful dispatch request is not proof that the Task Runner completed.
 
@@ -59,6 +59,7 @@ If the dispatch fails, inspect Cloudflare Worker Cron Events for the sanitized f
 - The Worker targets one hard-coded workflow and main branch; task payloads cannot choose a target.
 - JWTs and installation tokens are not logged or stored.
 - GitHub schedule remains primary when healthy; the watchdog is a fallback after a 10-minute stale threshold.
+- A D1 dispatch-intent row is written before the GitHub side effect; it suppresses another attempt for 10 minutes even if the post-dispatch audit write fails.
 - GitHub's workflow concurrency group and D1 atomic task claims remain the duplicate-execution controls.
 - Live inference, external writes, trading, and Telegram delivery remain disabled.
 - Missing App settings cause a no-op. No recurring network calls are made until all three settings exist.
