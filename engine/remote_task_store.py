@@ -31,7 +31,8 @@ class _RejectRedirects(HTTPRedirectHandler):
 class RemoteTaskStore:
     def __init__(self, base_url: str | None = None, token: str | None = None,
                  timeout: float = 15.0, access_client_id: str | None = None,
-                 access_client_secret: str | None = None, reject_redirects: bool = False):
+                 access_client_secret: str | None = None, reject_redirects: bool = False,
+                 require_retry_schedule: bool | None = None):
         self.base_url = (base_url or os.environ.get("RAAWAA_ENGINE_API_URL", "")).rstrip("/")
         self.token = token or os.environ.get("RAAWAA_ENGINE_API_TOKEN", "")
         self.access_client_id = (
@@ -44,6 +45,10 @@ class RemoteTaskStore:
         )
         self.timeout = timeout
         self.reject_redirects = bool(reject_redirects)
+        self.require_retry_schedule = (
+            os.environ.get("RAAWAA_ENGINE_LIVE_INFERENCE", "").strip().lower() == "enabled"
+            if require_retry_schedule is None else bool(require_retry_schedule)
+        )
         if not self.base_url.startswith("https://") or not self.token:
             raise ValueError("Remote task store requires an HTTPS API URL and token")
         if bool(self.access_client_id) != bool(self.access_client_secret):
@@ -139,23 +144,26 @@ class RemoteTaskStore:
     def claim_next(self, lease_timeout_seconds: int = 900) -> dict[str, Any] | None:
         if not 1 <= int(lease_timeout_seconds) <= 900:
             raise ValueError("remote lease timeout must be between 1 and 900 seconds")
-        # Do not claim from an older Worker that ignores retry_after_seconds.
-        # This prevents the new runner from creating a hot loop during rollout.
-        health = self._request("/health")
-        capabilities = health.get("capabilities")
-        if not isinstance(capabilities, list) or "task_retry_schedule_v1" not in capabilities:
-            raise RemoteTaskStoreError(
-                "Remote Worker lacks task_retry_schedule_v1; apply migration 0008 and deploy the updated Worker before claiming tasks"
-            )
+        # Live inference can encounter pre-provider capacity failures that must
+        # be deferred. Require the matching Worker/migration only in that mode;
+        # default dry-run queue processing remains compatible with the current
+        # production Worker during the staged rollout.
+        if self.require_retry_schedule:
+            health = self._request("/health")
+            capabilities = health.get("capabilities")
+            if not isinstance(capabilities, list) or "task_retry_schedule_v1" not in capabilities:
+                raise RemoteTaskStoreError(
+                    "Remote Worker lacks task_retry_schedule_v1; apply migration 0008 and deploy the updated Worker before live inference"
+                )
         result = self._request("/v1/tasks/claim", "POST", {})
         task = result.get("task")
         if task is None:
             return None
         if not isinstance(task, dict) or not result.get("lease_token"):
             raise RemoteTaskStoreError("Remote task API returned an invalid lease")
-        if "next_attempt_at" not in task:
+        if self.require_retry_schedule and "next_attempt_at" not in task:
             raise RemoteTaskStoreError(
-                "Remote Worker claimed a task without retry-schedule metadata; task was not executed"
+                "Remote Worker claimed a live task without retry-schedule metadata; task was not executed"
             )
         task["lease_token"] = result["lease_token"]
         return task
