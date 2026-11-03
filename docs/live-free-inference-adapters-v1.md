@@ -18,3 +18,6 @@ Next: integrate with QuotaManager and ModelGateway, reserve quota before calls, 
 ## Data policy boundary
 
 The live data gate is public-only and task-specific: `research_brief` is the sole allowlisted task type. The payload schema accepts only a topic, optional bounded questions, optional public HTTPS source URLs, and an explicit `data_classification=public`. All other task types and classifications fail closed before provider I/O. This gate does not detect every possible proprietary fact in free text; task authors must never mark confidential formulae, customer data, or credentials as public.
+
+
+The text scanner also blocks known sensitive terms in free-text titles, topics, questions, and URL strings, including formula/ingredient/composition, proprietary/confidential/internal markers, customer/order/payment data, personal contact details, and credential terms. This is a conservative keyword guard, not a semantic DLP guarantee; unknown sensitive facts can still evade keyword detection, so classification must remain accurate.
