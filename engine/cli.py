@@ -58,12 +58,18 @@ def audit() -> int:
     integrations = load_json(ROOT / "config" / "integrations.json")
     errors = []
     errors.extend(validate_permission_matrix(tool_permissions, roster))
-    artemis = integrations.get("integrations", {}).get("google_artemis", {})
-    if integrations.get("schema_version") != 1 or not isinstance(artemis, dict):
+    integration_map = integrations.get("integrations") if isinstance(integrations, dict) else None
+    artemis = integration_map.get("google_artemis") if isinstance(integration_map, dict) else None
+    security = artemis.get("security") if isinstance(artemis, dict) else None
+    if (
+        not isinstance(integrations, dict)
+        or integrations.get("schema_version") != 1
+        or not isinstance(artemis, dict)
+    ):
         errors.append("Integration registry is missing schema_version 1 or the Google ARTEMIS entry.")
     elif artemis.get("enabled") is not False or artemis.get("execution_enabled") is not False:
         errors.append("Google ARTEMIS must remain disabled until its separate runtime activation gates are verified.")
-    elif artemis.get("security", {}).get("read_only_probe_only") is not True:
+    elif not isinstance(security, dict) or security.get("read_only_probe_only") is not True:
         errors.append("Google ARTEMIS must remain read-only in the current integration stage.")
     try:
         provider_profiles = load_provider_profile_registry(ROOT / "config" / "provider_profiles.json")
@@ -206,9 +212,9 @@ def main() -> int:
 
     if args.command == "audit":
         return audit()
-    if args.command == "artemis-status":
+    elif args.command == "artemis-status":
         print(json.dumps(probe_artemis(os.environ), indent=2, ensure_ascii=False))
-    if args.command == "free-models":
+    elif args.command == "free-models":
         if args.provider == "all":
             result = discover_all()
         else:
