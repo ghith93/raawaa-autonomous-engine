@@ -225,6 +225,7 @@ jobs:
           with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
               output.write(f"tasks_processed={tasks_processed}\nstop_reason={stop_reason}\n")
           raise SystemExit(result.returncode)
+          PY
       - name: Publish bounded Task Runner status
         if: always()
         uses: actions/github-script@v9
