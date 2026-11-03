@@ -5,6 +5,10 @@ import json
 import sys
 from pathlib import Path
 
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
 from engine.skill_static_gate import scan_skill_bundle
 
 MAX_INPUT_BYTES = 2 * 1024 * 1024
