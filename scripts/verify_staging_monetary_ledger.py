@@ -25,6 +25,7 @@ BASE_URL = os.environ.get(
     "https://raawaa-autonomous-engine-staging.ghith-shikhkhaled.workers.dev",
 ).rstrip("/")
 TOKEN = os.environ.get("RAAWAA_ENGINE_STAGING_API_TOKEN", "")
+QUOTA_ADMIN_TOKEN = os.environ.get("RAAWAA_ENGINE_STAGING_QUOTA_ADMIN_TOKEN", "")
 PREFIX = "staging-verification-"
 
 STAGING_D1_ID = "231dd948-04a0-49e3-ad73-444f77d69477"
@@ -122,7 +123,8 @@ def set_staging_policy(daily: int, monthly: int, per_task: int) -> None:
 
 
 def api(method: str, path: str, payload: dict[str, Any] | None = None,
-        authenticated: bool = True, readiness_timeout_seconds: int = 90) -> tuple[int, dict[str, Any]]:
+        authenticated: bool = True, readiness_timeout_seconds: int = 90,
+        admin: bool = False) -> tuple[int, dict[str, Any]]:
     """Call the Staging Worker, tolerating bounded propagation of its fresh secret.
 
     The Worker checks bearer authentication before dispatching any authenticated
@@ -135,9 +137,10 @@ def api(method: str, path: str, payload: dict[str, Any] | None = None,
     data = None if payload is None else json.dumps(payload, separators=(",", ":")).encode()
     headers = {"Accept": "application/json", "User-Agent": "RaawaaStagingLedgerVerification/1.0"}
     if authenticated:
-        if not TOKEN:
+        selected_token = QUOTA_ADMIN_TOKEN if admin else TOKEN
+        if not selected_token:
             raise RuntimeError("Staging API token is unavailable")
-        headers["Authorization"] = "Bearer " + TOKEN
+        headers["Authorization"] = "Bearer " + selected_token
     if data is not None:
         headers["Content-Type"] = "application/json"
 
@@ -330,6 +333,21 @@ def verify_token_quota_concurrency(run_tag: str) -> None:
             usage.get("daily", {}).get("tokens") == 20 and
             usage.get("task", {}).get("requests") == 2,
             "D1 token quota status does not match the two settled reservations")
+
+    # Verify that the ordinary runner token cannot mutate administrative quota
+    # state, while the isolated admin token can apply a bounded cooldown.
+    ordinary_status, ordinary_body = api("POST", "/v1/quota", {
+        "action": "cool_down", "route_id": route_id, "seconds": 30,
+        "reason": "staging_scope_test",
+    })
+    require(ordinary_status == 403 and ordinary_body.get("error") == "forbidden_operation_scope",
+            "Ordinary Staging token unexpectedly has quota-admin scope")
+    admin_status, admin_body = api("POST", "/v1/quota", {
+        "action": "cool_down", "route_id": route_id, "seconds": 30,
+        "reason": "staging_scope_test",
+    }, admin=True)
+    require(admin_status == 200 and isinstance(admin_body.get("until_at"), str),
+            "Dedicated Staging quota-admin token could not apply a bounded cooldown")
 
 
 def cap_test(label: str, run_tag: str, cap_kind: str) -> None:

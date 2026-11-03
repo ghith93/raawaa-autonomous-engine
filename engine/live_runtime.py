@@ -55,7 +55,8 @@ def build_live_gateway(
         control_url = source.get("RAAWAA_ENGINE_API_URL")
         control_token = source.get("RAAWAA_ENGINE_API_TOKEN")
         monetary_ledger = D1MonetaryLedger(base_url=control_url, token=control_token)
-        quota_ledger = D1QuotaLedger(base_url=control_url, token=control_token)
+        quota_admin_token = source.get("RAAWAA_ENGINE_QUOTA_ADMIN_TOKEN")
+        quota_ledger = D1QuotaLedger(base_url=control_url, token=control_token, admin_token=quota_admin_token)
     else:
         if source.get("GITHUB_ACTIONS", "").lower() == "true":
             raise RuntimeError("Cloud live inference requires both durable D1 monetary and token quota ledgers.")

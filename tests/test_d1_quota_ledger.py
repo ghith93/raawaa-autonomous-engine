@@ -20,11 +20,11 @@ class Response:
 class D1QuotaLedgerTests(unittest.TestCase):
     def setUp(self):
         self.ledger = D1QuotaLedger(
-            "https://engine.example", "test-token",
+            "https://engine.example", "test-token", admin_token="admin-token",
         )
 
     @patch("urllib.request.urlopen")
-    def test_reserve_uses_authenticated_worker_and_passes_every_limit(self, open_url):
+    def test_reserve_uses_authenticated_worker_and_does_not_send_caller_limits(self, open_url):
         open_url.return_value = Response({"reservation_id": 17})
         result = self.ledger.reserve(
             "groq:main:model", 100, 10, 1000,
@@ -40,17 +40,24 @@ class D1QuotaLedgerTests(unittest.TestCase):
         payload = json.loads(request.data)
         self.assertEqual(payload["action"], "reserve")
         self.assertEqual(payload["task_id"], "task-1")
-        self.assertEqual(payload["daily_request_limit"], 10)
-        self.assertEqual(payload["minute_token_limit"], 500)
+        self.assertEqual(payload, {
+            "action": "reserve", "route_id": "groq:main:model",
+            "estimated_tokens": 100, "task_id": "task-1",
+        })
+        self.assertEqual(self.ledger._reservations[17], ("groq:main:model", "task-1"))
 
     @patch("urllib.request.urlopen")
     def test_identical_settlement_replay_is_accepted_by_worker(self, open_url):
         open_url.return_value = Response({"ok": True, "settled": True, "replay": True})
+        self.ledger._reservations[17] = ("groq:main:model", "task-1")
         self.ledger.settle(17, 88)
-        payload = json.loads(open_url.call_args.args[0].data)
+        request = open_url.call_args.args[0]
+        payload = json.loads(request.data)
         self.assertEqual(payload, {
             "action": "settle", "reservation_id": 17, "actual_tokens": 88,
+            "route_id": "groq:main:model", "task_id": "task-1",
         })
+        self.assertEqual(request.get_header("Authorization"), "Bearer test-token")
 
     @patch("urllib.request.urlopen")
     def test_worker_conflict_fails_closed(self, open_url):
@@ -58,6 +65,7 @@ class D1QuotaLedgerTests(unittest.TestCase):
         open_url.side_effect = HTTPError(
             "https://engine.example/v1/quota", 409, "conflict", {}, None
         )
+        self.ledger._reservations[17] = ("groq:main:model", "task-1")
         with self.assertRaises(D1QuotaLedgerError):
             self.ledger.settle(17, 90)
 
@@ -65,7 +73,34 @@ class D1QuotaLedgerTests(unittest.TestCase):
     def test_ambiguous_transport_failure_raises_without_local_fallback(self, open_url):
         from urllib.error import URLError
         open_url.side_effect = URLError("connection reset")
+        self.ledger._reservations[17] = ("groq:main:model", "task-1")
         with self.assertRaisesRegex(D1QuotaLedgerError, "transport failed"):
+            self.ledger.settle(17, 88)
+
+    @patch("urllib.request.urlopen")
+    def test_quota_admin_operations_use_a_distinct_token(self, open_url):
+        open_url.return_value = Response({"id": 9, "ok": True})
+        self.ledger.audit_event("provider_error", route_id="groq:main:model")
+        request = open_url.call_args.args[0]
+        self.assertEqual(request.get_header("Authorization"), "Bearer admin-token")
+        self.assertEqual(json.loads(request.data)["action"], "audit_event")
+
+        self.ledger.cool_down("groq:main:model", 30)
+        request = open_url.call_args.args[0]
+        self.assertEqual(request.get_header("Authorization"), "Bearer admin-token")
+        self.assertEqual(json.loads(request.data)["action"], "cool_down")
+
+    @patch("urllib.request.urlopen")
+    def test_admin_operations_fail_closed_without_admin_token(self, open_url):
+        ledger = D1QuotaLedger("https://engine.example", "test-token")
+        with self.assertRaisesRegex(D1QuotaLedgerError, "QUOTA_ADMIN_TOKEN"):
+            ledger.audit_event("provider_error")
+        with self.assertRaisesRegex(D1QuotaLedgerError, "QUOTA_ADMIN_TOKEN"):
+            ledger.cool_down("groq:main:model", 30)
+        open_url.assert_not_called()
+
+    def test_settlement_without_reservation_context_fails_closed(self):
+        with self.assertRaisesRegex(D1QuotaLedgerError, "ownership context"):
             self.ledger.settle(17, 88)
 
     def test_cloud_mode_requires_https_and_token(self):

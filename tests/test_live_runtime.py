@@ -177,6 +177,7 @@ class LiveRuntimeFactoryTests(unittest.TestCase):
                     "RAAWAA_ENGINE_LIVE_INFERENCE": "enabled",
                     "RAAWAA_ENGINE_API_URL": "https://engine.example",
                     "RAAWAA_ENGINE_API_TOKEN": "test-token",
+                    "RAAWAA_ENGINE_QUOTA_ADMIN_TOKEN": "quota-admin-test-token",
                     "GROQ_API_KEY": "test-key",
                 },
             )
@@ -187,7 +188,8 @@ class LiveRuntimeFactoryTests(unittest.TestCase):
             base_url="https://engine.example", token="test-token"
         )
         quota_factory.assert_called_once_with(
-            base_url="https://engine.example", token="test-token"
+            base_url="https://engine.example", token="test-token",
+            admin_token="quota-admin-test-token"
         )
 
     def test_github_actions_without_control_worker_url_fails_closed(self):
