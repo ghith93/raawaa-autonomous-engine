@@ -138,9 +138,9 @@ class MobileStatusProbeTests(unittest.TestCase):
         }
         result = probe.summarize_mobile_status(payload)
         self.assertEqual(result["watchdog_ready"], "invalid")
-        self.assertEqual(result["watchdog_missing"], "unknown")
-        self.assertEqual(result["watchdog_last_dispatch_requested"], "unknown")
-        self.assertEqual(result["watchdog_last_dispatch_intent_at"], "unknown")
+        self.assertEqual(result["watchdog_missing"], "invalid")
+        self.assertEqual(result["watchdog_last_dispatch_requested"], "invalid")
+        self.assertEqual(result["watchdog_last_dispatch_intent_at"], "invalid")
         self.assertNotIn("PRIVATE_KEY_NEVER_RETURN", json.dumps(result))
 
     def test_missing_status_fields_remain_unknown_not_available(self):
