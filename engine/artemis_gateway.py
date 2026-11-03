@@ -136,6 +136,14 @@ def probe_artemis(environ: dict[str, str] | None = None) -> dict[str, Any]:
             "message": str(exc),
         }
 
+    if not isinstance(health, dict):
+        return {
+            "integration": "google_artemis",
+            "status": "INVALID_RESPONSE",
+            "network_calls": 2,
+            "task_submission_enabled": False,
+            "message": "ARTEMIS health response did not contain an object.",
+        }
     raw_devices = devices_payload.get("devices", []) if isinstance(devices_payload, dict) else devices_payload
     if not isinstance(raw_devices, list):
         return {
