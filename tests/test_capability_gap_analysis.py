@@ -134,11 +134,23 @@ class CapabilityGapAnalysisTests(unittest.TestCase):
             self.assertIn(opportunity["risk_band"], {"low", "medium", "high"})
             self.assertIn(opportunity["cost_band"], {"zero", "low", "medium", "high"})
             self.assertIn(opportunity["complexity_band"], {"low", "medium", "high"})
+        self.assertFalse(result["task_creation"])
+        self.assertFalse(result["automatic_adoption"])
+        for opportunity in result["opportunities"]:
+            self.assertEqual(opportunity["decision_status"], "PROPOSED")
+            self.assertFalse(opportunity["automatic_task_creation"])
+            self.assertFalse(opportunity["automatic_adoption"])
         for proposal in result["task_proposals"]:
             self.assertEqual(proposal["task_type"], "capability_proposal")
+            self.assertEqual(proposal["status"], "PROPOSED")
             self.assertTrue(proposal["acceptance_criteria"])
             self.assertTrue(proposal["rollback_plan"])
+            self.assertTrue(proposal["independent_review_required"])
+            self.assertTrue(proposal["owner_approval_required"])
+            self.assertFalse(proposal["automatic_task_creation"])
             self.assertFalse(proposal["task_store_write"])
+            self.assertFalse(proposal["automatic_execution"])
+            self.assertFalse(proposal["automatic_adoption"])
             self.assertEqual(proposal["approval_state"], "not_requested")
 
 
