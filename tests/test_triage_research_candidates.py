@@ -9,7 +9,7 @@ class ResearchTriageTests(unittest.TestCase):
         self.now = datetime(2026, 11, 1, tzinfo=timezone.utc)
 
     def test_skill_security_and_agent_evaluation_topics_are_directly_relevant(self):
-        for topic in ("agent_skills_security", "agent_evaluation"):
+        for topic in ("agent_skills_security", "agent_evaluation", "skill_benchmarks"):
             with self.subTest(topic=topic):
                 result = triage_candidates({
                     "candidates": [{

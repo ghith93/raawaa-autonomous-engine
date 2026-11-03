@@ -4,14 +4,18 @@ from datetime import datetime, timezone
 from engine.research_discovery import DEFAULT_QUERIES, MAX_RESPONSE_BYTES, ResearchDiscoveryError, _request_crossref, _request_json, discover_repositories
 
 class ResearchDiscoveryTests(unittest.TestCase):
-    def test_default_queries_include_broad_skill_security_and_agent_evaluation_searches(self):
+    def test_default_queries_target_skill_scanners_and_evaluation_benchmarks(self):
         self.assertEqual(
             DEFAULT_QUERIES["agent_skills_security"],
-            "agent skills security archived:false",
+            "agent skill scanner archived:false",
         )
         self.assertEqual(
             DEFAULT_QUERIES["agent_evaluation"],
-            "agent evaluation benchmark archived:false",
+            "agent evaluation benchmark harness archived:false",
+        )
+        self.assertEqual(
+            DEFAULT_QUERIES["skill_benchmarks"],
+            "skillsbench archived:false",
         )
 
     def test_discovery_returns_metadata_only_candidates_and_deduplicates(self):

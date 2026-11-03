@@ -12,7 +12,7 @@ KNOWN_LICENSES = PERMISSIVE_LICENSES | {"MPL-2.0", "EPL-2.0", "CDDL-1.0", "GPL-2
 PREFERRED_LANGUAGES = {"python", "typescript", "javascript", "go", "rust"}
 RELEVANT_TOPICS = {
     "agent_frameworks", "coding_agents", "agent_memory", "mcp_ecosystem",
-    "model_routing", "durable_execution", "agent_skills_security", "agent_evaluation",
+    "model_routing", "durable_execution", "agent_skills_security", "agent_evaluation", "skill_benchmarks",
 }
 RELEVANT_PAPER_TERMS = {
     "agent", "agents", "agentic", "orchestration", "workflow", "memory", "llm",

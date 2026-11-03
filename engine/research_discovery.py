@@ -23,8 +23,9 @@ DEFAULT_QUERIES = {
     "mcp_ecosystem": "MCP server tools model context protocol archived:false",
     "model_routing": "LLM model router inference gateway quota archived:false",
     "durable_execution": "durable workflow orchestration agent execution archived:false",
-    "agent_skills_security": "agent skills security archived:false",
-    "agent_evaluation": "agent evaluation benchmark archived:false",
+    "agent_skills_security": "agent skill scanner archived:false",
+    "agent_evaluation": "agent evaluation benchmark harness archived:false",
+    "skill_benchmarks": "skillsbench archived:false",
 }
 
 class ResearchDiscoveryError(RuntimeError):
