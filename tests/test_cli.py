@@ -9,6 +9,8 @@ from unittest.mock import patch
 
 from engine import cli
 from engine.task_store import TaskStore
+from engine.remote_task_store import RemoteTaskStore
+from engine.task_invocation_store import TaskInvocationStore
 from engine.model_gateway import UsageLedger
 
 
@@ -119,6 +121,20 @@ class CliTests(unittest.TestCase):
                 with patch("engine.cli.store", return_value=object()):
                     with self.assertRaisesRegex(ValueError, "configured max_parallel_agents"):
                         cli.main()
+
+    def test_remote_runner_receives_durable_invocation_store_but_local_runner_does_not(self):
+        remote = RemoteTaskStore("https://engine.example", "test-token")
+        with patch("engine.cli.build_live_gateway", return_value="gateway") as builder:
+            self.assertEqual(cli.build_gateway_for_task_store(remote), "gateway")
+        remote_kwargs = builder.call_args.kwargs
+        self.assertIsInstance(remote_kwargs["invocation_store"], TaskInvocationStore)
+        self.assertIs(remote_kwargs["invocation_store"].task_store, remote)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            local = TaskStore(Path(tmp) / "local.db")
+            with patch("engine.cli.build_live_gateway", return_value=None) as builder:
+                self.assertIsNone(cli.build_gateway_for_task_store(local))
+            self.assertIsNone(builder.call_args.kwargs["invocation_store"])
 
     def test_run_once_uses_live_runtime_factory_but_default_remains_dry_run(self):
         with tempfile.TemporaryDirectory() as tmp:
