@@ -37,6 +37,11 @@ class MonetaryLedgerMigrationTests(unittest.TestCase):
             db.execute("SELECT version FROM schema_migrations WHERE version='0006_monetary_budget_ledger'").fetchone(),
             ("0006_monetary_budget_ledger",),
         )
+        policy = db.execute(
+            "SELECT daily_budget_nanos,monthly_budget_nanos,per_task_budget_nanos,enabled "
+            "FROM monetary_budget_policy WHERE policy_key='default'"
+        ).fetchone()
+        self.assertEqual(policy, (400_000_000,12_000_000_000,200_000_000,1))
         db.close()
 
 
