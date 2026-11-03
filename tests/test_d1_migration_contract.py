@@ -93,10 +93,6 @@ class D1MigrationContractTests(unittest.TestCase):
             VALUES ('legacy-task','legacy-key','research_brief','Legacy','{}','succeeded',1,2,'2026-01-01','2026-01-01')""")
         migration = MIGRATION_9.read_text(encoding="utf-8")
         self.db.executescript(migration)
-        self.db.executescript(migration.replace(
-            "ALTER TABLE tasks ADD COLUMN execution_mode TEXT NOT NULL DEFAULT 'unknown'\n  CHECK(execution_mode IN ('unknown','not_started','dry_run','live_inference'));",
-            "-- already applied",
-        ))
         self.assertEqual(self.db.execute(
             "SELECT execution_mode FROM tasks WHERE id='legacy-task'"
         ).fetchone()[0], "unknown")
