@@ -137,6 +137,7 @@ class ResearchDiscoveryTests(unittest.TestCase):
         self.assertEqual(normalized["title"], "Safe Multi-Agent Research")
         self.assertEqual(normalized["authors"], ["Example Author"])
         self.assertEqual(normalized["categories"], ["cs.AI"])
+        self.assertEqual(normalized["doi"], "10.1234/example")
         self.assertFalse(normalized["abstract_retrieved"])
         self.assertFalse(normalized["full_text_retrieved"])
         self.assertNotIn("summary", normalized)
