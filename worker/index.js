@@ -212,6 +212,7 @@ export default {
         url.pathname !== "/v1/monetary-ledger" &&
         url.pathname !== "/v1/paper-ledger" &&
         url.pathname !== "/v1/mobile/status" &&
+        url.pathname !== "/v1/workers-ai-neurons" &&
         !/^\/v1\/tasks\/[A-Za-z0-9-]+\/invocations$/.test(url.pathname) &&
         url.pathname !== "/v1/research/candidates/review" &&
         !/^\/v1\/tasks\/[A-Za-z0-9-]+\/(heartbeat|finish|retry)$/.test(url.pathname)) {
