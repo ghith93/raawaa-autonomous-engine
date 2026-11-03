@@ -37,6 +37,23 @@ class TaskStoreTests(unittest.TestCase):
         result = run_once(self.store)
         self.assertEqual(result["status"], "blocked")
 
+    def test_existing_sqlite_database_migrates_legacy_tasks_to_unknown_mode(self):
+        old_path = Path(self.tmp.name) / "legacy.db"
+        with sqlite3.connect(old_path) as db:
+            db.execute("""CREATE TABLE tasks (
+                id TEXT PRIMARY KEY, idempotency_key TEXT NOT NULL UNIQUE,
+                task_type TEXT NOT NULL, title TEXT NOT NULL, payload_json TEXT NOT NULL,
+                status TEXT NOT NULL CHECK(status IN ('pending','running','succeeded','failed','blocked')),
+                attempts INTEGER NOT NULL DEFAULT 0, max_attempts INTEGER NOT NULL DEFAULT 2,
+                created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+                result_json TEXT, error TEXT, lease_token TEXT, lease_expires_at TEXT
+            )""")
+            db.execute("""INSERT INTO tasks
+                (id,idempotency_key,task_type,title,payload_json,status,attempts,max_attempts,created_at,updated_at)
+                VALUES ('old-task','old-key','research_brief','Old success','{}','succeeded',1,2,'2026-01-01','2026-01-01')""")
+        migrated = TaskStore(old_path)
+        self.assertEqual(migrated.list_tasks()[0]["execution_mode"], "unknown")
+
     def test_claim_persists_explicit_execution_mode_and_audits_it(self):
         task = self.store.enqueue("research_brief", "Live mode claim")
         claimed = self.store.claim_next(execution_mode="live_inference")
