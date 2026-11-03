@@ -24,23 +24,26 @@ def write_fixture(root: Path, *, staging_id="231dd948-04a0-49e3-ad73-444f77d6947
         "model_policy": {"paid_fallback_enabled": False},
     }), encoding="utf-8")
     (root / ".github" / "workflows" / "task-runner.yml").write_text(
-        "      - name: Process bounded D1 task batch\\n"
-        "          RAAWAA_ENGINE_LIVE_INFERENCE: disabled\\n"
-        "      - name: Publish bounded Task Runner status\\n",
+        """      - name: Process bounded D1 task batch
+          RAAWAA_ENGINE_LIVE_INFERENCE: disabled
+      - name: Publish bounded Task Runner status
+""",
         encoding="utf-8",
     )
     (root / "wrangler.staging.toml").write_text(
-        'name = "raawaa-autonomous-engine-staging"\\n'
-        '[[d1_databases]]\\n'
-        'database_name = "raawaa-engine-staging"\\n'
-        f'database_id = "{staging_id}"\\n',
+        f"""name = "raawaa-autonomous-engine-staging"
+[[d1_databases]]
+database_name = "raawaa-engine-staging"
+database_id = "{staging_id}"
+""",
         encoding="utf-8",
     )
     (root / "wrangler.toml").write_text(
-        'name = "raawaa-autonomous-engine-control"\\n'
-        '[[d1_databases]]\\n'
-        'database_name = "raawaa-autonomous-e"\\n'
-        'database_id = "f0ffbed3-940f-488d-a7d1-31cbc5fbf742"\\n',
+        """name = "raawaa-autonomous-engine-control"
+[[d1_databases]]
+database_name = "raawaa-autonomous-e"
+database_id = "f0ffbed3-940f-488d-a7d1-31cbc5fbf742"
+""",
         encoding="utf-8",
     )
 
