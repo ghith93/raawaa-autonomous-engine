@@ -103,7 +103,7 @@ class TaskStore:
             if changed != 1:
                 return None
             self._audit(db, row["id"], "task_claimed", {"attempt": row["attempts"] + 1,
-                        "lease_expires_at": expires})
+                        "lease_expires_at": expires, "execution_mode": execution_mode})
             return dict(db.execute("SELECT * FROM tasks WHERE id=?", (row["id"],)).fetchone())
 
     def heartbeat(self, task_id: str, lease_token: str, lease_timeout_seconds: int = 900) -> str:
@@ -154,7 +154,8 @@ class TaskStore:
                  error, mode, now, task_id, lease_token)).rowcount
             if changed != 1:
                 raise ValueError("lease ownership lost")
-            self._audit(db, task_id, "task_" + status, {"error": error} if error else (result or {}))
+            self._audit(db, task_id, "task_" + status,
+                        {"error": error, "execution_mode": mode} if error else (result or {}))
 
     def retry_or_fail(self, task_id: str, error: str, lease_token: str | None = None) -> str:
         with self._connect() as db:
