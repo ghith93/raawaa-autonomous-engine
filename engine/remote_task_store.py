@@ -120,7 +120,7 @@ class RemoteTaskStore:
                    execution_mode: str = "unknown") -> dict[str, Any] | None:
         if not 1 <= int(lease_timeout_seconds) <= 900:
             raise ValueError("remote lease timeout must be between 1 and 900 seconds")
-        if execution_mode not in {"unknown", "dry_run", "live_inference"}:
+        if not isinstance(execution_mode, str) or execution_mode not in {"unknown", "dry_run", "live_inference"}:
             raise ValueError("invalid execution_mode")
         result = self._request("/v1/tasks/claim", "POST", {
             "execution_mode": execution_mode,
