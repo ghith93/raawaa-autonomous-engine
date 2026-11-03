@@ -329,6 +329,13 @@ def verify_quota_admin_scopes(run_tag: str) -> None:
     require(status == 403 and body.get("error") == "forbidden_operation_scope",
             "Quota admin token unexpectedly acquired runner reserve scope")
 
+    status, body = api("POST", "/v1/quota", {
+        "action": "settle", "reservation_id": 1, "route_id": route_id,
+        "task_id": task_id, "actual_tokens": 1,
+    }, token=ADMIN_TOKEN)
+    require(status == 403 and body.get("error") == "forbidden_operation_scope",
+            "Quota admin token unexpectedly acquired runner settlement scope")
+
     status, _ = api("GET", "/v1/tasks", token=ADMIN_TOKEN)
     require(status == 401, "Quota admin token escaped the quota endpoint")
 
