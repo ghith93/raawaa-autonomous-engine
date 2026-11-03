@@ -19,22 +19,6 @@
         {"agent_role": "operations_and_monitoring", "task_types": ["system_audit"]}
       ],
       "environments": ["local", "staging"]
-    },
-    "tests.run": {
-      "access": "read",
-      "action": "run_tests",
-      "grants": [
-        {"agent_role": "quality_and_security", "task_types": ["code_review"]}
-      ],
-      "environments": ["local", "staging"]
-    },
-    "research.public_search": {
-      "access": "read",
-      "action": "research",
-      "grants": [
-        {"agent_role": "research", "task_types": ["research_brief"]}
-      ],
-      "environments": ["local", "staging"]
     }
   }
 }
