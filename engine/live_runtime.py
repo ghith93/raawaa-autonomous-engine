@@ -93,6 +93,17 @@ def build_live_gateway(
         elif (profile.provider == "gemini"
               and profile.endpoint_url == "https://generativelanguage.googleapis.com/v1beta"):
             adapter = GeminiAdapter(api_key_env=entry.api_key_env, environ=source)
+        elif (profile.provider == "openrouter"
+              and profile.endpoint_url == "https://openrouter.ai/api/v1"
+              and profile.model == "openrouter/free"):
+            # The fixed OpenRouter free router alias is the only allowed model
+            # on this endpoint; arbitrary model IDs could select paid inference.
+            adapter = OpenAICompatibleAdapter(
+                provider=profile.provider,
+                base_url=profile.endpoint_url,
+                api_key_env=entry.api_key_env,
+                environ=source,
+            )
         else:
             continue
         adapters[profile.route_id] = adapter
