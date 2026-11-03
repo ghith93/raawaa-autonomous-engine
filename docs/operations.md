@@ -335,3 +335,12 @@ Required owner-side activation after review: configure a newly generated, distin
 - **Next core priorities:** F1 (separate dry-run completion from actual execution in task state/reporting) next, then F5 (DAG priority/dependencies), each on its own branch with exact-head CI and parity tests. F3/F4 follow after core semantics.
 - **Developer tools:** Graphify is approved for a later bounded code-only evaluation (Apache-2.0; official PyPI `graphifyy`; local/offline Tree-Sitter code extraction; optional semantic docs/media extraction uses the configured model). It is not installed, executed, or a runtime dependency. Spec Kit remains deferred and optional (MIT).
 
+
+
+## F1 execution-mode separation — 2026-11-04
+
+- Adds the additive D1 migration `0009_task_execution_mode` and matching SQLite forward migration.
+- New tasks begin as `not_started`; legacy tasks migrate as `unknown`. At atomic claim, the runner records the selected `dry_run`, `live_inference`, or legacy `unknown` mode under the existing lease. Terminal results can reconcile the mode from their recorded result.
+- The authenticated D1 task list/claim/finish APIs expose and preserve the mode. Mobile Status displays execution-mode aggregates separately from task terminal statuses, making clear that dry-run success is simulation, not live work.
+- `live_inference` means the live execution path was selected for the task; it does not by itself prove a provider request completed. Existing kill-switch, preflight, quota reservation, ambiguity/no-replay and zero-spend policies are unchanged.
+- No remote migration or Worker deployment has been performed from this branch. CI and local D1 smoke verification are required before merge.
