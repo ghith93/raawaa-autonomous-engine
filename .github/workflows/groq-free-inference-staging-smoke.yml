@@ -60,7 +60,7 @@ jobs:
               raise SystemExit("Refusing: only the two verified zero-cost Groq routes may be enabled")
           print("Staging isolation, fail-closed defaults, and isolated zero-cost Groq smoke policy verified.")
           PY
-      - name: Validate Cloudflare and Access credentials
+      - name: Validate Cloudflare and Groq credentials
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
