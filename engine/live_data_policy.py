@@ -17,6 +17,14 @@ SECRET_PATTERNS = (
     re.compile(r"\bBearer\s+[A-Za-z0-9._~+/-]{16,}", re.IGNORECASE),
 )
 EMAIL_PATTERN = re.compile(r"\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b", re.IGNORECASE)
+SENSITIVE_CONTENT_PATTERNS = (
+    re.compile(r"\b(?:raawaa|raawa|rawaa)\b.{0,120}\b(?:hair\s+serum\s+)?(?:formula|formulation|ingredients?|composition|blend)\b", re.IGNORECASE),
+    re.compile(r"\b(?:formula|formulation|ingredients?|composition|blend)\b.{0,120}\b(?:raawaa|raawa|rawaa)\b", re.IGNORECASE),
+    re.compile(r"\b(?:confidential|internal|proprietary|private)\b.{0,80}\b(?:confidential|internal|analysis|report|notes|details|information|data|formula|formulation|ingredients?|composition|blend|records)\b", re.IGNORECASE),
+    re.compile(r"\b(?:customer|client|user)\b.{0,80}\b(?:order|payment|transaction|account|contact|personal|details|records|data|history|email|phone|address)\b", re.IGNORECASE),
+    re.compile(r"\b(?:order|payment|transaction|account)\b.{0,80}\b(?:customer|client|user|personal|details|records|data|history)\b", re.IGNORECASE),
+    re.compile(r"\bpersonal\b.{0,80}\b(?:data|details|records|information|email|phone|address)\b", re.IGNORECASE),
+)
 BASE_BLOCKED_KEY_FRAGMENTS = (
     "password", "passwd", "secret", "apikey", "access_token", "refresh_token",
     "authorization", "privatekey", "credential", "customer", "personaldata",
@@ -120,10 +128,14 @@ def validate_live_payload(
                 return False, "personal_data_detected"
             if any(pattern.search(current) for pattern in SECRET_PATTERNS):
                 return False, "secret_pattern_detected"
+            if any(pattern.search(current) for pattern in SENSITIVE_CONTENT_PATTERNS):
+                return False, "sensitive_content_detected"
     if EMAIL_PATTERN.search(title):
         return False, "personal_data_detected"
     if any(pattern.search(title) for pattern in SECRET_PATTERNS):
         return False, "secret_pattern_detected"
+    if any(pattern.search(title) for pattern in SENSITIVE_CONTENT_PATTERNS):
+        return False, "sensitive_content_detected"
 
     if set(payload) - set(allowed_payload_keys) or not REQUIRED_PAYLOAD_KEYS.issubset(payload):
         return False, "payload_schema_invalid"
