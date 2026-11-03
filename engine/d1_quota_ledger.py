@@ -18,23 +18,26 @@ class D1QuotaLedgerError(RuntimeError):
 
 class D1QuotaLedger:
     def __init__(self, base_url: str | None = None, token: str | None = None,
-                 timeout: int = 15):
+                 timeout: int = 15, admin_token: str | None = None):
         self.base_url = (base_url or os.getenv("RAAWAA_ENGINE_API_URL", "")).rstrip("/")
         self.token = token or os.getenv("RAAWAA_ENGINE_API_TOKEN", "")
         self.timeout = timeout
+        self.admin_token = admin_token or os.getenv("RAAWAA_ENGINE_QUOTA_ADMIN_TOKEN", "")
+        self._reservations: dict[int, tuple[str, str]] = {}
         if not self.base_url.startswith("https://") or not self.token:
             raise D1QuotaLedgerError(
                 "RAAWAA_ENGINE_API_URL (HTTPS) and RAAWAA_ENGINE_API_TOKEN are required"
             )
 
-    def _request(self, method: str, path: str, payload: dict[str, Any] | None = None) -> dict:
+    def _request(self, method: str, path: str, payload: dict[str, Any] | None = None,
+                 token: str | None = None) -> dict:
         data = None if payload is None else json.dumps(payload, separators=(",", ":")).encode()
         # workers.dev Browser Integrity Check has rejected urllib's default
         # Python User-Agent in this project. Match the already-verified task
         # client identity so the new quota endpoint uses the same edge path.
         headers = {
             "Accept": "application/json",
-            "Authorization": f"Bearer {self.token}",
+            "Authorization": f"Bearer {token or self.token}",
             "User-Agent": "RaawaaAutonomousEngine/1.0",
         }
         access_id = os.getenv("RAAWAA_ENGINE_CF_ACCESS_CLIENT_ID", "")
@@ -101,40 +104,50 @@ class D1QuotaLedger:
                 per_task_token_limit: int | None = None,
                 minute_request_limit: int | None = None,
                 minute_token_limit: int | None = None) -> int:
-        required = (monthly_request_limit, monthly_token_limit, task_id,
-                    per_task_request_limit, per_task_token_limit,
-                    minute_request_limit, minute_token_limit)
-        if any(value is None for value in required):
-            raise ValueError("all daily, monthly, minute, and per-task limits plus task_id are required")
+        if (type(estimated_tokens) is not int or estimated_tokens < 1 or
+                not isinstance(route_id, str) or not route_id.strip() or
+                not isinstance(task_id, str) or not task_id.strip()):
+            raise ValueError("route_id, task_id and positive estimated_tokens are required")
+        # The Worker owns route eligibility and all hard quota limits. Keep the
+        # legacy limit parameters in this method signature for caller compatibility,
+        # but never serialize them as trusted policy.
         result = self._request("POST", "/v1/quota", {
-            "action": "reserve", "route_id": route_id, "estimated_tokens": estimated_tokens,
-            "daily_request_limit": request_limit, "daily_token_limit": token_limit,
-            "monthly_request_limit": monthly_request_limit,
-            "monthly_token_limit": monthly_token_limit, "task_id": task_id,
-            "per_task_request_limit": per_task_request_limit,
-            "per_task_token_limit": per_task_token_limit,
-            "minute_request_limit": minute_request_limit,
-            "minute_token_limit": minute_token_limit,
+            "action": "reserve", "route_id": route_id,
+            "estimated_tokens": estimated_tokens, "task_id": task_id,
         })
-        return int(result["reservation_id"])
+        reservation_id = int(result["reservation_id"])
+        self._reservations[reservation_id] = (route_id, task_id)
+        return reservation_id
 
     def settle(self, reservation_id: int, actual_tokens: int) -> None:
         if type(reservation_id) is not int or reservation_id < 1 or type(actual_tokens) is not int or actual_tokens < 0:
             raise ValueError("invalid reservation settlement")
+        reservation = self._reservations.get(reservation_id)
+        if reservation is None:
+            raise D1QuotaLedgerError("reservation ownership context is unavailable; refusing unbound settlement")
+        route_id, task_id = reservation
         self._request("POST", "/v1/quota", {
-            "action": "settle", "reservation_id": reservation_id, "actual_tokens": actual_tokens
+            "action": "settle", "reservation_id": reservation_id,
+            "actual_tokens": actual_tokens, "route_id": route_id, "task_id": task_id,
         })
+
+    def _admin_request(self, method: str, path: str, payload: dict[str, Any]) -> dict:
+        if not self.admin_token:
+            raise D1QuotaLedgerError(
+                "RAAWAA_ENGINE_QUOTA_ADMIN_TOKEN is required for quota administration"
+            )
+        return self._request(method, path, payload, token=self.admin_token)
 
     def record(self, route_id: str, tokens: int, now: datetime | None = None) -> None:
         if type(tokens) is not int or tokens < 0:
             raise ValueError("tokens cannot be negative")
-        self._request("POST", "/v1/quota", {"action": "record", "route_id": route_id, "tokens": tokens})
+        self._admin_request("POST", "/v1/quota", {"action": "record", "route_id": route_id, "tokens": tokens})
 
     def cool_down(self, route_id: str, seconds: int, reason: str = "rate_limited",
                   now: datetime | None = None) -> None:
         if type(seconds) is not int or seconds < 1:
             raise ValueError("cooldown must be positive")
-        self._request("POST", "/v1/quota", {
+        self._admin_request("POST", "/v1/quota", {
             "action": "cool_down", "route_id": route_id, "seconds": seconds, "reason": reason
         })
 
@@ -146,7 +159,7 @@ class D1QuotaLedger:
     def audit_event(self, event: str, route_id: str | None = None,
                     task_kind: str | None = None, details: dict | None = None,
                     now: datetime | None = None) -> int:
-        result = self._request("POST", "/v1/quota", {
+        result = self._admin_request("POST", "/v1/quota", {
             "action": "audit_event", "event": event, "route_id": route_id,
             "task_kind": task_kind, "details": details or {},
         })
