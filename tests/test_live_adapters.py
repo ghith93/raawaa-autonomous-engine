@@ -1,6 +1,8 @@
 import unittest
+from io import BytesIO
+from urllib.error import HTTPError
 from unittest.mock import patch
-from engine.live_adapters import GeminiAdapter, LiveAdapterError, OpenAICompatibleAdapter
+from engine.live_adapters import GeminiAdapter, LiveAdapterError, OpenAICompatibleAdapter, _post_json
 from engine.provider import GenerationRequest
 
 class FakeResponse:
@@ -37,5 +39,27 @@ class LiveAdapterTests(unittest.TestCase):
         adapter=OpenAICompatibleAdapter("groq","https://api.example/v1","KEY",environ={"KEY":"secret"})
         with patch("engine.live_adapters.urlopen",return_value=FakeResponse(b'{}')):
             with self.assertRaises(LiveAdapterError): adapter.generate("model",GenerationRequest("test","hi"))
+
+    def test_http_error_captures_only_safe_machine_code(self):
+        body = (
+            b'{"error":{"message":"sensitive provider detail",'
+            b'"type":"permissions_error","code":"model_permission_blocked_org"}}'
+        )
+        error = HTTPError("https://api.example/v1/chat/completions", 403, "Forbidden", {}, BytesIO(body))
+        with patch("engine.live_adapters.urlopen", side_effect=error):
+            with self.assertRaises(LiveAdapterError) as raised:
+                _post_json("https://api.example/v1/chat/completions", {}, {"model": "model-x"})
+        self.assertEqual(raised.exception.status_code, 403)
+        self.assertEqual(raised.exception.error_code, "model_permission_blocked_org")
+        self.assertNotIn("sensitive provider detail", str(raised.exception))
+
+    def test_http_error_rejects_unbounded_machine_code(self):
+        body = b'{"error":{"message":"secret","code":"bad code\\nwith newline"}}'
+        error = HTTPError("https://api.example/v1/chat/completions", 403, "Forbidden", {}, BytesIO(body))
+        with patch("engine.live_adapters.urlopen", side_effect=error):
+            with self.assertRaises(LiveAdapterError) as raised:
+                _post_json("https://api.example/v1/chat/completions", {}, {"model": "model-x"})
+        self.assertIsNone(raised.exception.error_code)
+        self.assertNotIn("secret", str(raised.exception))
 
 if __name__=="__main__": unittest.main()
