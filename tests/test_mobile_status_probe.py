@@ -97,6 +97,25 @@ class MobileStatusProbeTests(unittest.TestCase):
         self.assertNotIn("model_costs", result)
         self.assertNotIn("99.99", json.dumps(result))
 
+
+    def test_explicit_scan_and_source_freshness_snapshots_override_gap_text(self):
+        payload = status_payload()
+        payload["last_scan"] = {"status":"partial","freshness":"fresh"}
+        payload["source_freshness"] = {"status":"partial","sources":{
+            "github":{"status":"fresh"}, "crossref":{"status":"unavailable"}
+        }}
+        result = probe.summarize_mobile_status(payload)
+        self.assertEqual(result["last_scan"], "partial")
+        self.assertEqual(result["source_freshness"], "partial")
+
+    def test_stale_scan_and_source_observations_remain_stale(self):
+        payload = status_payload()
+        payload["last_scan"] = {"status":"stale","freshness":"stale"}
+        payload["source_freshness"] = {"status":"stale","sources":{}}
+        result = probe.summarize_mobile_status(payload)
+        self.assertEqual(result["last_scan"], "stale")
+        self.assertEqual(result["source_freshness"], "stale")
+
     def test_ci_health_and_kill_switch_snapshots_override_unavailable_placeholders(self):
         payload = status_payload()
         payload["ci_health"] = {"status": "success", "freshness": "fresh"}
