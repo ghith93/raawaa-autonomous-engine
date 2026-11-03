@@ -3,7 +3,11 @@ import assert from "node:assert/strict";
 import worker from "../worker/index.js";
 
 const TOKEN = "mobile-status-test-token";
-function dbMock(migrationVersions=["0003_durable_quota_ledger","0004_paper_event_ledger","0005_telegram_webhook_receipts"], workerCron={created_at:"2026-11-03T00:00:00.000Z",details_json:JSON.stringify({cron:"*/15 * * * *",requeued:2,failed:1})}, watchdogEvents=[], ciHealthRow=null, killSwitchRow=null, invocationCounts=[], scanRow=null, sourceRows=[]) {
+function dbMock(migrationVersions=["0003_durable_quota_ledger","0004_paper_event_ledger","0005_telegram_webhook_receipts","0008_task_execution_mode"], workerCron={created_at:"2026-11-03T00:00:00.000Z",details_json:JSON.stringify({cron:"*/15 * * * *",requeued:2,failed:1})}, watchdogEvents=[], ciHealthRow=null, killSwitchRow=null, invocationCounts=[], scanRow=null, sourceRows=[], executionModeCounts=[
+  {execution_mode:"dry_run",status:"succeeded",count:2},
+  {execution_mode:"live_inference",status:"succeeded",count:1},
+  {execution_mode:"unknown",status:"succeeded",count:3},
+]) {
   const calls=[];
   return {
     calls,
@@ -14,6 +18,7 @@ function dbMock(migrationVersions=["0003_durable_quota_ledger","0004_paper_event
         async first(){calls.push({kind:"first",sql,values:this.values});if(sql.includes("worker_cron_tick"))return workerCron;if(sql.includes("ci_health_snapshot"))return ciHealthRow;if(sql.includes("kill_switch_snapshot"))return killSwitchRow;if(sql.includes("research_scan_completed"))return scanRow;if(sql.includes("snapshot_captured"))return {candidate_id:"candidate-2",occurred_at:"2026-11-02T12:30:00.000Z",chain_id:1,block_number:123};return {event_type:"candidate_detected",candidate_id:"candidate-1",occurred_at:"2026-11-02T12:00:00.000Z"};},
         async all(){
           calls.push({kind:"all",sql,values:this.values});
+          if(sql.includes("GROUP BY execution_mode,status")) return {results:executionModeCounts};
           if(sql.includes("FROM tasks")) return {results:[{status:"pending",count:2}]};
           if(sql.includes("FROM task_model_invocations")) return {results:invocationCounts};
           if(sql.includes("schema_migrations")) return {results:migrationVersions.map(version=>({version}))};
@@ -56,6 +61,8 @@ test("mobile status page is public static HTML and never embeds an API token",as
  assert.doesNotMatch(body,/api\\.github\\.com/); 
  assert.match(body,/Default Task Runner inference gate/);
  assert.match(body,/Durable task-step invocations/);
+ assert.match(body,/Execution mode — simulation vs actual/);
+ assert.match(body,/Dry-run simulations/);
  assert.match(body,/unresolved_count/);
 });
 
@@ -70,6 +77,15 @@ test("mobile status endpoint returns read-only D1 metrics and explicit unknowns"
  assert.equal(response.status,200);
  const body=await response.json();
  assert.deepEqual(body.tasks,[{status:"pending",count:2}]);
+ assert.deepEqual(body.task_execution_modes,{
+  available:true,
+  counts:{
+   unknown:{pending:0,running:0,succeeded:3,failed:0,blocked:0},
+   dry_run:{pending:0,running:0,succeeded:2,failed:0,blocked:0},
+   live_inference:{pending:0,running:0,succeeded:1,failed:0,blocked:0},
+   codespace:{pending:0,running:0,succeeded:0,failed:0,blocked:0},
+  },
+ });
  assert.deepEqual(body.paper_events,[{event_type:"candidate_detected",count:4}]);
  assert.equal(body.latest_paper_event.candidate_id,"candidate-1");
  assert.deepEqual(body.latest_market_snapshot,{candidate_id:"candidate-2",occurred_at:"2026-11-02T12:30:00.000Z",chain_id:1,block_number:123});
@@ -83,6 +99,7 @@ test("mobile status endpoint returns read-only D1 metrics and explicit unknowns"
  assert.deepEqual(body.task_runner_watchdog,{ready:false,missing:["GITHUB_APP_ID","GITHUB_APP_INSTALLATION_ID","GITHUB_APP_PRIVATE_KEY","GITHUB_APP_WATCHDOG_ENABLED"],last_dispatch_requested:null,last_dispatch_intent_at:null});
  assert.equal(body.unavailable_metrics.worker_cron,undefined);
  assert.equal(body.unavailable_metrics.monetary_costs,undefined);
+ assert.equal(body.unavailable_metrics.task_execution_modes,undefined);
  assert.ok(DB.calls.every(call=>call.kind==="all"||call.kind==="first"));
 });
 
