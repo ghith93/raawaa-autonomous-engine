@@ -254,8 +254,15 @@ class UsageLedger:
                 estimated_cost_usd: float, daily_budget_usd: float,
                 monthly_budget_usd: float, now: datetime | None = None,
                 task_id: str | None = None,
-                per_task_budget_usd: float = 0.0) -> int:
-        """Atomically reserve estimated spend before a provider call."""
+                per_task_budget_usd: float = 0.0, *,
+                idempotency_key: str | None = None,
+                reservation_id: str | None = None) -> int:
+        """Atomically reserve estimated spend before a provider call.
+
+        The local SQLite implementation is a single-process development ledger;
+        stable remote replay identities are accepted for interface compatibility
+        and enforced by D1MonetaryLedger in cloud execution.
+        """
         if not all(isinstance(value, str) and value.strip()
                    for value in (provider, model, task_kind)):
             raise ValueError("provider, model and task_kind are required")
