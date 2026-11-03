@@ -31,7 +31,7 @@ async function usage(db, routeId, taskId, now) {
     db.prepare("SELECT COALESCE(SUM(requests),0) requests,COALESCE(SUM(tokens),0) tokens FROM quota_usage WHERE route_id=? AND occurred_at>=?").bind(routeId, day).first(),
     db.prepare("SELECT COALESCE(SUM(requests),0) requests,COALESCE(SUM(tokens),0) tokens FROM quota_usage WHERE route_id=? AND occurred_at>=?").bind(routeId, month).first(),
     db.prepare("SELECT COALESCE(SUM(requests),0) requests,COALESCE(SUM(tokens),0) tokens FROM quota_usage WHERE route_id=? AND occurred_at>?").bind(routeId, minute).first(),
-    db.prepare("SELECT COALESCE(SUM(requests),0) requests,COALESCE(SUM(tokens),0) tokens FROM quota_usage WHERE task_id=?").bind(taskId).first()
+    db.prepare("SELECT COALESCE(SUM(requests),0) requests,COALESCE(SUM(tokens),0) tokens FROM quota_usage WHERE route_id=? AND task_id=?").bind(routeId, taskId).first()
   ]);
   return { daily: usageRow(daily), monthly: usageRow(monthly), minute: usageRow(rolling), task: usageRow(task) };
 }
