@@ -47,3 +47,40 @@ This is a dated snapshot of the ChatGPT-connected environment used to operate th
 ## Revalidation policy
 
 Re-run this inventory when a connector is installed/disconnected, a workspace is connected, a new skill pack is added, permissions change, or a new engine runtime is introduced. Record exact observed counts and dates. Do not claim a tool is connected merely because its namespace exists in the tool catalog.
+
+## Revalidation update — 2026-11-03 (after PRs #333–#336)
+
+This addendum supersedes stale status statements above where noted. Counts and settings below were re-read during this cycle; connector namespace presence is not proof that every account is connected.
+
+| Surface | Revalidated state | Meaning |
+|---|---|---|
+| Tool catalog | 1,912 callable tool definitions across 63 namespaces | Includes many actions and optional connectors; not 1,912 independently authenticated services. |
+| Skill catalog | 248 skill definitions across 33 skill packs | Skills are instructions, not runtime credentials. Relevant Superpowers and GitHub implementation/review skills were loaded for this work. |
+| GitHub permission setting | GitHub app-specific ChatGPT permission: **Allow all actions**; global default: **Allow low-risk actions**. Activepieces inherits the global default. | This is the ChatGPT app permission setting, not the GitHub App installation's repository/API scopes. |
+| GitHub repository access | PRs, branch creation, contents, issues, CI inspection and merge operations succeeded. The connected GitHub app metadata shows Actions/contents/issues/pull-request/workflow permissions, but no repository administration permission. | Sufficient for normal code/PR operations; insufficient to administer main branch rulesets or inspect protected-branch settings. |
+| Main branch governance | Issue #318 remains open. Last verified repository evidence reported `main` unprotected; current connector cannot re-read or change the admin-only branch protection endpoint. | Treat this as an unresolved owner/admin governance blocker; do not expand app administration scope to work around it. |
+| Staging D1 | `raawaa-engine-staging` exists. Isolated Wrangler config and read-only inventory workflow are merged. | Remote healthcheck and migration inventory are still pending. No staging migration or Worker deployment has been run. |
+| Task Runner watchdog | Readiness `ready`, no missing settings, App-authored `workflow_dispatch` run #41569188010 succeeded. | Verified dispatch and idle bounded-run path (`tasks_processed=0`, `queue_idle`), not completion of a real task. |
+| Activepieces | Rechecked project `Ghith's Project`: 0 flows and 0 connections. The model catalog exposes 21 entries under provider `activepieces`. | No operational automation flows or authenticated app connections. Model listing alone does not prove price, quota, or eligibility; no inference was sent. |
+| Cloudflare connector | Plugin discovery for `Cloudflare` returned no plugin. | Use reviewed GitHub Actions and the Worker API; the current connector cannot administer Cloudflare resources or inspect secret values. |
+| Firecrawl | Prior inventory measured 427/1,000 credits; not rechecked in this cycle. | Treat that figure as historical, not current balance. |
+| Runzumi | Prior connection check reported no workspace consent; not rechecked in this cycle. | Do not use for compute-cost claims until consent is completed. |
+
+### Repository changes verified in this cycle
+
+- PR #333 merged: corrected the GitHub App watchdog documentation with verified activation evidence.
+- PR #334 merged: added the agent-runtime/platform evaluation and recorded the decision to retain the deterministic Python/D1 foundation rather than add overlapping frameworks prematurely.
+- PR #335 merged: added the isolated Staging D1 config and read-only migration inventory.
+- PR #336 merged: added automatic read-only staging inventory on relevant `main` updates, while retaining manual dispatch.
+- CI passed on each of those PR heads. PR #336 merge commit: `64d60f2fcef9ebfffa70f4747f545fa9e8f21584`.
+
+### Capability map (ChatGPT side, not inherited by the engine)
+
+- **Engineering/repository:** GitHub, Context7, Figma, Supabase, Render, Lovable, Activepieces.
+- **Research:** web search, Firecrawl, Exa, Consensus, SciSpace, Sider Scholar, Undermind, Hugging Face, GitHub search.
+- **Knowledge/collaboration:** Notion, Slack.
+- **Analytics/SEO/marketing:** Ahrefs, Semrush, GSC Wizard, HYPD, Windsor.ai, Metricool, PostHog, HookLayer.
+- **Creative/media:** Canva, Adobe, Higgsfield, Runway, HeyGen, Magnific, Descript, Photoroom, Creatify, Poster Maker.
+- **Monitoring/automation:** GitHub Actions, Automations, Uptimely, Runzumi, Activepieces.
+
+Presence in this list does not mean every connector has a completed account connection, every skill is loaded into the engine, or the engine can invoke these tools. The engine still needs its own reviewed tool adapters, credentials, data-classification rules, sandbox, and budget enforcement.
