@@ -1,0 +1,9 @@
+name = "raawaa-autonomous-engine-staging"
+main = "worker/index.js"
+compatibility_date = "2026-10-31"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "raawaa-engine-staging"
+database_id = "231dd948-04a0-49e3-ad73-444f77d69477"
+migrations_dir = "migrations"
