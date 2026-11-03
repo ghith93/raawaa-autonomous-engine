@@ -517,6 +517,7 @@ try {
   assert.equal(status.payload.tasks.find(row => row.status === "succeeded")?.count, 1);
   assert.equal(status.payload.monetary_ledger.available, true);
   assert.equal(status.payload.monetary_ledger.pending_count, 1);
+  assert.equal(status.payload.monetary_ledger.ambiguous_count, 1);
   assert.equal(status.payload.monetary_ledger.daily_spent_usd, 0.25);
   assert.equal(status.payload.model_costs_usd.total, 0.25);
 
