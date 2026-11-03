@@ -49,6 +49,36 @@ class StagingMonetaryHarnessTests(unittest.TestCase):
             harness.set_staging_policy(True, 200, 50)
         run.assert_not_called()
 
+    def test_monthly_cap_test_restores_original_staging_policy(self):
+        from itertools import count
+        from unittest.mock import call
+
+        original = {
+            "daily_budget_nanos": 4_000,
+            "monthly_budget_nanos": 12_000,
+            "per_task_budget_nanos": 2_000,
+            "enabled": True,
+        }
+        current = {"daily_total_nanos": 100, "monthly_total_nanos": 1_000}
+        attempts = count()
+
+        def reserve(*args, **kwargs):
+            return (201, {}, "reservation") if next(attempts) < 2 else (409, {"error": "budget_exceeded"}, "rejected")
+
+        with (
+            patch.object(harness, "snapshot", return_value=current),
+            patch.object(harness, "budget_policy", return_value=original),
+            patch.object(harness, "set_staging_policy") as update_policy,
+            patch.object(harness, "reserve", side_effect=reserve),
+            patch.object(harness, "action", return_value=(200, {})),
+        ):
+            harness.cap_test("monthly", "test-run", "monthly")
+
+        estimate = (12_000 - 1_000) // 2
+        temporary = (100 + 100 * estimate, 1_000 + 2 * estimate, estimate)
+        update_policy.assert_has_calls([call(*temporary), call(4_000, 12_000, 2_000)])
+        self.assertEqual(update_policy.call_count, 2)
+
     @patch.dict(os.environ, {
         "CLOUDFLARE_API_TOKEN": "test-cloudflare-token",
         "CLOUDFLARE_ACCOUNT_ID": "test-account",
