@@ -325,9 +325,14 @@ def run() -> None:
     initial = monetary_status()
     require(isinstance(initial["snapshot"].get("daily_total_nanos"), int), "D1 monetary totals are missing")
     policy = initial["budget_policy"]
-    require(all(int(policy.get(key, 0)) > 0 for key in (
-        "daily_budget_nanos", "monthly_budget_nanos", "per_task_budget_nanos"
-    )), "Operator-owned monetary hard caps must be positive")
+    expected_policy = default_policy_nanos()
+    actual_policy = (
+        int(policy["daily_budget_nanos"]),
+        int(policy["monthly_budget_nanos"]),
+        int(policy["per_task_budget_nanos"]),
+    )
+    require(actual_policy == expected_policy,
+            "Staging D1 hard caps do not match the reviewed policy configuration")
     run_tag = str(uuid.uuid4())
     cleanup_test_reservations()
     verify_token_quota_concurrency(run_tag)
@@ -460,7 +465,7 @@ def run() -> None:
             "Mobile status does not report the D1 token quota ledger as available")
 
     cleanup_test_reservations()
-    print("Staging D1 verification passed: token quota concurrency/settlement, global monetary daily/monthly/task caps, idempotency, pre-I/O release, ambiguous settlement, over-estimate quarantine, Worker redeploy persistence, and authenticated mobile status. No model provider was called.")
+    print("Staging D1 verification passed: token quota concurrency/settlement, global daily/task monetary caps, operator-policy tamper rejection, idempotency, pre-I/O release, ambiguous settlement, over-estimate quarantine, Worker redeploy persistence, and authenticated mobile status. Monthly-cap concurrency is covered by the isolated local D1 test. No model provider was called.")
 
 
 if __name__ == "__main__":
