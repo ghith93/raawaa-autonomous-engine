@@ -117,7 +117,8 @@ def probe_artemis(environ: dict[str, str] | None = None) -> dict[str, Any]:
         }
     try:
         base_url, token = validate_artemis_endpoint(configured_url, env)
-        health = _request_json(base_url, "/api/status", token)
+        # /api/status is intentionally excluded: ARTEMIS's handler calls
+        # ensure_worker_running(), which can start a dispatcher and process queued tasks.
         devices_payload = _request_json(base_url, "/api/devices", token)
     except ValueError as exc:
         return {
@@ -131,25 +132,17 @@ def probe_artemis(environ: dict[str, str] | None = None) -> dict[str, Any]:
         return {
             "integration": "google_artemis",
             "status": "UNAVAILABLE",
-            "network_calls": 1 if "api/devices" not in str(exc) else 2,
+            "network_calls": 1,
             "task_submission_enabled": False,
             "message": str(exc),
         }
 
-    if not isinstance(health, dict):
-        return {
-            "integration": "google_artemis",
-            "status": "INVALID_RESPONSE",
-            "network_calls": 2,
-            "task_submission_enabled": False,
-            "message": "ARTEMIS health response did not contain an object.",
-        }
     raw_devices = devices_payload.get("devices", []) if isinstance(devices_payload, dict) else devices_payload
     if not isinstance(raw_devices, list):
         return {
             "integration": "google_artemis",
             "status": "INVALID_RESPONSE",
-            "network_calls": 2,
+            "network_calls": 1,
             "task_submission_enabled": False,
             "message": "ARTEMIS device response did not contain a list.",
         }
@@ -167,15 +160,11 @@ def probe_artemis(environ: dict[str, str] | None = None) -> dict[str, Any]:
             "busy": bool(item.get("busy", item.get("is_busy", False))),
         })
 
-    daemon_state = None
-    if isinstance(health, dict):
-        value = health.get("status") or health.get("state")
-        daemon_state = value[:40] if isinstance(value, str) else None
     return {
         "integration": "google_artemis",
         "status": "CONNECTED",
-        "network_calls": 2,
-        "daemon_state": daemon_state,
+        "network_calls": 1,
+        "api_status": "reachable",
         "device_count": len(devices),
         "devices": devices,
         "task_submission_enabled": False,
