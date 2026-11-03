@@ -34,6 +34,7 @@ class CapabilityGapAnalysisTests(unittest.TestCase):
         (self.root / "engine" / "remote_task_store.py").write_text("# D1-backed task store", encoding="utf-8")
         (self.root / ".github" / "workflows" / "task-runner.yml").write_text("schedule: cron", encoding="utf-8")
         (self.root / "engine" / "memory.py").write_text("# local memory", encoding="utf-8")
+        (self.root / "engine" / "skill_static_gate.py").write_text("# deterministic static preflight", encoding="utf-8")
         (self.root / ".github" / "workflows" / "research-discovery.yml").write_text(
             "if: vars.RAAWAA_ENGINE_RESEARCH_PERSISTENCE == 'enabled'", encoding="utf-8"
         )
@@ -77,6 +78,7 @@ class CapabilityGapAnalysisTests(unittest.TestCase):
         self.assertEqual(by_id["agent_orchestration"]["current_status"], "declarative_only")
         self.assertEqual(by_id["memory"]["current_status"], "local_memory_with_optional_research_persistence")
         self.assertEqual(by_id["model_routing"]["current_status"], "profiles_staged_disabled")
+        self.assertEqual(by_id["skill_security"]["current_status"], "static_preflight_implemented_not_verified")
         self.assertEqual(by_id["durable_execution"]["current_status"], "bounded_scheduled_runner")
 
     def test_missing_broker_and_research_sources_are_reported_without_guessing(self):
