@@ -11,6 +11,8 @@ from pathlib import Path
 
 from engine.live_adapters import OpenAICompatibleAdapter
 from engine.model_gateway import UsageLedger
+from engine.d1_monetary_ledger import D1MonetaryLedger
+from engine.d1_quota_ledger import D1QuotaLedger
 from engine.quota_config import load_provider_profile_registry
 from engine.quota_live_gateway import QuotaAwareLiveGateway
 from engine.quota_manager import QuotaLedger, QuotaManager
@@ -41,14 +43,25 @@ def build_live_gateway(
         return None
     if validate_budget_policy(policy):
         return None
-    # The D1 quota ledger is durable, but the monetary UsageLedger is currently
-    # SQLite-backed. GitHub-hosted runners are ephemeral, so cloud live inference
-    # must remain blocked until a D1-backed monetary reservation/settlement ledger
-    # is implemented and its migration is safely verified.
-    if source.get("RAAWAA_ENGINE_API_URL"):
-        raise RuntimeError(
-            "Cloud live inference is blocked until the durable D1 monetary ledger is implemented."
+    cloud_mode = bool(source.get("RAAWAA_ENGINE_API_URL"))
+    if cloud_mode:
+        # The durable D1 monetary adapter is now available, but cloud inference
+        # remains blocked until the external account-level spend hard stop is
+        # independently verified and explicitly mirrored in both policy and env.
+        if (policy.get("budget_envelope", {}).get("external_spend_hard_stop_verified") is not True
+                or source.get("RAAWAA_ENGINE_EXTERNAL_SPEND_HARD_STOP_VERIFIED", "").strip().lower() != "enabled"):
+            return None
+        if not source.get("RAAWAA_ENGINE_API_TOKEN", "").strip():
+            return None
+        quota_ledger = D1QuotaLedger(
+            base_url=source.get("RAAWAA_ENGINE_API_URL"),
+            token=source.get("RAAWAA_ENGINE_API_TOKEN"),
+            environ=source,
         )
+        usage_ledger = D1MonetaryLedger(environ=source)
+    else:
+        quota_ledger = QuotaLedger(db_path)
+        usage_ledger = UsageLedger(db_path)
 
     entries = load_provider_profile_registry(registry_path)
     candidates = [
@@ -58,7 +71,6 @@ def build_live_gateway(
     if not candidates:
         return None
 
-    quota_ledger = QuotaLedger(db_path)
     manager = QuotaManager([entry.profile for entry in candidates], quota_ledger)
     adapters = {}
     eligible_profiles = []
@@ -85,7 +97,7 @@ def build_live_gateway(
     return QuotaAwareLiveGateway(
         manager,
         adapters,
-        UsageLedger(db_path),
+        usage_ledger,
         network_calls_enabled=True,
         environ=source,
         daily_budget_usd=policy.get("daily_budget_usd", 0),
