@@ -27,6 +27,7 @@ function dbMock() {
         bind(...values) { this.values = values; return this; },
         async first() {
           calls.push({ kind: "first", sql, values: this.values });
+          if (sql.includes("INSERT INTO quota_cooldowns")) return { until_at: this.values[1] };
           if (sql.includes("FROM audit_log")) return null;
           if (sql.includes("SELECT 1")) return { ok: 1 };
           if (sql.includes("UPDATE tasks SET status='running'")) return null;
@@ -481,7 +482,14 @@ test("quota administrative operations reject the shared runner token", async () 
 });
 
 test("quota admin token is restricted to quota admin operations", async () => {
-  const DB = dbMock();
+  const DB = {
+    prepare() {
+      return {
+        bind() { return this; },
+        async first() { return { until_at: "2099-01-01T00:00:00.000Z" }; },
+      };
+    },
+  };
   const adminResponse = await worker.fetch(request("/v1/quota", { method: "POST", token: ADMIN_TOKEN, body: { action: "cool_down", route_id: "groq:main:model", seconds: 60 } }),
     { DB, ENGINE_API_TOKEN: TOKEN, ENGINE_QUOTA_ADMIN_TOKEN: ADMIN_TOKEN });
   assert.equal(adminResponse.status, 200);
@@ -530,6 +538,29 @@ test("quota settlement cannot cross task or route ownership", async () => {
   assert.deepEqual(await response.json(), { error: "reservation_not_found" });
   assert.ok(calls[0].sql.includes("route_id=? AND task_id=?"));
   assert.deepEqual(calls[0].values.slice(2), [5, "groq:main:model", "different-task"]);
+});
+
+test("quota cooldown cannot shorten an existing cooldown", async () => {
+  const existingUntil = "2099-01-01T00:00:00.000Z";
+  let sql = "";
+  const DB = {
+    prepare(statement) {
+      sql = statement;
+      return {
+        bind(...values) { this.values = values; return this; },
+        async first() { return { until_at: existingUntil }; },
+      };
+    },
+  };
+  const response = await worker.fetch(request("/v1/quota", {
+    method: "POST", token: ADMIN_TOKEN,
+    body: { action: "cool_down", route_id: "groq:main:model", seconds: 60, reason: "short_retry" },
+  }), { DB, ENGINE_API_TOKEN: TOKEN, ENGINE_QUOTA_ADMIN_TOKEN: ADMIN_TOKEN });
+  assert.equal(response.status, 200);
+  assert.equal((await response.json()).until_at, existingUntil);
+  assert.match(sql, /until_at=MAX\(quota_cooldowns\.until_at,excluded\.until_at\)/);
+  assert.match(sql, /CASE WHEN excluded\.until_at>quota_cooldowns\.until_at THEN excluded\.reason ELSE quota_cooldowns\.reason END/);
+  assert.match(sql, /RETURNING until_at/);
 });
 
 test("quota settlement retries identical usage and rejects conflicting usage", async () => {
