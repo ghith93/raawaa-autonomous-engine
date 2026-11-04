@@ -132,11 +132,22 @@ jobs:
           code=$(curl -s -o /tmp/reply.json -w '%{http_code}' -X POST "$WORKER_URL/v1/telegram/webhook" \
             -H "content-type: application/json" \
             -H "x-telegram-bot-api-secret-token: $secret" \
-            --data "$body")
+            --data "$body" || echo "000")
+          reply=$(tr -d '\n' < /tmp/reply.json 2>/dev/null | cut -c1-300)
           echo "worker replied HTTP $code"
-          cat /tmp/reply.json
-          test "$code" != "503" || { echo "Worker reports webhook_disabled: secrets not installed"; exit 1; }
-          test "$code" != "401" || { echo "Worker rejected our own secret: secret mismatch"; exit 1; }
+          printf '%s\n' "$reply"
+          # The reply is the only thing that distinguishes "wrong secret" from
+          # "route not deployed" from "secrets not installed", and it lives in a
+          # log nobody can read from outside — so it goes out as an annotation.
+          echo "::notice title=Worker probe::HTTP $code — $reply"
+          case "$code" in
+            503) echo "::error title=webhook_disabled::The Worker is deployed without its Telegram secrets."; exit 1 ;;
+            401) echo "::error title=Secret mismatch::The Worker rejected the secret we just installed."; exit 1 ;;
+            404) echo "::error title=Route missing::This Worker deployment has no /v1/telegram/webhook route; redeploy main with [deploy-control-worker]."; exit 1 ;;
+            000) echo "::error title=Unreachable::$WORKER_URL did not answer."; exit 1 ;;
+            2*) ;;
+            *) echo "::error title=Unexpected status::The Worker answered HTTP $code — $reply"; exit 1 ;;
+          esac
       - name: Summary
         run: |
           echo "### Telegram webhook registered" >> "$GITHUB_STEP_SUMMARY"
