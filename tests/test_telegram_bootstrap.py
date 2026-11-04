@@ -195,7 +195,7 @@ class ResultShapeTest(unittest.TestCase):
 
     def test_a_list_result_is_returned_as_a_list(self):
         payload = {"ok": True, "result": [
-            {"update_id": 1, "message": {"chat": {"id": 42, "type": "private"}}},
+            {"update_id": 1, "message": {"chat": {"id": 42, "type": "private"}, "from": {"id": 42, "is_bot": False}}},
         ]}
         with patch.object(bootstrap, "urlopen", return_value=self._Response(payload)):
             result = bootstrap._call(VALID_TOKEN, "getUpdates", {}, expect="list")
@@ -212,7 +212,7 @@ class ResultShapeTest(unittest.TestCase):
 
     def test_discovery_finds_a_chat_from_a_real_list_result(self):
         updates = {"ok": True, "result": [
-            {"update_id": 7, "message": {"chat": {"id": 4242, "type": "private"}}},
+            {"update_id": 7, "message": {"chat": {"id": 4242, "type": "private"}, "from": {"id": 4242, "is_bot": False}}},
         ]}
         me = {"ok": True, "result": {"username": "raawaa_bot", "is_bot": True}}
 
