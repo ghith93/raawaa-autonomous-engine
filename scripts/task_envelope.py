@@ -455,6 +455,55 @@ def validate_ledger(ledger: dict, today: date | None = None) -> tuple[list[str],
     return errors, warnings
 
 
+def preflight(comments: list[dict], today: date | None = None) -> dict:
+    """Summarise what a session must do before acting, and what to acknowledge.
+
+    The channel protocol requires each agent to "read every comment newer than
+    the last one you acknowledged". That is unenforceable while the watermark
+    lives in a model's memory, because memory ends with the session. This makes
+    the watermark a number written into the reply instead.
+
+    ``watermark`` is the highest comment id in the snapshot. An agent that has
+    processed the thread prints it; a later session compares it to what this
+    function reports and knows immediately whether it is current.
+    """
+    today = today or datetime.now(timezone.utc).date()
+    ledger = build_ledger(comments)
+    errors, warnings = validate_ledger(ledger, today=today)
+
+    ids = [c.get("id") for c in comments if isinstance(c.get("id"), int)]
+    watermark = max(ids) if ids else None
+
+    tasks = []
+    for task_id, entry in sorted(ledger.items()):
+        envelope = entry["envelope"] or {}
+        state = entry["current"]
+        if state in {"VERIFIED", "REJECTED", "EXPIRED"}:
+            actor = None
+        elif state == "DELIVERED":
+            actor = envelope.get("from")
+        else:
+            actor = envelope.get("to")
+        tasks.append(
+            {
+                "id": task_id,
+                "state": state,
+                "actor": actor,
+                "fingerprint": envelope_hash(envelope)[:8] if envelope else None,
+            }
+        )
+
+    pending = [task for task in tasks if task["actor"] == "arena"]
+    return {
+        "watermark": watermark,
+        "comments": len(comments),
+        "tasks": tasks,
+        "awaiting_arena": pending,
+        "errors": errors,
+        "warnings": warnings,
+    }
+
+
 def _read(path: str) -> str:
     if path == "-":
         return sys.stdin.read()
@@ -475,6 +524,13 @@ def main(argv: list[str] | None = None) -> int:
 
     hash_parser = subparsers.add_parser("hash", help="print the envelope fingerprint")
     hash_parser.add_argument("path", help="file containing the envelope, or - for stdin")
+
+    preflight_parser = subparsers.add_parser(
+        "preflight", help="print the session preflight: watermark and what awaits arena"
+    )
+    preflight_parser.add_argument("path", help="JSON array of comments, or - for stdin")
+    preflight_parser.add_argument("--json", action="store_true", help="emit JSON instead of text")
+    preflight_parser.add_argument("--today", help="override today's date (YYYY-MM-DD)")
 
     ledger_parser = subparsers.add_parser(
         "ledger", help="validate a comments snapshot (gh api .../comments)"
@@ -523,6 +579,34 @@ def main(argv: list[str] | None = None) -> int:
             if not errors:
                 print(f"OK {envelope['id']} hash={short_hash(envelope)}")
         return 1 if errors else 0
+
+    if args.command == "preflight":
+        try:
+            comments = json.loads(_read(args.path))
+        except json.JSONDecodeError as exc:
+            print(f"ERROR: snapshot is not valid JSON: {exc}", file=sys.stderr)
+            return 1
+        if isinstance(comments, dict):
+            comments = [comments]
+
+        report = preflight(comments, today=today)
+        if args.json:
+            print(json.dumps(report, indent=2))
+        else:
+            print(f"watermark: {report['watermark']}  (comments in thread: {report['comments']})")
+            for task in report["tasks"]:
+                actor = task["actor"] or "-"
+                print(f"  {task['id']:<38} {task['state']:<12} next={actor}")
+            if report["awaiting_arena"]:
+                ids = ", ".join(task["id"] for task in report["awaiting_arena"])
+                print(f"ACTION REQUIRED (arena): {ids}")
+            else:
+                print("ACTION REQUIRED (arena): none")
+            for message in report["errors"]:
+                print(f"ERROR: {message}", file=sys.stderr)
+            for message in report["warnings"]:
+                print(f"WARN:  {message}", file=sys.stderr)
+        return 1 if report["errors"] else 0
 
     # ledger
     try:

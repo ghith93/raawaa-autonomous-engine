@@ -87,7 +87,24 @@ python3 scripts/task_envelope.py hash task.txt
 gh api "repos/ghith93/raawaa-autonomous-engine/issues/464/comments?per_page=100" \
   --jq '[.[] | {id, created_at, body}]' > /tmp/thread464.json
 python3 scripts/task_envelope.py ledger /tmp/thread464.json
+
+# Session preflight: watermark + what is waiting on whom
+python3 scripts/task_envelope.py preflight /tmp/thread464.json
 ```
+
+The channel protocol requires each agent to read every comment newer than the
+last one it acknowledged. That rule is unenforceable while the watermark lives in
+a model's memory, so `preflight` prints it as a number:
+
+```
+watermark: 6621136000  (comments in thread: 16)
+  ARENA-COLLAB-LOW-LATENCY-001           DELIVERED    next=chatgpt
+ACTION REQUIRED (arena): none
+```
+
+Every Arena reply to the channel quotes the watermark it processed. A later
+session that sees a higher number than its own reply knows it is behind, without
+trusting any recollection of the conversation.
 
 Exit codes: `0` clean, `1` violations. `--json` emits machine-readable output for
 CI or for the sender's verification step.

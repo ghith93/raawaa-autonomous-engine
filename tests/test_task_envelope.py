@@ -291,6 +291,54 @@ class LedgerTests(unittest.TestCase):
         self.assertTrue(any("no task envelope" in e for e in errors), errors)
 
 
+class PreflightTests(unittest.TestCase):
+    """The channel protocol asks each agent to read everything newer than the
+    last comment it acknowledged. These tests keep that watermark a number
+    rather than a memory."""
+
+    def _comment(self, comment_id, created_at, body):
+        return {"id": comment_id, "created_at": created_at, "body": body}
+
+    def test_watermark_is_highest_comment_id(self):
+        comments = [
+            self._comment(10, "2026-11-04T10:00:00Z", VALID_ENVELOPE),
+            self._comment(20, "2026-11-04T10:05:00Z", "unrelated chatter"),
+            self._comment(15, "2026-11-04T10:02:00Z", "later by date, earlier id"),
+        ]
+        report = te.preflight(comments, today=TODAY)
+        self.assertEqual(report["watermark"], 20)
+        self.assertEqual(report["comments"], 3)
+
+    def test_posted_task_awaits_the_receiver(self):
+        comments = [self._comment(1, "2026-11-04T10:00:00Z", VALID_ENVELOPE)]
+        report = te.preflight(comments, today=TODAY)
+        self.assertEqual([t["id"] for t in report["awaiting_arena"]], ["ARENA-DOCS-002"])
+        self.assertEqual(report["tasks"][0]["actor"], "arena")
+
+    def test_delivered_task_awaits_the_sender(self):
+        fingerprint = te.short_hash(te.parse_envelope(VALID_ENVELOPE))
+        comments = [
+            self._comment(1, "2026-11-04T10:00:00Z", VALID_ENVELOPE),
+            self._comment(2, "2026-11-04T10:05:00Z", f"[TASK ARENA-DOCS-002] CLAIMED hash={fingerprint}"),
+            self._comment(3, "2026-11-04T11:00:00Z", "[TASK ARENA-DOCS-002] DELIVERED `pytest` ok"),
+        ]
+        report = te.preflight(comments, today=TODAY)
+        self.assertEqual(report["awaiting_arena"], [])
+        self.assertEqual(report["tasks"][0]["state"], "DELIVERED")
+        self.assertEqual(report["tasks"][0]["actor"], "owner")
+
+    def test_verified_task_has_no_next_actor(self):
+        fingerprint = te.short_hash(te.parse_envelope(VALID_ENVELOPE))
+        comments = [
+            self._comment(1, "2026-11-04T10:00:00Z", VALID_ENVELOPE),
+            self._comment(2, "2026-11-04T10:05:00Z", f"[TASK ARENA-DOCS-002] CLAIMED hash={fingerprint}"),
+            self._comment(3, "2026-11-04T11:00:00Z", "[TASK ARENA-DOCS-002] DELIVERED `pytest` ok"),
+            self._comment(4, "2026-11-04T12:00:00Z", "[TASK ARENA-DOCS-002] VERIFIED"),
+        ]
+        report = te.preflight(comments, today=TODAY)
+        self.assertIsNone(report["tasks"][0]["actor"])
+
+
 class CliTests(unittest.TestCase):
     def test_lint_exit_zero_for_valid_envelope(self):
         result = subprocess.run(
