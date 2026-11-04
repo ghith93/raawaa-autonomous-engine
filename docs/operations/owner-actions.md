@@ -41,42 +41,35 @@ URL is a confirmed configuration defect only when reported by this live check.
 
 After exact-head tests, independent review, and an authorized Worker deployment
 (including the `/start` alias), **repair** mode is a separate explicit action.
-Before dispatch, independently verify the provenance and authorization of **every**
-identity in the existing allowlist, including that there are no unintended extra
-identities. The old bootstrap could have enrolled an unsolicited sender; restoring
-that unknown list to service could expose private information. If the existing
-list cannot be verified, do not attest or run repair. Cloudflare secret presence
-and structural readiness are not verification. Resolve a missing identity only
-through a trusted channel and a separately reviewed configuration change.
-
-Only after that verification, the operator can attest it for this run:
+Before dispatch, independently verify the owner identity through a trusted channel
+and configure the positive safe-integer ID as the GitHub Actions repository secret
+`OWNER_TELEGRAM_CHAT_ID`. The workflow requires this secret for every mutating
+mode and replaces the Worker allowlist with that single ID. An optional
+`VERIFIED_EXISTING_ALLOWLIST` attestation is unverified and is only informative
+in read-only diagnose mode; it cannot authorize repair, rotation, or recovery.
 
 ```sh
 gh workflow run telegram-register.yml --ref main \
-  -f confirm=REGISTER_TELEGRAM_WEBHOOK -f mode=repair \
-  -f owner_binding=VERIFIED_EXISTING_ALLOWLIST
+  -f confirm=REGISTER_TELEGRAM_WEBHOOK -f mode=repair
 ```
 
-This attestation is a fail-closed operational reminder, not automated evidence of
-identity; the workflow cannot inspect or prove the allowlist contents. Repair
-checks the bot identity, requires the existing allowlist secret and a
-successful unsigned readiness probe, snapshots the existing default command menu,
-sets and reads back `/start`, `/help`, `/status`, `/report`, prepares a fresh
-webhook secret in a private runner file, installs the bot and webhook secrets
-**without replacing the allowlist**, then calls `setWebhook` and checks its exact
-URL. If command setup or readback fails, it attempts to restore and read back the
-snapshot, reporting explicitly if rollback could not be verified. Finally it sends a synthetic signed update with no human sender;
-that update must be ignored and cannot prove owner authorization or end-to-end
-delivery. The new webhook secret is registered with GitHub's log masker before
-it is passed to Wrangler; Wrangler's secret-write output is suppressed. The
-prepared file is removed in an always-run cleanup step.
+Repair checks bot identity and unsigned readiness, snapshots and verifies the
+read-only command menu, prepares a secret in a private runner file and installs
+it as the Worker staging secret. A signed, deliberately ineligible synthetic
+update must receive the exact ignored response from the deployed Worker **before**
+Telegram is switched. A second signed probe follows the switch before promotion
+to primary and staging deletion. The summary reports staging cleanup as retired,
+already absent, failed, or not attempted; investigate any residual staging key.
+The probes cannot prove owner authorization or end-to-end delivery. Secret-write
+output is suppressed and the prepared file is removed in an always-run step.
+If command setup or readback fails, rollback of the menu is attempted and its
+verification reported.
 
 Repair refuses a **known non-empty pending queue**, both before mutations and
 again immediately before `setWebhook`. `drop_pending_updates` is false; this is
 not a backup or a guarantee of delivery. New updates can arrive between the last
 check and registration, and the Worker may acknowledge and ignore unauthorized
-messages. If installation succeeds but registration fails, old and new secrets
-may briefly differ; do not claim rollback. Investigate the failure and queue,
+messages. If staging succeeds but a later step fails, staging may remain active; do not claim rollback. Investigate the failure and queue,
 then, when safe, rerun reviewed repair to install and register a fresh matching
 secret. Cloudflare does not disclose the previous Worker secret value for
 restoration.
