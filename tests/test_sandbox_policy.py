@@ -45,6 +45,7 @@ class BoundaryTest(unittest.TestCase):
     def test_egress_is_denied_by_default(self):
         vector = argv()
         self.assertIn("--network=none", vector)
+        self.assertIn("--entrypoint=", vector)
         self.assertFalse([a for a in vector if a.startswith("--network=") and "none" not in a])
 
     def test_the_root_filesystem_is_read_only_and_writable_paths_are_bounded(self):
