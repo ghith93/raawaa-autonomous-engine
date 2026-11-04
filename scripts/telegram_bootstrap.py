@@ -107,11 +107,32 @@ def find_private_chat_ids(token: str) -> tuple[list[int], str | None]:
     """
     me = _call(token, "getMe", expect="dict")
     username = me.get("username") if isinstance(me.get("username"), str) else None
-    updates = _call(
-        token, "getUpdates",
-        {"timeout": 0, "limit": 100, "allowed_updates": ["message"]},
-        expect="list",
-    )
+    try:
+        updates = _call(
+            token, "getUpdates",
+            {"timeout": 0, "limit": 100, "allowed_updates": ["message"]},
+            expect="list",
+        )
+    except BootstrapError as error:
+        # 409 means a webhook is already set — which is the normal state on a
+        # re-run, and exactly the state this script leaves behind after a
+        # successful registration. Deleting it is not a destructive act here: the
+        # same run re-registers the webhook a few steps later, and the chat id is
+        # the only thing being recovered.
+        if "HTTP 409" not in str(error):
+            raise
+        _call(token, "deleteWebhook", {"drop_pending_updates": False}, expect="bool")
+        updates = _call(
+            token, "getUpdates",
+            {"timeout": 0, "limit": 100, "allowed_updates": ["message"]},
+            expect="list",
+        )
+        if not updates:
+            raise BootstrapError(
+                "a webhook is already registered, so Telegram has already delivered "
+                "the queued messages and there is nothing left to discover from. "
+                "Send the bot one more message and run this again — or pass --chat-id.",
+            ) from None
     seen = len(updates)
     found: list[int] = []
     for update in updates:
