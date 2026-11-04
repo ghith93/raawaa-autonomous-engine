@@ -142,6 +142,29 @@ class WorkflowPostureTests(unittest.TestCase):
     def test_runs_the_ingest_script(self):
         self.assertIn("scripts/github_comment_ingest.py --post", self.text)
 
+class ReportingTests(unittest.TestCase):
+    """The run must state its own outcome: log download is blocked in some
+    environments, so an annotation is the only evidence a reader may get."""
+
+    def test_notice_names_action_and_reason(self):
+        result = {"action": "enqueue", "reason": "valid_envelope", "comment_id": 42,
+                  "task": {"idempotency_key": "github-comment-42"}}
+        notice, summary = ingest.report_lines(result, "")
+        self.assertTrue(notice.startswith("::notice title=Issue comment ingest::"))
+        self.assertIn("action=enqueue", notice)
+        self.assertIn("idempotency_key=github-comment-42", notice)
+        self.assertIn("action=enqueue", summary)
+
+    def test_ignored_comment_still_reports(self):
+        notice, _ = ingest.report_lines({"action": "ignore", "reason": "no_envelope", "comment_id": 7}, "")
+        self.assertIn("action=ignore", notice)
+        self.assertIn("reason=no_envelope", notice)
+
+    def test_stage_is_appended_when_present(self):
+        notice, _ = ingest.report_lines({"action": "skip", "reason": "bot_author", "comment_id": 9}, "http_200_created_True")
+        self.assertIn("stage=http_200_created_True", notice)
+
+
 
 if __name__ == "__main__":
     unittest.main()
