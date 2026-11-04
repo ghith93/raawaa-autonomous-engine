@@ -39,7 +39,9 @@ class TaskStore:
               created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
               result_json TEXT, error TEXT, lease_token TEXT, lease_expires_at TEXT,
               execution_mode TEXT NOT NULL DEFAULT 'unknown'
-                CHECK(execution_mode IN ('unknown','not_started','dry_run','live_inference'))
+                CHECK(execution_mode IN ('unknown','not_started','dry_run','live_inference')),
+              priority INTEGER NOT NULL DEFAULT 0 CHECK(priority BETWEEN -100 AND 100),
+              depends_on TEXT NOT NULL DEFAULT '[]' CHECK(json_valid(depends_on))
             );
             CREATE INDEX IF NOT EXISTS idx_tasks_status_created ON tasks(status, created_at);
             CREATE TABLE IF NOT EXISTS audit_log (
@@ -58,28 +60,66 @@ class TaskStore:
                 db.execute("""ALTER TABLE tasks ADD COLUMN execution_mode TEXT NOT NULL
                     DEFAULT 'unknown' CHECK(execution_mode IN
                     ('unknown','not_started','dry_run','live_inference'))""")
+            if "priority" not in columns:
+                db.execute("""ALTER TABLE tasks ADD COLUMN priority INTEGER NOT NULL DEFAULT 0
+                    CHECK(priority BETWEEN -100 AND 100)""")
+            if "depends_on" not in columns:
+                db.execute("""ALTER TABLE tasks ADD COLUMN depends_on TEXT NOT NULL DEFAULT '[]'
+                    CHECK(json_valid(depends_on))""")
+            db.execute("""CREATE INDEX IF NOT EXISTS idx_tasks_claim_priority
+                ON tasks(status,priority DESC,created_at,id)""")
 
     def _audit(self, db, task_id: str | None, event: str, details: dict[str, Any]):
         db.execute("INSERT INTO audit_log(task_id,event,details_json,created_at) VALUES(?,?,?,?)",
                    (task_id, event, json.dumps(details, sort_keys=True), utc_now()))
 
     def enqueue(self, task_type: str, title: str, payload: dict[str, Any] | None = None,
-                idempotency_key: str | None = None, max_attempts: int = 2) -> dict[str, Any]:
+                idempotency_key: str | None = None, max_attempts: int = 2,
+                priority: int = 0, depends_on: list[str] | tuple[str, ...] | None = None) -> dict[str, Any]:
         if not task_type.strip() or not title.strip():
             raise ValueError("task_type and title are required")
         if max_attempts < 1 or max_attempts > 5:
             raise ValueError("max_attempts must be between 1 and 5")
+        if type(priority) is not int or not -100 <= priority <= 100:
+            raise ValueError("priority must be an integer between -100 and 100")
+        if depends_on is None:
+            dependencies = []
+        elif isinstance(depends_on, (list, tuple)):
+            dependencies = list(depends_on)
+        else:
+            raise ValueError("depends_on must be a list of task IDs")
+        if (len(dependencies) > 20 or
+                any(not isinstance(dep, str) or not dep or len(dep) > 128 or dep.strip() != dep
+                    or any(not (char.isalnum() or char in "-_") for char in dep)
+                    for dep in dependencies) or
+                len(dependencies) != len(set(dependencies))):
+            raise ValueError("depends_on must contain up to 20 unique valid task IDs")
+        dependencies.sort()
         key, task_id, now = idempotency_key or str(uuid.uuid4()), str(uuid.uuid4()), utc_now()
         with self._connect() as db:
+            db.execute("BEGIN IMMEDIATE")
             existing = db.execute("SELECT * FROM tasks WHERE idempotency_key=?", (key,)).fetchone()
             if existing:
                 return dict(existing)
+            if task_id in dependencies:
+                raise ValueError("a task cannot depend on itself")
+            if dependencies:
+                placeholders = ",".join("?" for _ in dependencies)
+                found = {row["id"] for row in db.execute(
+                    f"SELECT id FROM tasks WHERE id IN ({placeholders})", dependencies
+                ).fetchall()}
+                missing = sorted(set(dependencies) - found)
+                if missing:
+                    raise ValueError("depends_on references unknown task IDs")
             db.execute("""INSERT INTO tasks(id,idempotency_key,task_type,title,payload_json,status,
-                       attempts,max_attempts,created_at,updated_at,execution_mode)
-                       VALUES(?,?,?,?,?,'pending',0,?,?,?,'not_started')""",
+                       attempts,max_attempts,created_at,updated_at,execution_mode,priority,depends_on)
+                       VALUES(?,?,?,?,?,'pending',0,?,?,?,'not_started',?,?)""",
                        (task_id, key, task_type, title, json.dumps(payload or {}, sort_keys=True),
-                        max_attempts, now, now))
-            self._audit(db, task_id, "task_enqueued", {"task_type": task_type, "title": title})
+                        max_attempts, now, now, priority, json.dumps(dependencies, separators=(",", ":"))))
+            self._audit(db, task_id, "task_enqueued", {
+                "task_type": task_type, "title": title, "priority": priority,
+                "depends_on": dependencies,
+            })
             return dict(db.execute("SELECT * FROM tasks WHERE id=?", (task_id,)).fetchone())
 
     def claim_next(self, lease_timeout_seconds: int = 900,
@@ -90,20 +130,62 @@ class TaskStore:
             raise ValueError("invalid execution_mode")
         with self._connect() as db:
             db.execute("BEGIN IMMEDIATE")
-            row = db.execute("SELECT * FROM tasks WHERE status='pending' ORDER BY created_at,id LIMIT 1").fetchone()
+            now = datetime.now(timezone.utc)
+            now_iso = now.isoformat()
+            blocked = db.execute("""UPDATE tasks AS child
+                SET status='blocked',
+                    error=CASE
+                      WHEN EXISTS (
+                        SELECT 1 FROM json_each(child.depends_on) AS dep
+                        LEFT JOIN tasks AS parent ON parent.id=dep.value
+                        WHERE parent.id IS NULL
+                      ) THEN 'dependency_missing'
+                      WHEN EXISTS (
+                        SELECT 1 FROM json_each(child.depends_on) AS dep
+                        JOIN tasks AS parent ON parent.id=dep.value
+                        WHERE parent.status IN ('failed','blocked')
+                      ) THEN 'dependency_failed'
+                      ELSE 'dependency_not_executed'
+                    END,
+                    updated_at=?
+                WHERE child.status='pending' AND EXISTS (
+                  SELECT 1 FROM json_each(child.depends_on) AS dep
+                  LEFT JOIN tasks AS parent ON parent.id=dep.value
+                  WHERE parent.id IS NULL
+                     OR parent.status IN ('failed','blocked')
+                     OR (parent.status='succeeded' AND parent.execution_mode!='live_inference')
+                )
+                RETURNING id,error,depends_on""", (now_iso,)).fetchall()
+            for row in blocked:
+                self._audit(db, row["id"], "task_blocked_dependency", {
+                    "reason": row["error"], "depends_on": json.loads(row["depends_on"]),
+                })
+            row = db.execute("""SELECT * FROM tasks AS candidate
+                WHERE candidate.status='pending'
+                  AND NOT EXISTS (
+                    SELECT 1 FROM json_each(candidate.depends_on) AS dep
+                    LEFT JOIN tasks AS parent ON parent.id=dep.value
+                    WHERE parent.id IS NULL
+                       OR parent.status!='succeeded'
+                       OR parent.execution_mode!='live_inference'
+                  )
+                ORDER BY candidate.priority DESC,candidate.created_at,candidate.id
+                LIMIT 1""").fetchone()
             if row is None:
                 return None
-            now = datetime.now(timezone.utc)
             token = str(uuid.uuid4())
             expires = (now + timedelta(seconds=lease_timeout_seconds)).isoformat()
             changed = db.execute("""UPDATE tasks SET status='running',attempts=attempts+1,
                          execution_mode=?,updated_at=?,lease_token=?,lease_expires_at=?
                          WHERE id=? AND status='pending'""",
-                         (execution_mode, now.isoformat(), token, expires, row["id"])).rowcount
+                         (execution_mode, now_iso, token, expires, row["id"])).rowcount
             if changed != 1:
                 return None
-            self._audit(db, row["id"], "task_claimed", {"attempt": row["attempts"] + 1,
-                        "lease_expires_at": expires, "execution_mode": execution_mode})
+            self._audit(db, row["id"], "task_claimed", {
+                "attempt": row["attempts"] + 1, "lease_expires_at": expires,
+                "execution_mode": execution_mode, "priority": row["priority"],
+                "depends_on": json.loads(row["depends_on"]),
+            })
             return dict(db.execute("SELECT * FROM tasks WHERE id=?", (row["id"],)).fetchone())
 
     def heartbeat(self, task_id: str, lease_token: str, lease_timeout_seconds: int = 900) -> str:
