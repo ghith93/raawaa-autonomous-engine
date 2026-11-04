@@ -17,6 +17,8 @@ import os
 import sys
 from pathlib import Path
 
+from engine.redaction import redact
+
 MAX_NOTICE_ITEMS = 20
 
 #: A crashing batch leaves no JSON on stdout, so ``stop_reason`` degrades to
@@ -57,7 +59,7 @@ def _describe(item: dict) -> str:
     for field in INTERESTING_FIELDS:
         value = item.get(field)
         if value:
-            text = str(value).replace("\n", " ")[:120].replace("::", ":")
+            text = redact(str(value)).replace("\n", " ")[:120].replace("::", ":")
             parts.append(f"{field}={text}")
     return " ".join(parts)
 
@@ -120,10 +122,15 @@ def read_stderr_tail(path: str | Path | None) -> str:
 
 
 def stderr_notice(text: str) -> str | None:
-    """Render a stderr tail as one single-line ``::error`` annotation."""
+    """Render a stderr tail as one single-line ``::error`` annotation.
+
+    Annotations are readable by anyone who can read the repository, so the tail
+    is redacted before it is bounded. Bounding alone is not redaction: a
+    traceback whose message embeds a header would otherwise be published.
+    """
     if not text or not text.strip():
         return None
-    flattened = " ".join(line.strip() for line in text.splitlines() if line.strip())
+    flattened = " ".join(line.strip() for line in redact(text).splitlines() if line.strip())
     flattened = flattened.replace("::", ":").replace("%", "pct")[-MAX_ANNOTATION_CHARS:]
     return f"::error title=Task batch crashed::{flattened}"
 
@@ -132,7 +139,8 @@ def stderr_markdown(text: str) -> str:
     """Render the raw tail for the step summary, where multi-line output is safe."""
     if not text or not text.strip():
         return ""
-    return "#### stderr tail\n\n```text\n" + text.strip()[-MAX_STDERR_CHARS:] + "\n```\n"
+    body = redact(text.strip()[-MAX_STDERR_CHARS:])
+    return "#### stderr tail\n\n```text\n" + body + "\n```\n"
 
 
 def emit(batch: object, summary_path: str | None = None, stream=None,
