@@ -266,6 +266,36 @@ test("heartbeat requires the current lease and records a bounded extension", asy
   assert.ok(DB.calls.some(x => x.kind === "run" && x.sql.startsWith("UPDATE tasks")));
 });
 
+test("a dispatched step whose id contains an underscore can heartbeat and finish", async () => {
+  // workflow and step ids are /^[A-Za-z][A-Za-z0-9_-]{0,63}$/, and taskIdFor()
+  // joins them as wf-<run>-<step>. The action routes only accepted [A-Za-z0-9-],
+  // so every step id with an underscore — the natural way to write "verify_ci" —
+  // was routed to 404 and the task could never be reported back.
+  const taskId = "wf-run-2026-11-04-verify_ci";
+  for (const action of ["heartbeat", "finish"]) {
+    const DB = dbMock();
+    const body = action === "heartbeat"
+      ? { lease_token: "lease-1" }
+      : { lease_token: "lease-1", status: "succeeded", result: { mode: "dry_run" } };
+    const response = await worker.fetch(request(`/v1/tasks/${taskId}/${action}`, {
+      method: "POST", body,
+    }), { DB, ENGINE_API_TOKEN: TOKEN });
+    assert.notEqual(response.status, 404, `${action} must route for ${taskId}`);
+    assert.equal(response.status, 200, `${action} returned ${response.status}`);
+    const update = DB.calls.find(x => x.kind === "run" && x.sql.startsWith("UPDATE tasks"));
+    assert.ok(update.values.includes(taskId), `${action} must bind the routed task id`);
+  }
+});
+
+test("a task id that is not an identifier is still not routable", async () => {
+  for (const bad of ["task%20id", "task;drop", "../task"]) {
+    const response = await worker.fetch(request(`/v1/tasks/${bad}/heartbeat`, {
+      method: "POST", body: { lease_token: "lease-1" },
+    }), { DB: dbMock(), ENGINE_API_TOKEN: TOKEN });
+    assert.ok([400, 404].includes(response.status), `${bad} returned ${response.status}`);
+  }
+});
+
 test("finish rejects unsupported terminal states", async () => {
   const response = await worker.fetch(request("/v1/tasks/task-1/finish", {
     method: "POST", body: { lease_token: "lease-1", status: "pending" },
