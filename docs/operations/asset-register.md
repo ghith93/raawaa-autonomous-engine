@@ -134,3 +134,58 @@ At every session start, refresh counts, account/connection status, app permissio
 - Mobile readback: `status=verified`, `ci_health=success`, `kill_switch=engaged`, `external_writes=false`, `paid_model_calls=false`, `paid_fallback=false`.
 - Ephemeral Staging bearer/quota-admin tokens were revoked. Production Control Worker deployment #41747019726 was skipped. No Production D1/Worker change, model-provider call, paid inference, or external write.
 - Workflow planner remains proposal-only; no automatic workflow dispatch is enabled. Direct dependency behavior was integration-tested against local D1; no task was claimed from the shared Staging queue.
+
+
+## Live revalidation — 2026-11-04 00:51 UTC
+
+This addendum supersedes earlier snapshots where they conflict. Evidence was re-read from the live GitHub repository, Actions, Activepieces project, ChatGPT automation inventory, tool catalog, and current ruleset. Secret values were not accessed or recorded.
+
+### Repository, governance, and CI
+
+- Repository: ghith93/raawaa-autonomous-engine. Default branch: main. Exact main SHA: e6761d09de884d34bdc0ef7d01d7b7a8f1e1682e — https://github.com/ghith93/raawaa-autonomous-engine/commit/e6761d09de884d34bdc0ef7d01d7b7a8f1e1682e
+- Current tree: 404 entries; 23 workflow YAML files under .github/workflows.
+- Active ruleset main-protection, ID 26464558: active on the default branch; pull requests required; exact status context test required with strict up-to-date checks; review-thread resolution required; deletion and non-fast-forward updates blocked; no bypass actors. Important limitation: required_approving_review_count=0 and require_code_owner_review=false. The ruleset is active but does not enforce an approving review. The branch-protection endpoint returned HTTP 403 to this connector; the ruleset detail endpoint was readable.
+- Main CI run #41747902547 passed on the exact main SHA. All five jobs succeeded: test, reviewed Staging migrations, isolated Staging Worker/D1 monetary verification, sanitized telemetry publication, and authenticated Staging mobile-status readback. https://github.com/ghith93/raawaa-autonomous-engine/actions/runs/41747902547
+
+### Cloudflare, D1, and deployment evidence
+
+- Staging D1 remains raawaa-engine-staging, ID 231dd948-04a0-49e3-ad73-444f77d69477. The latest main CI run validated target separation and deployed the isolated Staging Worker as version a78c3de1-1ee0-4892-b97c-c13ec54d99bc at https://raawaa-autonomous-engine-staging.ghith-shikhkhaled.workers.dev.
+- Remote Staging verification passed quota concurrency/settlement, durable invocation identity, lease fencing, explicit 429 rotation, ambiguous replay blocking, global daily/monthly/task monetary caps, policy-tamper rejection, idempotency, pre-I/O release, ambiguous settlement, over-estimate quarantine, redeploy persistence, and aggregate-only authenticated status. No model provider was called. Temporary Staging secrets ENGINE_API_TOKEN and ENGINE_QUOTA_ADMIN_TOKEN were deleted by workflow cleanup.
+- Production Control Worker deployment workflow run #41748314581 was skipped. Production Worker and Production D1 were not changed by this cycle. No Production migration or deployment occurred.
+
+### Task Runner and durable queue
+
+- Existing Task Runner workflow: .github/workflows/task-runner.yml. Latest run #41749347645 completed successfully on main SHA e6761d09de884d34bdc0ef7d01d7b7a8f1e1682e: https://github.com/ghith93/raawaa-autonomous-engine/actions/runs/41749347645
+- Public Worker health GET, authenticated POST preflight, and authenticated D1 mobile-status read all returned HTTP 200. The bounded batch returned queue_idle with tasks_processed=0. D1 status reported tasks_pending=0 and tasks_running=0; execution-mode aggregates were unknown. This is an idle health/dispatch check, not completed business work or proof of live inference.
+- Worker Cron heartbeat was recorded at 2026-11-04T00:45:34.193Z on */15 * * * *, with 0 stale leases requeued and 0 failed. The separate GitHub App watchdog remains not_ready because the non-secret Worker variable GITHUB_APP_WATCHDOG_ENABLED is missing. No variable or secret was changed.
+- The run's safe-policy audit confirmed safe dry-run, three provider profiles, zero enabled provider routes, paid fallback disabled, infrastructure overages disabled, and external writes disabled. RAAWAA_ENGINE_LIVE_INFERENCE was unset; no provider request was made.
+
+### Open PRs, blockers, and completed work
+
+- PR #459 — draft security/trusted-main-only-codespace-bridge, head 6df513c40d96373028950235c7e0fb0ceb88a002, base main at e6761d09de884d34bdc0ef7d01d7b7a8f1e1682e. Exact-head CI #41749101378 passed. An automated security finding was posted as PR comment #6619451460: git status --porcelain --untracked-files=all omits ignored files, so an ignored executable/test artifact can remain outside the verified commit. Require a fresh tracked-only snapshot/worktree or an equivalent fail-closed ignored-file control plus regression tests. Keep draft/unmerged; the active ruleset still enforces zero approving reviews, and this automated comment is not an independent GitHub approval. Issue #440 remains open. Do not provision a token, enable the bridge, or start a Codespace.
+- Other open PR heads observed: #443 70f61d94a1254ea58b784b5f995f6a57acee8385; #426 ecb1312b41c9c0fa3f89dba396477c9946be8e41; #423 89a8cd466804463e5ab992c4069f3c27e71cf21f; #421 48483820659197905cb58359bf38be92f7032e60; #405 48117a70c2453f9d5f608b944d2b127443d6e726; #380 06fe80031ad913d71a1e9a2cf808a526232fe7fa. These remain open/draft or stale-base work; no branch was updated or merged in this cycle.
+- Issue #453 (F5 priority/dependency queue) was closed as completed after verifying PR #457, exact-head CI #41746324349, Staging migration/Worker verification in #41746574412, and the latest main CI. Closure: https://github.com/ghith93/raawaa-autonomous-engine/issues/453
+- Issue #438 remains open for the separate workflow dispatcher contract and root-step/downstream release lifecycle. Workflow planning remains proposal-only. Issue #440 remains the Codespace security blocker. The main project tracking issue #34 remains open.
+
+### Current ChatGPT and Activepieces capabilities
+
+- Live ChatGPT tool catalog: 1,922 tool definitions across 64 namespace groups. The current skills__list call returned an empty list; no skill pack was surfaced in this runtime. Historical skill counts in the dated inventory are not current evidence.
+- Activepieces project Ghith's Project (8A2qoCJNq9zlORJZMlrfw) is selected. One project-scoped GitHub connection is ACTIVE (externalId cn2iEAi2bWbLfeOVOu7D8). One flow is ENABLED and published: Raawaa GitHub Workflow Control (oDKKtoRanykDWtyBdkQFt). Its structure is Manual Trigger → GitHub trigger_workflow_dispatch for task-runner.yml on main, with a 30-minute wait and 60-second polling. Latest TESTING run appXqFOAEJKRLnQoA8xJs succeeded and triggered Task Runner run #41749347645. No PRODUCTION Activepieces runs were found.
+- Activepieces exposes 20 model entries under provider activepieces. Price, quota, billing, account eligibility, and runtime availability are unverified; no model call was made. These models are not engine provider adapters.
+- ChatGPT app permissions: GitHub and Activepieces each show app-specific Allow all actions; global default is Allow low-risk actions. These are ChatGPT UI permission settings, not GitHub API scopes, engine credentials, or runtime adapters.
+- ChatGPT automations: four records; only Raawaa Engine Daily Ops is enabled. Its record still reports next_run_time=null and last_run_time=2026-11-02T15:17:12Z. Three unrelated marketing/market/serum automations remain paused. Do not create a duplicate automation or infer recurring scheduler health from this invocation.
+
+### ARTEMIS and device boundary
+
+Google ARTEMIS remains registered but disabled and not runtime verified. No daemon, secure endpoint, ADB-authorized device, or zero-cost model route was verified. Device control is not a prerequisite for cloud-first engine work.
+
+### Next safe action
+
+Keep PR #459 draft until ignored-file integrity is corrected and an actual enforced independent-approval gate exists. Continue using the existing D1 queue, Task Runner, Worker Cron, CI, and Staging verification paths. Do not add a scheduler, queue, provider, integration, paid route, or Production mutation.
+
+
+### Task Runner schedule-liveness check — 2026-11-04 00:53 UTC
+
+- The current Task Runner workflow still has its existing five-minute schedule at minute offsets 2, 7, 12, 17, 22, 27, 32, 37, 42, 47, 52, and 57 UTC, plus the existing manual workflow_dispatch. Its concurrency group remains d1-task-runner.
+- A fresh repository Actions-runs query (first 100 returned runs) showed the latest Task Runner events as workflow_dispatch #41749347645 and push #41743485185; no event=schedule was visible in that result. Primary GitHub schedule liveness is therefore still unverified, not proven disabled. GitHub scheduled events are best-effort.
+- The Worker Cron heartbeat is a separate maintenance signal and was current at 00:45:34Z. The GitHub App watchdog is a separate fallback and remains not_ready because GITHUB_APP_WATCHDOG_ENABLED is missing. No schedule, watchdog, Worker variable, secret, or permissions were changed.
