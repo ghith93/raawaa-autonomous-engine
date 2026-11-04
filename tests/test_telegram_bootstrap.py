@@ -352,6 +352,36 @@ class MainFlowTest(unittest.TestCase):
         with self.assertRaisesRegex(bootstrap.BootstrapError, "not a chat id"):
             bootstrap._parse_chat_ids(["-100123"])
 
+    def test_explicit_pause_with_no_update_leaves_webhook_paused_and_guides_owner(self):
+        calls = []
+        def fake_call(token, method, payload=None, **kwargs):
+            calls.append((method, payload))
+            if method == "getMe":
+                return {"username": "raawaa_bot"}
+            if method == "getUpdates":
+                if sum(1 for name, _ in calls if name == "getUpdates") == 1:
+                    raise bootstrap.BootstrapError("getUpdates failed: HTTP 409 (token not shown)")
+                return []
+            if method == "deleteWebhook":
+                self.assertFalse(payload["drop_pending_updates"])
+                return True
+            if method == "getWebhookInfo":
+                return {"url": "", "pending_update_count": 0}
+            raise AssertionError(method)
+        with tempfile.TemporaryDirectory() as tmp:
+            env_file = Path(tmp) / "telegram.env"
+            with patch.object(bootstrap, "_call", side_effect=fake_call):
+                with patch.dict(os.environ, {"TELEGRAM_BOT_TOKEN": VALID_TOKEN}):
+                    with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()) as err:
+                        code = bootstrap.main([
+                            "--url", "https://w.example/v1/telegram/webhook",
+                            "--env-file", str(env_file), "--replace-webhook-to-discover",
+                        ])
+            self.assertEqual(code, 2)
+            self.assertIn("webhook is paused", err.getvalue())
+            self.assertFalse(env_file.exists())
+            self.assertEqual(sum(1 for name, _ in calls if name == "deleteWebhook"), 1)
+
     def test_register_without_a_url_fails_with_an_actionable_message(self):
         with tempfile.TemporaryDirectory() as tmp:
             replies = {
