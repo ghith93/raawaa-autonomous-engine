@@ -1,0 +1,186 @@
+import contextlib
+import io
+import json
+import os
+import stat
+import tempfile
+import unittest
+from pathlib import Path
+from unittest.mock import patch
+
+from scripts import telegram_bootstrap as bootstrap
+
+VALID_TOKEN = "123456789:" + "A" * 40
+
+
+class GenerateSecretTest(unittest.TestCase):
+    def test_generated_secret_is_inside_telegrams_alphabet_and_bounds(self):
+        for _ in range(20):
+            value = bootstrap.generate_webhook_secret()
+            self.assertTrue(bootstrap.SECRET_RE.fullmatch(value), value)
+            self.assertGreaterEqual(len(value), 16)
+            self.assertLessEqual(len(value), 256)
+
+    def test_generated_secrets_do_not_repeat(self):
+        values = {bootstrap.generate_webhook_secret() for _ in range(50)}
+        self.assertEqual(len(values), 50)
+
+
+class TokenInputTest(unittest.TestCase):
+    def test_a_malformed_token_is_refused_before_any_network_call(self):
+        for bad in ("", "abc", "12345:short", "123456789:" + "A" * 10):
+            with self.assertRaises(bootstrap.BootstrapError):
+                bootstrap.read_token(bad)
+
+    def test_a_well_formed_token_is_accepted_from_the_environment(self):
+        with patch.dict(os.environ, {"TELEGRAM_BOT_TOKEN": VALID_TOKEN}):
+            self.assertEqual(bootstrap.read_token(None), VALID_TOKEN)
+
+
+class ChatDiscoveryTest(unittest.TestCase):
+    def test_only_private_human_chats_are_accepted(self):
+        replies = {
+            "getMe": {"username": "raawaa_bot"},
+            "getUpdates": {
+                "updates": [
+                    {"message": {"chat": {"id": 42, "type": "private"}}},
+                    {"message": {"chat": {"id": 42, "type": "private"}}},
+                    {"message": {"chat": {"id": -100123, "type": "channel"}}},
+                    {"message": {"chat": {"id": -5, "type": "group"}}},
+                    {"edited_message": {"chat": {"id": 99, "type": "private"}}},
+                ],
+            },
+        }
+
+        def fake_call(token, method, payload=None, *, timeout=15.0):
+            self.assertEqual(token, VALID_TOKEN)
+            return replies[method]
+
+        with patch.object(bootstrap, "_call", side_effect=fake_call):
+            chat_ids, username = bootstrap.find_private_chat_ids(VALID_TOKEN)
+        # A duplicate collapses, a channel and a group are excluded, and an update
+        # type the bot does not subscribe to is not treated as a private chat.
+        self.assertEqual(chat_ids, [42])
+        self.assertEqual(username, "raawaa_bot")
+
+    def test_no_pending_updates_yields_no_chat_and_that_is_an_error_at_registration(self):
+        with patch.object(bootstrap, "_call", side_effect=lambda *a, **k: {"updates": []}):
+            chat_ids, _ = bootstrap.find_private_chat_ids(VALID_TOKEN)
+        self.assertEqual(chat_ids, [])
+
+
+class ErrorHygieneTest(unittest.TestCase):
+    def test_an_api_failure_never_echoes_the_token(self):
+        with patch.object(bootstrap, "urlopen", side_effect=bootstrap.URLError("boom")):
+            with self.assertRaises(bootstrap.BootstrapError) as caught:
+                bootstrap._call(VALID_TOKEN, "getMe")
+        self.assertNotIn(VALID_TOKEN, str(caught.exception))
+        self.assertNotIn("A" * 40, str(caught.exception))
+
+    def test_a_rejected_request_reports_telegrams_description_not_the_url(self):
+        class FakeResponse:
+            def __init__(self, body):
+                self._body = body
+
+            def read(self):
+                return self._body
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                return False
+
+        body = json.dumps({"ok": False, "description": "Bad Request: invalid token"}).encode()
+        with patch.object(bootstrap, "urlopen", return_value=FakeResponse(body)):
+            with self.assertRaises(bootstrap.BootstrapError) as caught:
+                bootstrap._call(VALID_TOKEN, "getMe")
+        self.assertIn("invalid token", str(caught.exception))
+        self.assertNotIn(VALID_TOKEN, str(caught.exception))
+
+
+class EnvFileTest(unittest.TestCase):
+    def test_the_env_file_is_written_read_only_for_the_owner(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "nested" / "telegram.env"
+            bootstrap.write_env_file(path, {"A": "1", "B": "2"})
+            mode = path.stat().st_mode
+            self.assertEqual(stat.S_IMODE(mode), 0o600)
+            self.assertEqual(path.read_text(), "A=1\nB=2\n")
+
+    def test_rewriting_tightens_permissions_rather_than_keeping_them(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "telegram.env"
+            path.write_text("OLD=1\n")
+            path.chmod(0o644)
+            bootstrap.write_env_file(path, {"A": "1"})
+            self.assertEqual(stat.S_IMODE(path.stat().st_mode), 0o600)
+            self.assertEqual(path.read_text(), "A=1\n")
+
+
+class RegisterTest(unittest.TestCase):
+    def test_registration_refuses_an_insecure_url(self):
+        with self.assertRaises(bootstrap.BootstrapError):
+            bootstrap.register(VALID_TOKEN, "http://example.test/hook", "x" * 32, [1])
+
+    def test_setwebhook_payload_carries_the_secret_and_drops_stale_updates(self):
+        calls = []
+
+        def fake_call(token, method, payload=None, *, timeout=15.0):
+            calls.append((method, payload))
+            if method == "getWebhookInfo":
+                return {"url": "https://worker.test/v1/telegram/webhook", "pending_update_count": 0}
+            return {}
+
+        with patch.object(bootstrap, "_call", side_effect=fake_call):
+            state = bootstrap.register(VALID_TOKEN, "https://worker.test/v1/telegram/webhook", "s" * 32, [42])
+
+        method, payload = calls[0]
+        self.assertEqual(method, "setWebhook")
+        self.assertEqual(payload["secret_token"], "s" * 32)
+        self.assertEqual(payload["allowed_updates"], ["message"])
+        self.assertTrue(payload["drop_pending_updates"])
+        self.assertTrue(state["url"].startswith("https://"))
+
+
+class MainFlowTest(unittest.TestCase):
+    def test_dry_run_writes_the_file_and_says_what_to_do_next(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            env_file = Path(tmp) / "telegram.env"
+            replies = {
+                "getMe": {"username": "raawaa_bot"},
+                "getUpdates": {"updates": [{"message": {"chat": {"id": 7, "type": "private"}}}]},
+            }
+            with patch.object(bootstrap, "_call", side_effect=lambda t, m, p=None, **k: replies[m]):
+                with patch.dict(os.environ, {"TELEGRAM_BOT_TOKEN": VALID_TOKEN}):
+                    with contextlib.redirect_stdout(io.StringIO()):
+                        code = bootstrap.main(["--env-file", str(env_file)])
+            self.assertEqual(code, 0)
+            written = dict(line.split("=", 1) for line in env_file.read_text().splitlines())
+            self.assertEqual(written["TELEGRAM_ALLOWED_CHAT_IDS"], "7")
+            self.assertTrue(bootstrap.SECRET_RE.fullmatch(written["TELEGRAM_WEBHOOK_SECRET"]))
+
+    def test_register_without_a_url_fails_with_an_actionable_message(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            replies = {
+                "getMe": {"username": "raawaa_bot"},
+                "getUpdates": {"updates": [{"message": {"chat": {"id": 7, "type": "private"}}}]},
+            }
+            with patch.object(bootstrap, "_call", side_effect=lambda t, m, p=None, **k: replies[m]):
+                with patch.dict(os.environ, {"TELEGRAM_BOT_TOKEN": VALID_TOKEN}):
+                    with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+                        code = bootstrap.main(["--env-file", str(Path(tmp) / "e"), "--register"])
+            self.assertEqual(code, 2)
+
+    def test_a_bad_token_exits_two_without_touching_the_filesystem(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            target = Path(tmp) / "telegram.env"
+            with patch.dict(os.environ, {"TELEGRAM_BOT_TOKEN": "nope"}):
+                with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+                    code = bootstrap.main(["--env-file", str(target)])
+            self.assertEqual(code, 2)
+            self.assertFalse(target.exists())
+
+
+if __name__ == "__main__":
+    unittest.main()

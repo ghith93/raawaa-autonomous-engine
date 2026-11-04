@@ -1,0 +1,125 @@
+name: Register Telegram webhook
+
+# Turns one owner action — adding the bot token as a repository secret — into a
+# working /status on a phone.
+#
+# The owner's remaining steps are the two that genuinely cannot be delegated:
+# create the bot with @BotFather, and send it one message. Everything after that
+# is here: discover the private chat id from the pending update, generate the
+# webhook secret, install all three values as Worker secrets, point Telegram at
+# the Worker, and prove the Worker accepts a signed update.
+#
+# Manual dispatch on purpose: it is an operational action against production, it
+# must not run on every push, and its confirmation input names the database it
+# touches (the same pattern as d1-migrate.yml).
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: "Type REGISTER_TELEGRAM_WEBHOOK to confirm"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: telegram-webhook-registration
+  cancel-in-progress: false
+
+env:
+  WORKER_URL: https://raawaa-autonomous-engine-control.ghith-shikhkhaled.workers.dev
+
+jobs:
+  register:
+    # A dispatch can be issued from any branch by anyone holding actions:write,
+    # so the ref is pinned as well: only reviewed main may touch production.
+    if: github.ref == 'refs/heads/main' && inputs.confirm == 'REGISTER_TELEGRAM_WEBHOOK'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out reviewed main
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - name: Set up Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
+        with:
+          node-version: "22"
+      - name: Set up Python
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7
+        with:
+          python-version: "3.12"
+      - name: Validate required secrets
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          test -n "$TELEGRAM_BOT_TOKEN" || {
+            echo "Missing TELEGRAM_BOT_TOKEN. Create the bot with @BotFather, send it one"
+            echo "message, and add the token as a repository secret. That is the only step"
+            echo "this workflow cannot do for you."
+            exit 1
+          }
+          test -n "$CLOUDFLARE_API_TOKEN" || { echo "Missing CLOUDFLARE_API_TOKEN"; exit 1; }
+          test -n "$CLOUDFLARE_ACCOUNT_ID" || { echo "Missing CLOUDFLARE_ACCOUNT_ID"; exit 1; }
+      - name: Discover the private chat and generate the webhook secret
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+        run: |
+          set -euo pipefail
+          python3 scripts/telegram_bootstrap.py --url "$WORKER_URL" --env-file /tmp/telegram.env
+      - name: Install the three Worker secrets
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          # Values go from the 0600 file to wrangler's stdin; they never appear in
+          # argv, in the workflow log, or in an error message.
+          while IFS='=' read -r key value; do
+            case "$key" in
+              TELEGRAM_BOT_TOKEN|TELEGRAM_WEBHOOK_SECRET|TELEGRAM_ALLOWED_CHAT_IDS) ;;
+              *) echo "Unexpected key in the env file: $key"; exit 1 ;;
+            esac
+            printf '%s' "$value" | npx --yes wrangler@4.156.1 secret put "$key" --config wrangler.toml
+          done < /tmp/telegram.env
+      - name: Point Telegram at the Worker
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+        run: |
+          set -euo pipefail
+          secret=$(grep '^TELEGRAM_WEBHOOK_SECRET=' /tmp/telegram.env | cut -d= -f2-)
+          chats=$(grep '^TELEGRAM_ALLOWED_CHAT_IDS=' /tmp/telegram.env | cut -d= -f2-)
+          python3 scripts/telegram_bootstrap.py --register --url "$WORKER_URL/v1/telegram/webhook" \
+            --secret "$secret" --chat-id "$chats" | tee /tmp/registration.json
+          python3 - <<'PY'
+          import json
+          state = json.load(open("/tmp/registration.json"))
+          webhook = state.get("webhook") or {}
+          if not str(webhook.get("url", "")).startswith("https://"):
+              raise SystemExit("Telegram did not accept the webhook URL")
+          print("webhook registered:", webhook["url"])
+          PY
+      - name: Prove the Worker accepts a signed update
+        run: |
+          set -euo pipefail
+          secret=$(grep '^TELEGRAM_WEBHOOK_SECRET=' /tmp/telegram.env | cut -d= -f2-)
+          body='{"update_id":1,"message":{"message_id":1,"date":0,"chat":{"id":0,"type":"private"},"text":"/help"}}'
+          # A chat id that is not on the allowlist must be refused as unauthorized
+          # or ignored — never answered. A 503 means the Worker is deployed without
+          # the secrets, which is the failure this step exists to catch.
+          code=$(curl -s -o /tmp/reply.json -w '%{http_code}' -X POST "$WORKER_URL/v1/telegram/webhook" \
+            -H "content-type: application/json" \
+            -H "x-telegram-bot-api-secret-token: $secret" \
+            --data "$body")
+          echo "worker replied HTTP $code"
+          cat /tmp/reply.json
+          test "$code" != "503" || { echo "Worker reports webhook_disabled: secrets not installed"; exit 1; }
+          test "$code" != "401" || { echo "Worker rejected our own secret: secret mismatch"; exit 1; }
+      - name: Summary
+        run: |
+          echo "### Telegram webhook registered" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "Send /status to the bot from an allowed chat." >> "$GITHUB_STEP_SUMMARY"
+          echo "The token, the generated secret and the chat id were written only to Worker secrets." >> "$GITHUB_STEP_SUMMARY"
