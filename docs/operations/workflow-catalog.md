@@ -55,3 +55,10 @@ Use the connected Activepieces GitHub action `trigger_workflow_dispatch` with re
 - The existing Task Runner workflow was dispatched through the existing Activepieces flow. TESTING flow run appXqFOAEJKRLnQoA8xJs succeeded and triggered GitHub run #41749347645. The bounded run completed with queue_idle and processed 0 tasks; this is not proof of live inference or business-task completion.
 - Production Control Worker workflow run #41748314581 was skipped. Production Worker and D1 remain unchanged.
 - The active main-protection ruleset requires PRs, strict test status, and resolved review threads, but currently requires zero approving reviews. Do not treat an independent approval as an enforced repository rule.
+
+
+### Task Runner schedule-liveness checkpoint — 2026-11-04 00:53 UTC
+
+- The existing task-runner.yml retains its five-minute cron offsets 2, 7, 12, 17, 22, 27, 32, 37, 42, 47, 52, and 57 UTC, plus workflow_dispatch; concurrency remains grouped as d1-task-runner.
+- The latest Task Runner events visible in the first 100 repository workflow runs were workflow_dispatch #41749347645 and push #41743485185. No event=schedule appeared in that result. Treat primary GitHub cron liveness as unverified; do not create another scheduler or infer schedule health from the manual dispatch.
+- The separate Worker Cron heartbeat was recorded at 00:45:34Z. The GitHub App watchdog remains not_ready because GITHUB_APP_WATCHDOG_ENABLED is missing.
