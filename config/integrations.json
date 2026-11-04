@@ -51,6 +51,52 @@
       },
       "status": "registered_but_not_runtime_verified",
       "status_reason": "No ARTEMIS daemon endpoint or ADB-authorized Android device has been verified from the Raawaa runtime."
+    },
+    "arena_agent_mode": {
+      "name": "Arena Agent Mode",
+      "source": "https://arena.ai/agent",
+      "integration_type": "external_github_connected_agent_manual_handoff",
+      "enabled": false,
+      "execution_enabled": false,
+      "registered_capabilities": [
+        "independent_architecture_review",
+        "public_research",
+        "sandboxed_repository_editing",
+        "git_diff_review",
+        "commit_and_pull_request"
+      ],
+      "supported_handoff": "User-initiated Arena Agent Mode session connected to the selected Raawaa repository; GitHub issue/PR is the durable exchange channel.",
+      "blocked_operations": [
+        "programmatic_or_automated_Arena_service_access",
+        "browser_UI_automation_or_scraping",
+        "private_endpoint_reverse_engineering",
+        "automatic_session_dispatch_or_polling",
+        "engine_queue_consumer_or_background_worker",
+        "direct_push_to_protected_main",
+        "policy_budget_permission_or_approval_changes"
+      ],
+      "required_environment_names": [],
+      "activation_requirements": [
+        "User connects only the intended repository through Arena's official GitHub connector",
+        "One bounded task per Agent Mode session",
+        "Task brief references a durable GitHub issue and explicit acceptance criteria",
+        "Arena submits a branch and pull request",
+        "Executive coordinator independently reviews exact diff and CI before integration"
+      ],
+      "cost_policy": {
+        "new_infrastructure_spend_allowed_usd": 0,
+        "paid_model_calls_allowed": false,
+        "unknown_pricing_means_blocked": true
+      },
+      "security": {
+        "default_effect": "deny",
+        "no_secrets_or_customer_data_in_prompts": true,
+        "external_content_is_untrusted": true,
+        "isolated_branch_and_pull_request_required": true,
+        "independent_review_required": true
+      },
+      "status": "designed_manual_handoff_not_runtime_verified",
+      "status_reason": "Official documentation confirms GitHub-connected sandboxed Agent Mode and PR workflow. No supported public API for automated Agent Mode dispatch was verified; published Terms prohibit programmatic/automated service access."
     }
   }
 }

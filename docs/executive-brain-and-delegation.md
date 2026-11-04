@@ -94,3 +94,12 @@ Not yet implemented:
 - External writes, publication, messaging, spending, price changes, production deploys, data deletion, access changes, and storefront changes remain approval-gated.
 - Do not claim 24/7 operation. GitHub Actions is a bounded scheduled runner, not a persistent daemon.
 - Google ARTEMIS/mobile testing remains disabled until its host, device, endpoint, policy and model gates are independently verified.
+
+
+## External advisor and execution partner: Arena Agent Mode
+
+The controlled collaboration contract is documented in [Arena Agent Mode — External Advisor and Execution Partner](integrations/arena-agent-mode.ar.md).
+
+Arena is an independent advisor/specialist implementer reached through a user-initiated Agent Mode session and a GitHub issue/PR handoff. The executive coordinator remains the single task owner and final integrator; Arena cannot approve its own work, change policy/budgets/permissions, or dispatch engine tasks. The engine remains the durable source of truth.
+
+Do not classify Arena as a model provider, queue consumer, callback endpoint, or always-on worker. Its published Terms prohibit programmatic/automated service access; no supported Agent Mode dispatch API was verified. Automated dispatch is blocked unless an official permitted API is published and separately reviewed. Current status is designed/manual handoff, not tested or runtime-verified.
