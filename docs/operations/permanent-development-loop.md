@@ -74,6 +74,18 @@ priority, the disagreement can be argued at the level of a named weight
 who spoke last. Changing the loop's urgency is then a code change with a test,
 not a mood.
 
+## What is deliberately not ranked
+
+An issue labelled `tracking`, `umbrella` or `meta` is a record, not a unit of
+work: it appears in the report under *Tracking*, never in the ranking. This
+exists because issue #34 — the project's 32 KB status log — used to rank
+alongside a failing pipeline, and a loop that cannot tell a log from a task is
+not a loop.
+
+A tracking issue still needs a home: give it one line with a link, and put the
+state itself in `docs/`. If a tracking issue starts describing work that must
+be done, that work becomes a new issue naming one acceptance criterion.
+
 ## Adding a signal
 
 1. Collect it in `scripts/build_development_state.py`, returning `null` when it

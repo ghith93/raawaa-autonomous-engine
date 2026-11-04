@@ -63,6 +63,9 @@ W_AGE_PER_DAY = 0.6
 W_BLOCKED = 5
 
 OWNER_APPROVAL_KINDS = frozenset({"deploy", "provider_activation", "permissions"})
+# Umbrella and status-record issues are not work. Ranking them next to a
+# failing pipeline is how a 32 KB log came to look like a task.
+TRACKING_LABELS = frozenset({"tracking", "umbrella", "meta"})
 
 
 def _now() -> datetime:
@@ -266,9 +269,12 @@ def _pull_request_actions(state: dict[str, Any], now: datetime) -> list[dict[str
     return actions
 
 
-def _issue_actions(state: dict[str, Any], now: datetime) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+def _issue_actions(
+    state: dict[str, Any], now: datetime
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]]]:
     actions: list[dict[str, Any]] = []
     blocked: list[dict[str, Any]] = []
+    tracking: list[dict[str, Any]] = []
     for issue in state.get("open_issues") or []:
         number = issue.get("number")
         if number is None:
@@ -278,6 +284,19 @@ def _issue_actions(state: dict[str, Any], now: datetime) -> tuple[list[dict[str,
         age = _age_days(issue.get("created_at"), now) or 0.0
         age_credit = min(ISSUE_AGE_FULL_CREDIT_DAYS, age) * W_AGE_PER_DAY
 
+        if TRACKING_LABELS & set(labels):
+            tracking.append(
+                {
+                    "target": f"#{number}",
+                    "title": title,
+                    "labels": labels,
+                    "reason": (
+                        "umbrella or status record, not a unit of work; excluded "
+                        "from the ranking by label"
+                    ),
+                }
+            )
+            continue
         if "blocked" in labels or "needs-owner" in labels:
             blocked.append(
                 _item(
@@ -305,7 +324,7 @@ def _issue_actions(state: dict[str, Any], now: datetime) -> tuple[list[dict[str,
                 evidence={"labels": labels, "age_days": round(age, 1)},
             )
         )
-    return actions, blocked
+    return actions, blocked, tracking
 
 
 def _hygiene_actions(state: dict[str, Any]) -> list[dict[str, Any]]:
@@ -349,7 +368,7 @@ def build_development_cycle(state: dict[str, Any] | None = None, *, limit: int =
 
     pipeline = _pipeline_actions(state, now)
     pull_requests = _pull_request_actions(state, now)
-    issues, blocked = _issue_actions(state, now)
+    issues, blocked, tracking = _issue_actions(state, now)
     hygiene = _hygiene_actions(state)
 
     ranked = sorted(
@@ -379,6 +398,7 @@ def build_development_cycle(state: dict[str, Any] | None = None, *, limit: int =
         },
         "next_actions": selected,
         "blocked": blocked,
+        "tracking": tracking,
         "deferred": ranked[len(selected):],
         "ranking_notes": {
             "thresholds": {
@@ -426,6 +446,12 @@ def render_markdown(report: dict[str, Any]) -> str:
     lines += ["", "### Why this order", ""]
     for item in report.get("next_actions") or []:
         lines.append(f"- **{item['target']}** — {item['reason']}")
+
+    tracking = report.get("tracking") or []
+    if tracking:
+        lines += ["", "### Tracking (excluded by label, not ranked)", ""]
+        for item in tracking:
+            lines.append(f"- **{item['target']}** — {item['title']}")
 
     blocked = report.get("blocked") or []
     if blocked:
