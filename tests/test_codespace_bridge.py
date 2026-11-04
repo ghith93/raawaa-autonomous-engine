@@ -51,7 +51,7 @@ class CodespaceBridgeTests(unittest.TestCase):
     def test_arbitrary_command_is_rejected(self):
         result = execute_task({
             "task_type": "codespace_test",
-            "payload_json": json.dumps({"operation": "shell", "command": "rm -rf /"}),
+            "payload_json": json.dumps({"operation": "shell"}),
         })
         self.assertEqual(result["status"], "blocked")
         self.assertEqual(result["reason"], "operation_not_allowlisted")
