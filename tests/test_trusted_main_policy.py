@@ -49,7 +49,7 @@ class TrustedMainPolicyTests(unittest.TestCase):
             ("git", "branch", "--show-current"): "main",
             ("git", "rev-parse", "HEAD"): COMMIT,
             ("git", "status", "--porcelain", "--untracked-files=all"): "",
-            ("git", "remote", "get-url", "origin"): TRUSTED_REMOTE_HTTPS,
+            ("git", "remote", "get-url", "origin"): "https://github.com/ghith93/raawaa-autonomous-engine.git",
         }
         values.update(overrides or {})
         def run(command, **kwargs):
