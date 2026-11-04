@@ -90,6 +90,7 @@ def find_private_chat_ids(token: str) -> tuple[list[int], str | None]:
     me = _call(token, "getMe")
     username = me.get("username") if isinstance(me.get("username"), str) else None
     updates = _call(token, "getUpdates", {"timeout": 0, "limit": 100, "allowed_updates": ["message"]})
+    seen = len(updates.get("updates") or [])
     found: list[int] = []
     for update in updates.get("updates") or []:
         message = update.get("message") if isinstance(update, dict) else None
@@ -100,7 +101,7 @@ def find_private_chat_ids(token: str) -> tuple[list[int], str | None]:
         # A private chat id equals the user id; anything else here is not a person.
         if isinstance(chat_id, int) and chat_id > 0 and chat_id not in found:
             found.append(chat_id)
-    return found, username
+    return found, username, seen
 
 
 def webhook_state(token: str) -> dict:
@@ -216,18 +217,28 @@ def main(argv: list[str] | None = None) -> int:
             print(json.dumps({"webhook": state}, indent=2))
             return 0 if state["url"] else 1
 
-        discovered, username = find_private_chat_ids(token)
+        discovered, username, updates_seen = find_private_chat_ids(token)
         chat_ids = _parse_chat_ids(args.chat_id) if args.chat_id else discovered
         if not chat_ids:
-            # Name the bot. "Send your bot a message" is useless advice when the
-            # owner has two bots, or created one and messaged another: the only
-            # thing that decides this is the username behind the token we hold.
+            # "No private chat found" has three causes that look identical from the
+            # outside, so the failure reports the two facts that separate them:
+            # whether Telegram handed us any update at all, and whether something
+            # else is already consuming them (a webhook, or another poller).
             where = f"https://t.me/{username}" if username else "your bot"
+            try:
+                state = webhook_state(token)
+                webhook = state.get("url") or ""
+                pending = state.get("pending_updates")
+            except BootstrapError:
+                webhook, pending = "", None
             raise BootstrapError(
-                f"no private chat found for @{username or 'this token'}. Open {where}, "
-                "press Start and send any message, then run this again. Telegram only "
-                "queues messages while no webhook is registered, so if one is already "
-                "set, delete it first or pass --chat-id.",
+                f"no private chat found for @{username or 'this token'} "
+                f"(updates_seen={updates_seen}, webhook_set={'yes' if webhook else 'no'}, "
+                f"pending_update_count={pending}). Open {where}, press Start and send any "
+                "message, then run this again. If updates_seen is 0 while you have just "
+                "messaged that bot, check that the bot in your chat window is this one "
+                "and that the token was not revoked and reissued; if a webhook is set, "
+                "something else is already consuming the updates.",
             )
         secret = args.secret or generate_webhook_secret()
         env_file = Path(args.env_file)

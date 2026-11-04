@@ -57,7 +57,7 @@ class ChatDiscoveryTest(unittest.TestCase):
             return replies[method]
 
         with patch.object(bootstrap, "_call", side_effect=fake_call):
-            chat_ids, username = bootstrap.find_private_chat_ids(VALID_TOKEN)
+            chat_ids, username, seen = bootstrap.find_private_chat_ids(VALID_TOKEN)
         # A duplicate collapses, a channel and a group are excluded, and an update
         # type the bot does not subscribe to is not treated as a private chat.
         self.assertEqual(chat_ids, [42])
@@ -65,7 +65,8 @@ class ChatDiscoveryTest(unittest.TestCase):
 
     def test_no_pending_updates_yields_no_chat_and_that_is_an_error_at_registration(self):
         with patch.object(bootstrap, "_call", side_effect=lambda *a, **k: {"updates": []}):
-            chat_ids, _ = bootstrap.find_private_chat_ids(VALID_TOKEN)
+            chat_ids, _, seen = bootstrap.find_private_chat_ids(VALID_TOKEN)
+        self.assertEqual(seen, 0, 'the failure must report how many updates Telegram returned')
         self.assertEqual(chat_ids, [])
 
 
@@ -195,6 +196,8 @@ class NoChatFoundTest(unittest.TestCase):
         replies = {
             "getMe": {"username": "raawaa_control_bot", "is_bot": True},
             "getUpdates": {"updates": []},
+            # reached only on the failure path, to report webhook/pending state
+            "getWebhookInfo": {"url": "", "pending_update_count": 0},
         }
         env_file = Path(tempfile.mkdtemp()) / "telegram.env"
         with patch.object(bootstrap, "_call", side_effect=lambda t, m, p=None, **k: replies[m]):
