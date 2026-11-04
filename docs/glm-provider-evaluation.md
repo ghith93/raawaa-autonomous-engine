@@ -10,7 +10,7 @@ Add Z.ai's GLM family to the provider/model evaluation set, but do not yet class
 
 The official Z.ai API pricing table lists **GLM-4.7-Flash**, **GLM-4.5-Flash**, and **GLM-4.6V-Flash** as Free for input, cached input, cached-input storage, and output. This is a strong public zero-price candidate, but it is not proof that this account has access, a fixed quota, a stable production SLA, or any particular card/billing requirement. The pricing page publishes no numeric RPM/TPM/RPD/TPD allowance for these rows. The account's rate-limit console and current eligibility remain unverified.
 
-The current flagship **GLM-5.3** and **GLM-5.3-Flash** are paid API models in the published table. The free-row product labels are not yet verified request-time model IDs; do not send them as API model values until the official API model catalog or the authenticated account confirms the exact identifiers. They are not eligible for live use under the current zero-spend default unless a separately verified no-charge entitlement exists and the operator explicitly authorizes any paid spend.
+The current flagship **GLM-5.3** and **GLM-5.3-Flash** are paid API models in the published table. The current official Chat Completion API schema enumerates `glm-5.3`, `glm-5.2`, `glm-5.1`, `glm-5`, `glm-4.7`, and `glm-4.6`; it does not list the three Flash pricing labels as accepted model values. Do not assume the free pricing rows are callable through this endpoint, and do not substitute `glm-4.7` or `glm-4.6` because their price/entitlement is different and unverified. They are not eligible for live use under the current zero-spend default unless a separately verified no-charge entitlement exists and the operator explicitly authorizes any paid spend.
 
 ## Candidate matrix
 
@@ -49,7 +49,7 @@ Prices are USD per million tokens from the official Z.ai API pricing table check
 Before creating an enabled provider profile:
 
 1. Confirm whether the existing operator account can access Z.ai from its registered region and account type.
-2. Verify the exact request-time API model identifier corresponding to the GLM-4.7-Flash pricing row in the authenticated account catalog or official API schema. Only after that, confirm that it is selectable and returns a zero-price entitlement; record exact RPM, TPM, daily/monthly caps, concurrency, expiry/renewal, and whether failed requests count.
+2. Verify whether the GLM-4.7-Flash pricing row is actually available as a request-time model. It is absent from the current Chat Completion model enum. Do not call it unless the authenticated account catalog or Z.ai support confirms a supported identifier and zero-price entitlement; record exact RPM, TPM, daily/monthly caps, concurrency, expiry/renewal, and whether failed requests count.
 3. Confirm the official endpoint, model ID, current price, free-quota expiry/renewal, and whether a payment method, prepaid balance, or billing activation is required. Do not top up or enable billing.
 4. Review current Terms, API Additional Terms, DPA, subprocessors, data-location provisions, and model-specific license. Until reviewed, send only public, non-confidential synthetic prompts.
 5. Add a hard-zero-cost provider profile: no paid fallback, no automatic model alias that can silently route to a paid model, no credit purchase, no billing enablement, and no call when verified free entitlement is absent or exhausted.
@@ -74,7 +74,7 @@ Score quality, correctness, latency, reliability, context efficiency, and actual
 
 - Z.ai API pricing: https://docs.z.ai/guides/overview/pricing
 - Z.ai API quick start and OpenAI SDK compatibility: https://docs.z.ai/guides/overview/quick-start
-- Z.ai Chat Completion API reference (verify request-time model identifiers): https://docs.z.ai/api-reference/llm/chat-completion
+- Z.ai Chat Completion API reference (current model enum): https://docs.z.ai/api-reference/llm/chat-completion
 - Z.ai Terms of Use and API Additional Terms: https://docs.z.ai/legal-agreement/terms-of-use
 - Z.ai Privacy Policy and API Data Processing Addendum: https://docs.z.ai/legal-agreement/privacy-policy
 - GLM-5.3 model card: https://huggingface.co/zai-org/GLM-5.3
