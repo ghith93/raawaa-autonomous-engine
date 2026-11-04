@@ -32,10 +32,10 @@ function dbMock(options = {}) {
           calls.push({ kind: "first", sql, values: this.values });
           if (sql.includes("INSERT INTO quota_cooldowns")) return { until_at: this.values[1] };
           if (sql.includes("FROM audit_log")) return null;
-          if (sql.includes("SELECT 1")) return { ok: 1 };
           if (sql.includes("UPDATE tasks SET status='running'")) {
             return sql.includes("task_type IN") ? (options.codespaceClaim || null) : (options.normalClaim || null);
           }
+          if (sql.includes("SELECT 1")) return { ok: 1 };
           if (sql.includes("SELECT id,status,attempts")) return options.currentTask || {
             id: "task-1", status: "running", attempts: 1, max_attempts: 2,
             task_type: "research_brief", execution_mode: "not_started", lease_token: "lease-1",
