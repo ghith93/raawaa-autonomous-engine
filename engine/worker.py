@@ -12,9 +12,65 @@ from engine.provider import GenerationRequest
 from engine.task_store import TaskStore
 from engine.live_data_policy import validate_live_payload
 from engine.operating_policy import OperatingPolicyError, load_operating_policy
+from scripts.task_envelope import validate as validate_envelope
 
 
 SAFE_TASKS = {"research_brief", "code_review", "content_draft", "system_audit"}
+
+# Tasks admitted from a GitHub issue comment. Deliberately NOT in SAFE_TASKS:
+# they are handled by an explicit branch that performs no inference, so the
+# allowlist for model-calling work keeps its original four entries.
+INGEST_TASK_TYPE = "issue_comment_task"
+
+
+def _ingest_payload(task: dict) -> dict:
+    payload = task.get("payload")
+    if isinstance(payload, dict) and payload:
+        return payload
+    raw = task.get("payload_json")
+    if isinstance(raw, str) and raw.strip():
+        try:
+            decoded = json.loads(raw)
+        except (TypeError, ValueError):
+            return {}
+        return decoded if isinstance(decoded, dict) else {}
+    return {}
+
+
+def _complete_ingest_task(store: TaskStore, task: dict) -> dict:
+    """Re-validate an ingested comment envelope and finish the task.
+
+    No provider call, no contract, no agent. The comment has already been
+    validated on the way in; this second check exists because the queue row is
+    durable and could have been edited between admission and claim, and because
+    an expired envelope must not be recorded as accepted simply because it was
+    accepted yesterday.
+    """
+    payload = _ingest_payload(task)
+    envelope = payload.get("envelope")
+    if not isinstance(envelope, dict) or not envelope:
+        store.finish(task["id"], "blocked", error="Ingested task has no envelope",
+                     lease_token=task.get("lease_token"))
+        return {"id": task["id"], "status": "blocked", "reason": "missing_envelope"}
+
+    errors, warnings = validate_envelope(envelope)
+    if errors:
+        store.finish(task["id"], "blocked",
+                     error=("Invalid ingested envelope: " + "; ".join(errors))[:400],
+                     lease_token=task.get("lease_token"))
+        return {"id": task["id"], "status": "blocked", "reason": "invalid_ingested_envelope"}
+
+    result = {
+        "envelope_id": envelope.get("id"),
+        "envelope_fingerprint": payload.get("envelope_fingerprint"),
+        "comment_id": payload.get("comment_id"),
+        "issue_number": payload.get("issue_number"),
+        "warnings": warnings,
+        "inference": "none",
+    }
+    store.finish(task["id"], "succeeded", result=result, lease_token=task.get("lease_token"))
+    return {"id": task["id"], "status": "succeeded", "reason": "issue_comment_recorded",
+            "envelope_id": result["envelope_id"]}
 LIVE_SWITCH = "RAAWAA_ENGINE_LIVE_INFERENCE"
 LIVE_MAX_OUTPUT_TOKENS = 256
 
@@ -83,6 +139,8 @@ def run_once(store: TaskStore, live_gateway=None, environ=None) -> dict | None:
         return {"status": "idle", "recovery": recovery} if any(recovery.values()) else None
 
     task_type = task["task_type"]
+    if task_type == INGEST_TASK_TYPE:
+        return _complete_ingest_task(store, task)
     if task_type not in SAFE_TASKS:
         store.finish(task["id"], "blocked", error=f"Unsupported task type: {task_type}",
                      lease_token=task["lease_token"])

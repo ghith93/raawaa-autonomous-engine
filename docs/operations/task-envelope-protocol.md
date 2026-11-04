@@ -109,6 +109,22 @@ trusting any recollection of the conversation.
 Exit codes: `0` clean, `1` violations. `--json` emits machine-readable output for
 CI or for the sender's verification step.
 
+## Ingest handler: a comment can enqueue, but never think
+
+`issue_comment_task` is completed by an explicit branch in `engine/worker.py`
+that re-validates the envelope, stores the result and returns — **no provider
+call, no contract, no agent**. The type is deliberately absent from
+`SAFE_TASKS`, so admitting comments never widens the allowlist for
+inference-capable work; a test pins both facts.
+
+Why re-validate a second time: the queue row is durable and could be edited
+between admission and claim, and an envelope that was valid yesterday is not
+valid today if it has expired.
+
+Outcomes: `succeeded` with `result.inference == "none"`, or `blocked` with
+`missing_envelope` / `invalid_ingested_envelope`. A blocked row is evidence that
+the gate held, not a failure of the pipeline.
+
 ## Deliberate design choices
 
 * **No committed ledger file.** State lives in the GitHub thread; a JSON mirror
