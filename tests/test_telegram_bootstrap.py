@@ -83,6 +83,59 @@ class ChatDiscoveryTest(unittest.TestCase):
         self.assertEqual(chat_ids, [])
 
 
+class RerunTest(unittest.TestCase):
+    """Re-runs must not silently interrupt an existing webhook."""
+
+    def test_a_409_does_not_delete_webhook_without_explicit_opt_in(self):
+        calls = []
+        def fake_call(token, method, payload=None, **kwargs):
+            calls.append(method)
+            if method == "getMe":
+                return {"username": "raawaa_bot"}
+            raise bootstrap.BootstrapError("getUpdates failed: HTTP 409 (token not shown)")
+        with patch.object(bootstrap, "_call", side_effect=fake_call):
+            with self.assertRaisesRegex(bootstrap.BootstrapError, "--replace-webhook-to-discover"):
+                bootstrap.find_private_chat_ids(VALID_TOKEN)
+        self.assertNotIn("deleteWebhook", calls)
+
+    def test_explicit_replace_preserves_pending_updates_and_retries(self):
+        calls = []
+        updates_after = [{
+            "update_id": 2,
+            "message": {
+                "chat": {"id": 55, "type": "private"},
+                "from": {"id": 55, "is_bot": False},
+            },
+        }]
+        def fake_call(token, method, payload=None, **kwargs):
+            calls.append((method, payload))
+            if method == "getMe":
+                return {"username": "raawaa_bot"}
+            if method == "getUpdates":
+                if sum(1 for name, _ in calls if name == "getUpdates") == 1:
+                    raise bootstrap.BootstrapError("getUpdates failed: HTTP 409 (token not shown)")
+                return updates_after
+            if method == "deleteWebhook":
+                self.assertFalse(payload["drop_pending_updates"])
+                return True
+            raise AssertionError(method)
+        with patch.object(bootstrap, "_call", side_effect=fake_call):
+            chat_ids, username, seen = bootstrap.find_private_chat_ids(VALID_TOKEN, replace_webhook=True)
+        self.assertEqual(chat_ids, [55])
+        self.assertEqual(username, "raawaa_bot")
+        self.assertEqual(seen, 1)
+        self.assertEqual(sum(1 for name, _ in calls if name == "deleteWebhook"), 1)
+
+    def test_another_api_error_is_not_swallowed(self):
+        def fake_call(token, method, payload=None, **kwargs):
+            if method == "getMe":
+                return {"username": "raawaa_bot"}
+            raise bootstrap.BootstrapError("getUpdates failed: HTTP 500 (token not shown)")
+        with patch.object(bootstrap, "_call", side_effect=fake_call):
+            with self.assertRaisesRegex(bootstrap.BootstrapError, "HTTP 500"):
+                bootstrap.find_private_chat_ids(VALID_TOKEN)
+
+
 class RearmTest(unittest.TestCase):
     """Re-arming must work when no chat id can be discovered anywhere."""
 
