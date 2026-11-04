@@ -40,7 +40,7 @@ DEFAULT_ENV_FILE = ".env.telegram-bootstrap"
 USER_AGENT = "RaawaaAutonomousEngine/1.0 (+https://github.com/ghith93/raawaa-autonomous-engine)"
 SECRET_RE = re.compile(r"^[A-Za-z0-9_-]{16,256}$")
 TOKEN_RE = re.compile(r"^\d{6,}:[A-Za-z0-9_-]{30,64}$")
-CHAT_ID_RE = re.compile(r"^-?\d{1,20}$")
+CHAT_ID_RE = re.compile(r"^[1-9]\d{0,19}$")
 
 
 class BootstrapError(RuntimeError):
@@ -98,13 +98,10 @@ def _call(
     return result if isinstance(result, dict) else {}
 
 
-def find_private_chat_ids(token: str) -> tuple[list[int], str | None]:
-    """Chat ids from pending updates, plus the bot username.
-
-    Telegram only returns updates while no webhook is registered, which is exactly
-    the state this script runs in before registration. A webhook already set means
-    the owner must send a fresh message after deleting it, or supply the id.
-    """
+def find_private_chat_ids(
+    token: str, *, replace_webhook: bool = False
+) -> tuple[list[int], str | None, int]:
+    """Discover one private human chat without silently interrupting a webhook."""
     me = _call(token, "getMe", expect="dict")
     username = me.get("username") if isinstance(me.get("username"), str) else None
     try:
@@ -114,36 +111,44 @@ def find_private_chat_ids(token: str) -> tuple[list[int], str | None]:
             expect="list",
         )
     except BootstrapError as error:
-        # 409 means a webhook is already set — which is the normal state on a
-        # re-run, and exactly the state this script leaves behind after a
-        # successful registration. Deleting it is not a destructive act here: the
-        # same run re-registers the webhook a few steps later, and the chat id is
-        # the only thing being recovered.
         if "HTTP 409" not in str(error):
             raise
+        if not replace_webhook:
+            raise BootstrapError(
+                "a webhook is already registered; refusing to pause it automatically. "
+                "Pass --replace-webhook-to-discover to pause delivery while preserving "
+                "pending updates, or pass --chat-id to avoid discovery.",
+            ) from None
         _call(token, "deleteWebhook", {"drop_pending_updates": False}, expect="bool")
         updates = _call(
             token, "getUpdates",
             {"timeout": 0, "limit": 100, "allowed_updates": ["message"]},
             expect="list",
         )
-        if not updates:
-            raise BootstrapError(
-                "a webhook is already registered, so Telegram has already delivered "
-                "the queued messages and there is nothing left to discover from. "
-                "Send the bot one more message and run this again — or pass --chat-id.",
-            ) from None
     seen = len(updates)
     found: list[int] = []
     for update in updates:
         message = update.get("message") if isinstance(update, dict) else None
         chat = message.get("chat") if isinstance(message, dict) else None
+        sender = message.get("from") if isinstance(message, dict) else None
         if not isinstance(chat, dict) or chat.get("type") != "private":
             continue
+        if not isinstance(sender, dict) or sender.get("is_bot") is not False:
+            continue
         chat_id = chat.get("id")
-        # A private chat id equals the user id; anything else here is not a person.
-        if isinstance(chat_id, int) and chat_id > 0 and chat_id not in found:
+        sender_id = sender.get("id")
+        # In a private chat, the human sender id must equal the private chat id.
+        if (
+            isinstance(chat_id, int) and chat_id > 0 and
+            isinstance(sender_id, int) and sender_id == chat_id and
+            chat_id not in found
+        ):
             found.append(chat_id)
+    if len(found) > 1:
+        raise BootstrapError(
+            "multiple private human chats were found; refusing to allowlist multiple users. "
+            "Pass --chat-id with the owner's verified numeric id.",
+        )
     return found, username, seen
 
 
@@ -180,8 +185,8 @@ def register(
         "url": url,
         "secret_token": secret,
         "allowed_updates": ["message"],
-        # Drop whatever queued before registration: an old /start is not a command.
-        "drop_pending_updates": True,
+        # Preserve queued owner messages across webhook registration/re-registration.
+        "drop_pending_updates": False,
         "max_connections": 10,
     })
     return webhook_state(token)
@@ -264,6 +269,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--register", action="store_true", help="Actually call setWebhook (default: dry run)")
     parser.add_argument("--check", action="store_true", help="Report current webhook state and exit")
     parser.add_argument(
+        "--replace-webhook-to-discover",
+        action="store_true",
+        help="Explicitly pause an existing webhook (without dropping updates) to use getUpdates",
+    )
+    parser.add_argument(
         "--rearm-only",
         action="store_true",
         help=(
@@ -306,8 +316,15 @@ def main(argv: list[str] | None = None) -> int:
             print(json.dumps(summary, indent=2))
             return 0
 
-        discovered, username, updates_seen = find_private_chat_ids(token)
-        chat_ids = _parse_chat_ids(args.chat_id) if args.chat_id else discovered
+        if args.chat_id:
+            if args.replace_webhook_to_discover:
+                raise BootstrapError("--chat-id and --replace-webhook-to-discover cannot be used together")
+            chat_ids = _parse_chat_ids(args.chat_id)
+            username, updates_seen = None, 0
+        else:
+            chat_ids, username, updates_seen = find_private_chat_ids(
+                token, replace_webhook=args.replace_webhook_to_discover
+            )
         if not chat_ids:
             # "No private chat found" has three causes that look identical from the
             # outside, so the failure reports the two facts that separate them:
@@ -320,14 +337,21 @@ def main(argv: list[str] | None = None) -> int:
                 pending = state.get("pending_updates")
             except BootstrapError:
                 webhook, pending = "", None
+            if args.replace_webhook_to_discover:
+                guidance = (
+                    "The webhook is paused and pending updates were preserved. Send /start "
+                    "to the correct bot, then rerun with --replace-webhook-to-discover."
+                )
+            else:
+                guidance = (
+                    f"Open {where}, press Start and send a message. If a webhook is already "
+                    "set, pass --replace-webhook-to-discover only when you intentionally "
+                    "accept a brief delivery pause, or pass --chat-id with the verified id."
+                )
             raise BootstrapError(
-                f"no private chat found for @{username or 'this token'} "
+                f"no private human chat found for @{username or 'the supplied bot'} "
                 f"(updates_seen={updates_seen}, webhook_set={'yes' if webhook else 'no'}, "
-                f"pending_update_count={pending}). Open {where}, press Start and send any "
-                "message, then run this again. If updates_seen is 0 while you have just "
-                "messaged that bot, check that the bot in your chat window is this one "
-                "and that the token was not revoked and reissued; if a webhook is set, "
-                "something else is already consuming the updates.",
+                f"pending_update_count={pending}). {guidance}",
             )
         secret = args.secret or generate_webhook_secret()
         env_file = Path(args.env_file)
