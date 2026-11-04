@@ -9,12 +9,12 @@ from engine.workflow_manifest import (
 
 class WorkflowRunManifestTests(unittest.TestCase):
     def setUp(self):
-        roster = {
-            "agents": [
-                {"id": "researcher", "role": "Researcher", "capabilities": ["research"]},
-                {"id": "writer", "role": "Writer", "capabilities": ["content"]},
-            ]
-        }
+        roster = {"agents": [
+            {"id": "researcher", "enabled": True, "role": "research",
+             "capabilities": ["research", "compare", "summarize"]},
+            {"id": "marketer", "enabled": True, "role": "marketing_and_content",
+             "capabilities": ["strategy", "draft_content", "analyze_campaigns"]},
+        ]}
         workflow = {
             "id": "launch",
             "steps": [
