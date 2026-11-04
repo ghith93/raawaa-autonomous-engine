@@ -88,13 +88,17 @@ class TaskStore:
 
     def enqueue(self, task_type: str, title: str, payload: dict[str, Any] | None = None,
                 idempotency_key: str | None = None, max_attempts: int = 2,
-                priority: int = 50, depends_on: list[str] | None = None) -> dict[str, Any]:
+                priority: int | None = None, depends_on: list[str] | None = None) -> dict[str, Any]:
         if not task_type.strip() or not title.strip():
             raise ValueError("task_type and title are required")
         if max_attempts < 1 or max_attempts > 5:
             raise ValueError("max_attempts must be between 1 and 5")
-        if type(priority) is not int or not 0 <= priority <= 100:
+        priority_supplied = priority is not None
+        if priority is None:
+            priority = 50
+        elif type(priority) is not int or not 0 <= priority <= 100:
             raise ValueError("priority must be an integer between 0 and 100")
+        dependencies_supplied = depends_on is not None
         if depends_on is None:
             depends_on = []
         if (not isinstance(depends_on, list) or len(depends_on) > 20
@@ -111,10 +115,8 @@ class TaskStore:
                 existing_deps = [row["dependency_task_id"] for row in db.execute(
                     "SELECT dependency_task_id FROM task_dependencies WHERE task_id=? ORDER BY dependency_task_id",
                     (existing["id"],)).fetchall()]
-                if (existing["task_type"] != task_type or existing["title"] != title
-                        or existing["payload_json"] != payload_json
-                        or existing["max_attempts"] != max_attempts
-                        or existing["priority"] != priority or existing_deps != deps):
+                if ((priority_supplied and existing["priority"] != priority)
+                        or (dependencies_supplied and existing_deps != deps)):
                     raise ValueError("idempotency key conflicts with an existing task")
                 return self._task_dict(existing)
             if deps:

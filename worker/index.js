@@ -494,6 +494,8 @@ export default {
     const key = input?.idempotency_key;
     const payload = input?.payload ?? {};
     const maxAttempts = input?.max_attempts ?? 2;
+    const prioritySupplied = input?.priority !== undefined;
+    const dependenciesSupplied = input?.depends_on !== undefined;
     const priority = input?.priority ?? 50;
     const rawDependencies = input?.depends_on ?? [];
     if (!validText(taskType, 100) || !validText(title, 240) ||
@@ -524,12 +526,8 @@ export default {
       max_attempts: maxAttempts, priority, dependencies_json: dependenciesJson,
     };
     const matchesTask = task => task &&
-      task.task_type === normalizedTask.task_type &&
-      task.title === normalizedTask.title &&
-      task.payload_json === normalizedTask.payload_json &&
-      task.max_attempts === normalizedTask.max_attempts &&
-      task.priority === normalizedTask.priority &&
-      (task.dependencies_json || "[]") === normalizedTask.dependencies_json;
+      (!prioritySupplied || task.priority === normalizedTask.priority) &&
+      (!dependenciesSupplied || (task.dependencies_json || "[]") === normalizedTask.dependencies_json);
     const readDependencies = async taskId => {
       const rows = await env.DB.prepare(
         "SELECT dependency_task_id FROM task_dependencies WHERE task_id=? ORDER BY dependency_task_id"
@@ -546,7 +544,7 @@ export default {
       if (existing) {
         if (!matchesTask(existing)) return json({ error: "idempotency_conflict" }, 409);
         const existingDependencies = await readDependencies(existing.id);
-        if (JSON.stringify(existingDependencies) !== JSON.stringify(dependsOn)) {
+        if (dependenciesSupplied && JSON.stringify(existingDependencies) !== JSON.stringify(dependsOn)) {
           return json({ error: "dependency_manifest_conflict" }, 409);
         }
         return json({ task: { ...existing, depends_on: existingDependencies }, created: false }, 200);
