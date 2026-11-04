@@ -75,6 +75,16 @@ class PullRequestClassificationTests(unittest.TestCase):
         report = self._report(mergeable="MERGEABLE", merge_state_status="CLEAN", checks="success")
         self.assertEqual(report["next_actions"][0]["action"], "merge_after_verification")
 
+    def test_parked_pull_request_is_held_not_ranked(self):
+        report = self._report(mergeable="CONFLICTING", checks="success", labels=["blocked"])
+        self.assertEqual(report["next_actions"], [])
+        self.assertEqual(report["blocked"][0]["target"], "#7")
+        self.assertIn("external decision", report["blocked"][0]["gate"])
+
+    def test_unlabelled_conflicting_pull_request_is_still_ranked(self):
+        report = self._report(mergeable="CONFLICTING", checks="success", labels=[])
+        self.assertEqual(report["next_actions"][0]["action"], "rebase_or_supersede")
+
     def test_unknown_mergeability_is_inspected_not_dropped(self):
         # GitHub computes mergeability lazily; two live PRs fell out of the
         # ranking entirely because their state was UNKNOWN.

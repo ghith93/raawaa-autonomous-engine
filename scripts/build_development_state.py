@@ -75,7 +75,7 @@ def collect(repo: str | None = None) -> dict[str, Any]:
             "--limit",
             "50",
             "--json",
-            "number,title,createdAt,mergeable,mergeStateStatus,isDraft,statusCheckRollup",
+            "number,title,createdAt,mergeable,mergeStateStatus,isDraft,labels,statusCheckRollup",
         ]
     ) or []
     open_pull_requests = []
@@ -104,6 +104,7 @@ def collect(repo: str | None = None) -> dict[str, Any]:
                 "mergeable": pr.get("mergeable"),
                 "merge_state_status": pr.get("mergeStateStatus"),
                 "is_draft": pr.get("isDraft"),
+                "labels": [label.get("name") for label in pr.get("labels") or []],
                 "checks": checks,
             }
         )
