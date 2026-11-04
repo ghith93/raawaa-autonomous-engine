@@ -149,6 +149,7 @@ class SandboxRequest:
     command: tuple[str, ...]
     source_dir: str
     limits: SandboxLimits = SandboxLimits()
+    container_name: str = "raawaa-sandbox"
 
     def validated(self) -> "SandboxRequest":
         if not isinstance(self.image, str) or not _DIGEST_IMAGE.match(self.image):
@@ -169,6 +170,10 @@ class SandboxRequest:
         normalised = self.source_dir.rstrip("/")
         if normalised in ("", "/") or ".." in normalised.split("/"):
             raise SandboxPolicyError("source_dir must be a specific directory, not / or ..")
+        if not isinstance(self.container_name, str) or not re.fullmatch(
+            r"[A-Za-z0-9][A-Za-z0-9_.-]{0,63}", self.container_name
+        ):
+            raise SandboxPolicyError("container_name must be a safe Docker name")
         self.limits.validated()
         return self
 
@@ -182,7 +187,7 @@ def build_docker_argv(request: SandboxRequest) -> list[str]:
     req = request.validated()
     limits = req.limits
     return [
-        "docker", "run", "--rm",
+        "docker", "run", "--rm", f"--name={req.container_name}",
         # boundary
         f"--runtime={SANDBOX_RUNTIME}",
         "--network=none",
@@ -271,17 +276,17 @@ def assert_sandbox_argv(argv: list[str], *, expected_source_dir: str) -> list[st
             raise SandboxPolicyError(f"argv requires exactly one {value}")
 
     for required in (
-        "--rm", f"--runtime={SANDBOX_RUNTIME}", "--network=none", "--read-only",
+        "--rm", f"--name={req.container_name}", f"--runtime={SANDBOX_RUNTIME}", "--network=none", "--read-only",
         "--cap-drop=ALL", "--security-opt=no-new-privileges",
         f"--user={NON_ROOT_USER}", "--entrypoint=", "--ulimit=nofile=256:256",
         "--ulimit=core=0:0", "--workdir=/workspace",
     ):
         one_exact(required)
 
-    value_prefixes = ("--pids-limit=", "--memory=", "--memory-swap=", "--cpus=",
+    value_prefixes = ("--name=", "--pids-limit=", "--memory=", "--memory-swap=", "--cpus=",
                       "--mount=", "--tmpfs=")
     allowed_exact = {
-        "--rm", f"--runtime={SANDBOX_RUNTIME}", "--network=none", "--read-only",
+        "--rm", f"--name={req.container_name}", f"--runtime={SANDBOX_RUNTIME}", "--network=none", "--read-only",
         "--cap-drop=ALL", "--security-opt=no-new-privileges",
         f"--user={NON_ROOT_USER}", "--entrypoint=", "--ulimit=nofile=256:256",
         "--ulimit=core=0:0", "--workdir=/workspace",
@@ -308,6 +313,8 @@ def assert_sandbox_argv(argv: list[str], *, expected_source_dir: str) -> list[st
             raise SandboxPolicyError(f"{name} exceeds its allowed positive ceiling")
         return value
 
+    if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,63}", single_value("--name=")):
+        raise SandboxPolicyError("container name is invalid")
     bounded_number("pids", single_value("--pids-limit="), CEILINGS["pids"])
     memory = bounded_number("memory", single_value("--memory="), CEILINGS["memory_mb"], "m")
     swap = bounded_number("memory-swap", single_value("--memory-swap="), CEILINGS["memory_mb"], "m")
