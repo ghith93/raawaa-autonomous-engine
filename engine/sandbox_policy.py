@@ -315,19 +315,11 @@ def assert_sandbox_argv(argv: list[str], *, expected_source_dir: str) -> list[st
         raise SandboxPolicyError(f"unrecognized or duplicate sandbox options: {unknown!r}")
     return argv
 
-def reviewed_ref_only(ref: str, *, allow_pr_heads: bool = False) -> str:
-    """Refuse to run task code from anything but reviewed main.
-
-    This is the fallback contract in the same breath as the sandbox: even a real
-    boundary should not be handed code the owner never reviewed, so a PR head, a
-    fork or a branch ref fails closed by default.
-    """
-    if allow_pr_heads:
-        if not isinstance(ref, str) or not ref.startswith("refs/pull/"):
-            raise SandboxPolicyError("allow_pr_heads only permits refs/pull/*")
-        return "/workspace"
+def reviewed_ref_only(ref: str) -> str:
+    """Only reviewed main may execute task code; PR and branch refs always fail closed."""
     if ref != "refs/heads/main":
         raise SandboxPolicyError(
             f"refusing {ref!r}: only reviewed refs/heads/main may execute task code"
         )
     return "/workspace"
+
