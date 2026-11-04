@@ -46,12 +46,16 @@ def _task_priority(task: dict[str, Any], now: datetime) -> dict[str, Any]:
     age_boost = min(20.0, (age or 0.0) / 24.0 * 10.0)
     retry_boost = min(10, max(0, int(task.get("attempts") or 0)) * 5)
     score = round(min(100.0, base * 0.7 + age_boost + retry_boost), 1)
+    queue_priority = task.get("priority", 50)
+    if type(queue_priority) is not int or not 0 <= queue_priority <= 100:
+        queue_priority = 50
     return {
         "task_id": task.get("id"),
         "title": task.get("title"),
         "task_type": task_type,
         "status": task.get("status"),
         "priority_score": score,
+        "queue_priority": queue_priority,
         "priority_band": "critical" if score >= 80 else "high" if score >= 65 else "normal",
         "age_hours": round(age, 2) if age is not None else None,
         "attempts": task.get("attempts", 0),
@@ -121,7 +125,7 @@ def build_executive_snapshot(
             "priority": "normal",
             "action": "execute_highest_ranked_pending_task",
             "task_id": pending[0]["task_id"],
-            "reason": "Use the deterministic ranking as decision support; the queue's existing claim order remains unchanged.",
+            "reason": "Use the triage score as decision support; actual claims use persisted queue priority and dependency eligibility.",
         })
     if not recommendations:
         recommendations.append({
@@ -147,7 +151,7 @@ def build_executive_snapshot(
             "age_boost": "up to 20 points; 10 points per 24 hours",
             "retry_boost": "5 points per prior attempt, capped at 10",
             "unknown_task_type_base": 50,
-            "note": "Scores are transparent triage hints, not automatic queue ordering or authorization.",
+            "note": "Triage scores are separate from persisted queue_priority; queue claims use priority descending with stable FIFO ties and dependency gates. Neither score nor priority grants authorization.",
         },
         "next_best_tasks": pending[:limit],
         "needs_attention": attention[:limit],

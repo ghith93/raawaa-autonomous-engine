@@ -21,6 +21,7 @@ class ExecutiveIntelligenceTests(unittest.TestCase):
         ranked = result["next_best_tasks"]
         self.assertEqual([task["task_id"] for task in ranked], ["b", "c", "a"])
         self.assertTrue(all(task["rationale"] for task in ranked))
+        self.assertEqual([task["queue_priority"] for task in ranked], [50, 50, 50])
         self.assertEqual(result["mode"], "read_only_decision_support")
 
     def test_failed_blocked_and_expired_running_are_escalated(self):

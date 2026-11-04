@@ -140,6 +140,21 @@ test("enqueue rejects out-of-range priority and unknown dependencies", async () 
   assert.deepEqual(await missingDependency.json(), { error: "unknown_task_dependency" });
 });
 
+test("enqueue rejects an idempotency key reused with a different priority", async () => {
+  const DB = dbMock({ existingTask: {
+    id: "existing", task_type: "research", title: "Same", payload_json: "{}",
+    max_attempts: 2, priority: 50, dependencies_json: "[]",
+  } });
+  const response = await worker.fetch(request("/v1/tasks/enqueue", {
+    method: "POST",
+    body: { task_type: "research", title: "Same", idempotency_key: "same-key",
+      payload: {}, priority: 90 },
+  }), { DB, ENGINE_API_TOKEN: TOKEN });
+  assert.equal(response.status, 409);
+  assert.deepEqual(await response.json(), { error: "idempotency_conflict" });
+  assert.equal(DB.calls.some(call => call.kind === "batch"), false);
+});
+
 test("enqueue rejects malformed task payload", async () => {
   const response = await worker.fetch(request("/v1/tasks/enqueue", {
     method: "POST",

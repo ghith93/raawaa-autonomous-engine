@@ -324,6 +324,15 @@ try {
   assert.equal(byId.get(failureChild.payload.task.id).status, "blocked");
   assert.equal(byId.get(failureGrandchild.payload.task.id).status, "blocked");
   assert.deepEqual(byId.get(childTask.payload.task.id).depends_on, [parentTask.payload.task.id]);
+  assert.equal(byId.get(childTask.payload.task.id).priority, 100);
+  const priorityConflict = await api("/v1/tasks/enqueue", {
+    method: "POST",
+    body: {
+      task_type: "research_brief", title: "DAG parent", payload: { step: "parent" },
+      idempotency_key: parentTask.payload.task.idempotency_key, priority: 99, max_attempts: 1,
+    },
+  });
+  assertStatus(priorityConflict, 409, "idempotency key cannot change priority");
 
 
   // Codespaces remains hard-disabled until issue #440's adversarial sandbox

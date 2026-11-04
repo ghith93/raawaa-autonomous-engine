@@ -126,6 +126,11 @@ class D1MigrationContractTests(unittest.TestCase):
         self.assertEqual(self.db.execute("SELECT priority FROM tasks WHERE id='parent'").fetchone()[0], 50)
         self.assertEqual(self.db.execute("SELECT priority FROM tasks WHERE id='child'").fetchone()[0], 90)
         with self.assertRaises(sqlite3.IntegrityError):
+            self.db.execute("""INSERT INTO tasks
+                (id,idempotency_key,task_type,title,payload_json,status,attempts,max_attempts,
+                 created_at,updated_at,priority)
+                VALUES ('invalid-priority','invalid-priority-key','research_brief','Invalid','{}','pending',0,2,'now','now',101)""")
+        with self.assertRaises(sqlite3.IntegrityError):
             self.db.execute("INSERT INTO task_dependencies(task_id,dependency_task_id) VALUES('child','missing')")
         with self.assertRaises(sqlite3.IntegrityError):
             self.db.execute("INSERT INTO task_dependencies(task_id,dependency_task_id) VALUES('child','child')")
