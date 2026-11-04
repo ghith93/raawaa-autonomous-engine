@@ -53,6 +53,51 @@ class QuotaAwareLiveGateway:
             details=details,
         )
 
+    def preflight_capacity(self, max_output_tokens: int = 256,
+                           estimated_input_tokens: int = 1) -> dict:
+        """Read-only capacity signal before a task is claimed; never reserves or calls a provider."""
+        if not self._live_enabled():
+            return {"eligible": False, "reason": "live_inference_disabled"}
+        if (type(max_output_tokens) is not int or not 1 <= max_output_tokens <= 4096
+                or type(estimated_input_tokens) is not int or estimated_input_tokens < 1):
+            return {"eligible": False, "reason": "invalid_preflight_request"}
+        try:
+            budget = self.usage_ledger.budget_status(
+                self.daily_budget_usd, self.monthly_budget_usd,
+            )
+        except Exception:
+            return {"eligible": False, "reason": "monetary_budget_status_unavailable"}
+        if budget["daily_over_budget"] or budget["monthly_over_budget"]:
+            return {"eligible": False, "reason": "monetary_budget_exhausted"}
+
+        estimated_tokens = estimated_input_tokens + max_output_tokens
+        candidates = sorted(
+            self.quota_manager.profiles,
+            key=lambda profile: (
+                profile.priority, profile.provider, profile.account, profile.model
+            ),
+        )
+        for profile in candidates:
+            if (profile.max_output_tokens is None
+                    or max_output_tokens > profile.max_output_tokens):
+                continue
+            if not self.quota_manager.eligible(profile, estimated_tokens):
+                continue
+            if self.adapters.get(profile.route_id) is None and self.adapters.get(profile.provider) is None:
+                continue
+            return {
+                "eligible": True,
+                "reason": "verified_free_route_available",
+                "route_id": profile.route_id,
+                "estimated_tokens": estimated_tokens,
+                "per_task_budget_checked_after_claim": self.per_task_budget_usd > 0,
+            }
+        return {
+            "eligible": False,
+            "reason": "provider_capacity_unavailable",
+            "estimated_tokens": estimated_tokens,
+        }
+
     def generate(self, request: GenerationRequest):
         if not self._live_enabled():
             self._audit("live_request_blocked", request, reason="kill_switch_off")

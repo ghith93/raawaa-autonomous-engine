@@ -27,6 +27,7 @@ class TaskStoreTests(unittest.TestCase):
         self.assertEqual(result["status"], "succeeded")
         task = self.store.list_tasks()[0]
         self.assertEqual(task["status"], "succeeded")
+        self.assertEqual(task["execution_mode"], "dry_run")
         self.assertIn("dry_run", task["result_json"])
         self.assertIn('"agent_id": "researcher"', task["result_json"])
         self.assertIn('"execution_started": false', task["result_json"])
@@ -35,6 +36,96 @@ class TaskStoreTests(unittest.TestCase):
         self.store.enqueue("shell", "Do arbitrary shell work")
         result = run_once(self.store)
         self.assertEqual(result["status"], "blocked")
+
+    def test_claim_records_selected_execution_mode(self):
+        task = self.store.enqueue("research_brief", "Mode tracking")
+        claimed = self.store.claim_next(execution_mode="live_inference")
+        self.assertEqual(claimed["id"], task["id"])
+        self.assertEqual(claimed["execution_mode"], "live_inference")
+        self.assertEqual(self.store.list_tasks()[0]["execution_mode"], "live_inference")
+        with self.assertRaises(ValueError):
+            self.store.claim_next(execution_mode="shell")
+
+    def test_finish_rejects_not_started_execution_mode(self):
+        task = self.store.enqueue("research_brief", "Mode cannot revert after claim")
+        claim = self.store.claim_next(execution_mode="dry_run")
+        with self.assertRaisesRegex(ValueError, "invalid execution_mode"):
+            self.store.finish(
+                task["id"], "succeeded", result={"ok": True},
+                lease_token=claim["lease_token"], execution_mode="not_started",
+            )
+        saved = self.store.list_tasks()[0]
+        self.assertEqual(saved["status"], "running")
+        self.assertEqual(saved["execution_mode"], "dry_run")
+
+    # Queue priority is persisted; dependency eligibility is evaluated before this ordering.
+    def test_priority_selects_highest_eligible_task_first(self):
+        self.store.enqueue("research_brief", "Low", priority=10)
+        high = self.store.enqueue("research_brief", "High", priority=90)
+        claimed = self.store.claim_next(execution_mode="dry_run")
+        self.assertEqual(claimed["id"], high["id"])
+        self.assertEqual(claimed["priority"], 90)
+
+    def test_dependencies_wait_for_success_in_the_same_execution_mode(self):
+        parent = self.store.enqueue("research_brief", "Parent", priority=10)
+        child = self.store.enqueue("content_draft", "Child", priority=100,
+                                   depends_on=[parent["id"]])
+        self.assertEqual(child["depends_on"], [parent["id"]])
+        claimed_parent = self.store.claim_next(execution_mode="dry_run")
+        self.assertEqual(claimed_parent["id"], parent["id"])
+        self.store.finish(parent["id"], "succeeded", result={"mode": "dry_run"},
+                          lease_token=claimed_parent["lease_token"])
+        self.assertIsNone(self.store.claim_next(execution_mode="live_inference"))
+        claimed_child = self.store.claim_next(execution_mode="dry_run")
+        self.assertEqual(claimed_child["id"], child["id"])
+
+    def test_failed_dependency_blocks_all_pending_descendants(self):
+        parent = self.store.enqueue("research_brief", "Failing parent", max_attempts=1)
+        child = self.store.enqueue("content_draft", "Child", depends_on=[parent["id"]])
+        grandchild = self.store.enqueue("code_review", "Grandchild", depends_on=[child["id"]])
+        claim = self.store.claim_next(execution_mode="dry_run")
+        self.assertEqual(claim["id"], parent["id"])
+        self.store.finish(parent["id"], "failed", error="test failure",
+                          lease_token=claim["lease_token"])
+        self.assertIsNone(self.store.claim_next(execution_mode="dry_run"))
+        tasks = {task["id"]: task for task in self.store.list_tasks()}
+        self.assertEqual(tasks[child["id"]]["status"], "blocked")
+        self.assertEqual(tasks[grandchild["id"]]["status"], "blocked")
+        self.assertTrue(any(event["event"] == "task_blocked_by_dependency"
+                            for event in self.store.audit_events()))
+
+    def test_enqueue_rejects_disabled_codespace_dependency_executor(self):
+        parent = self.store.enqueue("codespace_test", "Disabled parent")
+        with self.assertRaisesRegex(ValueError, "unsupported dependency executor"):
+            self.store.enqueue("research_brief", "Dependent", depends_on=[parent["id"]])
+
+    def test_enqueue_validates_dependencies_and_idempotency_manifest(self):
+        with self.assertRaisesRegex(ValueError, "unknown task dependency"):
+            self.store.enqueue("research_brief", "Unknown", depends_on=["missing-task"])
+        with self.assertRaisesRegex(ValueError, "depends_on must be a unique list"):
+            self.store.enqueue("research_brief", "Whitespace", depends_on=["   "])
+        first = self.store.enqueue("research_brief", "Stable", idempotency_key="stable", priority=25)
+        replay = self.store.enqueue("research_brief", "Stable", idempotency_key="stable", priority=25)
+        self.assertEqual(first["id"], replay["id"])
+        with self.assertRaisesRegex(ValueError, "idempotency key conflicts"):
+            self.store.enqueue("research_brief", "Stable", idempotency_key="stable", priority=90)
+
+    def test_existing_database_rows_migrate_to_unknown_mode(self):
+        legacy_path = Path(self.tmp.name) / "legacy.db"
+        with sqlite3.connect(legacy_path) as db:
+            db.execute("""CREATE TABLE tasks (
+                id TEXT PRIMARY KEY, idempotency_key TEXT NOT NULL UNIQUE,
+                task_type TEXT NOT NULL, title TEXT NOT NULL, payload_json TEXT NOT NULL,
+                status TEXT NOT NULL CHECK(status IN ('pending','running','succeeded','failed','blocked')),
+                attempts INTEGER NOT NULL DEFAULT 0, max_attempts INTEGER NOT NULL DEFAULT 2,
+                created_at TEXT NOT NULL, updated_at TEXT NOT NULL, result_json TEXT,
+                error TEXT, lease_token TEXT, lease_expires_at TEXT
+            )""")
+            db.execute("""INSERT INTO tasks
+                (id,idempotency_key,task_type,title,payload_json,status,attempts,max_attempts,created_at,updated_at)
+                VALUES ('legacy','legacy-key','research_brief','Legacy','{}','succeeded',1,2,'2026-01-01','2026-01-01')""")
+        migrated = TaskStore(legacy_path)
+        self.assertEqual(migrated.list_tasks()[0]["execution_mode"], "unknown")
 
     def test_claim_empty_queue(self):
         self.assertIsNone(self.store.claim_next())

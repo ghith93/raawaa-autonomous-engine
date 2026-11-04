@@ -3,7 +3,12 @@ import assert from "node:assert/strict";
 import worker from "../worker/index.js";
 
 const TOKEN = "mobile-status-test-token";
-function dbMock(migrationVersions=["0003_durable_quota_ledger","0004_paper_event_ledger","0005_telegram_webhook_receipts"], workerCron={created_at:"2026-11-03T00:00:00.000Z",details_json:JSON.stringify({cron:"*/15 * * * *",requeued:2,failed:1})}, watchdogEvents=[], ciHealthRow=null, killSwitchRow=null, invocationCounts=[], scanRow=null, sourceRows=[]) {
+function dbMock(migrationVersions=["0003_durable_quota_ledger","0004_paper_event_ledger","0005_telegram_webhook_receipts","0009_task_execution_mode"], workerCron={created_at:"2026-11-03T00:00:00.000Z",details_json:JSON.stringify({cron:"*/15 * * * *",requeued:2,failed:1})}, watchdogEvents=[], ciHealthRow=null, killSwitchRow=null, invocationCounts=[], scanRow=null, sourceRows=[], executionModeStatusCounts=[
+  {execution_mode:"not_started",status:"pending",count:3},
+  {execution_mode:"dry_run",status:"succeeded",count:2},
+  {execution_mode:"live_inference",status:"succeeded",count:1},
+  {execution_mode:"unknown",status:"succeeded",count:4},
+]) {
   const calls=[];
   return {
     calls,
@@ -14,6 +19,8 @@ function dbMock(migrationVersions=["0003_durable_quota_ledger","0004_paper_event
         async first(){calls.push({kind:"first",sql,values:this.values});if(sql.includes("worker_cron_tick"))return workerCron;if(sql.includes("ci_health_snapshot"))return ciHealthRow;if(sql.includes("kill_switch_snapshot"))return killSwitchRow;if(sql.includes("research_scan_completed"))return scanRow;if(sql.includes("snapshot_captured"))return {candidate_id:"candidate-2",occurred_at:"2026-11-02T12:30:00.000Z",chain_id:1,block_number:123};return {event_type:"candidate_detected",candidate_id:"candidate-1",occurred_at:"2026-11-02T12:00:00.000Z"};},
         async all(){
           calls.push({kind:"all",sql,values:this.values});
+          if(sql.includes("GROUP BY execution_mode,status")) return {results:executionModeStatusCounts};
+          if(sql.includes("GROUP BY execution_mode,status")) return {results:executionModeStatusCounts};
           if(sql.includes("FROM tasks")) return {results:[{status:"pending",count:2}]};
           if(sql.includes("FROM task_model_invocations")) return {results:invocationCounts};
           if(sql.includes("schema_migrations")) return {results:migrationVersions.map(version=>({version}))};
@@ -79,6 +86,26 @@ test("mobile status endpoint returns read-only D1 metrics and explicit unknowns"
  assert.equal(JSON.stringify(body).includes('"provider":"groq"'),false);
  assert.equal(JSON.stringify(body).includes("reservation_id"),false);
  assert.deepEqual(body.telegram_webhook_schema,{available:true,status:"Migration 0005 applied; webhook activation remains separately gated"});
+ assert.deepEqual(body.execution_modes,{
+  available:true,
+  counts:{not_started:3,dry_run:2,live_inference:1,unknown:4},
+  status_counts:{
+   not_started:{pending:3,running:0,succeeded:0,failed:0,blocked:0},
+   dry_run:{pending:0,running:0,succeeded:2,failed:0,blocked:0},
+   live_inference:{pending:0,running:0,succeeded:1,failed:0,blocked:0},
+   unknown:{pending:0,running:0,succeeded:4,failed:0,blocked:0},
+  },
+ });
+ assert.deepEqual(body.execution_modes,{
+  available:true,
+  counts:{not_started:3,dry_run:2,live_inference:1,unknown:4},
+  status_counts:{
+   not_started:{pending:3,running:0,succeeded:0,failed:0,blocked:0},
+   dry_run:{pending:0,running:0,succeeded:2,failed:0,blocked:0},
+   live_inference:{pending:0,running:0,succeeded:1,failed:0,blocked:0},
+   unknown:{pending:0,running:0,succeeded:4,failed:0,blocked:0},
+  },
+ });
  assert.deepEqual(body.worker_cron,{last_seen_at:"2026-11-03T00:00:00.000Z",cron:"*/15 * * * *",requeued:2,failed:1});
  assert.deepEqual(body.task_runner_watchdog,{ready:false,missing:["GITHUB_APP_ID","GITHUB_APP_INSTALLATION_ID","GITHUB_APP_PRIVATE_KEY","GITHUB_APP_WATCHDOG_ENABLED"],last_dispatch_requested:null,last_dispatch_intent_at:null});
  assert.equal(body.unavailable_metrics.worker_cron,undefined);
@@ -151,6 +178,26 @@ test("mobile status returns fresh validated CI and default inference-gate snapsh
  assert.equal(body.unavailable_metrics.kill_switch,undefined);
 });
 
+test("mobile status separates dry-run and legacy successes from live execution",async()=>{
+ const DB=dbMock();
+ const response=await worker.fetch(request("/v1/mobile/status"),{DB,ENGINE_API_TOKEN:TOKEN});
+ assert.equal(response.status,200);
+ const body=await response.json();
+ assert.equal(body.execution_modes.status_counts.dry_run.succeeded,2);
+ assert.equal(body.execution_modes.status_counts.live_inference.succeeded,1);
+ assert.equal(body.execution_modes.status_counts.unknown.succeeded,4);
+});
+
+test("mobile status separates dry-run and legacy successes from live execution",async()=>{
+ const DB=dbMock();
+ const response=await worker.fetch(request("/v1/mobile/status"),{DB,ENGINE_API_TOKEN:TOKEN});
+ assert.equal(response.status,200);
+ const body=await response.json();
+ assert.equal(body.execution_modes.status_counts.dry_run.succeeded,2);
+ assert.equal(body.execution_modes.status_counts.live_inference.succeeded,1);
+ assert.equal(body.execution_modes.status_counts.unknown.succeeded,4);
+});
+
 test("mobile status preserves stale CI and inference-gate snapshots as stale",async()=>{
  const stale=new Date(Date.now()-25*60*60*1000).toISOString();
  const ci={created_at:stale,details_json:JSON.stringify({
@@ -201,6 +248,9 @@ test("mobile status does not query invocation tables before migration 0007",asyn
  assert.deepEqual(body.task_invocations,{available:false});
  assert.equal(body.unavailable_metrics.task_invocations,"Migration 0007 is not applied to this database");
  assert.equal(DB.calls.some(call=>call.sql.includes("FROM task_model_invocations")),false);
+ assert.deepEqual(body.execution_modes,{available:false});
+ assert.equal(body.unavailable_metrics.execution_modes,"Migration 0009 is not applied to this database");
+ assert.equal(DB.calls.some(call=>call.sql.includes("GROUP BY execution_mode,status")),false);
 });
 
 

@@ -12,9 +12,138 @@ from engine.provider import GenerationRequest
 from engine.task_store import TaskStore
 from engine.live_data_policy import validate_live_payload
 from engine.operating_policy import OperatingPolicyError, load_operating_policy
+from scripts.task_envelope import envelope_hash, validate as validate_envelope
 
 
 SAFE_TASKS = {"research_brief", "code_review", "content_draft", "system_audit"}
+
+# Tasks admitted from a GitHub issue comment. Deliberately NOT in SAFE_TASKS:
+# they are handled by an explicit branch that performs no inference, so the
+# allowlist for model-calling work keeps its original four entries.
+INGEST_TASK_TYPE = "issue_comment_task"
+
+# Provenance the receiving edge is required to have recorded. Checked again at
+# claim time, because the queue row is durable: "it was true when enqueued" is
+# not the same claim as "it is true now".
+INGEST_SOURCE = "github_issue_comment"
+INGEST_ISSUE_NUMBER = int(os.environ.get("RAAWAA_INGEST_ISSUE", "464"))
+INGEST_ALLOWED_AUTHORS = frozenset(
+    author.strip()
+    for author in os.environ.get("RAAWAA_INGEST_AUTHORS", "ghith93").split(",")
+    if author.strip()
+)
+# An ingested comment may never carry a spending authority: the edge exists to
+# record work, not to authorise it.
+INGEST_MAX_COST_CAP_USD = 0.0
+
+
+def _ingest_payload(task: dict) -> dict:
+    payload = task.get("payload")
+    if isinstance(payload, dict) and payload:
+        return payload
+    raw = task.get("payload_json")
+    if isinstance(raw, str) and raw.strip():
+        try:
+            decoded = json.loads(raw)
+        except (TypeError, ValueError):
+            return {}
+        return decoded if isinstance(decoded, dict) else {}
+    return {}
+
+
+def _ingest_provenance_errors(task: dict, payload: dict) -> list[str]:
+    """Check that the row still describes a comment we were willing to accept."""
+    errors: list[str] = []
+    if payload.get("source") != INGEST_SOURCE:
+        errors.append(f"unexpected source {payload.get('source')!r}")
+    issue_number = payload.get("issue_number")
+    if not isinstance(issue_number, int) or issue_number != INGEST_ISSUE_NUMBER:
+        errors.append(f"unexpected issue {issue_number!r}")
+    author = payload.get("comment_author")
+    if not isinstance(author, str) or author not in INGEST_ALLOWED_AUTHORS:
+        errors.append(f"unexpected comment author {author!r}")
+    comment_id = payload.get("comment_id")
+    if not isinstance(comment_id, int):
+        errors.append("comment_id is not an integer")
+    else:
+        expected_key = f"github-comment-{comment_id}"
+        stored_key = task.get("idempotency_key")
+        if isinstance(stored_key, str) and stored_key and stored_key != expected_key:
+            errors.append(f"idempotency key {stored_key!r} does not match {expected_key!r}")
+    return errors
+
+
+def _complete_ingest_task(store: TaskStore, task: dict) -> dict:
+    """Re-validate an ingested comment envelope and finish the task.
+
+    No provider call, no contract, no agent. The comment has already been
+    validated on the way in; this second check exists because the queue row is
+    durable and could have been edited between admission and claim, and because
+    an expired envelope must not be recorded as accepted simply because it was
+    accepted yesterday.
+    """
+    payload = _ingest_payload(task)
+    envelope = payload.get("envelope")
+    if not isinstance(envelope, dict) or not envelope:
+        store.finish(task["id"], "blocked", error="Ingested task has no envelope",
+                     lease_token=task.get("lease_token"))
+        return {"id": task["id"], "status": "blocked", "reason": "missing_envelope"}
+
+    # Provenance first: shape validation says nothing about where a row came from.
+    provenance_errors = _ingest_provenance_errors(task, payload)
+    if provenance_errors:
+        store.finish(task["id"], "blocked",
+                     error=("Ingested task failed provenance: " + "; ".join(provenance_errors))[:400],
+                     lease_token=task.get("lease_token"))
+        return {"id": task["id"], "status": "blocked", "reason": "ingest_provenance_rejected"}
+
+    # Integrity: the payload may have been edited after admission. Recompute the
+    # fingerprint from the envelope itself and compare it with the recorded one.
+    recomputed = envelope_hash(envelope)
+    recorded = payload.get("envelope_fingerprint")
+    if not isinstance(recorded, str) or not recorded:
+        store.finish(task["id"], "blocked", error="Ingested task has no envelope fingerprint",
+                     lease_token=task.get("lease_token"))
+        return {"id": task["id"], "status": "blocked", "reason": "missing_envelope_fingerprint"}
+    if recomputed != recorded:
+        store.finish(task["id"], "blocked",
+                     error=f"Ingested envelope fingerprint mismatch: recorded={recorded[:12]} recomputed={recomputed[:12]}",
+                     lease_token=task.get("lease_token"))
+        return {"id": task["id"], "status": "blocked", "reason": "envelope_fingerprint_mismatch"}
+
+    errors, warnings = validate_envelope(envelope)
+    if errors:
+        store.finish(task["id"], "blocked",
+                     error=("Invalid ingested envelope: " + "; ".join(errors))[:400],
+                     lease_token=task.get("lease_token"))
+        return {"id": task["id"], "status": "blocked", "reason": "invalid_ingested_envelope"}
+
+    # Policy, not merely presence: the edge accepts no spending authority at all.
+    try:
+        cap = float(envelope.get("cost_cap_usd"))
+    except (TypeError, ValueError):
+        cap = None
+    if cap is None or cap > INGEST_MAX_COST_CAP_USD:
+        store.finish(task["id"], "blocked",
+                     error=f"Ingested envelope cost cap {envelope.get('cost_cap_usd')!r} exceeds "
+                           f"the ingest limit of {INGEST_MAX_COST_CAP_USD}",
+                     lease_token=task.get("lease_token"))
+        return {"id": task["id"], "status": "blocked", "reason": "ingest_cost_cap_exceeded"}
+
+    result = {
+        "envelope_id": envelope.get("id"),
+        "envelope_fingerprint": payload.get("envelope_fingerprint"),
+        "comment_id": payload.get("comment_id"),
+        "issue_number": payload.get("issue_number"),
+        "warnings": warnings,
+        "inference": "none",
+        "execution_authorized": False,
+        "meaning": "validated_and_recorded_only",
+        "envelope_fingerprint_verified": recomputed,
+    }
+    store.finish(task["id"], "succeeded", result=result, lease_token=task.get("lease_token"))
+    return {"id": task["id"], "status": "succeeded", "reason": "issue_comment_recorded",
+            "envelope_id": result["envelope_id"]}
 LIVE_SWITCH = "RAAWAA_ENGINE_LIVE_INFERENCE"
 LIVE_MAX_OUTPUT_TOKENS = 256
 
@@ -52,11 +181,39 @@ def run_once(store: TaskStore, live_gateway=None, environ=None) -> dict | None:
 
     # Recover abandoned work before claiming another item.
     recovery = store.recover_stale()
-    task = store.claim_next()
+
+    # In live mode, check current free-route capacity before consuming a task lease.
+    # This is read-only and deliberately does not reserve quota; generate() repeats
+    # the eligibility check and atomically reserves immediately before provider I/O.
+    if _live_requested(environ):
+        if live_gateway is None:
+            return {"status": "blocked", "reason": "live_gateway_unavailable",
+                    "recovery": recovery}
+        preflight = getattr(live_gateway, "preflight_capacity", None)
+        if not callable(preflight):
+            return {"status": "blocked", "reason": "live_gateway_preflight_unavailable",
+                    "recovery": recovery}
+        try:
+            capacity = preflight(max_output_tokens=LIVE_MAX_OUTPUT_TOKENS)
+        except Exception as exc:
+            return {"status": "blocked", "reason": "live_capacity_preflight_failed",
+                    "detail": type(exc).__name__, "recovery": recovery}
+        if not isinstance(capacity, dict) or capacity.get("eligible") is not True:
+            reason = capacity.get("reason") if isinstance(capacity, dict) else "invalid_preflight_result"
+            if reason in {"provider_capacity_unavailable", "monetary_budget_exhausted"}:
+                return {"status": "idle", "reason": "live_capacity_unavailable",
+                        "capacity_reason": reason, "recovery": recovery}
+            return {"status": "blocked", "reason": "live_capacity_preflight_blocked",
+                    "capacity_reason": reason, "recovery": recovery}
+
+    execution_mode = "live_inference" if _live_requested(environ) else "dry_run"
+    task = store.claim_next(execution_mode=execution_mode)
     if task is None:
         return {"status": "idle", "recovery": recovery} if any(recovery.values()) else None
 
     task_type = task["task_type"]
+    if task_type == INGEST_TASK_TYPE:
+        return _complete_ingest_task(store, task)
     if task_type not in SAFE_TASKS:
         store.finish(task["id"], "blocked", error=f"Unsupported task type: {task_type}",
                      lease_token=task["lease_token"])
@@ -153,10 +310,21 @@ def run_once(store: TaskStore, live_gateway=None, environ=None) -> dict | None:
         heartbeat.stop()
         heartbeat.check()
         store.finish(task["id"], "succeeded", result=result, lease_token=task["lease_token"])
-        return {
+        summary = {
             "id": task["id"], "status": "succeeded", "mode": result["mode"],
             "agent_id": result["agent_id"], "recovery": recovery,
         }
+        if result["mode"] == "live_inference":
+            # Live task payloads are restricted to explicitly classified public research.
+            # Expose a bounded preview to the one-shot workflow summary for verification.
+            summary.update({
+                "provider": result["provider"],
+                "model": result["model"],
+                "output_preview": result["output"][:3500],
+                "input_tokens": result["input_tokens"],
+                "output_tokens": result["output_tokens"],
+            })
+        return summary
     except LeaseHeartbeatLost:
         # Never persist a result without confirmed lease ownership.
         return {"id": task["id"], "status": "lease_lost",

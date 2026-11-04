@@ -45,6 +45,10 @@ python -m unittest discover -s tests -v
 
 CI runs the policy/agent-roster audit and unit tests on pushes to `main` and on pull requests targeting `main`. A workflow file is not proof of a successful run; verify the Actions result for the exact commit SHA.
 
+## Executive management snapshot
+
+Run `python -m engine.cli executive-status` to inspect the existing task portfolio. This read-only command ranks pending work with explainable provisional weights, flags failed/blocked tasks and missing/expired running leases, and reports recommended next checks. It does not claim tasks, reorder the FIFO queue, call a model, or make network requests. Use the result as management decision support, not as proof of a continuously running agent team. See [Executive Intelligence v1](executive-intelligence.md).
+
 ## Task operations
 
 ```bash
@@ -61,9 +65,11 @@ GitHub notes that scheduled runs are best-effort and may be delayed or dropped, 
 
 ## Task Runner schedule watchdog
 
-PR #291 adds an optional fallback scheduler to the existing Cloudflare Worker. The current GitHub Actions Task Runner schedule remains primary. A second Cloudflare Cron runs at minutes 1, 6, 11, 16, 21, 26, 31, 36, 41, 46, 51, and 56 UTC, two minutes after the primary Task Runner schedule. It checks the fixed Task Runner workflow on main and skips if any run is queued/running, if any Task Runner run on main was created within the previous 10 minutes, or if a recent durable D1 dispatch intent exists. Otherwise it requests workflow_dispatch for task-runner.yml on main. A D1 intent is reserved atomically before the external dispatch so an ambiguous dispatch/audit failure cannot immediately cause duplicate requests.
+PR #291 adds an optional fallback scheduler to the existing Cloudflare Worker. The current GitHub Actions Task Runner schedule remains primary. A second Cloudflare Cron runs at minutes 1, 6, 11, 16, 21, 26, 31, 36, 41, 46, 51, and 56 UTC, two minutes after the primary Task Runner schedule. For each watched workflow it reads the recent runs on main and skips if any run is queued/running, if a run was created within that workflow's own threshold, or if a recent durable D1 dispatch intent exists. Otherwise it requests workflow_dispatch for task-runner.yml on main. A D1 intent is reserved atomically before the external dispatch so an ambiguous dispatch/audit failure cannot immediately cause duplicate requests.
 
-The fallback uses a GitHub App installation token scoped to repository ID 1441352567 and Actions: write. It requires Cloudflare Worker secrets GITHUB_APP_ID, GITHUB_APP_INSTALLATION_ID, and GITHUB_APP_PRIVATE_KEY plus the explicit Worker variable GITHUB_APP_WATCHDOG_ENABLED=enabled. If any secret or the opt-in variable is absent, the handler returns disabled without network or D1 access. It does not use a PAT, add dependencies, or apply a D1 migration. The private key must be added directly in Cloudflare and never pasted into ChatGPT or committed to source. Full setup and verification steps are in the [GitHub App watchdog guide](operations/github-app-task-runner-watchdog.md).
+The five-minute fallback Cron covers every watched workflow, not only the task runner: `task-runner.yml` (10 min), `maintenance.yml` (6 h 30 m), `research-discovery.yml`, `cex-public-market-smoke.yml`, `v3-live-readonly-smoke.yml` (25 h each) and `groq-connection-check.yml` (7 d 12 h). Each threshold is that workflow's own cadence plus slack, and each has its own dispatch-intent event so one workflow's dispatch cannot suppress another's. A workflow added to `.github/workflows` is **not** covered automatically; it must be added to `WATCHED_WORKFLOWS`.
+
+The fallback uses a GitHub App installation token scoped to repository ID 1441352567 and Actions: write. It requires Cloudflare Worker secrets GITHUB_APP_ID, GITHUB_APP_INSTALLATION_ID, and GITHUB_APP_PRIVATE_KEY plus the explicit opt-in `GITHUB_APP_WATCHDOG_ENABLED=enabled`, which is declared in `wrangler.toml` `[vars]` so it travels with the reviewed deploy instead of living only in the dashboard. If any secret or the opt-in value is absent, the handler returns disabled without network or D1 access. It does not use a PAT, add dependencies, or apply a D1 migration. The private key must be added directly in Cloudflare and never pasted into ChatGPT or committed to source. Full setup and verification steps are in the [GitHub App watchdog guide](operations/github-app-task-runner-watchdog.md).
 
 PR #291's watchdog implementation was first deployed at 01:25 UTC from main SHA `4800d2aa3fb9dcd31c7dd0aaffe2e4d1b1b5638e` (Worker version `546a233f-5d93-4328-b71f-f3afed990b4c`). After PR #305 added a second fail-closed opt-in gate, the Worker was redeployed at 01:34 UTC from main SHA `15e0ff5c4051cd396a59e76dd9503db5448ff52a` (Worker version `b1cb1429-3914-412c-b681-20c245466269`); deployment run [#41560533199](https://github.com/ghith93/raawaa-autonomous-engine/actions/runs/41560533199) succeeded and the public `/health` route again returned `{"ok":true}`. **Watchdog dispatch is verified:** run [#41569188010](https://github.com/ghith93/raawaa-autonomous-engine/actions/runs/41569188010) was authored by `raawaa-engine[bot]`, used `workflow_dispatch`, reported `watchdog_ready=ready` and `watchdog_missing=none`, and completed successfully with `queue_idle`. This proves the App-authenticated dispatch path and bounded runner execution, but it did not process a task. The private key remains stored only in Cloudflare; its value is not retrievable through the GitHub connector. Continue monitoring the next primary schedule event and later watchdog heartbeats. The safe_dry_run policy, disabled live inference, and disabled external writes remain unchanged.
 
@@ -133,7 +139,9 @@ Use the manual [D1 Migration Inventory workflow](../.github/workflows/d1-migrati
 
 Production side effects are deliberately separated from code merge:
 
-- `.github/workflows/deploy-worker.yml` is manual-only. Dispatch requires the exact confirmation string `DEPLOY_CONTROL_WORKER`; a push or PR merge does not deploy the Worker.
+- After deploying, the job asks the Worker itself what schema it can reach: `GET /v1/diagnostics/schema` probes every table the Worker's SQL touches and returns 503 with the missing names when one is absent. The migration gate checks the repository's files; the probe checks the deployed reality, and a deploy fails if either disagrees.
+- The deploy job refuses to run while a reviewed migration is unapplied. It reads `d1_migrations` from the production database and compares it against `migrations/*.sql` (`engine/migrations.py`), so code cannot reach production ahead of the schema it depends on. On 2026-11-04 the claim SQL shipped ahead of migration `0010`, every write answered 503, and the queue was dead from 11:06 to 12:08; that is the failure this gate blocks.
+- `.github/workflows/deploy-worker.yml` has **no manual dispatch trigger**. Production deployment is authorized only by a successful `Engine CI` push to `main` whose commit message contains the exact marker `[deploy-control-worker]`. A dispatch was removed because any credential holding `actions: write` can produce one, so it is not an authorization boundary; `scripts/check_workflow_dispatch_guards.py` now fails CI if a production-class workflow exposes `workflow_dispatch`.
 - The automatic production migration workflow was removed. The retained `.github/workflows/d1-migrate.yml` is manual-only and requires the exact database confirmation `raawaa-autonomous-e`.
 - A merge that changes `worker/**` or `migrations/**` therefore does not deploy code or apply schema changes by itself.
 - Do not dispatch either workflow as part of routine CI or PR completion. First review the exact main SHA, migration status, rollback/recovery plan, and non-production integration evidence; production deployment/migration requires a separate explicit operator decision.
@@ -280,3 +288,92 @@ This addendum supersedes earlier operational snapshots and historical statements
 2. Continue the six-phase pilot with the owner-side Codespaces OAuth handoff; do not attempt to bypass the interactive identity step.
 3. Implement the next isolated, public-data-only Execution Manager increment behind a disabled feature gate, reusing D1 task identity, lease fencing, policy loading, and existing quota/audit contracts. Require isolated workspaces, hard process/time/output bounds, kill-on-lease-loss, and a separate reviewer before any CLI execution is connected.
 4. Keep ARTEMIS as a separate, disabled mobile-QA integration; do not revive the retired AndroidHarness/Droid device runner.
+
+
+## Codespace bridge — staged implementation (2026-11-03)
+
+The first isolated Codespace execution slice is implemented on branch `feat/codespace-task-isolation` and remains disabled until an owner configures its distinct secret and starts the process inside the existing Codespace.
+
+- The D1 task table and queue remain canonical; no second queue, database, scheduler, or schema migration is introduced.
+- The legacy `/v1/tasks/claim` query explicitly excludes `codespace_inspect` and `codespace_test`; the Codespace claim endpoint selects only those task types.
+- The bridge uses a distinct `ENGINE_CODESPACE_TOKEN` principal and can access only its read-only preflight, claim, heartbeat, and finish routes only; the bridge has no retry endpoint. It cannot use general task listing/recovery, quota, monetary, provider, or admin routes.
+- Initial operations are read-only repository inspection and fixed local test suites. Arbitrary shell strings, patch application, deployment, inference, external writes, and secret access are not supported.
+- Every run loads the same mandatory operating-policy documents before claiming work. Each task is bounded to one fixed command, 240 seconds, bounded output, and the existing 900-second fenced lease.
+- Runtime opt-in is `RAAWAA_ENGINE_CODESPACE_BRIDGE=enabled`; unset means disabled. The existing Codespace is not created, stopped, upgraded, or automatically kept alive by this change.
+
+Required owner-side activation after review: configure a newly generated, distinct high-entropy `ENGINE_CODESPACE_TOKEN` in the Cloudflare Worker and `RAAWAA_ENGINE_CODESPACE_TOKEN` in the existing Codespace, plus the existing API URL and optional Cloudflare Access credentials. Do not place token values in Git, PR comments, logs, or chat. Run `python -m engine.codespace_bridge --preflight`, then one harmless inspection/test task. Do not enable continuous polling until cost/idle behavior is understood. This code change does not claim the Codespace process is installed or running.
+
+ 
+## Continuation update — 2026-11-03 23:12 UTC
+
+- **Current safety boundary:** PR #442 is merged at main SHA `181de234082b73ae8aa20290cbad505be07585c6`. Issue #440 remains open. Codespaces stays hard-disabled; no token, process, or production deployment was activated.
+- **F2 implementation in progress:** branch `fix/provider-not-called-backoff`. The worker now distinguishes `ProviderNotCalled` from `ProviderUnavailable`. Only failures proven to occur before `adapter.generate()` are eligible for delayed retry: transient invocation-checkpoint preparation failures, unavailable verified-free capacity, and monetary-budget reservation rejection. Post-send 429, timeout, 5xx, malformed response, adapter failure, invocation replay conflict, and other ambiguous outcomes remain blocked/no-replay.
+- Safe retries use bounded exponential backoff (60 seconds for transient checkpoint preparation, 15 minutes for unavailable route capacity, 1 hour for monetary budget exhaustion; exponential multiplier by attempt, capped at 24 hours). No quota reservation, monetary reservation, eligibility, budget, provider pricing, or paid-fallback limit is relaxed.
+- SQLite tasks now persist `next_attempt_at`; the D1 path has additive migration `0008_task_retry_schedule`, and its claim query excludes pending tasks whose retry time has not arrived. The updated Worker advertises `task_retry_schedule_v1`; the remote runner requires that capability before claiming in live-inference mode, while default dry-run processing remains compatible during rollout. Migration 0008 has **not** been applied to Staging or Production. The Worker has **not** been deployed from this branch.
+- First branch CI run [#41736856567](https://github.com/ghith93/raawaa-autonomous-engine/actions/runs/41736856567) failed on one test-fixture decorator placement in `tests/test_remote_task_store.py`; the failure was isolated and fixed.
+- Follow-up exact-head CI run [#41737101450](https://github.com/ghith93/raawaa-autonomous-engine/actions/runs/41737101450) passed Python unit tests but the D1 local smoke exposed a stale success-count assertion after the new delayed-retry task was added. The smoke assertion now expects the two intended legacy tasks; the next exact-head run [#41737262210](https://github.com/ghith93/raawaa-autonomous-engine/actions/runs/41737262210) includes that correction and the real-time 5-second D1 eligibility check.
+
+- Exact-head workflow-dispatch CI [#41737974145](https://github.com/ghith93/raawaa-autonomous-engine/actions/runs/41737974145) passed the full test job on SHA `2798c6f12e01b392be7a866eb31a5d5428f0bc15`. The PR event CI [#41738158606](https://github.com/ghith93/raawaa-autonomous-engine/actions/runs/41738158606) also passed on PR head `23a38b61a387549f33548a58d9815cccfe36d76f`, including Python, Worker, Workflows, local D1 delayed-retry integration, and local Workflows runtime tests. Staging migration/deployment jobs were skipped because both runs were feature-branch/PR validations. The preceding assertion failures in runs #41736856567, #41737101450, and #41737616436 were isolated and corrected.
+- [PR #444](https://github.com/ghith93/raawaa-autonomous-engine/pull/444) is open and unmerged. PR-event CI passed; merge and post-merge Staging verification remain next gates.
+- **Spec Kit:** official `github/spec-kit` is MIT-licensed and free/open source. No installation or repository integration was performed in this cycle; defer selective adoption until core v1 reliability work is complete.
+- F1 and F5 remain unimplemented. No live inference, external write, Production D1 migration, or deployment was performed.
+
+## F2 correction and Graphify evaluation — 2026-11-04
+
+- PR #444 was merged at main commit `a9c3273201cab33ea0193609b0377453ad194391`; its PR-event test job passed on head `23a38b61a387549f33548a58d9815cccfe36d76f`. Staging migration/deployment jobs were skipped. Migration `0008_task_retry_schedule` was not applied remotely and no Worker deployment from PR #444 was verified.
+- Post-merge review identified that classifying invocation-checkpoint preparation transport failures as `ProviderNotCalled` was too broad: the checkpoint write may have committed even when its response was lost. This is not a safe retry signal. The corrective branch `fix/f2-capacity-preflight` restores the pre-PR-444 retry/migration contract and replaces it with a read-only capacity preflight before task claim.
+- The preflight checks the existing quota manager's verified-free route eligibility, cooldown and rolling-minute/daily/monthly capacity, adapter presence, and the global daily/monthly monetary budget. It makes no provider call and creates no quota or monetary reservation. If no route is currently eligible or the global budget is exhausted, the worker returns idle and leaves pending work unclaimed. The gateway still repeats the exact prompt-based eligibility check and atomically reserves immediately before provider I/O.
+- Per-task monetary budget remains enforced by the gateway after the task ID is known. A preflight is a signal, not a reservation: capacity can change between preflight and claim, and the actual prompt can exceed the minimal estimate. Those cases remain fail-closed; ambiguous checkpoint/provider outcomes remain blocked with no replay. No quota, price, budget, kill-switch, or paid-fallback limit is relaxed.
+- The corrective branch does not add a D1 migration, new task status, or new retry/defer state. F1 and F5 remain separate future work.
+- **Graphify evaluation:** the official `Graphify-Labs/graphify` project is Apache-2.0 open source. The official PyPI distribution is `graphifyy` (CLI: `graphify`). Its code-only Tree-sitter graph extraction is local/offline and does not require an API key; semantic extraction of documentation/media may use a configured model backend. It is useful for code dependency/call tracing, architecture discovery and review, but is not an engine runtime dependency. Adoption is approved for a later bounded code-only evaluation; it has not been installed or executed in this cycle. Sources: https://github.com/Graphify-Labs/graphify and https://graphify.com/security.
+- **Spec Kit** remains an optional MIT-licensed specification workflow, deferred until the first core reliability milestones are complete. It is not a runtime dependency and has not been installed.
+
+## F2 completion — 2026-11-04
+
+- **Correction merged:** PR #445 merged by squash at main SHA `b20707d77dccb6157a4a9a90b6cb01cf12e0946a`. It removes the unsafe broad `ProviderNotCalled` retry classification and delayed-retry migration introduced in #444, and adds a read-only verified-free capacity preflight before task claim.
+- **F2 runtime contract:** when live inference is explicitly requested, the worker checks current verified-free route eligibility, cooldown and quota capacity, adapter presence, and global daily/monthly monetary budget before `claim_next`. If capacity/budget is unavailable, the worker returns idle and leaves pending tasks unclaimed. Preflight makes no provider call and creates no quota or monetary reservation. `generate()` still checks the actual prompt and atomically reserves immediately before provider I/O. Checkpoint preparation/start failures and ambiguous provider outcomes remain blocked with no replay. Per-task budget and exact prompt size remain enforced after claim; a race or oversized actual prompt fails closed.
+- **CI:** exact PR-head CI passed on `ef56f398258d84196981e086b278316810684ea3`: PR run [#41740180740](https://github.com/ghith93/raawaa-autonomous-engine/actions/runs/41740180740) and full run [#41740194129](https://github.com/ghith93/raawaa-autonomous-engine/actions/runs/41740194129). Post-merge main CI [#41740416340](https://github.com/ghith93/raawaa-autonomous-engine/actions/runs/41740416340) passed Python, Worker, Workflows, local D1, and local Workflows tests.
+- **Staging:** post-merge pipeline verified Staging/Production target separation, found no pending migrations, successfully deployed the isolated Staging Worker, passed remote D1 monetary/token-quota/invocation-lifecycle/redeploy-persistence tests, published sanitized telemetry, and passed authenticated mobile-status readback. All ephemeral Staging bearer/quota-admin tokens were revoked. Staging verification is not Production deployment.
+- **Production:** separate Control Worker deployment workflow [#41740887986](https://github.com/ghith93/raawaa-autonomous-engine/actions/runs/41740887986) was skipped. Production Worker and D1 were not changed by this cycle. No provider inference, paid spend, or external write was performed.
+- **Security boundary:** PR #442 remains merged as main SHA `181de234082b73ae8aa20290cbad505be07585c6`; issue #440 remains open. Codespaces executor stays hard-disabled; do not create its token or start the bridge.
+- **Core priority status:** F1 execution-mode separation/dashboard accuracy and F5 priority/dependency-aware queue are merged and Staging-verified. F3/F4 are the next core implementation tracks; keep the workflow dispatcher proposal-only until its own contract, tests, and safety review are complete.
+- **Developer tools:** Graphify is approved for a later bounded code-only evaluation (Apache-2.0; official PyPI `graphifyy`; local/offline Tree-Sitter code extraction; optional semantic docs/media extraction uses the configured model). It is not installed, executed, or a runtime dependency. Spec Kit remains deferred and optional (MIT).
+
+
+
+## F1 execution-mode separation — 2026-11-04
+
+- Adds the additive D1 migration `0009_task_execution_mode` and matching SQLite forward migration.
+- New tasks begin as `not_started`; legacy tasks migrate as `unknown`. At atomic claim, the runner records the selected `dry_run`, `live_inference`, or legacy `unknown` mode under the existing lease. Terminal results can reconcile the mode from their recorded result.
+- The authenticated D1 task list/claim/finish APIs expose and preserve the mode. Mobile Status displays execution-mode aggregates separately from task terminal statuses, making clear that dry-run success is simulation, not live work.
+- `live_inference` means the live execution path was selected for the task; it does not by itself prove a provider request completed. Existing kill-switch, preflight, quota reservation, ambiguity/no-replay and zero-spend policies are unchanged.
+- Merged into `main` via PR #448, with terminal-mode validation follow-up PR #449 and status-by-mode accuracy follow-up in commit `b792357`.
+- Staging migration `0009_task_execution_mode` applied successfully; isolated Staging Worker deployment and remote monetary-ledger verification passed in run `41742923497`. Both ephemeral Staging tokens were revoked by the workflow.
+- The telemetry publisher event guard was corrected in PR #456. Post-merge main run #41746574412 successfully published sanitized telemetry and passed authenticated Staging mobile-status readback; ephemeral Staging tokens were revoked. Production Worker and D1 remain unchanged.
+- Production Worker and Production D1 remain unchanged.
+
+## F1 dashboard accuracy follow-up — 2026-11-04
+
+- The Mobile Status API now groups task rows by both `execution_mode` and terminal/current `status`, while retaining total counts per mode for compatibility.
+- The “Executed successfully” headline counts only `succeeded` + `live_inference`; “Dry-run simulations” counts `succeeded` + `dry_run`. Legacy `unknown` successes are displayed separately and are never inferred as live execution.
+- The Task Runner issue status and authenticated Staging mobile readback expose sanitized aggregate counts only. No task IDs, prompts, request IDs, lease tokens, or model cost details are added to the summary.
+
+## Manual Staging replay
+
+- `.github/workflows/ci.yml` supports a guarded `workflow_dispatch` replay from the exact `main` ref for Staging migration, isolated Worker verification, sanitized telemetry, and authenticated mobile-status readback.
+- All Staging jobs require `github.ref == 'refs/heads/main'`; dispatching from another ref cannot access Staging secrets. Production deployment remains a separate workflow.
+- PR #456 is merged. The guarded manual replay is available from `main` for reviewed Staging migration, isolated Worker verification, sanitized telemetry, and authenticated mobile-status readback. The latest post-merge push run #41746574412 completed all Staging jobs successfully; use manual replay only when a normal push run is absent or needs deliberate re-verification.
+
+
+## F5 priority and dependency-aware queue — 2026-11-04 (PR #457 merged; Staging verified)
+
+- Extends the existing SQLite/D1 task ledger; no second queue, scheduler, database, or workflow runtime.
+- Persists bounded queue priority (0–100, default 50); claims order by priority descending, then creation time and task ID for stable FIFO ties.
+- Stores normalized dependency edges and a canonical dependency manifest. Dependencies must reference existing tasks; self, duplicate, unknown, blank, and disabled-Codespaces dependencies are rejected. The insertion-only edge contract prevents cycles; the proposal-only planner independently rejects cyclic DAGs.
+- A task is claimable only when every dependency is succeeded in the same execution mode. A dry-run result cannot release a live-inference task. Failed/blocked upstream outcomes propagate to pending descendants with audit events.
+- Workflow planning remains proposal-only; no automatic workflow dispatch, live inference, paid spend, external writes, higher concurrency, Codespaces, or Production deployment was enabled.
+- Exact-head CI #41746324349 passed: Python, Worker, Workflows runtime, migration contract, and local D1 integration tests. The local D1 smoke verified priority order, dependency gating, dry-run/live separation, idempotency, and transitive blocking.
+- Migration `0010_task_priority_dependencies.sql` applied successfully to Staging in main run #41746574412; the subsequent migration-list readback reported no pending migrations.
+- Staging Worker deployed as version `07947078-2d37-46a2-ba5b-d3917b269caa`; remote monetary/token-quota/invocation/redeploy checks and sanitized telemetry publication passed. Authenticated Mobile Status returned `status=verified`, `ci_health=success`, `kill_switch=engaged`, `external_writes=false`, `paid_model_calls=false`, and `paid_fallback=false`.
+- Ephemeral Staging bearer and quota-admin tokens were revoked. Production Control Worker deployment workflow #41747019726 was skipped; Production D1 and Worker remain unchanged.
+- Staging deployment and mobile readback verify the deployed Worker and schema. Direct queue-behavior integration was exercised against local D1; no shared Staging queue task was claimed during this run.

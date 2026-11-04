@@ -9,7 +9,7 @@ from __future__ import annotations
 import json
 import os
 from urllib.error import HTTPError, URLError
-from urllib.request import Request, urlopen
+from urllib.request import HTTPRedirectHandler, Request, build_opener, urlopen
 from typing import Any
 
 
@@ -17,10 +17,43 @@ class RemoteTaskStoreError(RuntimeError):
     """Remote task API failure with a safe, non-secret message."""
 
 
+class _RejectRedirects(HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
+
+
+#: The Worker answers a storage failure with ``{"error": ..., "detail": ...}``.
+#: Reading it back is the difference between "temporarily unavailable" and a
+#: diagnosable cause; the body is truncated and control characters are dropped.
+MAX_ERROR_DETAIL_CHARS = 240
+
+
+def _error_detail(exc: HTTPError) -> str:
+    """Return a bounded reason from an error response body, or "" when absent."""
+    try:
+        body = exc.read(1024)
+    except Exception:  # noqa: BLE001 - a missing body must never mask the status
+        return ""
+    if not body:
+        return ""
+    try:
+        parsed = json.loads(body.decode("utf-8", "replace"))
+    except (ValueError, UnicodeDecodeError):
+        return ""
+    if not isinstance(parsed, dict):
+        return ""
+    parts = []
+    for key in ("error", "detail"):
+        value = parsed.get(key)
+        if isinstance(value, str) and value.strip():
+            parts.append(" ".join(value.split())[:MAX_ERROR_DETAIL_CHARS])
+    return f": {' | '.join(parts)}" if parts else ""
+
+
 class RemoteTaskStore:
     def __init__(self, base_url: str | None = None, token: str | None = None,
                  timeout: float = 15.0, access_client_id: str | None = None,
-                 access_client_secret: str | None = None):
+                 access_client_secret: str | None = None, reject_redirects: bool = False):
         self.base_url = (base_url or os.environ.get("RAAWAA_ENGINE_API_URL", "")).rstrip("/")
         self.token = token or os.environ.get("RAAWAA_ENGINE_API_TOKEN", "")
         self.access_client_id = (
@@ -32,6 +65,7 @@ class RemoteTaskStore:
             else os.environ.get("RAAWAA_ENGINE_CF_ACCESS_CLIENT_SECRET", "")
         )
         self.timeout = timeout
+        self.reject_redirects = bool(reject_redirects)
         if not self.base_url.startswith("https://") or not self.token:
             raise ValueError("Remote task store requires an HTTPS API URL and token")
         if bool(self.access_client_id) != bool(self.access_client_secret):
@@ -51,7 +85,9 @@ class RemoteTaskStore:
             headers["CF-Access-Client-Secret"] = self.access_client_secret
         request = Request(self.base_url + path, data=body, method=method, headers=headers)
         try:
-            with urlopen(request, timeout=self.timeout) as response:
+            opener = build_opener(_RejectRedirects) if self.reject_redirects else None
+            response_context = opener.open(request, timeout=self.timeout) if opener else urlopen(request, timeout=self.timeout)
+            with response_context as response:
                 data = response.read(64 * 1024 + 1)
                 if len(data) > 64 * 1024:
                     raise RemoteTaskStoreError("Remote task API response exceeded limit")
@@ -82,19 +118,33 @@ class RemoteTaskStore:
             if exc.code == 429:
                 raise RemoteTaskStoreError("Remote task API rate limit reached; retry in a later run") from None
             if 500 <= exc.code <= 599 or exc.code == 408:
-                raise RemoteTaskStoreError(f"Remote task API temporarily unavailable (HTTP {exc.code})") from None
+                raise RemoteTaskStoreError(
+                    f"Remote task API temporarily unavailable (HTTP {exc.code}){_error_detail(exc)}"
+                ) from None
             raise RemoteTaskStoreError(f"Remote task API returned HTTP {exc.code}") from None
         except (URLError, TimeoutError, OSError, json.JSONDecodeError, UnicodeDecodeError):
             raise RemoteTaskStoreError("Remote task API is unavailable or returned invalid JSON") from None
 
     def enqueue(self, task_type: str, title: str, payload: dict[str, Any] | None = None,
-                idempotency_key: str | None = None, max_attempts: int = 2) -> dict[str, Any]:
+                idempotency_key: str | None = None, max_attempts: int = 2,
+                priority: int | None = None, depends_on: list[str] | None = None) -> dict[str, Any]:
         import uuid
-        result = self._request("/v1/tasks/enqueue", "POST", {
+        request_payload = {
             "task_type": task_type, "title": title, "payload": payload or {},
             "idempotency_key": idempotency_key or str(uuid.uuid4()),
             "max_attempts": max_attempts,
-        })
+        }
+        if priority is not None:
+            if type(priority) is not int or not 0 <= priority <= 100:
+                raise ValueError("priority must be an integer between 0 and 100")
+            request_payload["priority"] = priority
+        if depends_on is not None:
+            if (not isinstance(depends_on, list) or len(depends_on) > 20
+                    or any(not isinstance(dep, str) or not dep.strip() or len(dep) > 128 for dep in depends_on)
+                    or len(depends_on) != len(set(depends_on))):
+                raise ValueError("depends_on must be a unique list of at most 20 task IDs")
+            request_payload["depends_on"] = sorted(depends_on)
+        result = self._request("/v1/tasks/enqueue", "POST", request_payload)
         task = result.get("task")
         if not isinstance(task, dict):
             raise RemoteTaskStoreError("Remote task API omitted the task")
@@ -108,10 +158,13 @@ class RemoteTaskStore:
             raise RemoteTaskStoreError("Remote task API returned an invalid task list")
         return tasks
 
-    def claim_next(self, lease_timeout_seconds: int = 900) -> dict[str, Any] | None:
+    def claim_next(self, lease_timeout_seconds: int = 900,
+                   execution_mode: str = "unknown") -> dict[str, Any] | None:
         if not 1 <= int(lease_timeout_seconds) <= 900:
             raise ValueError("remote lease timeout must be between 1 and 900 seconds")
-        result = self._request("/v1/tasks/claim", "POST", {})
+        if execution_mode not in {"unknown", "dry_run", "live_inference"}:
+            raise ValueError("invalid execution_mode")
+        result = self._request("/v1/tasks/claim", "POST", {"execution_mode": execution_mode})
         task = result.get("task")
         if task is None:
             return None
@@ -132,7 +185,8 @@ class RemoteTaskStore:
         return expiry
 
     def finish(self, task_id: str, status: str, result: dict[str, Any] | None = None,
-               error: str | None = None, lease_token: str | None = None) -> None:
+               error: str | None = None, lease_token: str | None = None,
+               execution_mode: str | None = None) -> None:
         if status not in {"succeeded", "failed", "blocked"}:
             raise ValueError("invalid terminal status")
         payload: dict[str, Any] = {"lease_token": lease_token, "status": status}
@@ -140,6 +194,12 @@ class RemoteTaskStore:
             payload["result"] = result
         if error is not None:
             payload["error"] = error
+        if execution_mode is not None:
+            if execution_mode not in {"unknown", "dry_run", "live_inference"}:
+                raise ValueError("invalid execution_mode")
+            payload["execution_mode"] = execution_mode
+        elif result is not None and result.get("mode") in {"dry_run", "live_inference"}:
+            payload["execution_mode"] = result["mode"]
         self._request(f"/v1/tasks/{task_id}/finish", "POST", payload)
 
     def retry_or_fail(self, task_id: str, error: str,

@@ -128,3 +128,38 @@ This addendum supersedes earlier statements above where they conflict.
 - **Workers AI plan:** the billing subscription inventory previously returned zero active paid subscriptions, but that does not conclusively identify the account's Workers Free/Paid plan. Confirm the exact plan and daily Neuron allocation in the Cloudflare dashboard before any inference. The public 10,000-Neuron daily allocation is not account-specific evidence.
 - **Production/Staging:** the isolated Staging Worker/D1 and authenticated mobile-status verification are complete in CI run [#41678035968](https://github.com/ghith93/raawaa-autonomous-engine/actions/runs/41678035968). Production Worker/D1 were not changed. The Staging test's temporary bearer/admin credentials were revoked.
 
+
+
+## Live revalidation — 2026-11-03 22:33 UTC
+
+This section supersedes conflicting counts and connection/flow states in the earlier snapshot above.
+
+- Current ChatGPT catalog: 1,889 callable tool definitions and 250 skill definitions across 34 skill packs. Catalog presence is not account authentication or engine-runtime availability.
+- Activepieces project `Ghith's Project` (`8A2qoCJNq9zlORJZMlrfw`) is selected. Current connection inventory returns **one ACTIVE GitHub connection** (`cn2iEAi2bWbLfeOVOu7D8`). Current flow inventory returns **one ENABLED, published flow**: `Raawaa GitHub Workflow Control` (`oDKKtoRanykDWtyBdkQFt`). Its validated structure is Manual Trigger → GitHub `trigger_workflow_dispatch` for `.github/workflows/task-runner.yml` on `main`, waiting up to 30 minutes and polling every 60 seconds. Its latest recorded TESTING run `v1Kt0iPvORqFk6gMs6mn0` succeeded at 2026-11-03 21:08:04 UTC. This is not proof of a production/recurring trigger.
+- Activepieces currently lists 20 model entries in its provider catalog (per earlier inventory), but price, quota, and free eligibility remain unverified; no inference was sent through Activepieces.
+- GitHub connector successfully read files, branches, PRs, workflow jobs/logs and merged documentation PRs #433 and #434 after exact-head CI. The dated inventory's last report says `main` was not protected and branch-protection checks were disabled; the current connector still lacks repository-administration permission, so do not infer enforced protection. Continue to enforce PR + exact-head CI + diff/review discipline procedurally.
+- Cloudflare is not a direct ChatGPT connector. Existing GitHub Actions inventory workflow #41731268698 succeeded on main SHA `4f94e59924654b41ac8563c3c7f012e51180845e`: Worker `raawaa-autonomous-engine-control` exists, Workers API returned HTTP 200, workers.dev and preview URLs were enabled, and public `/health` returned HTTP 200. The workflow posted a sanitized report to tracking issue #34. It did not inspect authenticated Task Runner watchdog readiness or change Cloudflare settings.
+- Current standalone-engine main after documentation PR #434 is `d3c84919bea6e778c8062b8828fb681161b47ec3`. PR #434 exact-head CI #41731362709 passed; a separate post-merge main CI result was not confirmed in this cycle.
+- Do not treat this ChatGPT connector inventory as engine-side credentials. No Activepieces connection, ChatGPT tool, or skill was copied into engine secrets or runtime configuration.
+
+## Candidate developer tools — revalidated 2026-11-04
+
+| Tool | License / cost | Useful capability | Privacy / operational notes | Decision |
+|---|---|---|---|---|
+| [Graphify](https://github.com/Graphify-Labs/graphify) | Apache-2.0; official package `graphifyy`; code-only CLI path is free and offline | Local code knowledge graph for call/import/dependency tracing, architecture discovery and code review; supports graph JSON/report/HTML and assistant skill/MCP integration | Code-only Tree-sitter extraction stays local. Optional semantic extraction of docs/media may call a configured LLM backend. Install only official `graphifyy`; hosted Graphify is separate and not required. | Approved for later bounded code-only evaluation; not installed, not executed, and not a runtime dependency. |
+| [GitHub Spec Kit](https://github.com/github/spec-kit) | MIT; free/open source | Specification → plan → task breakdown for larger changes; can improve traceability and acceptance criteria | Developer workflow only; adds repository artifacts and process overhead if used on every small fix. | Deferred until core v1 reliability work stabilizes; selective use for F1/F5 or larger architecture changes. |
+
+
+
+## Live revalidation — 2026-11-04 00:51 UTC
+
+This addendum supersedes historical counts and connection states above where they conflict.
+
+- Current ChatGPT tool catalog: 1,922 definitions across 64 namespace groups, counted from the current runtime tool catalog. Current skills__list returned an empty list; no skill roots were surfaced in this runtime. The earlier 248/250 skill counts are historical snapshots, not current availability.
+- Activepieces project Ghith's Project (8A2qoCJNq9zlORJZMlrfw): one ACTIVE project-scoped GitHub connection (cn2iEAi2bWbLfeOVOu7D8); one ENABLED, published flow Raawaa GitHub Workflow Control (oDKKtoRanykDWtyBdkQFt); zero PRODUCTION runs found. The flow is Manual Trigger → GitHub workflow_dispatch for .github/workflows/task-runner.yml on main. TESTING run appXqFOAEJKRLnQoA8xJs succeeded at 2026-11-04T00:46:34Z and triggered GitHub run #41749347645. Do not create a second workflow or scheduler.
+- Activepieces AI catalog: 20 model entries under provider activepieces. Pricing, quota, account eligibility, billing behavior, and free-tier status remain unknown; no inference was sent. Catalog visibility is not engine-runtime adapter availability.
+- ChatGPT app permission evidence: GitHub and Activepieces each report app-specific Allow all actions; global default reports Allow low-risk actions. These settings are not the underlying GitHub App installation's API scopes and do not transfer to the engine.
+- GitHub main-protection ruleset ID 26464558 is active and requires PRs, strict exact test status, and resolved review threads. It blocks deletion/non-fast-forward updates and has no bypass actors. It currently requires zero approving reviews; do not describe independent approval as enforced. Reading the classic branch-protection endpoint returned HTTP 403, while ruleset details were readable.
+- Current engine main is e6761d09de884d34bdc0ef7d01d7b7a8f1e1682e. Main CI #41747902547 passed all five test/Staging/telemetry/readback jobs. Staging Worker version a78c3de1-1ee0-4892-b97c-c13ec54d99bc was deployed to the isolated Staging Worker and the remote ledger verification passed. Production deployment #41748314581 was skipped; Production Worker/D1 were unchanged.
+- Task Runner #41749347645 succeeded with HTTP 200 health/auth/mobile probes, queue_idle, 0 tasks processed, 0 pending, and 0 running. Worker Cron heartbeat was recorded; the separate watchdog remains not_ready because GITHUB_APP_WATCHDOG_ENABLED is absent. No provider inference occurred.
+- PR #459 is draft and has a documented ignored-file integrity finding; the release gate remains false. Its exact-head CI passed, but it is not ready to merge. Issue #453 was closed after F5 implementation and Staging verification; issue #438 remains a separate proposal-only workflow-dispatch gap.
