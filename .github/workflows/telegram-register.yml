@@ -82,6 +82,8 @@ jobs:
       - name: Discover the private chat and generate the webhook secret
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         run: |
           set -uo pipefail
           CHAT_ID="${{ inputs.chat_id }}"
@@ -89,18 +91,39 @@ jobs:
             echo "::error title=Invalid chat_id::chat_id must be numeric (or comma-separated)"
             exit 1
           fi
-          # The script's diagnostics go to stderr, which nobody can read from a
-          # workflow run — so each line becomes an annotation, and "no private chat
-          # found for @x" arrives as a sentence carrying the bot's own link.
-          args=(--url "$WORKER_URL" --env-file /tmp/telegram.env)
-          [ -n "$CHAT_ID" ] && args+=(--chat-id "$CHAT_ID")
-          if ! output="$(python3 scripts/telegram_bootstrap.py "${args[@]}" 2>&1)"; then
-            printf '%s\n' "$output" | tail -n 5 | while IFS= read -r line; do
-              [ -n "$line" ] && echo "::error title=Telegram bootstrap::$line"
-            done
+
+          run_bootstrap() {
+            python3 scripts/telegram_bootstrap.py --url "$WORKER_URL" --env-file /tmp/telegram.env "$@"
+          }
+
+          if [ -n "$CHAT_ID" ]; then
+            run_bootstrap --chat-id "$CHAT_ID" || exit 1
+            exit 0
+          fi
+
+          if output="$(run_bootstrap 2>&1)"; then
+            printf '%s\n' "$output" | head -n 20
+            exit 0
+          fi
+          printf '%s\n' "$output" | tail -n 5 | sed 's/^/::warning title=Discovery::/'
+
+          # Telegram has nothing queued — usually because a webhook already drained
+          # it. The Worker has been receiving this owner's messages, so its receipts
+          # table knows the chat id even when Telegram does not. That is the
+          # difference between "the owner must message the bot again" and "we finish
+          # this without them".
+          recovered="$(npx --yes wrangler@4.156.1 d1 execute raawaa-autonomous-e --remote \
+            --config wrangler.toml --json \
+            --command "SELECT chat_id FROM telegram_update_receipts ORDER BY created_at DESC LIMIT 1" \
+            2>/dev/null | jq -r 'if type == "array" then .[0].results else .results end | (.[0].chat_id // "")' 2>/dev/null || true)"
+
+          if [ -z "$recovered" ]; then
+            echo "::error title=No chat id::Neither Telegram nor the D1 receipts table yielded one. Send the bot one message and run this again."
             exit 1
           fi
-          printf '%s\n' "$output" | head -n 20
+          echo "::notice title=Chat id recovered::from telegram_update_receipts, so the owner does not need to message the bot again."
+          run_bootstrap --chat-id "$recovered"
+
       - name: Install the three Worker secrets
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
