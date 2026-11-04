@@ -49,22 +49,25 @@ jobs:
             exit 1
           }
 
-      - name: Install gVisor and register it as a Docker runtime
-        # The signed apt repository is used rather than a downloaded binary so that
-        # the runtime's provenance is verified by apt, and `runsc install` writes the
-        # daemon.json entry that makes --runtime=runsc resolvable.
+      - name: Install pinned gVisor and register it as a Docker runtime
+        env:
+          RUNSC_VERSION: "20261102.0"
+          RUNSC_SUITE: "20261102"
+          RUNSC_KEY_FINGERPRINT: "6F1DF85E3A71C24918E727D56C6D554E32BD943"
         run: |
+          set -euo pipefail
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends apt-transport-https ca-certificates curl gnupg
-          curl -fsSL https://gvisor.dev/archive.key | sudo gpg --dearmor -o /usr/share/keyrings/gvisor-archive-keyring.gpg
-          echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/gvisor-archive-keyring.gpg] https://storage.googleapis.com/gvisor/releases release main" \
-            | sudo tee /etc/apt/sources.list.d/gvisor.list > /dev/null
+          curl -fsSL https://gvisor.dev/archive.key -o /tmp/gvisor-archive.key
+          ACTUAL_FINGERPRINT="$(gpg --show-keys --with-colons /tmp/gvisor-archive.key | awk -F: '$1 == "fpr" {print toupper($10); exit}')"
+          test "$ACTUAL_FINGERPRINT" = "$RUNSC_KEY_FINGERPRINT" || { echo "::error::gVisor archive signing key fingerprint mismatch"; exit 1; }
+          sudo gpg --dearmor --output /usr/share/keyrings/gvisor-archive-keyring.gpg /tmp/gvisor-archive.key
+          echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/gvisor-archive-keyring.gpg] https://storage.googleapis.com/gvisor/releases $RUNSC_SUITE main" | sudo tee /etc/apt/sources.list.d/gvisor.list > /dev/null
           sudo apt-get update
-          sudo apt-get install -y runsc
+          sudo apt-get install -y "runsc=$RUNSC_VERSION"
+          runsc --version | grep -F "release-$RUNSC_VERSION"
           sudo runsc install
           sudo systemctl restart docker
-          runsc --version
-
       - name: Prove the runtime is the one the contract asks for
         run: |
           docker info --format '{{json .Runtimes}}' | tee /tmp/runtimes.json
@@ -87,13 +90,15 @@ jobs:
 
       - name: Summary
         if: always()
+        env:
+          IMAGE: ${{ inputs.image }}
         run: |
           {
             echo "### Sandbox escape proof"
             echo ""
-            echo "- image: \`${{ inputs.image }}\`"
-            echo "- runtime: runsc (gVisor), network none, read-only rootfs, cap-drop ALL, non-root"
-            echo "- probes: parent environ, own environ, docker socket, /root/.ssh, egress, root write"
+            echo "- image: `$IMAGE`"
+            echo "- runtime: runsc (gVisor) release-20261102.0, network none, read-only rootfs, cap-drop ALL, non-root"
+            echo "- probes: host file/environment canaries, immutable source, bounded tmpfs, cgroup PID/memory/CPU limits, Docker socket, egress, root write"
             echo ""
             echo "A skipped or partially run probe is reported as a failure, never as containment."
           } >> "$GITHUB_STEP_SUMMARY"
