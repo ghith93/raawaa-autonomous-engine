@@ -1,6 +1,8 @@
-"""Opt-in, bounded Codespace executor for inspect-only and fixed test operations.
+"""Opt-in trusted-main-only executor using the legacy Codespace transport.
 
-No arbitrary shell, patching, deployment, inference, external writes, or secrets access.
+This is not an OS sandbox. It runs only fixed operations from a clean, canonical
+main commit already reachable from GitHub main. No arbitrary shell, patching,
+deployment, inference, external writes, or secrets access is supported.
 """
 from __future__ import annotations
 
@@ -17,6 +19,7 @@ from typing import Any, Callable
 from engine.codespace_task_store import CodespaceTaskStore
 from engine.operating_policy import OperatingPolicyError, load_operating_policy
 from engine.remote_task_store import RemoteTaskStoreError
+from engine.trusted_main_policy import verify_trusted_checkout
 
 
 REPOSITORY_ROOT = Path(__file__).resolve().parent.parent
@@ -77,7 +80,7 @@ def execute_task(task: dict[str, Any], runner: Callable[..., Any] = subprocess.r
         payload = json.loads(task.get("payload_json", "{}"))
     except (TypeError, ValueError):
         return {"status": "blocked", "reason": "invalid_task_payload", "external_writes": 0}
-    if not isinstance(payload, dict):
+    if not isinstance(payload, dict) or set(payload) != {"operation"}:
         return {"status": "blocked", "reason": "invalid_task_payload", "external_writes": 0}
 
     operation = payload.get("operation")
@@ -104,12 +107,21 @@ def execute_task(task: dict[str, Any], runner: Callable[..., Any] = subprocess.r
 
 
 def run_once(store: CodespaceTaskStore | None = None,
-             runner: Callable[..., Any] = subprocess.run) -> dict[str, Any]:
+             runner: Callable[..., Any] = subprocess.run,
+             checkout_verifier: Callable[[], dict[str, Any]] | None = None) -> dict[str, Any]:
     """Load mandatory policy before any remote claim, then process at most one task."""
     try:
         policy = load_operating_policy()
     except Exception:
         return {"status": "blocked", "reason": "operating_policy_unavailable"}
+
+    verifier = checkout_verifier or verify_trusted_checkout
+    try:
+        checkout = verifier()
+    except Exception:
+        checkout = {"trusted": False}
+    if not isinstance(checkout, dict) or checkout.get("trusted") is not True:
+        return {"status": "blocked", "reason": "trusted_checkout_unverified"}
 
     client = store or CodespaceTaskStore()
     try:
@@ -125,6 +137,15 @@ def run_once(store: CodespaceTaskStore | None = None,
         return {"status": "blocked", "reason": "invalid_claim"}
 
     try:
+        try:
+            checkout_after_claim = verifier()
+        except Exception:
+            checkout_after_claim = {"trusted": False}
+        if not isinstance(checkout_after_claim, dict) or checkout_after_claim.get("trusted") is not True:
+            reason = "trusted_checkout_changed_after_claim"
+            client.finish(task_id, "blocked", result={"reason": reason, "external_writes": 0},
+                          lease_token=lease_token, error=reason)
+            return {"id": task_id, "status": "blocked", "reason": reason}
         client.heartbeat(task_id, lease_token)
         try:
             result = execute_task(task, runner=runner)
@@ -134,7 +155,8 @@ def run_once(store: CodespaceTaskStore | None = None,
         terminal = result.pop("status")
         result["policy_documents"] = policy.get("documents_loaded", [])
         result["policy_fingerprints"] = policy.get("fingerprints", {})
-        result["executor"] = "codespace"
+        result["executor"] = "trusted_main_only"
+        result["trusted_main_commit"] = checkout_after_claim.get("commit")
         client.finish(task_id, terminal, result=result, lease_token=lease_token,
                       error=result.get("reason"))
         return {"id": task_id, "status": terminal, "operation": result.get("operation")}
@@ -152,8 +174,13 @@ def main(argv: list[str] | None = None) -> int:
     if args.preflight:
         try:
             load_operating_policy()
+            checkout = verify_trusted_checkout()
+            if checkout.get("trusted") is not True:
+                print('{"status":"blocked","reason":"trusted_checkout_unverified"}')
+                return 1
             status = CodespaceTaskStore().preflight()
-            print(json.dumps({"status": "ready", "scope": status}, sort_keys=True))
+            print(json.dumps({"status": "ready", "execution_contract": "trusted_main_only",
+                              "trusted_main_commit": checkout.get("commit"), "scope": status}, sort_keys=True))
             return 0
         except (OperatingPolicyError, RemoteTaskStoreError, ValueError):
             print('{"status":"blocked","reason":"preflight_failed"}')

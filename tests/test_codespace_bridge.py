@@ -35,15 +35,23 @@ class CodespaceBridgeTests(unittest.TestCase):
         })
         result = execute_task({
             "task_type": "codespace_test",
-            "payload_json": json.dumps({"operation": "python_tests", "command": "echo unsafe"}),
+            "payload_json": json.dumps({"operation": "python_tests"}),
         }, runner=lambda *a, **k: FakeCompleted(0, "ok"))
         self.assertEqual(result["status"], "succeeded")
         self.assertEqual(result["operation"], "python_tests")
 
+    def test_extra_unreviewed_payload_fields_are_rejected(self):
+        result = execute_task({
+            "task_type": "codespace_test",
+            "payload_json": json.dumps({"operation": "python_tests", "command": "echo unsafe"}),
+        }, runner=lambda *a, **k: FakeCompleted(0, "must not run"))
+        self.assertEqual(result["status"], "blocked")
+        self.assertEqual(result["reason"], "invalid_task_payload")
+
     def test_arbitrary_command_is_rejected(self):
         result = execute_task({
             "task_type": "codespace_test",
-            "payload_json": json.dumps({"operation": "shell", "command": "rm -rf /"}),
+            "payload_json": json.dumps({"operation": "shell"}),
         })
         self.assertEqual(result["status"], "blocked")
         self.assertEqual(result["reason"], "operation_not_allowlisted")
@@ -100,7 +108,7 @@ class CodespaceBridgeTests(unittest.TestCase):
                 "payload_json": '{"operation":"python_tests"}'}
         store = FakeStore(task)
         policy = {"documents_loaded": ["AGENTS.md"], "fingerprints": {"AGENTS.md": "abc"}}
-        with patch("engine.codespace_bridge.load_operating_policy", return_value=policy):
+        with patch("engine.codespace_bridge.load_operating_policy", return_value=policy),  patch("engine.codespace_bridge.verify_trusted_checkout", return_value={"trusted": True, "commit": "a" * 40}):
             result = run_once(store, runner=lambda *a, **k: FakeCompleted(0, "tests passed"))
         self.assertEqual(result["status"], "succeeded")
         self.assertEqual(store.calls[0], "claim")
@@ -139,12 +147,38 @@ class CodespaceBridgeTests(unittest.TestCase):
         policy = {"documents_loaded": [], "fingerprints": {}}
         def broken_runner(*args, **kwargs):
             raise OSError("do not expose exception details")
-        with patch("engine.codespace_bridge.load_operating_policy", return_value=policy):
+        with patch("engine.codespace_bridge.load_operating_policy", return_value=policy),  patch("engine.codespace_bridge.verify_trusted_checkout", return_value={"trusted": True, "commit": "a" * 40}):
             result = run_once(store, runner=broken_runner)
         self.assertEqual(result["status"], "blocked")
         finish = [call for call in store.calls if isinstance(call, tuple) and call[0] == "finish"][0]
         self.assertEqual(finish[2], "blocked")
         self.assertIn("bridge_execution_failed:OSError", finish[3]["reason"])
+
+
+    def test_untrusted_checkout_prevents_any_task_claim(self):
+        store = FakeStore({"id": "task-1", "lease_token": "lease-1", "task_type": "codespace_test",
+                           "payload_json": '{"operation":"python_tests"}'})
+        with patch("engine.codespace_bridge.load_operating_policy", return_value={"documents_loaded": [], "fingerprints": {}}):
+            result = run_once(store, checkout_verifier=lambda: {"trusted": False, "reason": "branch_not_main"})
+        self.assertEqual(result["reason"], "trusted_checkout_unverified")
+        self.assertEqual(store.calls, [])
+
+    def test_checkout_is_reverified_after_claim_before_execution(self):
+        task = {"id": "task-3", "lease_token": "lease-3", "task_type": "codespace_test",
+                "payload_json": '{"operation":"python_tests"}'}
+        store = FakeStore(task)
+        states = iter([
+            {"trusted": True, "commit": "a" * 40},
+            {"trusted": False, "reason": "working_tree_not_clean"},
+        ])
+        with patch("engine.codespace_bridge.load_operating_policy", return_value={"documents_loaded": [], "fingerprints": {}}):
+            result = run_once(store, checkout_verifier=lambda: next(states))
+        self.assertEqual(result["status"], "blocked")
+        self.assertEqual(store.calls[0], "claim")
+        finish = store.calls[1]
+        self.assertEqual(finish[0:3], ("finish", "task-3", "blocked"))
+        self.assertEqual(finish[3]["reason"], "trusted_checkout_changed_after_claim")
+        self.assertFalse(any(isinstance(call, tuple) and call[0] == "heartbeat" for call in store.calls))
 
     def test_lease_loss_never_writes_completion(self):
         class LostStore(FakeStore):
@@ -152,7 +186,7 @@ class CodespaceBridgeTests(unittest.TestCase):
                 raise RemoteTaskStoreError("lost")
         store = LostStore({"id": "task-1", "lease_token": "lease-1", "task_type": "codespace_test",
                            "payload_json": '{"operation":"python_tests"}'})
-        with patch("engine.codespace_bridge.load_operating_policy", return_value={"documents_loaded": [], "fingerprints": {}}):
+        with patch("engine.codespace_bridge.load_operating_policy", return_value={"documents_loaded": [], "fingerprints": {}}),  patch("engine.codespace_bridge.verify_trusted_checkout", return_value={"trusted": True, "commit": "a" * 40}):
             result = run_once(store)
         self.assertEqual(result["status"], "lease_lost_or_remote_error")
         self.assertFalse(any(isinstance(call, tuple) and call[0] == "finish" for call in store.calls))
