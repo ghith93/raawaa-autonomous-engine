@@ -10,6 +10,7 @@ Unittest rather than pytest on purpose: root CI runs ``unittest discover``, so a
 pytest-style file here would be imported and never executed.
 """
 import unittest
+from pathlib import Path
 
 from engine.sandbox_policy import (
     CEILINGS,
@@ -224,6 +225,22 @@ class RefusalTest(unittest.TestCase):
             with self.assertRaises(SandboxPolicyError, msg=repr(bad)):
                 assert_sandbox_argv(bad, expected_source_dir="/repo")
 
+
+class WorkflowContractTest(unittest.TestCase):
+    def test_gvisor_release_and_signing_key_are_pinned(self):
+        workflow = Path(".github/workflows/sandbox-adversarial.yml").read_text(encoding="utf-8")
+        self.assertIn('RUNSC_VERSION: "20261102.0"', workflow)
+        self.assertIn('RUNSC_SUITE: "20261102"', workflow)
+        self.assertIn('RUNSC_KEY_FINGERPRINT: "6F1DF85E3A71C24918E727D56C6D554E32BD943"', workflow)
+        self.assertIn('runsc=$RUNSC_VERSION', workflow)
+        self.assertIn("gpg --show-keys --with-colons", workflow)
+
+    def test_summary_uses_an_environment_variable_for_untrusted_image_input(self):
+        workflow = Path(".github/workflows/sandbox-adversarial.yml").read_text(encoding="utf-8")
+        summary = workflow.split("      - name: Summary", 1)[1]
+        self.assertIn("IMAGE: ${{ inputs.image }}", summary)
+        shell = summary.split("        run: |", 1)[1]
+        self.assertNotIn("${{ inputs.image }}", shell)
 
 class ReviewedRefTest(unittest.TestCase):
     def test_only_reviewed_main_may_execute_task_code(self):
