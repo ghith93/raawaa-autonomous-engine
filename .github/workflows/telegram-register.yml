@@ -73,7 +73,7 @@ jobs:
           if [ "$missing" -ne 0 ]; then
             echo "::error title=Registration not attempted::$missing required secret name(s) missing (see the annotations above)."
             exit 1
-          }
+          fi
       - name: Discover the private chat and generate the webhook secret
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
