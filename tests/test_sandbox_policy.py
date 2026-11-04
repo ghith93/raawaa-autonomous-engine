@@ -199,7 +199,7 @@ class RefusalTest(unittest.TestCase):
         self.assertEqual(assert_sandbox_argv(vector, expected_source_dir="/repo"), vector)
 
     def test_a_vector_missing_a_boundary_flag_is_refused(self):
-        for flag in (f"--runtime={SANDBOX_RUNTIME}", "--network=none", "--read-only",
+        for flag in (f"--runtime={SANDBOX_RUNTIME}", "--network=none", "--entrypoint=", "--read-only",
                      "--cap-drop=ALL", "--security-opt=no-new-privileges"):
             with self.assertRaisesRegex(SandboxPolicyError, "missing", msg=flag):
                 assert_sandbox_argv([a for a in argv() if a != flag], expected_source_dir="/repo")
