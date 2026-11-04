@@ -5,11 +5,12 @@ can prove a boundary, and it only proves it where a boundary exists — so it is
 skipped unless both of these are set:
 
     RAAWAA_SANDBOX_LIVE=1
-    RAAWAA_SANDBOX_IMAGE=<image>@sha256:<64 hex>
+    RAAWAA_SANDBOX_IMAGE=python:3.12-slim@sha256:aa943ce411423c7582288f18707ff66eddcbaeb510502d747a72aeb34f30d159
 
 Run it from ``.github/workflows/sandbox-adversarial.yml``, which installs gVisor on
-an ephemeral runner. A green run there is evidence; a green run of the rest of the
-suite is not, and #440's release rule says so explicitly.
+an ephemeral runner and mounts a temporary workspace containing only a canary file.
+The checked-out repository and its `.git` directory are never mounted into the
+sandbox. A green run there is evidence; a green run of the rest of the suite is not.
 
 Each probe is a small program that *tries* to escape and reports what it saw. The
 harness asserts on its output, so a probe that fails to run at all is a failure
@@ -121,18 +122,25 @@ def _sandbox_available():
 class SandboxEscapeTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.workspace = Path(__file__).resolve().parents[2]
+        cls.workspace_tmp = tempfile.TemporaryDirectory(
+            prefix="raawaa-sandbox-workspace-",
+            dir=os.environ.get("RUNNER_TEMP") or tempfile.gettempdir(),
+        )
+        cls.addClassCleanup(cls.workspace_tmp.cleanup)
+        cls.workspace = Path(cls.workspace_tmp.name).resolve(strict=True)
         with tempfile.NamedTemporaryFile(
             mode="w", prefix="raawaa-host-canary-", dir=Path.home(), delete=False,
             encoding="utf-8",
         ) as handle:
             cls.host_canary = Path(handle.name)
+            cls.addClassCleanup(cls.host_canary.unlink, missing_ok=True)
             handle.write(HOST_CANARY_MARKER)
         with tempfile.NamedTemporaryFile(
             mode="w", prefix=".raawaa-source-canary-", dir=cls.workspace,
             delete=False, encoding="utf-8",
         ) as handle:
             cls.source_canary = Path(handle.name)
+            cls.addClassCleanup(cls.source_canary.unlink, missing_ok=True)
             handle.write("source-must-remain-immutable")
         if cls.host_canary.is_relative_to(cls.workspace):
             raise RuntimeError("host canary must be outside the mounted workspace")
