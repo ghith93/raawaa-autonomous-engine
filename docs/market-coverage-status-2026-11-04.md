@@ -69,3 +69,8 @@ The cheapest gap that changes what the system *is*:
 - No strategy is net-profitable. Gross spread is reported as gross spread.
 - No endpoint was called for this document; nothing here is evidence of live data quality, rate-limit behaviour in production, or regional availability.
 - Nothing here authorises deployment, provider activation, spend, or execution. The engine's dry-run and zero-spend gates are unchanged.
+
+
+## Cross-family comparator depth correction — 2026-11-04
+
+The first multi-family comparator increment exposed a false-positive path: an undeclared `max_base_quantity` was converted to a 100% fill fraction. The evaluator now treats a missing depth fraction as unknown and returns `depth_unverified`; it never emits `net_profit_quote` for that comparison. The comparison evidence records buy- and sell-side depth separately, and the aggregate depth basis distinguishes fully quoted, partially declared, and undeclared depth. A net-positive candidate requires explicit depth evidence for both legs. Regression fixtures cover unknown buy depth, unknown sell depth, both unknown, and both declared, using a positive mathematical spread and complete costs. This remains a research estimate, not proof of execution or profitability.
