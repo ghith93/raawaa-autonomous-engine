@@ -87,6 +87,7 @@ def build_workflow_run_manifest(
     if not isinstance(raw_steps, dict) or not 1 <= len(raw_steps) <= _MAX_STEPS:
         raise WorkflowManifestError("plan must contain between 1 and 20 steps")
     if (not isinstance(order, list) or len(order) != len(raw_steps)
+            or any(not isinstance(item, str) for item in order)
             or len(order) != len(set(order)) or set(order) != set(raw_steps)):
         raise WorkflowManifestError("plan order must contain every step exactly once")
 
@@ -100,9 +101,15 @@ def build_workflow_run_manifest(
             raise WorkflowManifestError(f"step {step_id} must be an object")
         dependencies = step.get("depends_on")
         if (not isinstance(dependencies, list)
-                or len(dependencies) != len(set(dependencies))
-                or any(not isinstance(dep, str) for dep in dependencies)):
+                or any(not isinstance(dep, str) for dep in dependencies)
+                or len(dependencies) != len(set(dependencies))):
             raise WorkflowManifestError(f"step {step_id} has invalid dependencies")
+        if (step.get("task_type") not in {"research_brief", "code_review", "content_draft", "system_audit"}
+                or not isinstance(step.get("title"), str) or not step["title"].strip()
+                or not isinstance(step.get("assigned_agent"), str) or not step["assigned_agent"].strip()
+                or type(step.get("priority", 50)) is not int
+                or not 0 <= step.get("priority", 50) <= 100):
+            raise WorkflowManifestError(f"step {step_id} has invalid execution metadata")
         if any(dep not in raw_steps or dep not in seen for dep in dependencies):
             raise WorkflowManifestError(f"step {step_id} has a missing or forward dependency")
         if not dependencies:
