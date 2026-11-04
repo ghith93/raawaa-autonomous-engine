@@ -57,9 +57,9 @@ def test_cex_against_solana_aggregator_with_full_costs_reaches_a_net_label():
         network_fee_quote="0.01", priority_fee_quote="0.005",
     )
     result = compare_legs(
-        buy=leg(price="60000", venue="binance"),
+        buy=leg(price="60000", venue="binance", max_base_quantity="1"),
         sell=leg(family="solana_aggregator", venue="jupiter", instrument="btc-mint/usdc-mint",
-                 price="60900", data_type="executable_quote"),
+                 price="60900", data_type="executable_quote", max_base_quantity="1"),
         notional_quote="600",
         costs=costs,
         now=NOW,
@@ -105,9 +105,9 @@ def test_an_indicative_leg_caps_the_label_even_when_the_math_is_positive():
         network_fee_quote="0.01", priority_fee_quote="0.005",
     )
     result = compare_legs(
-        buy=leg(price="60000"),
+        buy=leg(price="60000", max_base_quantity="1"),
         sell=leg(family="solana_aggregator", venue="jupiter", instrument="mint-a/mint-b",
-                 price="60900", data_type="indicative_quote"),
+                 price="60900", data_type="indicative_quote", max_base_quantity="1"),
         notional_quote="600", costs=costs, now=NOW,
     )
     assert result.evaluation.status == "net_positive_estimate"
