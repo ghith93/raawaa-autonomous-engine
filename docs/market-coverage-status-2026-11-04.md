@@ -12,7 +12,8 @@ venue registry's own claims. **No live endpoint was called** for this
 evaluation. That is deliberate — every number below comes from code, fixtures,
 and the registry's own `source_status` field.
 
-Head evaluated: `e84c282`. Project suite: **496 tests, all passing**
+Head evaluated: `e84c282` (comparator increment: `ed24d24`). Project suite:
+**508 tests, all passing**
 (`cd projects/telegram-arbitrage-engine && PYTHONPATH=src python3 -m pytest`).
 
 ## Acceptance criteria
@@ -40,7 +41,14 @@ Head evaluated: `e84c282`. Project suite: **496 tests, all passing**
 
 ## Gaps, stated plainly
 
-1. **No cross-family comparator.** `cross_venue.py` is CEX-spot only. A CEX-versus-DEX or CEX-versus-Solana comparison cannot be expressed through it even though `opportunity_costs.py` can price both legs. This is the single largest gap between "we have adapters" and "we have a multi-market research system".
+1. ~~**No cross-family comparator.**~~ **Closed 2026-11-04** by
+   `market_sources/multi_family.py` (`compare_legs`) with 12 fixture tests: a leg
+   from any of the four priced families can now sit on either side of a
+   comparison, with identity, freshness, skew, depth, data-type and full-cost
+   gates preserved. `cross_venue.py` still governs CEX-only order-book sweeps and
+   is unchanged. What remains open here: the comparison takes caller-supplied
+   legs, so nothing yet wires a DEX or Solana adapter's output into it
+   automatically — that is the next increment, and it needs no new source.
 2. **No triangular/cyclic enumeration.** Nothing in `src/` implements it; the term appears only in docs. The cost model could price the legs, but the route enumeration does not exist.
 3. **No derivatives strategy module.** Funding data is ingested and normalised (`funding.py`); nothing computes basis, carry or spot-perp convergence from it.
 4. **No cross-chain comparator.** The cost model has a `cross_chain` flag with bridge/settlement requirements; no code builds such a comparison.
