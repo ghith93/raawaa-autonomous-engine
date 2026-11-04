@@ -20,6 +20,11 @@ on:
         description: "Type REGISTER_TELEGRAM_WEBHOOK to confirm"
         required: true
         type: string
+      chat_id:
+        description: "Optional numeric chat id; skips discovery (use after a webhook has already drained the queue)"
+        required: false
+        default: ""
+        type: string
 
 permissions:
   contents: read
@@ -79,10 +84,17 @@ jobs:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
         run: |
           set -uo pipefail
+          CHAT_ID="${{ inputs.chat_id }}"
+          if [ -n "$CHAT_ID" ] && ! printf '%s' "$CHAT_ID" | grep -Eq '^-?[0-9]+(,-?[0-9]+)*$'; then
+            echo "::error title=Invalid chat_id::chat_id must be numeric (or comma-separated)"
+            exit 1
+          fi
           # The script's diagnostics go to stderr, which nobody can read from a
           # workflow run — so each line becomes an annotation, and "no private chat
           # found for @x" arrives as a sentence carrying the bot's own link.
-          if ! output="$(python3 scripts/telegram_bootstrap.py --url "$WORKER_URL" --env-file /tmp/telegram.env 2>&1)"; then
+          args=(--url "$WORKER_URL" --env-file /tmp/telegram.env)
+          [ -n "$CHAT_ID" ] && args+=(--chat-id "$CHAT_ID")
+          if ! output="$(python3 scripts/telegram_bootstrap.py "${args[@]}" 2>&1)"; then
             printf '%s\n' "$output" | tail -n 5 | while IFS= read -r line; do
               [ -n "$line" ] && echo "::error title=Telegram bootstrap::$line"
             done
