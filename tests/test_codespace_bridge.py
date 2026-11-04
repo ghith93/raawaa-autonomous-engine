@@ -108,8 +108,7 @@ class CodespaceBridgeTests(unittest.TestCase):
                 "payload_json": '{"operation":"python_tests"}'}
         store = FakeStore(task)
         policy = {"documents_loaded": ["AGENTS.md"], "fingerprints": {"AGENTS.md": "abc"}}
-        with patch("engine.codespace_bridge.load_operating_policy", return_value=policy), \\
-             patch("engine.codespace_bridge.verify_trusted_checkout", return_value={"trusted": True, "commit": "a" * 40}):
+        with patch("engine.codespace_bridge.load_operating_policy", return_value=policy),  patch("engine.codespace_bridge.verify_trusted_checkout", return_value={"trusted": True, "commit": "a" * 40}):
             result = run_once(store, runner=lambda *a, **k: FakeCompleted(0, "tests passed"))
         self.assertEqual(result["status"], "succeeded")
         self.assertEqual(store.calls[0], "claim")
@@ -148,8 +147,7 @@ class CodespaceBridgeTests(unittest.TestCase):
         policy = {"documents_loaded": [], "fingerprints": {}}
         def broken_runner(*args, **kwargs):
             raise OSError("do not expose exception details")
-        with patch("engine.codespace_bridge.load_operating_policy", return_value=policy), \\
-             patch("engine.codespace_bridge.verify_trusted_checkout", return_value={"trusted": True, "commit": "a" * 40}):
+        with patch("engine.codespace_bridge.load_operating_policy", return_value=policy),  patch("engine.codespace_bridge.verify_trusted_checkout", return_value={"trusted": True, "commit": "a" * 40}):
             result = run_once(store, runner=broken_runner)
         self.assertEqual(result["status"], "blocked")
         finish = [call for call in store.calls if isinstance(call, tuple) and call[0] == "finish"][0]
@@ -188,8 +186,7 @@ class CodespaceBridgeTests(unittest.TestCase):
                 raise RemoteTaskStoreError("lost")
         store = LostStore({"id": "task-1", "lease_token": "lease-1", "task_type": "codespace_test",
                            "payload_json": '{"operation":"python_tests"}'})
-        with patch("engine.codespace_bridge.load_operating_policy", return_value={"documents_loaded": [], "fingerprints": {}}), \\
-             patch("engine.codespace_bridge.verify_trusted_checkout", return_value={"trusted": True, "commit": "a" * 40}):
+        with patch("engine.codespace_bridge.load_operating_policy", return_value={"documents_loaded": [], "fingerprints": {}}),  patch("engine.codespace_bridge.verify_trusted_checkout", return_value={"trusted": True, "commit": "a" * 40}):
             result = run_once(store)
         self.assertEqual(result["status"], "lease_lost_or_remote_error")
         self.assertFalse(any(isinstance(call, tuple) and call[0] == "finish" for call in store.calls))
