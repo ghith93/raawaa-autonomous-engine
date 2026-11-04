@@ -4,9 +4,52 @@ import { handlePaperLedger } from "./paper-ledger.js";
 import { handleTaskInvocation } from "./task-invocations.js";
 import { handleTelegramWebhook } from "./telegram-webhook.js";
 import { handleMobilePage, handleMobileStatus } from "./mobile-status.js";
-import { dispatchTaskRunnerIfStale } from "./task-runner-watchdog.js";
+import { dispatchDueWorkflows } from "./task-runner-watchdog.js";
 const JSON_HEADERS = { "content-type": "application/json; charset=utf-8", "cache-control": "no-store" };
 const MAX_BODY_BYTES = 32 * 1024;
+
+// A storage failure must travel to the authenticated caller with a bounded
+// reason. Swallowing it made the 2026-11-04 claim outage ("HTTP 503" and
+// nothing else) indistinguishable from any other unavailability, and D1 was
+// never told to anyone. The reason is truncated and flattened; no SQL text of
+// the request, headers, or credentials are included.
+const MAX_ERROR_DETAIL = 240;
+function storageDetail(error) {
+  const text = error && error.message ? String(error.message) : String(error ?? "unknown");
+  return text.replace(/\s+/g, " ").trim().slice(0, MAX_ERROR_DETAIL);
+}
+
+// Tables the Worker's own SQL depends on. A deploy that ships code referencing a
+// table no migration created is invisible until the first write fails: on
+// 2026-11-04 the claim route joined task_dependencies eight hours before that
+// table existed, and the queue answered 503 while every read stayed healthy.
+const REQUIRED_SCHEMA_TABLES = Object.freeze([
+  "tasks",
+  "task_dependencies",
+  "audit_log",
+  "schema_migrations",
+  "monetary_reservations",
+  "task_model_invocations",
+]);
+
+async function schemaProbe(env) {
+  const missing = [];
+  const reasons = {};
+  for (const table of REQUIRED_SCHEMA_TABLES) {
+    try {
+      await env.DB.prepare(`SELECT 1 FROM ${table} LIMIT 1`).all();
+    } catch (error) {
+      missing.push(table);
+      reasons[table] = storageDetail(error);
+    }
+  }
+  return {
+    ok: missing.length === 0,
+    checked: [...REQUIRED_SCHEMA_TABLES],
+    missing,
+    reasons,
+  };
+}
 // Release remains hard-disabled until issue #440 adversarial sandbox criteria pass.
 const CODESPACE_EXECUTOR_RELEASE_ENABLED = false;
 const CODESPACE_TASK_TYPES = new Set(["codespace_inspect", "codespace_test"]);
@@ -177,7 +220,9 @@ export default {
   async scheduled(controller, env) {
     const cron = typeof controller?.cron === "string" ? controller.cron : "";
     if (cron === "1,6,11,16,21,26,31,36,41,46,51,56 * * * *") {
-      await dispatchTaskRunnerIfStale({
+      // Every watched workflow, not only the task runner: a dropped GitHub
+      // schedule produces no failure notification, so silence is the symptom.
+      await dispatchDueWorkflows({
         env,
         scheduledTime: controller?.scheduledTime,
       });
@@ -222,6 +267,7 @@ export default {
         !/^\/v1\/codespace\/tasks\/[A-Za-z0-9-]+\/(heartbeat|finish)$/.test(url.pathname) &&
         url.pathname !== "/v1/tasks/recover" &&
         url.pathname !== "/v1/diagnostics/auth" &&
+        url.pathname !== "/v1/diagnostics/schema" &&
         url.pathname !== "/v1/research/candidates" &&
         url.pathname !== "/v1/quota" &&
         url.pathname !== "/v1/monetary-ledger" &&
@@ -277,6 +323,12 @@ export default {
     if (url.pathname === "/v1/diagnostics/auth") {
       if (request.method !== "POST") return json({ error: "method_not_allowed" }, 405);
       return json({ ok: true, authenticated: true });
+    }
+
+    if (url.pathname === "/v1/diagnostics/schema") {
+      if (request.method !== "GET") return json({ error: "method_not_allowed" }, 405);
+      const probe = await schemaProbe(env);
+      return json(probe, probe.ok ? 200 : 503);
     }
 
     if (request.method === "GET" && url.pathname === "/v1/tasks") {
@@ -379,8 +431,8 @@ export default {
           attempt: claim.attempts, lease_expires_at: expires, execution_mode: executionMode
         }), nowIso).run();
         return json({ task: claim, lease_token: leaseToken, lease_expires_at: expires });
-      } catch {
-        return json({ error: "storage_unavailable" }, 503);
+      } catch (error) {
+        return json({ error: "storage_unavailable", detail: storageDetail(error) }, 503);
       }
     }
 
@@ -586,8 +638,8 @@ export default {
         return json({ error: "dependency_manifest_conflict" }, 409);
       }
       return json({ task: { ...task, depends_on: storedDependencies }, created: task.id === id }, task.id === id ? 201 : 200);
-    } catch {
-      return json({ error: "storage_unavailable" }, 503);
+    } catch (error) {
+      return json({ error: "storage_unavailable", detail: storageDetail(error) }, 503);
     }
   }
 };

@@ -334,6 +334,35 @@ class CliTests(unittest.TestCase):
             self.assertEqual(len(task_store.list_tasks()), 1)
 
 
+    def test_brain_cycle_cli_requests_the_portable_snapshot_limit(self):
+        """The remote adapter clamps at 100, so the CLI must not ask for 200."""
+        seen = {}
+
+        class FakeStore:
+            def list_tasks(self, limit=50):
+                seen["limit"] = limit
+                return [
+                    {"id": f"s{i}", "task_type": "code_review", "status": "succeeded"}
+                    for i in range(5)
+                ]
+
+        output = io.StringIO()
+        with patch("engine.cli.store", return_value=FakeStore()):
+            with patch("sys.argv", ["engine", "brain-cycle", "--limit", "2"]):
+                with contextlib.redirect_stdout(output):
+                    self.assertEqual(cli.main(), 0)
+        result = json.loads(output.getvalue())
+
+        self.assertEqual(seen["limit"], 100)
+        self.assertEqual(result["schema_version"], 2)
+        self.assertEqual(result["snapshot"]["requested_limit"], 100)
+        self.assertFalse(result["snapshot"]["truncated"])
+        self.assertEqual(result["excluded"], {"non_terminal": 0, "missing_task_type": 0, "malformed": 0})
+        self.assertEqual(result["learning"]["scorecards"][0]["sample_size"], 5)
+        self.assertEqual(result["guardrails"]["task_writes"], 0)
+        self.assertFalse(result["guardrails"]["dispatch_authorized"])
+
+
     def test_workflow_plan_cli_validates_and_does_not_enqueue(self):
         proposal = {
             "id": "cli_plan",

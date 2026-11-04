@@ -19,7 +19,7 @@
 | Apply D1 Migrations | `d1-migrate.yml` | **Database write** | Inspect target and environment before use. Use Staging only for new migrations. Never assume the target from the workflow name. |
 | D1 Migration Inventory (Read Only) | `d1-migration-inventory.yml` | Read-only schema inventory | Does not apply migrations. |
 | D1 Staging Inventory (Read Only) | `d1-staging-inventory.yml` | Read-only staging inventory | Verifies isolated Staging target/schema. |
-| Deploy Control Worker | `deploy-worker.yml` | **Production deployment** | Requires `confirm_deployment=DEPLOY_CONTROL_WORKER`; after PR #432, preserve dashboard vars and fail if watchdog is not ready. |
+| Deploy Control Worker | `deploy-worker.yml` | **Production deployment** | No manual dispatch; authorized only by a `main` push whose commit message contains `[deploy-control-worker]`. After PR #432, preserve dashboard vars and fail if watchdog is not ready. |
 | V2 Flash Swap Solidity Tests | `flash-swap-solidity.yml` | Test/CI | Solidity tests; not a deployment workflow. |
 | Groq API Connection Check | `groq-connection-check.yml` | Read-only provider check | Authentication/catalog only; does not prove free inference success. |
 | One-shot Groq Free inference Staging smoke | `groq-free-inference-staging-smoke.yml` | **One-shot provider inference in Staging** | Uses isolated Staging and ephemeral bearer credentials; intended to revoke them. Run only after inspecting exact script and quota evidence. |
@@ -45,3 +45,20 @@
 ## Workflow discovery method
 
 Use the connected Activepieces GitHub action `trigger_workflow_dispatch` with repository `ghith93/raawaa-autonomous-engine`; resolve the `workflow` property after selecting the repository. This returned the authoritative 25-entry list above. The existing Activepieces flow `Raawaa GitHub Workflow Control` is preconfigured for the standard Task Runner workflow only; do not mistake it for a universal workflow selector.
+
+
+## Live workflow-tree reconciliation — 2026-11-04 00:51 UTC
+
+- The exact main tree at e6761d09de884d34bdc0ef7d01d7b7a8f1e1682e contains 23 workflow YAML files under .github/workflows. The current list includes the existing CI, Task Runner, research discovery, Cloudflare inventory/audit/billing, D1 inventory/migration, Staging deployment, Production Worker deployment, Groq connection and Staging smoke, and read-only market-data workflows. Reuse these exact entry points; do not add another scheduler or queue consumer.
+- The earlier catalog entry for openrouter-nemotron-free-smoke.yml is not present in the current main workflow tree. Treat that entry as stale/historical and do not dispatch it unless a current workflow file and selector entry are independently verified. The dynamic Dependabot workflow is platform-generated and is not a file in this repository tree.
+- Main CI run #41747902547 passed on exact main SHA e6761d09de884d34bdc0ef7d01d7b7a8f1e1682e, including all Staging migration, isolated Worker, monetary-ledger, telemetry, and authenticated mobile-status jobs.
+- The existing Task Runner workflow was dispatched through the existing Activepieces flow. TESTING flow run appXqFOAEJKRLnQoA8xJs succeeded and triggered GitHub run #41749347645. The bounded run completed with queue_idle and processed 0 tasks; this is not proof of live inference or business-task completion.
+- Production Control Worker workflow run #41748314581 was skipped. Production Worker and D1 remain unchanged.
+- The active main-protection ruleset requires PRs, strict test status, and resolved review threads, but currently requires zero approving reviews. Do not treat an independent approval as an enforced repository rule.
+
+
+### Task Runner schedule-liveness checkpoint — 2026-11-04 00:53 UTC
+
+- The existing task-runner.yml retains its five-minute cron offsets 2, 7, 12, 17, 22, 27, 32, 37, 42, 47, 52, and 57 UTC, plus workflow_dispatch; concurrency remains grouped as d1-task-runner.
+- The latest Task Runner events visible in the first 100 repository workflow runs were workflow_dispatch #41749347645 and push #41743485185. No event=schedule appeared in that result. Treat primary GitHub cron liveness as unverified; do not create another scheduler or infer schedule health from the manual dispatch.
+- The separate Worker Cron heartbeat was recorded at 00:45:34Z. The GitHub App watchdog remains not_ready because GITHUB_APP_WATCHDOG_ENABLED is missing.

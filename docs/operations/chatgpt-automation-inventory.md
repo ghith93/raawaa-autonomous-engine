@@ -24,3 +24,13 @@
 - `Raawaa Engine Daily Ops` remains enabled with the same daily 19:00 America/New_York schedule. Reapplying the existing schedule and toggling the existing automation off/on did not restore `next_run_time`; it remains null. The last recorded scheduled run remains failed on 2026-11-02.
 - A manual `run_now` request succeeded only by returning an `inline_run` instruction for execution in the current conversation. This is not a background run and does not prove recurring scheduler liveness. No duplicate automation was created.
 - The three marketing/market/serum automations remain paused; their state was not changed.
+
+
+## Live revalidation — 2026-11-04 00:51 UTC
+
+- Current automation inventory returned four automations. Only Raawaa Engine Daily Ops is enabled; the other three marketing/market/serum automations remain paused. The enabled record still has last_run_time=2026-11-02T15:17:12Z and next_run_time=null. This invocation does not prove recurring scheduler liveness. Do not create a duplicate or re-enable the paused tasks.
+- Current tool catalog contains 1,922 definitions across 64 namespace groups. The current skills__list result was empty; no skill pack was surfaced in this runtime.
+- GitHub and Activepieces app permission checks both report app-specific Allow all actions and global Allow low-risk actions. These are ChatGPT-side permission settings, not engine credentials or repository API scopes.
+- Activepieces project Ghith's Project has one ACTIVE GitHub connection and one ENABLED, published flow: Raawaa GitHub Workflow Control. The flow is Manual Trigger → GitHub workflow_dispatch for task-runner.yml on main. Latest TESTING run appXqFOAEJKRLnQoA8xJs succeeded and triggered GitHub Task Runner run #41749347645. No PRODUCTION flow runs were found.
+- Activepieces lists 20 model entries under its activepieces provider, but price, quota, eligibility, and billing are unknown. No inference was sent. These are not engine-runtime provider adapters.
+- The current repository main SHA is e6761d09de884d34bdc0ef7d01d7b7a8f1e1682e. Main CI #41747902547 passed all test and isolated Staging verification jobs. Production deployment workflow #41748314581 was skipped; Production Worker/D1 remain unchanged.

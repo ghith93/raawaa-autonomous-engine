@@ -147,6 +147,55 @@ class RemoteTaskStoreTests(unittest.TestCase):
             with self.assertRaisesRegex(RemoteTaskStoreError, "temporarily unavailable"):
                 self.store.list_tasks()
 
+    def test_server_error_carries_the_worker_reason(self):
+        """A 503 without its reason is undiagnosable; the body must survive."""
+        import io
+        from urllib.error import HTTPError
+
+        body = io.BytesIO(json.dumps({
+            "error": "storage_unavailable",
+            "detail": "D1_ERROR: too many SQL variables: SQLITE_ERROR",
+        }).encode("utf-8"))
+        with patch("engine.remote_task_store.urlopen",
+                   side_effect=HTTPError("https://engine.example/v1/tasks/claim", 503,
+                                         "unavailable", {}, body)):
+            with self.assertRaises(RemoteTaskStoreError) as caught:
+                self.store.claim_next()
+        message = str(caught.exception)
+        self.assertIn("HTTP 503", message)
+        self.assertIn("storage_unavailable", message)
+        self.assertIn("D1_ERROR", message)
+        self.assertNotIn("secret-test-token", message)
+
+    def test_error_detail_is_bounded_and_flattened(self):
+        import io
+        from urllib.error import HTTPError
+
+        body = io.BytesIO(json.dumps({
+            "error": "storage_unavailable",
+            "detail": "line one\nline two " + "x" * 5000,
+        }).encode("utf-8"))
+        with patch("engine.remote_task_store.urlopen",
+                   side_effect=HTTPError("https://engine.example/v1/tasks/claim", 503,
+                                         "unavailable", {}, body)):
+            with self.assertRaises(RemoteTaskStoreError) as caught:
+                self.store.claim_next()
+        message = str(caught.exception)
+        self.assertNotIn("\n", message)
+        self.assertLess(len(message), 900)
+
+    def test_server_error_without_a_body_stays_generic(self):
+        from urllib.error import HTTPError
+        with patch("engine.remote_task_store.urlopen",
+                   side_effect=HTTPError("https://engine.example/v1/tasks/claim", 503,
+                                         "unavailable", {}, None)):
+            with self.assertRaises(RemoteTaskStoreError) as caught:
+                self.store.claim_next()
+        self.assertEqual(
+            str(caught.exception),
+            "Remote task API temporarily unavailable (HTTP 503)",
+        )
+
     def test_transport_oserror_is_sanitized(self):
         with patch("engine.remote_task_store.urlopen", side_effect=OSError("socket detail")):
             with self.assertRaisesRegex(RemoteTaskStoreError, "unavailable") as caught:

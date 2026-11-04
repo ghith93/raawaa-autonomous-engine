@@ -1,0 +1,53 @@
+name: Issue Comment Ingest
+
+# Turns a validated task envelope in a tracked issue comment into one idempotent
+# engine task. This is the receiving edge the engine never had: GitHub supplies
+# its own token here, so no GitHub App event subscription is involved.
+#
+# Off by default. Enable by setting the repository variable
+# ISSUE_COMMENT_INGEST_ENABLED=true; remove it (or set anything else) to stop.
+#
+# Deliberately granted `contents: read` only. The job cannot comment, label or
+# edit anything, so it cannot create a loop by reacting to its own output.
+
+on:
+  issue_comment:
+    types: [created]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: issue-comment-ingest-${{ github.event.comment.id }}
+  cancel-in-progress: false
+
+jobs:
+  ingest:
+    if: >
+      vars.ISSUE_COMMENT_INGEST_ENABLED == 'true' &&
+      github.event.issue.number == 464 &&
+      github.event.comment.user.login == 'ghith93' &&
+      github.event.comment.user.type != 'Bot'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Check out reviewed main
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - name: Set up Python
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7
+        with:
+          python-version: "3.11"
+      - name: Plan and enqueue from comment
+        env:
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+          COMMENT_ID: ${{ github.event.comment.id }}
+          COMMENT_AUTHOR: ${{ github.event.comment.user.login }}
+          COMMENT_AUTHOR_TYPE: ${{ github.event.comment.user.type }}
+          COMMENT_BODY: ${{ github.event.comment.body }}
+          ALLOWED_ACTOR: ghith93
+          ALLOWED_ISSUE: "464"
+          ENGINE_API_URL: https://raawaa-autonomous-engine-control.ghith-shikhkhaled.workers.dev
+          ENGINE_API_TOKEN: ${{ secrets.ENGINE_API_TOKEN }}
+          CF_ACCESS_CLIENT_ID: ${{ secrets.CF_ACCESS_CLIENT_ID }}
+          CF_ACCESS_CLIENT_SECRET: ${{ secrets.CF_ACCESS_CLIENT_SECRET }}
+        run: python3 scripts/github_comment_ingest.py --post
