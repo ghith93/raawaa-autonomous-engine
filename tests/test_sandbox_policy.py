@@ -232,10 +232,10 @@ class ReviewedRefTest(unittest.TestCase):
             with self.assertRaisesRegex(SandboxPolicyError, "reviewed", msg=ref):
                 reviewed_ref_only(ref)
 
-    def test_the_pr_head_escape_hatch_stays_narrow(self):
-        self.assertEqual(reviewed_ref_only("refs/pull/12/merge", allow_pr_heads=True), "/workspace")
-        with self.assertRaisesRegex(SandboxPolicyError, "refs/pull"):
-            reviewed_ref_only("refs/heads/feature", allow_pr_heads=True)
+    def test_every_pull_request_ref_is_rejected_even_if_its_branch_is_in_this_repository(self):
+        for ref in ("refs/pull/12/merge", "refs/pull/12/head", "refs/heads/feature"):
+            with self.assertRaisesRegex(SandboxPolicyError, "only reviewed"):
+                reviewed_ref_only(ref)
 
 
 if __name__ == "__main__":
