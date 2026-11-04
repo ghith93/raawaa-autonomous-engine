@@ -22,6 +22,33 @@ class RemoteTaskStoreTests(unittest.TestCase):
         self.store = RemoteTaskStore("https://engine.example", "secret-test-token")
 
     @patch("engine.remote_task_store.urlopen")
+    def test_enqueue_sends_priority_and_dependencies(self, open_url):
+        open_url.return_value = FakeResponse({
+            "task": {
+                "id": "child-task", "priority": 80,
+                "depends_on": '["parent-task"]', "status": "pending",
+            }
+        })
+        task = self.store.enqueue(
+            "code_review", "Dependent review", idempotency_key="child-key",
+            priority=80, depends_on=["parent-task"],
+        )
+        self.assertEqual(task["priority"], 80)
+        payload = json.loads(open_url.call_args.args[0].data)
+        self.assertEqual(payload["priority"], 80)
+        self.assertEqual(payload["depends_on"], ["parent-task"])
+
+    def test_enqueue_rejects_invalid_priority_or_dependencies_before_request(self):
+        with self.assertRaisesRegex(ValueError, "priority"):
+            self.store.enqueue("research_brief", "Bad priority", priority=101)
+        with self.assertRaisesRegex(ValueError, "depends_on"):
+            self.store.enqueue("research_brief", "Duplicate", depends_on=["parent", "parent"])
+        with patch("engine.remote_task_store.urlopen") as open_url:
+            with self.assertRaisesRegex(ValueError, "depends_on"):
+                self.store.enqueue("research_brief", "Bad dependency", depends_on=["bad id"])
+            open_url.assert_not_called()
+
+    @patch("engine.remote_task_store.urlopen")
     def test_claim_returns_server_lease_token(self, open_url):
         open_url.return_value = FakeResponse({
             "task": {"id": "task-1", "payload_json": "{}", "status": "running"},
