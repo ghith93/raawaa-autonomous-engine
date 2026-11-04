@@ -116,6 +116,39 @@ class IssueRankingTests(unittest.TestCase):
         report = build_development_cycle(state)
         self.assertEqual([i["target"] for i in report["next_actions"]], ["#4", "#3"])
 
+    def test_tracking_umbrella_is_excluded_from_the_ranking(self):
+        state = {
+            "signals": {"main_ci_status": "success"},
+            "open_issues": [
+                {"number": 34, "title": "status log", "labels": ["tracking"],
+                 "created_at": _iso(1440 * 3)},
+                {"number": 1, "title": "real work", "labels": ["enhancement"],
+                 "created_at": _iso(60)},
+            ],
+        }
+        report = build_development_cycle(state)
+        self.assertEqual([i["target"] for i in report["next_actions"]], ["#1"])
+        self.assertEqual([t["target"] for t in report["tracking"]], ["#34"])
+        self.assertIn("not a unit of work", report["tracking"][0]["reason"])
+
+    def test_every_tracking_label_alias_is_honoured(self):
+        for label in ("tracking", "umbrella", "meta"):
+            with self.subTest(label=label):
+                report = build_development_cycle(
+                    {"open_issues": [{"number": 2, "title": "x", "labels": [label]}]}
+                )
+                self.assertEqual(report["next_actions"], [])
+                self.assertEqual(len(report["tracking"]), 1)
+
+    def test_tracking_umbrella_never_displaces_a_pipeline_failure(self):
+        state = {
+            "signals": {"main_ci_status": "failure"},
+            "open_issues": [{"number": 34, "title": "log", "labels": ["tracking"]}],
+        }
+        report = build_development_cycle(state)
+        self.assertEqual(report["next_actions"][0]["action"], "fix_red_main_ci")
+        self.assertEqual(len(report["tracking"]), 1)
+
     def test_blocked_issue_is_held_not_ranked(self):
         state = {
             "signals": {"main_ci_status": "success"},
