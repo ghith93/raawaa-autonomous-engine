@@ -14,6 +14,7 @@ model inference, task execution, arbitrary operation calls, or customer-facing w
 - `POST /v1/tasks/:id/finish`: completes a leased task as `succeeded`, `failed`, or `blocked`.
 - `POST /v1/tasks/:id/retry`: releases a leased task back to `pending` while attempts remain, otherwise marks it `failed`.
 - `POST /v1/workflows/dispatch`: enqueues every step of a validated workflow plan with its dependency edges and records the run, atomically (see below).
+- `GET /v1/workflows/:run_id`: read-only reconciliation — what a run recorded, and whether every step's task exists.
 
 All task writes use prepared statements and a D1 batch so task insertion and its audit
 event are committed together. Duplicate idempotency keys return the existing task.
@@ -50,6 +51,13 @@ Properties, each covered by a test:
 - **Replay is a no-op.** Task ids and idempotency keys derive deterministically from
   `(workflow_id, run_id, plan_version, step_id)`, so repeating a dispatch returns
   `200` with `created: false` and writes nothing.
+- **Replay must also match content.** The run row stores a `steps_digest` (SHA-256 over
+  the normalized steps). The same `run_id` and `plan_digest` with different steps is
+  `409 step_contract_conflict`; the stored digest, not a preflight read, decides.
+- **A lost response is not a failure.** A definite SQL/constraint error is a known
+  rollback (`503 dispatch_failed`, nothing enqueued). Any other error may have
+  committed, so it answers `504 dispatch_outcome_unknown` and the caller reconciles
+  with `GET /v1/workflows/:run_id` instead of retrying under a new run id.
 - **A different plan cannot reuse a run id.** Same `run_id`, different `plan_digest`
   returns `409 run_digest_conflict` instead of quietly dispatching a second workflow
   under an identity that already means something.
@@ -58,9 +66,13 @@ Properties, each covered by a test:
   child blocked forever — an edge to a task that will never exist looks like a stuck
   queue, not a bad request.
 - **Cycles are refused** (`400 cyclic_dependency`) with the offending steps named.
+- **Only known step types.** `research_brief`, `code_review`, `content_draft` and
+  `system_audit` are accepted; anything else is `400 unsupported_step_task_type`, so a
+  typo cannot become a task nothing can execute. Codespace task types are refused
+  categorically, not only while the executor release is false.
 - **Ages gracefully.** On a deployment that predates `migrations/0012_workflow_runs.sql`
-  the route returns `404 plan_dispatch_unavailable`; it never reports success for a run
-  it could not record.
+  the route — and the reconciliation route — return `404 plan_dispatch_unavailable`; it
+  never reports success for a run it could not record.
 - **Still not execution.** Tasks are enqueued as `pending` and pass through the same
   claim, lease and policy gates as any other task. Codespace task types stay refused
   while the executor release is false, and dispatch never sets `dispatch_authorized`

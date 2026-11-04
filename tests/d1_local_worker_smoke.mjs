@@ -247,6 +247,31 @@ try {
   assertStatus(conflicting, 409, "workflow dispatch digest conflict");
   assert.equal(conflicting.payload.error, "run_digest_conflict");
 
+  // Reconciliation: the run can be read back and names its tasks, without writing.
+  const reconciled = await api("/v1/workflows/smoke-run-1");
+  assertStatus(reconciled, 200, "workflow run reconciliation");
+  assert.equal(reconciled.payload.complete, true);
+  assert.deepEqual(reconciled.payload.steps.map(step => step.step_id).sort(), ["prepare", "verify"]);
+  assert.equal(reconciled.payload.run.step_count, 2);
+  assert.match(reconciled.payload.run.steps_digest, /^[0-9a-f]{64}$/);
+
+  const unknownRun = await api("/v1/workflows/never-dispatched");
+  assertStatus(unknownRun, 404, "unknown workflow run");
+
+  // A step type outside the manifest's allowlist is refused by the Worker itself.
+  const badType = await api("/v1/workflows/dispatch", {
+    method: "POST",
+    body: {
+      run_id: "smoke-run-2",
+      workflow_id: "smoke-workflow",
+      plan_digest: "d".repeat(64),
+      plan_version: 1,
+      steps: [{ step_id: "x", task_type: "not_a_real_type", title: "x" }],
+    },
+  });
+  assertStatus(badType, 400, "unsupported step task type");
+  assert.equal(badType.payload.error, "unsupported_step_task_type");
+
   // The dependency edge is real: the dependent step must not be claimable while
   // its parent is pending.
   const claimAfterDispatch = await api("/v1/tasks/claim", { method: "POST", body: {} });

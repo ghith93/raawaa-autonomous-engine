@@ -3,7 +3,7 @@ import { handleMonetaryLedger } from "./monetary-ledger.js";
 import { handlePaperLedger } from "./paper-ledger.js";
 import { handleTaskInvocation } from "./task-invocations.js";
 import { handleTelegramWebhook } from "./telegram-webhook.js";
-import { handleWorkflowDispatch } from "./workflow-dispatch.js";
+import { handleWorkflowDispatch, handleWorkflowRunLookup } from "./workflow-dispatch.js";
 import { handleMobilePage, handleMobileStatus } from "./mobile-status.js";
 import { dispatchDueWorkflows } from "./task-runner-watchdog.js";
 const JSON_HEADERS = { "content-type": "application/json; charset=utf-8", "cache-control": "no-store" };
@@ -321,6 +321,7 @@ export default {
         url.pathname !== "/v1/paper-ledger" &&
         url.pathname !== "/v1/mobile/status" &&
         url.pathname !== "/v1/workflows/dispatch" &&
+        !/^\/v1\/workflows\/[A-Za-z][A-Za-z0-9_-]{0,127}$/.test(url.pathname) &&
         !/^\/v1\/tasks\/[A-Za-z0-9-]+\/invocations$/.test(url.pathname) &&
         url.pathname !== "/v1/research/candidates/review" &&
         !/^\/v1\/tasks\/[A-Za-z0-9-]+\/(heartbeat|finish|retry)$/.test(url.pathname)) {
@@ -353,6 +354,9 @@ export default {
     // Only reachable after the bearer guard above: dispatch enqueues tasks, so it
     // must sit behind the same authentication as /v1/tasks/enqueue. It records
     // the run and its steps in one D1 batch and executes nothing.
+    const runLookupResponse = await handleWorkflowRunLookup(request, env, url);
+    if (runLookupResponse) return runLookupResponse;
+
     const dispatchResponse = await handleWorkflowDispatch(request, env, url, {
       codespaceTaskTypes: CODESPACE_TASK_TYPES,
       executorEnabled: CODESPACE_EXECUTOR_RELEASE_ENABLED,

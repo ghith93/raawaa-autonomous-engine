@@ -12,10 +12,19 @@ CREATE TABLE IF NOT EXISTS workflow_runs (
   run_id TEXT PRIMARY KEY,
   workflow_id TEXT NOT NULL,
   plan_digest TEXT NOT NULL,
+  -- SHA-256 over the normalized steps actually enqueued. plan_digest binds the
+  -- run identity to a plan; steps_digest binds it to the content. A replay
+  -- carrying the same plan_digest but different steps is a conflict, not a
+  -- no-op, and it is the stored digest — not a preflight read — that decides.
+  steps_digest TEXT NOT NULL,
   plan_version INTEGER NOT NULL DEFAULT 1,
   status TEXT NOT NULL CHECK(status IN ('dispatched','dispatch_failed')),
   step_count INTEGER NOT NULL CHECK(step_count >= 1),
   entry_step_ids TEXT NOT NULL,
+  -- Every step id in the run, so reconciliation can name each task without
+  -- pattern-matching on ids (a LIKE prefix would treat '_' in a run id as a
+  -- wildcard).
+  step_ids TEXT NOT NULL,
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL
 );
