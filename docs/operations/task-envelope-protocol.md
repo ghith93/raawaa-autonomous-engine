@@ -139,6 +139,35 @@ The last one is the sharpest: the general validator only rejects negative caps, 
 an envelope may legally declare a budget. The ingest path refuses any budget at
 all, because this edge exists to record work, not to fund it.
 
+### Writing an envelope without wasting a run
+
+A hand-written envelope is rejected for reasons that are invisible while you
+write it: an acceptance criterion that is prose, evidence that names no openable
+artefact, a date that has passed. The rejection only surfaces after a workflow
+run. Generate it instead:
+
+```
+python scripts/owner_task.py \
+    --to chatgpt --scope research-only \
+    --acceptance "The \`task-runner\` report shows 1 task processed and 0 pending" \
+    --evidence "pr-470; engine/worker.py" \
+    --post
+```
+
+The generator validates against the same `validate()` the edge uses, refuses to
+post when anything fails, and prints a hint naming what the two most common
+rejections actually want. Pass `--id` to pin an identifier; otherwise the next
+free `ARENA-OP-NNN` is chosen from the handoff issue.
+
+### Reading a result without downloading logs
+
+Job logs are not reachable from this project's tooling, so the bounded batch
+states its own outcome: `engine/run_report.py` emits one `::notice` per task
+(`id`, `status`, `reason`, `mode`) plus a summary line, and appends a table to
+the step summary. Both are readable through the checks API and the run page.
+A blocked task and a succeeded task are therefore distinguishable from outside,
+which the queue counters alone could never show.
+
 ### What `succeeded` means
 
 `succeeded` means **validated and recorded — nothing more**. The stored result
