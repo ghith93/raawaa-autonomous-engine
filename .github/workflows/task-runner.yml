@@ -1,10 +1,6 @@
 name: Scheduled D1 Task Runner
 
 on:
-  push:
-    branches: [main]
-    paths:
-      - ".github/workflows/task-runner.yml"
   schedule:
     # Primary GitHub cadence; the Cloudflare watchdog is a separately gated fallback.
     # Refresh the schedule registration without changing the five-minute cadence; avoid minute 0 load.
@@ -12,7 +8,7 @@ on:
   workflow_dispatch:
     inputs:
       run_public_research_once:
-        description: "Queue and run one public research task using the verified Groq Free route"
+        description: "Unavailable: one-shot live research is disabled pending verified zero-cost controls"
         required: false
         type: boolean
         default: false
@@ -31,6 +27,11 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 3
     steps:
+      - name: Refuse unverified one-shot live research
+        if: github.event_name == 'workflow_dispatch' && inputs.run_public_research_once
+        run: |
+          echo '::error::One-shot live research is disabled: account tier, provider-side zero-cost controls, and safe task isolation must be independently verified before re-enabling.'
+          exit 1
       - name: Check out reviewed main
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - name: Set up Python
@@ -153,159 +154,12 @@ jobs:
           CF_ACCESS_CLIENT_ID: ${{ secrets.CF_ACCESS_CLIENT_ID }}
           CF_ACCESS_CLIENT_SECRET: ${{ secrets.CF_ACCESS_CLIENT_SECRET }}
         run: python -m engine.mobile_status_probe
-      - name: Enqueue one-time D1 dry-run smoke task
-        if: github.event_name == 'push'
-        env:
-          ENGINE_API_URL: https://raawaa-autonomous-engine-control.ghith-shikhkhaled.workers.dev
-          ENGINE_API_TOKEN: ${{ secrets.ENGINE_API_TOKEN }}
-        run: |
-          python - <<'PY'
-          import json
-          import os
-          import urllib.error
-          import urllib.request
-
-          payload = {
-              "task_type": "system_audit",
-              "title": "One-time D1 queue end-to-end smoke test",
-              "payload": {
-                  "purpose": "Verify authenticated enqueue, claim, lease fencing, specialist dry-run and result persistence.",
-                  "constraints": ["No provider calls", "No external writes", "No customer data"],
-              },
-              "idempotency_key": "raawaa-engine-e2e-smoke-2026-11-01",
-              "max_attempts": 1,
-          }
-          request = urllib.request.Request(
-              os.environ["ENGINE_API_URL"].rstrip("/") + "/v1/tasks/enqueue",
-              data=json.dumps(payload).encode("utf-8"),
-              headers={
-                  "Authorization": "Bearer " + os.environ["ENGINE_API_TOKEN"],
-                  "Content-Type": "application/json",
-                  "Accept": "application/json",
-                  "User-Agent": "RaawaaAutonomousEngine/1.0 (+https://github.com/ghith93/raawaa-autonomous-engine)",
-              },
-              method="POST",
-          )
-          try:
-              with urllib.request.urlopen(request, timeout=15) as response:
-                  result = json.loads(response.read().decode("utf-8"))
-                  task = result.get("task") or {}
-                  print(f"Smoke task enqueue returned HTTP {response.status}; created={result.get('created')}.")
-                  print(f"Smoke task status: {task.get('status', 'not reported')}.")
-          except urllib.error.HTTPError as error:
-              print(f"Smoke task enqueue failed with HTTP {error.code}.")
-              raise SystemExit(1)
-          except (urllib.error.URLError, TimeoutError, OSError, ValueError) as error:
-              print(f"Smoke task enqueue failed: {type(error).__name__}.")
-              raise SystemExit(1)
-          PY
-
-      - name: Enqueue one-time public research task
-        if: github.event_name == 'workflow_dispatch' && inputs.run_public_research_once
-        id: research
-        env:
-          ENGINE_API_URL: https://raawaa-autonomous-engine-control.ghith-shikhkhaled.workers.dev
-          ENGINE_API_TOKEN: ${{ secrets.ENGINE_API_TOKEN }}
-          PENDING_TASKS: ${{ steps.mobile.outputs.tasks_pending }}
-          RUNNING_TASKS: ${{ steps.mobile.outputs.tasks_running }}
-          GITHUB_RUN_ID: ${{ github.run_id }}
-        run: |
-          python - <<'PY'
-          import json
-          import os
-          from urllib.request import Request, urlopen
-          from urllib.error import HTTPError, URLError
-
-          if os.environ.get("PENDING_TASKS") != "0" or os.environ.get("RUNNING_TASKS") != "0":
-              raise SystemExit("Refusing one-shot live research: the D1 queue must be empty and idle before enqueue.")
-          payload = {
-              "task_type": "research_brief",
-              "title": "Public research: lean multi-agent orchestration choices",
-              "payload": {
-                  "data_classification": "public",
-                  "topic": "Compare LangGraph, CrewAI, PydanticAI and Agno for a lightweight Python multi-agent operating system with durable task queues, safe delegation, observable execution, and strict free-only inference budgets.",
-                  "questions": [
-                      "Compare their orchestration model, learning curve, persistence, retries, observability, and deployment footprint.",
-                      "Identify the smallest practical architecture for a solo operator using GitHub Actions and Cloudflare D1 without paid infrastructure.",
-                      "Separate verified capabilities from assumptions and list concrete migration risks.",
-                      "Recommend a staged adoption plan that avoids unnecessary framework complexity."
-                  ],
-                  "source_urls": [
-                      "https://docs.langchain.com/oss/python/langgraph/overview",
-                      "https://docs.crewai.com/",
-                      "https://ai.pydantic.dev/",
-                      "https://docs.agno.com/"
-                  ]
-              },
-              "idempotency_key": "raawaa-public-research-" + os.environ["GITHUB_RUN_ID"],
-              "max_attempts": 1
-          }
-          request = Request(
-              os.environ["ENGINE_API_URL"].rstrip("/") + "/v1/tasks/enqueue",
-              data=json.dumps(payload).encode("utf-8"),
-              headers={
-                  "Authorization": "Bearer " + os.environ["ENGINE_API_TOKEN"],
-                  "Content-Type": "application/json",
-                  "Accept": "application/json",
-                  "User-Agent": "RaawaaAutonomousEngine/1.0 (+https://github.com/ghith93/raawaa-autonomous-engine)"
-              },
-              method="POST"
-          )
-          try:
-              with urlopen(request, timeout=15) as response:
-                  result = json.loads(response.read().decode("utf-8"))
-                  task = result.get("task") or {}
-                  if response.status not in (200, 201) or not task.get("id"):
-                      raise SystemExit("Research task enqueue returned no task identity.")
-                  print("Public research task enqueued; created=" + str(result.get("created")) + ".")
-                  print("Task status: " + str(task.get("status", "unknown")) + ".")
-                  with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
-                      output.write("task_id=" + str(task["id"]) + "\n")
-          except HTTPError as error:
-              raise SystemExit("Research task enqueue failed with HTTP " + str(error.code)) from None
-          except (URLError, TimeoutError, OSError, ValueError) as error:
-              raise SystemExit("Research task enqueue failed: " + type(error).__name__) from None
-          PY
-
-      - name: Enable verified-free route for this job only
-        if: github.event_name == 'workflow_dispatch' && inputs.run_public_research_once
-        run: |
-          python - <<'PY'
-          import json
-          from datetime import datetime, timezone
-          from pathlib import Path
-
-          policy_path = Path("config/policy.json")
-          policy = json.loads(policy_path.read_text(encoding="utf-8"))
-          policy["mode"] = "live_inference_opt_in"
-          policy["model_policy"]["provider_hard_stop_verified"] = True
-          policy["model_policy"]["provider_hard_stop_evidence"] = {
-              "provider": "Groq Cloud Free Plan",
-              "scope": "Operator-confirmed Free organization; openai/gpt-oss-20b route only",
-              "hard_limit": "Free-plan quotas: 30 RPM, 1,000 RPD, 8,000 TPM, 200,000 TPD. Over-limit requests return HTTP 429; Groq Free Plan support confirms no charges while the account remains on Free Plan. No paid route or paid fallback.",
-              "verified_at": datetime.now(timezone.utc).replace(microsecond=0).isoformat(),
-              "source_url": "https://console.groq.com/docs/rate-limits",
-              "support_url": "https://community.groq.com/t/do-i-get-charged-for-anything-on-the-groq-free-plan/832"
-          }
-          policy_path.write_text(json.dumps(policy, indent=2) + "\n", encoding="utf-8")
-
-          profiles_path = Path("config/provider_profiles.json")
-          profiles = json.loads(profiles_path.read_text(encoding="utf-8"))
-          for route in profiles["routes"]:
-              route["enabled"] = route["id"] == "groq-free-gpt-oss-20b-primary"
-          profiles_path.write_text(json.dumps(profiles, indent=2) + "\n", encoding="utf-8")
-          PY
-          python -m engine.cli audit
-
       - name: Process bounded D1 task batch
         id: batch
         env:
           # Provider credentials are scoped to the bounded worker process only.
           # The gateway still fails closed unless repository policy, provider
           # verification, quota evidence, and the operator switch all permit use.
-          RAAWAA_ENGINE_LIVE_INFERENCE: ${{ inputs.run_public_research_once && 'enabled' || '' }}
-          RUN_PUBLIC_RESEARCH_ONCE: ${{ inputs.run_public_research_once }}
-          EXPECTED_RESEARCH_TASK_ID: ${{ steps.research.outputs.task_id }}
           RAAWAA_ENGINE_API_URL: https://raawaa-autonomous-engine-control.ghith-shikhkhaled.workers.dev
           RAAWAA_ENGINE_API_TOKEN: ${{ secrets.ENGINE_API_TOKEN }}
           RAAWAA_ENGINE_QUOTA_ADMIN_TOKEN: ${{ secrets.ENGINE_QUOTA_ADMIN_TOKEN }}
@@ -321,10 +175,8 @@ jobs:
           import sys
           from pathlib import Path
 
-          run_research = os.environ.get("RUN_PUBLIC_RESEARCH_ONCE", "").lower() == "true"
-          max_tasks = "1" if run_research else "5"
           command = [sys.executable, "-m", "engine.cli", "run-batch",
-                     "--max-tasks", max_tasks, "--max-seconds", "60"]
+                     "--max-tasks", "5", "--max-seconds", "60"]
           result = subprocess.run(command, capture_output=True, text=True, check=False)
           # Keep the per-task JSON where the reporting step can reach it. Job logs
           # are not downloadable from this project's own tooling, so a result that
@@ -347,34 +199,19 @@ jobs:
               stop_reason = str(payload.get("stop_reason", "unknown"))
           except (ValueError, TypeError):
               payload = {}
-          if os.environ.get("RUN_PUBLIC_RESEARCH_ONCE", "").lower() == "true":
-              results = payload.get("results", []) if isinstance(payload, dict) else []
-              expected_id = os.environ.get("EXPECTED_RESEARCH_TASK_ID", "")
-              if (result.returncode != 0 or tasks_processed != 1 or len(results) != 1
-                      or results[0].get("id") != expected_id
-                      or results[0].get("status") != "succeeded"
-                      or results[0].get("mode") != "live_inference"
-                      or results[0].get("provider") != "groq"
-                      or results[0].get("model") != "openai/gpt-oss-20b"
-                      or not results[0].get("output_preview")):
-                  raise SystemExit("One-shot research did not complete through the expected live Groq route.")
-              with open(os.environ["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8") as summary:
-                  summary.write("## One-shot public research result\n\n")
-                  summary.write("Provider: Groq · Model: openai/gpt-oss-20b\n\n")
-                  summary.write(results[0]["output_preview"][:3500] + "\n")
           with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
               output.write(f"tasks_processed={tasks_processed}\nstop_reason={stop_reason}\n")
           raise SystemExit(result.returncode)
           PY
       - name: Publish per-task outcomes
-        if: always()
+        if: always() && !(github.event_name == 'workflow_dispatch' && inputs.run_public_research_once)
         # Annotations and the step summary are readable through the checks API and
         # the run page; raw job logs are not. Always run, so a failed batch still
         # says which task failed and why.
         run: python -m engine.run_report /tmp/raawaa-batch.json /tmp/raawaa-batch.stderr
 
       - name: Publish bounded Task Runner status
-        if: always()
+        if: always() && !(github.event_name == 'workflow_dispatch' && inputs.run_public_research_once)
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9
         env:
           HEALTH_STATUS: ${{ steps.health.outputs.status }}
