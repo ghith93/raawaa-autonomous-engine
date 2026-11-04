@@ -6,7 +6,7 @@
 
 ## Decision
 
-Add Z.ai's GLM family to the provider/model evaluation set. Keep every GLM route disabled until the exact account entitlement, rate limits, API terms, model-specific license, and a hard-zero-spend route are verified.
+Add Z.ai's GLM family to the provider/model evaluation set, but do not yet classify it as eligible for autonomous-agent production use. Keep every GLM route disabled until the exact account entitlement, rate limits, API terms (including the broad restriction on decision-making activities), model-specific license, and a hard-zero-spend route are verified. Obtain written clarification from Z.ai on whether internal autonomous-agent planning, model routing, code review, and execution orchestration are permitted under the API Terms.
 
 The official Z.ai API pricing table lists **GLM-4.7-Flash**, **GLM-4.5-Flash**, and **GLM-4.6V-Flash** as Free for input, cached input, cached-input storage, and output. This is a strong public zero-price candidate, but it is not proof that this account has access, a fixed quota, a stable production SLA, or any particular card/billing requirement. The pricing page publishes no numeric RPM/TPM/RPD/TPD allowance for these rows. The account's rate-limit console and current eligibility remain unverified.
 
@@ -39,6 +39,7 @@ Prices are USD per million tokens from the official Z.ai API pricing table check
 
 - The current Terms of Use (updated 2026-04-14) state that API customers/developers are also governed by the Additional Terms for API Services, and that the Additional Terms prevail in case of inconsistency.
 - The API Additional Terms state that Z.ai will use API End User Content only as necessary to provide the API, comply with law, enforce policies, and prevent abuse; it says API content will not be used to develop or improve services unless the customer explicitly agrees.
+- **Critical terms ambiguity:** the same API Additional Terms prohibit use of Z.ai for "decision-making activities" (section 1.f.iv). The scope is not defined on the page. Autonomous agents that plan tasks, choose providers/tools, review code, or initiate actions may be considered decision-making. Do not use GLM for those Engine roles until Z.ai provides written clarification that the intended internal/business workflow is permitted. The fact that API integration for downstream systems is generally allowed does not resolve this specific restriction.
 - The API Data Processing Addendum describes Z.ai as processor for customer personal data and says it processes such data on the customer's behalf for API support. The DPA also describes Singapore as the general processing location and refers to safeguards for international transfers. Review the full current DPA and any applicable order/contract before sending personal data.
 - Do not confuse the consumer Z.ai chat privacy policy/consumer terms with the API Additional Terms. The consumer terms permit broader service-improvement use of individual-user content; API-specific clauses are different.
 - Even with the API no-training clause, never send secrets, credentials, private source code, customer/order data, personal data, or Raawaa formulae during initial evaluation. Use synthetic public prompts only. Do not use Z.ai outputs to train or improve competing models; API terms expressly restrict this outside authorized integration for specific business scenarios.
@@ -81,4 +82,4 @@ Score quality, correctness, latency, reliability, context efficiency, and actual
 
 ## Review outcome
 
-**Recommendation:** retain GLM as a first-class candidate in model discovery, with GLM-4.7-Flash as the first no-spend account-verification target. Do not add a production provider profile or enable inference yet. The exact account quota, availability, card/billing requirement, and operational benchmark remain unverified.
+**Recommendation:** retain GLM as a research candidate, with GLM-4.7-Flash as the first no-spend account-verification target. Do not add an enabled provider profile or use it for autonomous decision-making yet. The API Terms' undefined decision-making prohibition must be clarified in writing, in addition to verifying account quota, availability, billing requirements, and operational quality.
