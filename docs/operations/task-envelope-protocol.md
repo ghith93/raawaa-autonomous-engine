@@ -121,9 +121,34 @@ Why re-validate a second time: the queue row is durable and could be edited
 between admission and claim, and an envelope that was valid yesterday is not
 valid today if it has expired.
 
-Outcomes: `succeeded` with `result.inference == "none"`, or `blocked` with
-`missing_envelope` / `invalid_ingested_envelope`. A blocked row is evidence that
-the gate held, not a failure of the pipeline.
+### What is re-checked at claim time, and why
+
+The queue row is durable, so "it was true when enqueued" is not the same claim as
+"it is true now". Before a task is completed the handler re-checks:
+
+| Check | Rejected reason | Why it exists |
+|---|---|---|
+| `source == github_issue_comment` | `ingest_provenance_rejected` | a row from elsewhere is not this pipeline's |
+| issue number matches the tracked issue | `ingest_provenance_rejected` | scope creep by editing one integer |
+| author is on the allowlist | `ingest_provenance_rejected` | identity is the only gate the edge has |
+| `comment_id` matches `idempotency_key` | `ingest_provenance_rejected` | replay under a different key |
+| recomputed fingerprint equals the recorded one | `envelope_fingerprint_mismatch` | the envelope may have been edited after admission |
+| `cost_cap_usd` is exactly `0` | `ingest_cost_cap_exceeded` | **a valid schema is not proof of authority** |
+
+The last one is the sharpest: the general validator only rejects negative caps, so
+an envelope may legally declare a budget. The ingest path refuses any budget at
+all, because this edge exists to record work, not to fund it.
+
+### What `succeeded` means
+
+`succeeded` means **validated and recorded — nothing more**. The stored result
+carries `inference: "none"`, `execution_authorized: false` and
+`meaning: "validated_and_recorded_only"`. Turning a recorded task into execution
+is a separate, explicit act; nothing in this path can do it, and a test asserts
+that no contract or agent is ever constructed here.
+
+Outcomes: `succeeded`, or `blocked` with one of the reasons above. A blocked row
+is evidence that the gate held, not a failure of the pipeline.
 
 ## Deliberate design choices
 

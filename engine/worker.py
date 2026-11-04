@@ -12,7 +12,7 @@ from engine.provider import GenerationRequest
 from engine.task_store import TaskStore
 from engine.live_data_policy import validate_live_payload
 from engine.operating_policy import OperatingPolicyError, load_operating_policy
-from scripts.task_envelope import validate as validate_envelope
+from scripts.task_envelope import envelope_hash, validate as validate_envelope
 
 
 SAFE_TASKS = {"research_brief", "code_review", "content_draft", "system_audit"}
@@ -21,6 +21,20 @@ SAFE_TASKS = {"research_brief", "code_review", "content_draft", "system_audit"}
 # they are handled by an explicit branch that performs no inference, so the
 # allowlist for model-calling work keeps its original four entries.
 INGEST_TASK_TYPE = "issue_comment_task"
+
+# Provenance the receiving edge is required to have recorded. Checked again at
+# claim time, because the queue row is durable: "it was true when enqueued" is
+# not the same claim as "it is true now".
+INGEST_SOURCE = "github_issue_comment"
+INGEST_ISSUE_NUMBER = int(os.environ.get("RAAWAA_INGEST_ISSUE", "464"))
+INGEST_ALLOWED_AUTHORS = frozenset(
+    author.strip()
+    for author in os.environ.get("RAAWAA_INGEST_AUTHORS", "ghith93").split(",")
+    if author.strip()
+)
+# An ingested comment may never carry a spending authority: the edge exists to
+# record work, not to authorise it.
+INGEST_MAX_COST_CAP_USD = 0.0
 
 
 def _ingest_payload(task: dict) -> dict:
@@ -35,6 +49,28 @@ def _ingest_payload(task: dict) -> dict:
             return {}
         return decoded if isinstance(decoded, dict) else {}
     return {}
+
+
+def _ingest_provenance_errors(task: dict, payload: dict) -> list[str]:
+    """Check that the row still describes a comment we were willing to accept."""
+    errors: list[str] = []
+    if payload.get("source") != INGEST_SOURCE:
+        errors.append(f"unexpected source {payload.get('source')!r}")
+    issue_number = payload.get("issue_number")
+    if not isinstance(issue_number, int) or issue_number != INGEST_ISSUE_NUMBER:
+        errors.append(f"unexpected issue {issue_number!r}")
+    author = payload.get("comment_author")
+    if not isinstance(author, str) or author not in INGEST_ALLOWED_AUTHORS:
+        errors.append(f"unexpected comment author {author!r}")
+    comment_id = payload.get("comment_id")
+    if not isinstance(comment_id, int):
+        errors.append("comment_id is not an integer")
+    else:
+        expected_key = f"github-comment-{comment_id}"
+        stored_key = task.get("idempotency_key")
+        if isinstance(stored_key, str) and stored_key and stored_key != expected_key:
+            errors.append(f"idempotency key {stored_key!r} does not match {expected_key!r}")
+    return errors
 
 
 def _complete_ingest_task(store: TaskStore, task: dict) -> dict:
@@ -53,12 +89,46 @@ def _complete_ingest_task(store: TaskStore, task: dict) -> dict:
                      lease_token=task.get("lease_token"))
         return {"id": task["id"], "status": "blocked", "reason": "missing_envelope"}
 
+    # Provenance first: shape validation says nothing about where a row came from.
+    provenance_errors = _ingest_provenance_errors(task, payload)
+    if provenance_errors:
+        store.finish(task["id"], "blocked",
+                     error=("Ingested task failed provenance: " + "; ".join(provenance_errors))[:400],
+                     lease_token=task.get("lease_token"))
+        return {"id": task["id"], "status": "blocked", "reason": "ingest_provenance_rejected"}
+
+    # Integrity: the payload may have been edited after admission. Recompute the
+    # fingerprint from the envelope itself and compare it with the recorded one.
+    recomputed = envelope_hash(envelope)
+    recorded = payload.get("envelope_fingerprint")
+    if not isinstance(recorded, str) or not recorded:
+        store.finish(task["id"], "blocked", error="Ingested task has no envelope fingerprint",
+                     lease_token=task.get("lease_token"))
+        return {"id": task["id"], "status": "blocked", "reason": "missing_envelope_fingerprint"}
+    if recomputed != recorded:
+        store.finish(task["id"], "blocked",
+                     error=f"Ingested envelope fingerprint mismatch: recorded={recorded[:12]} recomputed={recomputed[:12]}",
+                     lease_token=task.get("lease_token"))
+        return {"id": task["id"], "status": "blocked", "reason": "envelope_fingerprint_mismatch"}
+
     errors, warnings = validate_envelope(envelope)
     if errors:
         store.finish(task["id"], "blocked",
                      error=("Invalid ingested envelope: " + "; ".join(errors))[:400],
                      lease_token=task.get("lease_token"))
         return {"id": task["id"], "status": "blocked", "reason": "invalid_ingested_envelope"}
+
+    # Policy, not merely presence: the edge accepts no spending authority at all.
+    try:
+        cap = float(envelope.get("cost_cap_usd"))
+    except (TypeError, ValueError):
+        cap = None
+    if cap is None or cap > INGEST_MAX_COST_CAP_USD:
+        store.finish(task["id"], "blocked",
+                     error=f"Ingested envelope cost cap {envelope.get('cost_cap_usd')!r} exceeds "
+                           f"the ingest limit of {INGEST_MAX_COST_CAP_USD}",
+                     lease_token=task.get("lease_token"))
+        return {"id": task["id"], "status": "blocked", "reason": "ingest_cost_cap_exceeded"}
 
     result = {
         "envelope_id": envelope.get("id"),
@@ -67,6 +137,9 @@ def _complete_ingest_task(store: TaskStore, task: dict) -> dict:
         "issue_number": payload.get("issue_number"),
         "warnings": warnings,
         "inference": "none",
+        "execution_authorized": False,
+        "meaning": "validated_and_recorded_only",
+        "envelope_fingerprint_verified": recomputed,
     }
     store.finish(task["id"], "succeeded", result=result, lease_token=task.get("lease_token"))
     return {"id": task["id"], "status": "succeeded", "reason": "issue_comment_recorded",
