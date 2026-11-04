@@ -21,6 +21,10 @@ on:
         options:
           - diagnose
           - repair
+      owner_binding:
+        description: "Repair only: attest independently verified exclusive allowlist (see runbook)"
+        required: false
+        type: string
 
 permissions:
   contents: read
@@ -51,6 +55,17 @@ jobs:
         uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7
         with:
           python-version: "3.12"
+      - name: Require independent allowlist verification for repair
+        if: inputs.mode == 'repair'
+        env:
+          OWNER_BINDING: ${{ inputs.owner_binding }}
+        run: |
+          set -euo pipefail
+          if [ "${OWNER_BINDING:-}" != 'VERIFIED_EXISTING_ALLOWLIST' ]; then
+            echo '::error title=Owner authorization unverified::Repair requires independent verification of every existing allowed identity. Presence is not proof. See the runbook.'
+            exit 1
+          fi
+          echo '::notice title=Owner verification::Operator attestation received; the workflow cannot independently verify the allowlist.'
       - name: Validate required repository secrets
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
@@ -108,7 +123,7 @@ jobs:
           MODE: ${{ inputs.mode }}
         run: |
           set -euo pipefail
-          if ! npx --yes wrangler@4.156.1 secret list --format json --config wrangler.toml > /tmp/telegram-worker-secrets.json; then
+          if ! npx --yes wrangler@4.156.1 secret list --format json --config wrangler.toml > /tmp/telegram-worker-secrets.json 2>/dev/null; then
             echo "::error title=Worker secret inventory::Unable to list Worker secret names. No secret value was requested."
             exit 1
           fi
@@ -173,6 +188,15 @@ jobs:
             echo "::error title=Telegram preparation::$output"
             exit 1
           fi
+          masked=0
+          while IFS='=' read -r key value; do
+            if [ "$key" = TELEGRAM_WEBHOOK_SECRET ]; then
+              [[ "$value" =~ ^[A-Za-z0-9_-]{16,256}$ ]] || { echo '::error::Invalid prepared webhook secret'; exit 1; }
+              printf '::add-mask::%s\n' "$value"
+              masked=$((masked + 1))
+            fi
+          done < /tmp/telegram.env
+          [ "$masked" -eq 1 ] || { echo '::error::Expected exactly one prepared webhook secret'; exit 1; }
       - name: Install bot and webhook secrets; preserve the allowlist
         if: inputs.mode == 'repair'
         env:
@@ -189,7 +213,15 @@ jobs:
               *) echo "::error::Unexpected prepared key"; exit 1 ;;
             esac
             [ -n "$value" ] || { echo "::error::Empty prepared secret"; exit 1; }
-            printf '%s' "$value" | npx --yes wrangler@4.156.1 secret put "$key" --config wrangler.toml
+            # Provider output is deliberately discarded: it could echo submitted
+            # data on error. GitHub masks the new webhook secret as a second line
+            # of defense, but transformed values would not necessarily be masked.
+            if printf '%s' "$value" | npx --yes wrangler@4.156.1 secret put "$key" --config wrangler.toml >/dev/null 2>&1; then
+              echo "::notice title=Worker secret::Installed $key."
+            else
+              echo "::error title=Worker secret::Installation of $key failed; provider output withheld to protect secrets."
+              exit 1
+            fi
           done < /tmp/telegram.env
       - name: Register and verify the exact webhook URL
         if: inputs.mode == 'repair'
@@ -227,7 +259,8 @@ jobs:
             echo ""
             echo "A matching URL or a signed synthetic probe does not prove the owner's chat is authorized or that a reply was delivered."
             echo "Repair preserves the existing allowlist and does not explicitly drop pending updates."
-            echo "If a repair fails between secret installation and registration, retry repair to install and register a fresh matching secret."
+            echo "The operator attestation is not automated verification of owner identity."
+            echo "If a repair fails between secret installation and registration, investigate the failure and pending queue before considering a fresh matching secret."
           } >> "$GITHUB_STEP_SUMMARY"
       - name: Remove prepared secrets
         if: always()

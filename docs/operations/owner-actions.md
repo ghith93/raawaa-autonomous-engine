@@ -40,14 +40,26 @@ prove it is valid, contains the owner's ID, or belongs to the correct bot.
 URL is a confirmed configuration defect only when reported by this live check.
 
 After exact-head tests, independent review, and an authorized Worker deployment
-(including the `/start` alias), **repair** mode is a separate explicit action:
+(including the `/start` alias), **repair** mode is a separate explicit action.
+Before dispatch, independently verify the provenance and authorization of **every**
+identity in the existing allowlist, including that there are no unintended extra
+identities. The old bootstrap could have enrolled an unsolicited sender; restoring
+that unknown list to service could expose private information. If the existing
+list cannot be verified, do not attest or run repair. Cloudflare secret presence
+and structural readiness are not verification. Resolve a missing identity only
+through a trusted channel and a separately reviewed configuration change.
+
+Only after that verification, the operator can attest it for this run:
 
 ```sh
 gh workflow run telegram-register.yml --ref main \
-  -f confirm=REGISTER_TELEGRAM_WEBHOOK -f mode=repair
+  -f confirm=REGISTER_TELEGRAM_WEBHOOK -f mode=repair \
+  -f owner_binding=VERIFIED_EXISTING_ALLOWLIST
 ```
 
-Repair checks the bot identity, requires the existing allowlist secret and a
+This attestation is a fail-closed operational reminder, not automated evidence of
+identity; the workflow cannot inspect or prove the allowlist contents. Repair
+checks the bot identity, requires the existing allowlist secret and a
 successful unsigned readiness probe, snapshots the existing default command menu,
 sets and reads back `/start`, `/help`, `/status`, `/report`, prepares a fresh
 webhook secret in a private runner file, installs the bot and webhook secrets
@@ -55,7 +67,9 @@ webhook secret in a private runner file, installs the bot and webhook secrets
 URL. If command setup or readback fails, it attempts to restore and read back the
 snapshot, reporting explicitly if rollback could not be verified. Finally it sends a synthetic signed update with no human sender;
 that update must be ignored and cannot prove owner authorization or end-to-end
-delivery. The prepared file is removed in an always-run cleanup step.
+delivery. The new webhook secret is registered with GitHub's log masker before
+it is passed to Wrangler; Wrangler's secret-write output is suppressed. The
+prepared file is removed in an always-run cleanup step.
 
 Repair refuses a **known non-empty pending queue**, both before mutations and
 again immediately before `setWebhook`. `drop_pending_updates` is false; this is

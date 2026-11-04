@@ -15,16 +15,18 @@ import unittest
 ROOT = Path(__file__).resolve().parents[1]
 WORKFLOW = ROOT / ".github/workflows/telegram-register.yml"
 TOKEN = "123456789:" + "A" * 40
+WEBHOOK_SECRET = "synthetic_webhook_secret_0123456789ABCDEF"
 WEBHOOK = "https://worker.test/v1/telegram/webhook"
 BOT = "Raawaa_control_bot"
 
 SITE_CUSTOMIZE = r'''
-import hashlib, io, json, os, time
+import hashlib, io, json, os, secrets, time
 from pathlib import Path
 from urllib.error import HTTPError
 import urllib.request
 
 time.sleep = lambda _seconds: None
+secrets.token_urlsafe = lambda _bytes: os.environ["MOCK_WEBHOOK_SECRET"]
 path = Path(os.environ["MOCK_STATE"])
 def read():
     return json.loads(path.read_text())
@@ -111,6 +113,12 @@ elif "secret" in args and "put" in args:
     assert value
     state["events"].append("worker:secret-put:" + key)
     state["worker_token_hash" if key == "TELEGRAM_BOT_TOKEN" else "worker_webhook_hash"] = hashlib.sha256(value).hexdigest()
+    if os.environ.get("MOCK_WRANGLER_ECHO") == "1":
+        print("untrusted stdout: " + value.decode())
+        print("untrusted stderr: " + value.decode(), file=sys.stderr)
+    if os.environ.get("MOCK_WRANGLER_FAIL_KEY") == key:
+        path.write_text(json.dumps(state))
+        sys.exit(1)
 else:
     raise AssertionError("Unexpected npx invocation")
 path.write_text(json.dumps(state))
@@ -150,10 +158,13 @@ def simulate(mode, **extra):
                    PYTHONPATH=str(temp), MOCK_STATE=str(state), TELEGRAM_BOT_TOKEN=TOKEN,
                    CLOUDFLARE_API_TOKEN="synthetic-cf-token", CLOUDFLARE_ACCOUNT_ID="synthetic-account",
                    WEBHOOK_URL=WEBHOOK, EXPECTED_BOT=BOT, MODE=mode,
-                   GITHUB_STEP_SUMMARY=str(temp / "summary.txt"), **extra)
+                   OWNER_BINDING="VERIFIED_EXISTING_ALLOWLIST", MOCK_WEBHOOK_SECRET=WEBHOOK_SECRET,
+                   GITHUB_STEP_SUMMARY=str(temp / "summary.txt"))
+        env.update(extra)
         failed = False
         outputs = []
         executed = []
+        masks = []
         for name, block, script in shell_steps():
             always = "if: always()" in block
             repair_only = "if: inputs.mode == 'repair'" in block
@@ -165,7 +176,18 @@ def simulate(mode, **extra):
             if syntax.returncode:
                 raise AssertionError(f"{name}: bash syntax error: {syntax.stderr}")
             result = subprocess.run(["bash", "-c", script], cwd=ROOT, env=env, text=True, capture_output=True, timeout=20)
-            outputs.append(result.stdout + result.stderr)
+            # Emulate the Actions runner consuming ::add-mask:: commands and
+            # redacting later output; the mock value is synthetic, never a secret.
+            visible = []
+            for line in (result.stdout + result.stderr).splitlines():
+                if line.startswith("::add-mask::"):
+                    masks.append(line[len("::add-mask::"):])
+                    visible.append("::add-mask::[MASKED]")
+                else:
+                    for mask in masks:
+                        line = line.replace(mask, "[MASKED]")
+                    visible.append(line)
+            outputs.append("\n".join(visible))
             executed.append((name, result.returncode))
             if result.returncode:
                 failed = True
@@ -174,7 +196,7 @@ def simulate(mode, **extra):
 
 class TelegramWorkflowOfflineIntegrationTests(unittest.TestCase):
     def test_diagnose_is_read_only_and_reports_origin_mismatch(self):
-        failed, state, output, executed, private_file_left = simulate("diagnose", MOCK_PENDING="3")
+        failed, state, output, executed, private_file_left = simulate("diagnose", MOCK_PENDING="3", OWNER_BINDING="")
         self.assertFalse(failed, executed)
         self.assertIn("webhook_matches=False", output)
         self.assertIn("pending_updates=3", output)
@@ -195,7 +217,33 @@ class TelegramWorkflowOfflineIntegrationTests(unittest.TestCase):
         self.assertEqual(state["webhook"], WEBHOOK)
         self.assertEqual([entry["command"] for entry in state["menu"]], ["start", "help", "status", "report"])
         self.assertNotIn(TOKEN, output)
+        self.assertNotIn(WEBHOOK_SECRET, output)
+        self.assertIn("::add-mask::[MASKED]", output)
         self.assertFalse(private_file_left)
+
+    def test_unattested_repair_stops_before_provider_calls(self):
+        failed, state, output, _executed, private_file_left = simulate("repair", OWNER_BINDING="")
+        self.assertTrue(failed)
+        self.assertIn("Owner authorization unverified", output)
+        self.assertEqual(state["events"], [])
+        self.assertFalse(private_file_left)
+
+    def test_wrangler_secret_output_is_suppressed_on_success_and_failure(self):
+        for fail_key in ("", "TELEGRAM_WEBHOOK_SECRET"):
+            with self.subTest(fail_key=fail_key):
+                failed, state, output, _executed, private_file_left = simulate(
+                    "repair", MOCK_WRANGLER_ECHO="1", MOCK_WRANGLER_FAIL_KEY=fail_key,
+                )
+                self.assertEqual(failed, bool(fail_key))
+                self.assertNotIn("untrusted stdout", output)
+                self.assertNotIn("untrusted stderr", output)
+                self.assertNotIn(TOKEN, output)
+                self.assertNotIn(WEBHOOK_SECRET, output)
+                self.assertIn("::add-mask::[MASKED]", output)
+                if fail_key:
+                    self.assertIn("provider output withheld", output)
+                    self.assertNotIn("telegram:setWebhook", state["events"])
+                self.assertFalse(private_file_left)
 
     def test_missing_allowlist_or_wrong_bot_stops_before_mutations(self):
         for extra in ({"MOCK_NO_ALLOWLIST": "1"}, {"MOCK_BOT": "another_bot"}):

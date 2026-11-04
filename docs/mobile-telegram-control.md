@@ -56,9 +56,12 @@ workflow's read-only diagnostic mode and separately confirmed repair mode.
 Review and merge it before dispatching it. The proposed repair preserves the
 existing allowlist, refuses a known non-empty queue, never derives ownership from
 an arbitrary sender, does not delete the webhook to discover a chat and does not
-explicitly drop pending updates. Telegram updates can arrive between checks and
-registration; unauthorized ones may still be delivered and ignored. A synthetic
-ignored probe verifies only the handler contract, not owner identity or delivery.
+explicitly drop pending updates. Repair requires an operator attestation that all
+existing allowed identities were independently verified; the workflow cannot
+itself verify this. Do not repair an unverified list. Telegram updates can arrive
+between checks and registration; unauthorized ones may still be delivered and
+ignored. A synthetic ignored probe verifies only the handler contract, not owner
+identity or delivery.
 
 ## Validation
 
