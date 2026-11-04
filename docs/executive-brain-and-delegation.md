@@ -48,7 +48,7 @@ The proposer cannot select a different enabled agent to bypass the map. The rost
 
 The orchestrator rejects duplicate IDs, unknown dependencies, cycles, unsafe task types, disabled/missing specialists, capability mismatches, missing acceptance checks, malformed estimates, and per-task budget violations. It computes a deterministic topological order and execution waves. Independent tasks may share a wave, capped by max_parallel_agents; dependent work waits for upstream success.
 
-**Important:** workflow planning still validates and previews the DAG only. F5 queue enforcement is under review in PR #457: it adds persisted priority, dependency-aware claims, same-execution-mode release, and failed-dependency propagation to SQLite and D1. Do not treat multi-step workflow dispatch as enabled; the planner remains proposal-only until a separate dispatcher contract is reviewed and approved.
+**Important:** F5 queue enforcement is merged in PR #457 and Staging-verified: persisted priority, dependency-aware claims, same-execution-mode release, and failed-dependency propagation are enforced in SQLite and D1. Workflow planning still validates and previews the DAG only. Do not treat multi-step workflow dispatch as enabled; the planner remains proposal-only until a separate dispatcher contract is reviewed and approved.
 
 ### Step 5 — Execution and verification
 
@@ -81,7 +81,7 @@ Implemented:
 Not yet implemented:
 - A persistent executive cycle that creates and reviews objectives on a schedule.
 - A live, verified free planning-model adapter.
-- Dependency-aware queue claims and downstream release in both SQLite and D1 are implemented in PR #457 but remain unmerged and not Staging-verified.
+- Dependency-aware queue claims and downstream release in both SQLite and D1 are implemented and Staging-verified (PR #457; additive migration 0010).
 - Durable plan/decision version storage and cross-run orchestration state.
 - Independent reviewer enforcement as a required completion gate for consequential work.
 - A measured agent/model capability registry based on completed task outcomes.

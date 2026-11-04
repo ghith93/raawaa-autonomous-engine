@@ -91,3 +91,12 @@ Cloudflare Dashboard: https://dash.cloudflare.com/ . Select the account → Work
 - PR #427 was merged to main as `bdaf97006aedd431f051c0fec8a182037ed0320b` at 22:46:14 UTC while the security remediation issue #440 remained open. The current branch includes the opt-in bridge code, but no Codespace process was started by this continuation and no Codespace task was processed; the latest Task Runner readback showed queue pending/running counts 0/0.
 - To prevent accidental activation after a future Worker deployment, PR #442 adds a compile-time fail-closed release constant. Codespace status/claim/heartbeat/finish routes and enqueue for Codespace task types return HTTP 503 until issue #440's adversarial sandbox acceptance criteria pass and the release constant is deliberately changed in a reviewed PR.
 - Do not create `ENGINE_CODESPACE_TOKEN`, set `RAAWAA_ENGINE_CODESPACE_BRIDGE=enabled`, or start a Codespace process while issue #440 is open.
+
+
+## F1/F5 completion — 2026-11-04 00:28 UTC
+
+- F1 execution-mode separation and dashboard accuracy are merged and Staging-verified. F5 priority/dependency-aware queue semantics are merged in PR #457 as `381e2094af5f6b47d56a812a6a544c8d6b23f13c`.
+- Exact-head F5 CI #41746324349 passed. Post-merge main run #41746574412 applied migration 0010 to Staging, confirmed no migrations remained, deployed Staging Worker version `07947078-2d37-46a2-ba5b-d3917b269caa`, completed remote monetary/invocation checks, published sanitized telemetry, and verified authenticated Mobile Status.
+- Mobile readback: `status=verified`, `ci_health=success`, `kill_switch=engaged`, `external_writes=false`, `paid_model_calls=false`, `paid_fallback=false`. Ephemeral Staging bearer and quota-admin tokens were revoked.
+- Production Control Worker workflow #41747019726 was skipped. Production Worker/D1 unchanged; no provider calls, paid spend, or external writes.
+- F5 local D1 integration covers priority ordering, dependency eligibility, same-mode gating, idempotency, and transitive blocking. Workflow planning remains proposal-only; no automatic workflow dispatch.

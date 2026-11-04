@@ -358,14 +358,18 @@ Required owner-side activation after review: configure a newly generated, distin
 
 - `.github/workflows/ci.yml` supports a guarded `workflow_dispatch` replay from the exact `main` ref for Staging migration, isolated Worker verification, sanitized telemetry, and authenticated mobile-status readback.
 - All Staging jobs require `github.ref == 'refs/heads/main'`; dispatching from another ref cannot access Staging secrets. Production deployment remains a separate workflow.
-- The telemetry publisher is being aligned to accept this guarded manual event; see PR #456. Use replay only for a reviewed `main` commit when the normal push pipeline is absent or needs deliberate verification.
+- PR #456 is merged. The guarded manual replay is available from `main` for reviewed Staging migration, isolated Worker verification, sanitized telemetry, and authenticated mobile-status readback. The latest post-merge push run #41746574412 completed all Staging jobs successfully; use manual replay only when a normal push run is absent or needs deliberate re-verification.
 
 
-## F5 priority and dependency-aware queue — 2026-11-04 (PR #457, verification pending)
+## F5 priority and dependency-aware queue — 2026-11-04 (PR #457 merged; Staging verified)
 
 - Extends the existing SQLite/D1 task ledger; no second queue, scheduler, database, or workflow runtime.
 - Persists bounded queue priority (0–100, default 50); claims order by priority descending, then creation time and task ID for stable FIFO ties.
-- Stores normalized dependency edges and a canonical dependency manifest. Dependencies must reference existing tasks; self, duplicate, unknown, and disabled-Codespaces dependencies are rejected. The insertion-only edge contract prevents cycles; the proposal-only planner independently rejects cyclic DAGs.
+- Stores normalized dependency edges and a canonical dependency manifest. Dependencies must reference existing tasks; self, duplicate, unknown, blank, and disabled-Codespaces dependencies are rejected. The insertion-only edge contract prevents cycles; the proposal-only planner independently rejects cyclic DAGs.
 - A task is claimable only when every dependency is succeeded in the same execution mode. A dry-run result cannot release a live-inference task. Failed/blocked upstream outcomes propagate to pending descendants with audit events.
-- Workflow planning remains proposal-only. This PR does not enqueue plans or enable live inference, paid spend, external writes, higher concurrency, Codespaces, or Production deployment.
-- Migration `0010_task_priority_dependencies.sql` is additive. It has not yet been applied to Staging; do so only after exact-head CI, review, and merge.
+- Workflow planning remains proposal-only; no automatic workflow dispatch, live inference, paid spend, external writes, higher concurrency, Codespaces, or Production deployment was enabled.
+- Exact-head CI #41746324349 passed: Python, Worker, Workflows runtime, migration contract, and local D1 integration tests. The local D1 smoke verified priority order, dependency gating, dry-run/live separation, idempotency, and transitive blocking.
+- Migration `0010_task_priority_dependencies.sql` applied successfully to Staging in main run #41746574412; the subsequent migration-list readback reported no pending migrations.
+- Staging Worker deployed as version `07947078-2d37-46a2-ba5b-d3917b269caa`; remote monetary/token-quota/invocation/redeploy checks and sanitized telemetry publication passed. Authenticated Mobile Status returned `status=verified`, `ci_health=success`, `kill_switch=engaged`, `external_writes=false`, `paid_model_calls=false`, and `paid_fallback=false`.
+- Ephemeral Staging bearer and quota-admin tokens were revoked. Production Control Worker deployment workflow #41747019726 was skipped; Production D1 and Worker remain unchanged.
+- Staging deployment and mobile readback verify the deployed Worker and schema. Direct queue-behavior integration was exercised against local D1; no shared Staging queue task was claimed during this run.
