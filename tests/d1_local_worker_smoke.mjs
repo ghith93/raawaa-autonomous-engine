@@ -231,6 +231,101 @@ try {
   });
   assertStatus(staleLease, 409, "finished task must reject stale lease");
 
+  // Priority and dependency eligibility are enforced by the real local D1 queue.
+  const parentTask = await api("/v1/tasks/enqueue", {
+    method: "POST",
+    body: {
+      task_type: "research_brief", title: "DAG parent", payload: { step: "parent" },
+      idempotency_key: "d1-local-dag-parent-" + randomUUID(), priority: 10, max_attempts: 1,
+    },
+  });
+  assertStatus(parentTask, 201, "DAG parent enqueue");
+  const childTask = await api("/v1/tasks/enqueue", {
+    method: "POST",
+    body: {
+      task_type: "content_draft", title: "DAG child", payload: { step: "child" },
+      idempotency_key: "d1-local-dag-child-" + randomUUID(), priority: 100,
+      depends_on: [parentTask.payload.task.id], max_attempts: 1,
+    },
+  });
+  assertStatus(childTask, 201, "DAG child enqueue");
+  const independentTask = await api("/v1/tasks/enqueue", {
+    method: "POST",
+    body: {
+      task_type: "system_audit", title: "Independent task", payload: { step: "independent" },
+      idempotency_key: "d1-local-dag-independent-" + randomUUID(), priority: 50, max_attempts: 1,
+    },
+  });
+  assertStatus(independentTask, 201, "independent task enqueue");
+  const independentClaim = await api("/v1/tasks/claim", {
+    method: "POST", body: { execution_mode: "dry_run" },
+  });
+  assert.equal(independentClaim.payload.task.id, independentTask.payload.task.id,
+    "higher-priority blocked child cannot bypass its dependency");
+  await api("/v1/tasks/" + independentTask.payload.task.id + "/finish", {
+    method: "POST", body: { lease_token: independentClaim.payload.lease_token,
+      status: "succeeded", result: { mode: "dry_run" } },
+  });
+  const parentClaim = await api("/v1/tasks/claim", {
+    method: "POST", body: { execution_mode: "dry_run" },
+  });
+  assert.equal(parentClaim.payload.task.id, parentTask.payload.task.id);
+  await api("/v1/tasks/" + parentTask.payload.task.id + "/finish", {
+    method: "POST", body: { lease_token: parentClaim.payload.lease_token,
+      status: "succeeded", result: { mode: "dry_run" } },
+  });
+  const wrongModeClaim = await api("/v1/tasks/claim", {
+    method: "POST", body: { execution_mode: "live_inference" },
+  });
+  assert.equal(wrongModeClaim.payload.task, null,
+    "a dry-run dependency must not release a live-inference task");
+  const childClaim = await api("/v1/tasks/claim", {
+    method: "POST", body: { execution_mode: "dry_run" },
+  });
+  assert.equal(childClaim.payload.task.id, childTask.payload.task.id);
+  await api("/v1/tasks/" + childTask.payload.task.id + "/finish", {
+    method: "POST", body: { lease_token: childClaim.payload.lease_token,
+      status: "succeeded", result: { mode: "dry_run" } },
+  });
+  const failureParent = await api("/v1/tasks/enqueue", {
+    method: "POST", body: {
+      task_type: "research_brief", title: "Failing DAG parent", payload: {},
+      idempotency_key: "d1-local-dag-fail-parent-" + randomUUID(), max_attempts: 1,
+    },
+  });
+  const failureChild = await api("/v1/tasks/enqueue", {
+    method: "POST", body: {
+      task_type: "content_draft", title: "Blocked DAG child", payload: {},
+      idempotency_key: "d1-local-dag-fail-child-" + randomUUID(),
+      depends_on: [failureParent.payload.task.id], max_attempts: 1,
+    },
+  });
+  const failureGrandchild = await api("/v1/tasks/enqueue", {
+    method: "POST", body: {
+      task_type: "code_review", title: "Blocked DAG grandchild", payload: {},
+      idempotency_key: "d1-local-dag-fail-grandchild-" + randomUUID(),
+      depends_on: [failureChild.payload.task.id], max_attempts: 1,
+    },
+  });
+  const failureClaim = await api("/v1/tasks/claim", {
+    method: "POST", body: { execution_mode: "dry_run" },
+  });
+  assert.equal(failureClaim.payload.task.id, failureParent.payload.task.id);
+  await api("/v1/tasks/" + failureParent.payload.task.id + "/finish", {
+    method: "POST", body: { lease_token: failureClaim.payload.lease_token,
+      status: "failed", error: "intentional local smoke failure" },
+  });
+  const afterFailureClaim = await api("/v1/tasks/claim", {
+    method: "POST", body: { execution_mode: "dry_run" },
+  });
+  assert.equal(afterFailureClaim.payload.task, null);
+  const dagReadback = await api("/v1/tasks?limit=100");
+  const byId = new Map(dagReadback.payload.tasks.map(task => [task.id, task]));
+  assert.equal(byId.get(failureChild.payload.task.id).status, "blocked");
+  assert.equal(byId.get(failureGrandchild.payload.task.id).status, "blocked");
+  assert.deepEqual(byId.get(childTask.payload.task.id).depends_on, [parentTask.payload.task.id]);
+
+
   // Codespaces remains hard-disabled until issue #440's adversarial sandbox
   // acceptance criteria pass. Verify the real local D1 Worker rejects every
   // activation path and does not enqueue a Codespace task.

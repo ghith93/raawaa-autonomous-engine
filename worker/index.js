@@ -286,9 +286,17 @@ export default {
       }
       try {
         const result = await env.DB.prepare(
-          "SELECT id,idempotency_key,task_type,title,payload_json,status,attempts,max_attempts,created_at,updated_at,execution_mode FROM tasks ORDER BY created_at DESC,id DESC LIMIT ?"
+          "SELECT id,idempotency_key,task_type,title,payload_json,status,attempts,max_attempts,created_at,updated_at,execution_mode,priority,dependencies_json FROM tasks ORDER BY created_at DESC,id DESC LIMIT ?"
         ).bind(rawLimit).all();
-        return json({ tasks: result.results || [] });
+        const tasks = (result.results || []).map(task => {
+          let dependsOn = [];
+          try {
+            const parsed = JSON.parse(task.dependencies_json || "[]");
+            if (Array.isArray(parsed)) dependsOn = parsed;
+          } catch { /* malformed legacy metadata stays empty and is not executable */ }
+          return { ...task, depends_on: dependsOn };
+        });
+        return json({ tasks });
       } catch {
         return json({ error: "storage_unavailable" }, 503);
       }
@@ -322,15 +330,48 @@ export default {
       const expires = new Date(now.getTime() + leaseSeconds * 1000).toISOString();
       const leaseToken = crypto.randomUUID();
       try {
+        const blockedResult = await env.DB.prepare(`
+          WITH RECURSIVE blocked(id) AS (
+            SELECT child.id FROM tasks child
+            JOIN task_dependencies d ON d.task_id=child.id
+            JOIN tasks dependency ON dependency.id=d.dependency_task_id
+            WHERE child.status='pending' AND dependency.status IN ('failed','blocked')
+            UNION
+            SELECT child.id FROM tasks child
+            JOIN task_dependencies d ON d.task_id=child.id
+            JOIN blocked b ON b.id=d.dependency_task_id
+            WHERE child.status='pending'
+          )
+          SELECT id FROM blocked ORDER BY id LIMIT 50
+        `).all();
+        const blockedIds = (blockedResult.results || []).map(row => row.id);
+        if (blockedIds.length) {
+          const blockedStatements = [];
+          for (const blockedId of blockedIds) {
+            blockedStatements.push(env.DB.prepare(
+              "INSERT INTO audit_log(task_id,event,details_json,created_at) SELECT id,'task_blocked_by_dependency',?,? FROM tasks WHERE id=? AND status='pending'"
+            ).bind(JSON.stringify({ reason: "dependency_failed_or_blocked" }), nowIso, blockedId));
+            blockedStatements.push(env.DB.prepare(
+              "UPDATE tasks SET status='blocked',error='Dependency failed or was blocked.',updated_at=? WHERE id=? AND status='pending'"
+            ).bind(nowIso, blockedId));
+          }
+          await env.DB.batch(blockedStatements);
+        }
         const claim = await env.DB.prepare(`
           UPDATE tasks SET status='running', attempts=attempts+1, execution_mode=?, updated_at=?,
             lease_token=?, lease_expires_at=?
-          WHERE id=(SELECT id FROM tasks WHERE status='pending' ${taskTypeFilter}
-            ORDER BY created_at,id LIMIT 1)
+          WHERE id=(SELECT candidate.id FROM tasks candidate WHERE candidate.status='pending' ${taskTypeFilter}
+            AND NOT EXISTS (
+              SELECT 1 FROM task_dependencies d
+              JOIN tasks dependency ON dependency.id=d.dependency_task_id
+              WHERE d.task_id=candidate.id
+                AND (dependency.status <> 'succeeded' OR dependency.execution_mode <> ?)
+            )
+            ORDER BY candidate.priority DESC, candidate.created_at ASC, candidate.id ASC LIMIT 1)
             AND status='pending' ${taskTypeFilter}
           RETURNING id,idempotency_key,task_type,title,payload_json,status,attempts,
-            max_attempts,created_at,updated_at,execution_mode,lease_token,lease_expires_at
-        `).bind(executionMode, nowIso, leaseToken, expires).first();
+            max_attempts,created_at,updated_at,execution_mode,priority,dependencies_json,lease_token,lease_expires_at
+        `).bind(executionMode, nowIso, leaseToken, expires, executionMode).first();
         if (!claim) return json({ task: null });
         await env.DB.prepare(
           "INSERT INTO audit_log(task_id,event,details_json,created_at) VALUES(?,?,?,?)"
@@ -453,12 +494,20 @@ export default {
     const key = input?.idempotency_key;
     const payload = input?.payload ?? {};
     const maxAttempts = input?.max_attempts ?? 2;
+    const priority = input?.priority ?? 50;
+    const rawDependencies = input?.depends_on ?? [];
     if (!validText(taskType, 100) || !validText(title, 240) ||
         !validText(key, 200) || !payload || typeof payload !== "object" ||
         Array.isArray(payload) || !Number.isInteger(maxAttempts) ||
-        maxAttempts < 1 || maxAttempts > 5) {
+        maxAttempts < 1 || maxAttempts > 5 || !Number.isInteger(priority) ||
+        priority < 0 || priority > 100 || !Array.isArray(rawDependencies) ||
+        rawDependencies.length > 20 ||
+        rawDependencies.some(dep => !validText(dep, 128)) ||
+        new Set(rawDependencies).size !== rawDependencies.length) {
       return json({ error: "invalid_task" }, 400);
     }
+    const dependsOn = [...rawDependencies].sort();
+    const dependenciesJson = JSON.stringify(dependsOn);
 
     let payloadJson;
     try {
@@ -470,21 +519,75 @@ export default {
       return json({ error: "invalid_payload" }, 400);
     }
 
+    const normalizedTask = {
+      task_type: taskType.trim(), title: title.trim(), payload_json: payloadJson,
+      max_attempts: maxAttempts, priority, dependencies_json: dependenciesJson,
+    };
+    const matchesTask = task => task &&
+      task.task_type === normalizedTask.task_type &&
+      task.title === normalizedTask.title &&
+      task.payload_json === normalizedTask.payload_json &&
+      task.max_attempts === normalizedTask.max_attempts &&
+      task.priority === normalizedTask.priority &&
+      (task.dependencies_json || "[]") === normalizedTask.dependencies_json;
+    const readDependencies = async taskId => {
+      const rows = await env.DB.prepare(
+        "SELECT dependency_task_id FROM task_dependencies WHERE task_id=? ORDER BY dependency_task_id"
+      ).bind(taskId).all();
+      return (rows.results || []).map(row => row.dependency_task_id);
+    };
+
     const id = crypto.randomUUID();
     const now = new Date().toISOString();
     try {
+      const existing = await env.DB.prepare(
+        "SELECT id,idempotency_key,task_type,title,payload_json,status,attempts,max_attempts,created_at,updated_at,execution_mode,priority,dependencies_json FROM tasks WHERE idempotency_key=?"
+      ).bind(key).first();
+      if (existing) {
+        if (!matchesTask(existing)) return json({ error: "idempotency_conflict" }, 409);
+        const existingDependencies = await readDependencies(existing.id);
+        if (JSON.stringify(existingDependencies) !== JSON.stringify(dependsOn)) {
+          return json({ error: "dependency_manifest_conflict" }, 409);
+        }
+        return json({ task: { ...existing, depends_on: existingDependencies }, created: false }, 200);
+      }
+
+      if (dependsOn.length) {
+        const placeholders = dependsOn.map(() => "?").join(",");
+        const dependencyResult = await env.DB.prepare(
+          `SELECT id,task_type FROM tasks WHERE id IN (${placeholders})`
+        ).bind(...dependsOn).all();
+        const dependencyRows = dependencyResult.results || [];
+        if (dependencyRows.length !== dependsOn.length) {
+          return json({ error: "unknown_task_dependency" }, 400);
+        }
+        if (dependencyRows.some(row => CODESPACE_TASK_TYPES.has(row.task_type))) {
+          return json({ error: "unsupported_dependency_executor" }, 400);
+        }
+      }
+
       const insert = env.DB.prepare(
-        "INSERT OR IGNORE INTO tasks(id,idempotency_key,task_type,title,payload_json,status,attempts,max_attempts,created_at,updated_at,execution_mode) VALUES(?,?,?,?,?,'pending',0,?,?,?,'not_started')"
-      ).bind(id, key, taskType.trim(), title.trim(), payloadJson, maxAttempts, now, now);
+        "INSERT OR IGNORE INTO tasks(id,idempotency_key,task_type,title,payload_json,status,attempts,max_attempts,created_at,updated_at,execution_mode,priority,dependencies_json) VALUES(?,?,?,?,?,'pending',0,?,?,?,'not_started',?,?)"
+      ).bind(id, key, normalizedTask.task_type, normalizedTask.title, payloadJson,
+        maxAttempts, now, now, priority, dependenciesJson);
       const audit = env.DB.prepare(
-        "INSERT INTO audit_log(task_id,event,details_json,created_at) SELECT id,'task_enqueued',?,? FROM tasks WHERE idempotency_key=? AND changes() > 0"
-      ).bind(JSON.stringify({ task_type: taskType.trim() }), now, key);
-      await env.DB.batch([insert, audit]);
+        "INSERT INTO audit_log(task_id,event,details_json,created_at) SELECT id,'task_enqueued',?,? FROM tasks WHERE idempotency_key=? AND id=?"
+      ).bind(JSON.stringify({ task_type: normalizedTask.task_type, priority, depends_on: dependsOn }), now, key, id);
+      const edgeStatements = dependsOn.map(dependencyId => env.DB.prepare(
+        "INSERT OR IGNORE INTO task_dependencies(task_id,dependency_task_id) VALUES(?,?)"
+      ).bind(id, dependencyId));
+      await env.DB.batch([insert, audit, ...edgeStatements]);
+
       const task = await env.DB.prepare(
-        "SELECT id,idempotency_key,task_type,title,payload_json,status,attempts,max_attempts,created_at,updated_at,execution_mode FROM tasks WHERE idempotency_key=?"
+        "SELECT id,idempotency_key,task_type,title,payload_json,status,attempts,max_attempts,created_at,updated_at,execution_mode,priority,dependencies_json FROM tasks WHERE idempotency_key=?"
       ).bind(key).first();
       if (!task) return json({ error: "storage_unavailable" }, 503);
-      return json({ task, created: task.id === id }, task.id === id ? 201 : 200);
+      if (!matchesTask(task)) return json({ error: "idempotency_conflict" }, 409);
+      const storedDependencies = await readDependencies(task.id);
+      if (JSON.stringify(storedDependencies) !== JSON.stringify(dependsOn)) {
+        return json({ error: "dependency_manifest_conflict" }, 409);
+      }
+      return json({ task: { ...task, depends_on: storedDependencies }, created: task.id === id }, task.id === id ? 201 : 200);
     } catch {
       return json({ error: "storage_unavailable" }, 503);
     }
