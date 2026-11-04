@@ -51,6 +51,59 @@
       },
       "status": "registered_but_not_runtime_verified",
       "status_reason": "No ARTEMIS daemon endpoint or ADB-authorized Android device has been verified from the Raawaa runtime."
+    },
+    "nvidia_nemotron": {
+      "name": "NVIDIA Nemotron 3.5 Lightning",
+      "source": "https://build.nvidia.com/nvidia/nemotron-3.5-lightning-30b-a3b",
+      "license": "OpenMDW-1.1 for downloadable model weights; hosted API terms require separate verification",
+      "integration_type": "hosted_openai_compatible_model_endpoint",
+      "enabled": false,
+      "execution_enabled": false,
+      "registered_capabilities": [
+        "independent_architecture_review",
+        "technical_research",
+        "code_generation",
+        "bounded_implementation_proposals",
+        "test_design",
+        "independent_critique"
+      ],
+      "endpoint_url": "https://integrate.api.nvidia.com/v1",
+      "model_id": "nvidia/nemotron-3.5-lightning-30b-a3b",
+      "required_environment_names": [
+        "NVIDIA_API_KEY"
+      ],
+      "activation_requirements": [
+        "Verify NVIDIA Developer account eligibility and API-key creation for the exact endpoint",
+        "Verify current hosted API terms, data handling, retention, and commercial-use permissions independently of the model-weights licence",
+        "Verify finite account-enforced request and token quotas at minute, day, month, and per-task levels",
+        "Verify zero-cost operation and absence of automatic paid overage or conversion",
+        "Confirm NVIDIA_API_KEY exists in the approved secret store; never expose its value",
+        "Add exact endpoint allowlisting and provider compatibility tests",
+        "Run one public non-sensitive Staging smoke under existing D1 quota and monetary ledgers and the live-inference kill switch",
+        "Benchmark on fixed code, review, architecture, tool-call, latency, and reliability tasks before enabling the specialist"
+      ],
+      "blocked_operations": [
+        "live inference",
+        "automatic paid fallback",
+        "arbitrary tool execution",
+        "production operations",
+        "policy or budget changes",
+        "self-approval or merge"
+      ],
+      "cost_policy": {
+        "new_infrastructure_spend_allowed_usd": 0,
+        "paid_model_calls_allowed": false,
+        "unknown_pricing_or_quota_means_blocked": true
+      },
+      "security": {
+        "default_effect": "deny",
+        "no_secrets_in_repository_or_logs": true,
+        "external_content_is_untrusted": true,
+        "require_existing_live_inference_kill_switch": true,
+        "require_durable_d1_quota_ledger_in_cloud": true
+      },
+      "status": "candidate_registered_disabled",
+      "status_reason": "NVIDIA offers a free prototype endpoint, but public documentation does not publish stable numeric quotas and account-specific hosted terms/eligibility are not verified. No provider request has been sent; route is deliberately ineligible for routing."
     }
   }
 }
