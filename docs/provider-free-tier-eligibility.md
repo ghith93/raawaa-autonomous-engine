@@ -15,6 +15,7 @@ Keep live inference disabled. A provider is eligible for the engine only after i
 | GroqCloud Free Plan | Official docs expose a Free Plan and a separate Developer Plan; do not confuse the Developer Plan table with free limits. | Limits are organization-level and model-specific. RPM, RPD, TPM, TPD and optional input/output token limits may apply. Exact account limits must be read from the organization/project Limits page and response headers. | Groq's Services Agreement permits API integration into customer applications and access for end users, subject to model-specific terms. Inference inputs/outputs are not retained by default, but may be temporarily logged for reliability/abuse investigations (up to 30 days); eligible accounts can enable Zero Data Retention. Third-party model terms still apply. | Best initial candidate for non-confidential business workloads, subject to verifying the exact free model IDs, model terms, and this account's free limits. |
 | OpenRouter Free | Free plan lists 25+ free models and 4 free providers. | Free plan is limited to 50 requests/day. Free model variants ending in `:free` have 20 RPM and 50 RPD; failed attempts count. The higher 1,000 RPD allowance requires at least $10 in purchased credits and is not a zero-spend option. | Provider/model data policies vary. Free plan has no budgets/spend controls, no preferred vendor auto-routing, and no data-policy-based routing. Dynamic free-model availability is not a stable production dependency. | Suitable only for constrained experiments with explicitly pinned free model IDs and provider-specific data review; do not use paid fallback or funded-credit upgrades. |
 | Cerebras Inference | Documentation describes a $0 Free tier with lower rate limits and an 8,192-token context. | Current account entitlement and exact limits must be confirmed in the console. The main pricing page describes the Developer tier as pay-as-you-go; its one-time $5 promotional credit requires a valid payment method and expires after 30 days. | The promotional credit is not recurring free capacity. The Developer tier is described for development/evaluation, not production. | Do not treat as a persistent zero-cost provider. Reconsider only if the account shows a genuine no-card Free tier with suitable terms and limits. |
+| Z.ai GLM API | Official pricing lists GLM-4.7-Flash, GLM-4.5-Flash and GLM-4.6V-Flash at $0 for input, cached input/storage, and output. | Numeric RPM/TPM/RPD/TPD limits are not published on the pricing page; account-specific quota, region, payment/billing requirements and entitlement remain unverified. | API Additional Terms say API content is not used to improve services unless explicitly agreed; the API DPA applies. The same terms broadly prohibit use for "decision-making activities"; scope is undefined. Model-specific licenses differ. | Research candidate only; all routes disabled. No autonomous-agent use until Z.ai clarifies decision-making restriction in writing. |
 
 ## Provider-specific notes
 
@@ -221,3 +222,33 @@ Sources:
 - Gemma 4 Apache 2.0 license: https://ai.google.dev/gemma/apache_2
 - GPT-OSS 20B model page: https://developers.cloudflare.com/workers-ai/models/gpt-oss-20b/
 - Cloudflare model catalog API permissions: https://developers.cloudflare.com/api/resources/ai/subresources/models/methods/list/
+
+
+## Z.ai GLM API — first-party free-price candidate (2026-11-04)
+
+### Official price verification
+- Z.ai's official API pricing page lists `glm-4.7-flash`, `glm-4.5-flash`, and `glm-4.6v-flash` as Free for input, cached input, cached-input storage, and output.
+- Paid examples on the same table: GLM-5.3 is $1.40/M input and $4.40/M output; GLM-5.3-Flash is $0.15/M input and $0.50/M output; GLM-5.3-FlashX is $0.37/M input and $1.25/M output. Limited-time free cached-storage rows on paid models do not make their inference free.
+- The public pricing table does not publish numeric request/token rate limits. Account-specific entitlement, region, concurrency, quota, expiry, and payment requirements remain unverified. Do not claim a specific no-card policy or stable quota without account evidence.
+
+### API and data terms
+- Official API endpoint: `https://api.z.ai/api/paas/v4/`; official Quick Start demonstrates OpenAI SDK compatibility.
+- API customers/developers are subject to Additional Terms for API Services, which prevail over general Terms in case of inconsistency.
+- **Production-use blocker:** the same API Additional Terms prohibit use of Z.ai for “decision-making activities” (section 1.f.iv), without defining the scope on the page. Internal autonomous-agent planning, tool/provider selection, code review, and execution orchestration may fall within this restriction. Do not use GLM for those Engine roles until Z.ai confirms in writing that the intended workflow is allowed.
+- The API Additional Terms say End User Content is used only as necessary to provide API services, comply with law, enforce policies, and prevent abuse; it is not used to develop or improve services unless the customer explicitly agrees. The API DPA describes the processor relationship and Singapore as the general processing location.
+- Do not apply consumer-chat privacy terms to API usage, or vice versa. Still exclude credentials, private source, customer/order data, personal data, and Raawaa formulae from initial tests.
+- API terms restrict use of Z.ai models/outputs to develop or improve competing models, except authorized integration for specific business scenarios.
+
+### Model and integration decision
+- First account-verification candidate: `glm-4.7-flash`; secondary text candidate `glm-4.5-flash`; vision candidate `glm-4.6v-flash`.
+- GLM-5.3 uses a Z.AI-specific model license; GLM-5.3-Flash is listed MIT. Never infer one model's license from another.
+- All GLM routes remain disabled. No credential, billing change, API request, inference, or profile activation has been made.
+- Before activation, verify account entitlement and numeric limits in the console, inspect current API terms/DPA and license, add a pinned model-specific profile with hard-zero-cost behavior and no paid fallback, then benchmark with public synthetic prompts against the Groq Free GPT-OSS candidates.
+
+Sources:
+- Z.ai API pricing: https://docs.z.ai/guides/overview/pricing
+- Z.ai API quick start: https://docs.z.ai/guides/overview/quick-start
+- Z.ai Terms and API Additional Terms: https://chat.z.ai/legal-agreement/terms-of-service
+- Z.ai Privacy Policy and API DPA: https://chat.z.ai/legal-agreement/privacy-policy
+- GLM-5.3 model/license: https://huggingface.co/zai-org/GLM-5.3
+- GLM-5.3-Flash model/license: https://huggingface.co/zai-org/GLM-5.3-Flash
