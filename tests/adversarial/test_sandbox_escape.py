@@ -19,6 +19,7 @@ import json
 import os
 import shutil
 import subprocess
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -33,7 +34,7 @@ HOST_CANARY_MARKER = "raawaa-host-filesystem-canary-must-not-be-readable"
 # is reported as an error string, so the assertion below can tell "denied" from
 # "never ran".
 PROBE = r"""
-import json, os, socket, sys
+import json, os, socket, sys, subprocess
 
 result = {}
 try:
@@ -41,6 +42,51 @@ try:
         result["host_canary"] = handle.read(256)
 except OSError as exc:
     result["host_canary"] = "denied:" + type(exc).__name__
+try:
+    with open(SOURCE_CANARY_PATH, "w", encoding="utf-8") as handle:
+        handle.write("modified")
+    result["source_write"] = "succeeded"
+except OSError as exc:
+    result["source_write"] = "denied:" + type(exc).__name__
+result["host_env_marker_absent"] = os.environ.get("RAAWAA_PROBE_SECRET") != "raawaa-probe-secret-do-not-leak"
+try:
+    with open("/scratch/probe-canary", "w", encoding="utf-8") as handle:
+        handle.write("scratch")
+    result["scratch_write"] = "succeeded"
+except OSError as exc:
+    result["scratch_write"] = "denied:" + type(exc).__name__
+try:
+    scratch = os.statvfs("/scratch")
+    result["scratch_bytes"] = scratch.f_blocks * scratch.f_frsize
+except OSError as exc:
+    result["scratch_bytes_error"] = type(exc).__name__
+try:
+    with open("/sys/fs/cgroup/pids.max", encoding="utf-8") as handle:
+        result["pids_max"] = handle.read().strip()
+    with open("/sys/fs/cgroup/memory.max", encoding="utf-8") as handle:
+        result["memory_max"] = handle.read().strip()
+    with open("/sys/fs/cgroup/cpu.max", encoding="utf-8") as handle:
+        result["cpu_max"] = handle.read().strip()
+except OSError as exc:
+    result["cgroup_limits_error"] = type(exc).__name__
+children = []
+try:
+    for _ in range(80):
+        try:
+            children.append(subprocess.Popen(
+                [sys.executable, "-c", "import time; time.sleep(20)"],
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            ))
+        except OSError:
+            result["pids_limit_enforced"] = True
+            break
+    else:
+        result["pids_limit_enforced"] = False
+finally:
+    for child in children:
+        child.kill()
+    for child in children:
+        child.wait(timeout=3)
 try:
     result["own_environ"] = "|".join(sorted(os.environ))[:400]
 except OSError as exc:
@@ -72,14 +118,24 @@ class SandboxEscapeTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.workspace = Path(__file__).resolve().parents[2]
-        cls.host_canary = Path.home() / "raawaa-host-filesystem-canary"
+        with tempfile.NamedTemporaryFile(
+            mode="w", prefix="raawaa-host-canary-", dir=Path.home(), delete=False,
+            encoding="utf-8",
+        ) as handle:
+            cls.host_canary = Path(handle.name)
+            handle.write(HOST_CANARY_MARKER)
+        with tempfile.NamedTemporaryFile(
+            mode="w", prefix=".raawaa-source-canary-", dir=cls.workspace,
+            delete=False, encoding="utf-8",
+        ) as handle:
+            cls.source_canary = Path(handle.name)
+            handle.write("source-must-remain-immutable")
         if cls.host_canary.is_relative_to(cls.workspace):
             raise RuntimeError("host canary must be outside the mounted workspace")
-        cls.host_canary.write_text(HOST_CANARY_MARKER, encoding="utf-8")
         os.environ["RAAWAA_PROBE_SECRET"] = SECRET_MARKER
         cls.vector = build_docker_argv(SandboxRequest(
             image=IMAGE,
-            command=("python3", "-c", PROBE.replace("HOST_CANARY_PATH", repr(str(cls.host_canary)))),
+            command=("python3", "-c", PROBE.replace("HOST_CANARY_PATH", repr(str(cls.host_canary))).replace("SOURCE_CANARY_PATH", repr(str(cls.source_canary)))),
             source_dir=str(cls.workspace),
             limits=SandboxLimits(memory_mb=512, cpus=1.0, pids=64, wall_seconds=90, scratch_mb=32),
         ))
@@ -95,8 +151,10 @@ class SandboxEscapeTest(unittest.TestCase):
 
     @classmethod
     def tearDownClass(cls):
-        if getattr(cls, "host_canary", None):
-            cls.host_canary.unlink(missing_ok=True)
+        for path_name in ("host_canary", "source_canary"):
+            path = getattr(cls, path_name, None)
+            if path:
+                path.unlink(missing_ok=True)
 
     def test_the_probe_actually_ran(self):
         # A container that never started proves nothing, and a silent pass here
@@ -111,6 +169,29 @@ class SandboxEscapeTest(unittest.TestCase):
         )
         self.assertNotIn(HOST_CANARY_MARKER, self.output.get("host_canary", ""))
         self.assertNotIn(SECRET_MARKER, self.output.get("own_environ", ""))
+
+    def test_the_mounted_source_is_immutable(self):
+        self.assertTrue(
+            str(self.output.get("source_write", "")).startswith("denied:"),
+            self.output.get("source_write"),
+        )
+        self.assertEqual(self.source_canary.read_text(encoding="utf-8"), "source-must-remain-immutable")
+
+    def test_only_bounded_tmpfs_scratch_is_writable(self):
+        self.assertEqual(self.output.get("scratch_write"), "succeeded")
+        self.assertGreater(self.output.get("scratch_bytes", 0), 0)
+        self.assertLessEqual(self.output.get("scratch_bytes", 0), 33 * 1024 * 1024)
+
+    def test_host_environment_marker_is_not_inherited(self):
+        self.assertTrue(self.output.get("host_env_marker_absent"), self.output)
+
+    def test_cgroup_limits_are_present_and_pid_limit_is_enforced(self):
+        self.assertEqual(self.output.get("pids_max"), "64", self.output)
+        self.assertEqual(self.output.get("memory_max"), str(512 * 1024 * 1024), self.output)
+        cpu_parts = str(self.output.get("cpu_max", "")).split()
+        self.assertEqual(len(cpu_parts), 2, self.output)
+        self.assertLessEqual(int(cpu_parts[0]) / int(cpu_parts[1]), 1.0)
+        self.assertTrue(self.output.get("pids_limit_enforced"), self.output)
 
     def test_the_public_network_is_unreachable(self):
         self.assertTrue(
