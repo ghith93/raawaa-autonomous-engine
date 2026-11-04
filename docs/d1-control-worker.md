@@ -51,6 +51,23 @@ Properties, each covered by a test:
 - **Replay is a no-op.** Task ids and idempotency keys derive deterministically from
   `(workflow_id, run_id, plan_version, step_id)`, so repeating a dispatch returns
   `200` with `created: false` and writes nothing.
+- **A replay must be the same dispatch.** All four identity fields are compared —
+  `workflow_id`, `plan_version`, `plan_digest`, `steps_digest`. Any mismatch is a
+  `409` (`run_identity_conflict`, `run_digest_conflict` or `step_contract_conflict`),
+  because `steps_digest` hashes step content only: two dispatches could share it and
+  still name different tasks through a different `workflow_id` or version.
+- **Task ids are exact.** A step's task is `wf-<run_id>-<step_id>`, never truncated:
+  with both fields allowed 64 characters the id can reach 132, and shortening it
+  would collide in the reconciliation path — the one place the id must be exact.
+  Uniqueness inside a run is structural (step ids are unique per run). Across runs
+  the separator is theoretically ambiguous (`run "a"` + `step "b-c"` renders the
+  same as `run "a-b"` + `step "c"`); that case is resolved by the strict task
+  insert — the batch rolls back and the caller gets `409 step_contract_conflict`,
+  rather than two identities being silently merged.
+- **`plan_digest` is opaque here.** The Worker checks its shape and treats it as the
+  caller's run identity; it does not recompute the canonical planner digest, because
+  it never receives the plan. Content consistency is `steps_digest`, and Python
+  verifies the planner digest when it builds the manifest.
 - **Replay must also match content.** The run row stores a `steps_digest` (SHA-256 over
   the normalized steps). The same `run_id` and `plan_digest` with different steps is
   `409 step_contract_conflict`; the stored digest, not a preflight read, decides.

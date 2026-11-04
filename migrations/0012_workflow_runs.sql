@@ -18,7 +18,12 @@ CREATE TABLE IF NOT EXISTS workflow_runs (
   -- no-op, and it is the stored digest — not a preflight read — that decides.
   steps_digest TEXT NOT NULL,
   plan_version INTEGER NOT NULL DEFAULT 1,
-  status TEXT NOT NULL CHECK(status IN ('dispatched','dispatch_failed')),
+  -- Only 'dispatched' exists. A run row is written inside the dispatch batch, so
+  -- it becomes visible only once every step was enqueued; there is no failed row
+  -- to write, because the batch that failed rolled back. Execution state belongs
+  -- to the tasks, not here. Widening this CHECK later is a migration; narrowing
+  -- it quietly is why it is stated explicitly.
+  status TEXT NOT NULL CHECK(status = 'dispatched'),
   step_count INTEGER NOT NULL CHECK(step_count >= 1),
   entry_step_ids TEXT NOT NULL,
   -- Every step id in the run, so reconciliation can name each task without

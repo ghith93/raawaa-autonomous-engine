@@ -272,14 +272,64 @@ try {
   assertStatus(badType, 400, "unsupported step task type");
   assert.equal(badType.payload.error, "unsupported_step_task_type");
 
-  // The dependency edge is real: the dependent step must not be claimable while
-  // its parent is pending.
-  const claimAfterDispatch = await api("/v1/tasks/claim", { method: "POST", body: {} });
-  if (claimAfterDispatch.payload?.task) {
-    assert.ok(
-      !claimAfterDispatch.payload.task.id.endsWith("-verify"),
-      "a dependent step must not be claimed before its dependency completes",
-    );
+  // Real concurrent dispatch, not a simulated one: two requests for the same run
+  // fired together against the same D1. Exactly one may create the run, and the
+  // queue must end up with two tasks, not four.
+  const concurrentBody = {
+    run_id: "smoke-run-3",
+    workflow_id: "smoke-workflow",
+    plan_digest: "e".repeat(64),
+    plan_version: 1,
+    steps: [
+      { step_id: "alpha", task_type: "system_audit", title: "concurrent alpha" },
+      { step_id: "beta", task_type: "system_audit", title: "concurrent beta", depends_on: ["alpha"] },
+    ],
+  };
+  const [firstDispatch, secondDispatch] = await Promise.all([
+    api("/v1/workflows/dispatch", { method: "POST", body: concurrentBody }),
+    api("/v1/workflows/dispatch", { method: "POST", body: concurrentBody }),
+  ]);
+  assert.deepEqual(
+    [firstDispatch.status, secondDispatch.status].sort(), [200, 201],
+    "one dispatch creates the run, the other converges on it",
+  );
+  assert.equal([firstDispatch.payload.created, secondDispatch.payload.created].filter(Boolean).length, 1);
+  const afterConcurrent = await api("/v1/tasks?limit=100");
+  assert.equal(
+    afterConcurrent.payload.tasks.filter(task => task.id.startsWith("wf-smoke-run-3-")).length, 2,
+    "a concurrent dispatch must not duplicate steps",
+  );
+
+  // Dependency gating, demonstrated rather than assumed: the entry step is
+  // claimable, and the dependent step becomes claimable only after it succeeds.
+  const prepareClaim = await api("/v1/tasks/claim", { method: "POST", body: { execution_mode: "dry_run" } });
+  assertStatus(prepareClaim, 200, "claim entry step");
+  assert.equal(prepareClaim.payload.task.id, "wf-smoke-run-1-prepare");
+  await api(`/v1/tasks/${prepareClaim.payload.task.id}/finish`, {
+    method: "POST",
+    body: { lease_token: prepareClaim.payload.lease_token, status: "succeeded",
+      result: { mode: "dry_run", step: "prepare" } },
+  });
+  const verifyClaim = await api("/v1/tasks/claim", { method: "POST", body: { execution_mode: "dry_run" } });
+  assertStatus(verifyClaim, 200, "claim dependent step after its parent succeeded");
+  assert.equal(verifyClaim.payload.task.id, "wf-smoke-run-1-verify");
+  await api(`/v1/tasks/${verifyClaim.payload.task.id}/finish`, {
+    method: "POST",
+    body: { lease_token: verifyClaim.payload.lease_token, status: "succeeded",
+      result: { mode: "dry_run", step: "verify" } },
+  });
+
+  // Drain the concurrently dispatched run in dependency order, so the rest of
+  // this smoke starts from an empty queue.
+  for (const expectedStep of ["alpha", "beta"]) {
+    const claimedStep = await api("/v1/tasks/claim", { method: "POST", body: { execution_mode: "dry_run" } });
+    assertStatus(claimedStep, 200, `claim ${expectedStep}`);
+    assert.equal(claimedStep.payload.task.id, `wf-smoke-run-3-${expectedStep}`);
+    await api(`/v1/tasks/${claimedStep.payload.task.id}/finish`, {
+      method: "POST",
+      body: { lease_token: claimedStep.payload.lease_token, status: "succeeded",
+        result: { mode: "dry_run", step: expectedStep } },
+    });
   }
 
   const taskPayload = {
@@ -296,6 +346,14 @@ try {
   assert.equal(duplicate.payload.task.id, enqueued.payload.task.id);
   assert.equal(duplicate.payload.created, false);
   assert.equal(enqueued.payload.task.execution_mode, "not_started");
+
+  // Captured before the claim: claiming is what sets execution_mode, so the
+  // aggregate must be read before this task joins the dry_run count. Asserted as
+  // a delta rather than an absolute, because the workflow block above already
+  // executed four dry-run steps.
+  const beforeClaim = await api("/v1/mobile/status");
+  assertStatus(beforeClaim, 200, "mobile status before claim");
+  const dryRunBefore = beforeClaim.payload.execution_modes.counts.dry_run;
 
   const claimed = await api("/v1/tasks/claim", {
     method: "POST", body: { execution_mode: "dry_run" },
@@ -321,7 +379,7 @@ try {
   assert.equal(persistedTask.execution_mode, "dry_run");
   status = await api("/v1/mobile/status");
   assertStatus(status, 200, "mobile execution-mode aggregate");
-  assert.equal(status.payload.execution_modes.counts.dry_run, 1);
+  assert.equal(status.payload.execution_modes.counts.dry_run, dryRunBefore + 1);
 
   const staleLease = await api("/v1/tasks/" + enqueued.payload.task.id + "/heartbeat", {
     method: "POST",
@@ -878,8 +936,8 @@ try {
   status = await api("/v1/mobile/status");
   assertStatus(status, 200, "mobile status after D1 writes");
   assert.equal(status.payload.paper_events.find(row => row.event_type === "candidate_detected")?.count, 1);
-  assert.equal(status.payload.tasks.find(row => row.status === "succeeded")?.count, 4,
-    "the legacy task and three dependency-smoke tasks should be durably succeeded");
+  assert.equal(status.payload.tasks.find(row => row.status === "succeeded")?.count, 8,
+    "four workflow steps plus the legacy task and three dependency-smoke tasks should be durably succeeded");
   assert.equal(status.payload.tasks.find(row => row.status === "failed")?.count, 1,
     "the failed dependency root remains visibly failed");
   assert.equal(status.payload.tasks.find(row => row.status === "blocked")?.count, 2,

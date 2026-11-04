@@ -88,7 +88,19 @@ async function readRun(env, runId) {
 // A replay is only a no-op when it names the same run *and* the same content.
 // Same plan_digest with different steps would otherwise return someone else's
 // dispatch as if it were yours.
+// A replay is the same dispatch only when the whole identity matches. Digests
+// alone are not enough: `stepsDigestFor` hashes step content, not workflow_id or
+// plan_version, and both of those feed the derived task ids and idempotency
+// keys. Without this check, the same run_id and digests under a different
+// workflow_id or version would be answered "already done" while naming a
+// different set of tasks.
 function replayOf(existing, plan, stepsDigest) {
+  if (existing.workflow_id !== plan.workflow_id || existing.plan_version !== plan.plan_version) {
+    return reply({
+      error: "run_identity_conflict",
+      detail: `stored ${existing.workflow_id}/${existing.plan_version} != ${plan.workflow_id}/${plan.plan_version}`,
+    }, 409);
+  }
   if (existing.plan_digest !== plan.digest) return reply({ error: "run_digest_conflict" }, 409);
   if (existing.steps_digest !== stepsDigest) return reply({ error: "step_contract_conflict" }, 409);
   return reply({ run: existing, created: false }, 200);
@@ -106,10 +118,23 @@ function validText(value, max) {
 }
 
 // Deterministic identity: the same (run, step) always names the same task, in
-// any process, on any retry. Ids stay inside the 128-char bound the rest of the
-// Worker assumes for route parameters.
+// any process, on any retry.
+//
+// No truncation. `run_id` and `step_id` are each allowed 64 characters, so the
+// combined id can reach 132; a `.slice(0, 128)` made two distinct long step ids
+// collapse onto one task id — a lossy identity in exactly the path
+// (reconciliation) that exists to prove nothing was lost. SQLite TEXT has no
+// length limit, so there was never a reason to shorten it.
+//
+// Uniqueness within a run is what the rest of the system needs: step ids are
+// unique per run and run_id is the key of workflow_runs, so two steps of one run
+// can never share an id. Across runs the separator is theoretically ambiguous
+// (run "a" + step "b-c" reads the same as run "a-b" + step "c"); that case is not
+// silently merged — the strict INSERT meets the tasks primary key, the batch
+// rolls back, and the caller gets 409. A collision has to fail closed; it does
+// not have to be impossible.
 export function taskIdFor(runId, stepId) {
-  return `wf-${runId}-${stepId}`.slice(0, 128);
+  return `wf-${runId}-${stepId}`;
 }
 
 // The idempotency key is NOT invented here. engine/workflow_manifest.py already
@@ -158,6 +183,12 @@ export async function validatePlan(input, { codespaceTaskTypes = new Set(), exec
   if (typeof workflowId !== "string" || !IDENTIFIER_RE.test(workflowId)) {
     return { error: "invalid_workflow_id" };
   }
+  // Deliberately opaque: this boundary checks the *shape* of plan_digest and
+  // treats it as the caller's run identity. It does not recompute the canonical
+  // planner digest — the Worker never receives the plan, only its steps, and
+  // re-deriving it would mean a second planner in JavaScript. Content
+  // consistency is enforced separately by steps_digest, and identity by
+  // workflow_id + plan_version + run_id in replayOf().
   if (typeof digest !== "string" || !DIGEST_RE.test(digest)) {
     return { error: "invalid_plan_digest" };
   }
@@ -212,10 +243,12 @@ export async function validatePlan(input, { codespaceTaskTypes = new Set(), exec
       return { error: "invalid_step_max_attempts" };
     }
 
+    const taskId = taskIdFor(runId.trim(), stepId);
+
     normalized.push({
       step_id: stepId,
       key: await idempotencyKeyFor(workflowId, runId.trim(), planVersion, stepId),
-      id: taskIdFor(runId.trim(), stepId),
+      id: taskId,
       task_type: raw.task_type.trim(),
       title: raw.title.trim(),
       payload_json: payloadJson,
