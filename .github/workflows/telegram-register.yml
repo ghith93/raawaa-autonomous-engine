@@ -1,7 +1,7 @@
 name: Register Telegram webhook
 
 # `diagnose` is read-only. `repair` rotates the webhook secret, preserves the
-# current allowlist, refuses a known non-empty queue, does not explicitly drop
+# independently verified owner allowlist, refuses a known non-empty queue, does not explicitly drop
 # pending updates, and sets the read-only command menu. It never infers an owner
 # from an unsolicited private message.
 # A confirmed repair is a production operation, restricted to reviewed main.
@@ -24,7 +24,7 @@ on:
           - rotation
           - wedged-recovery
       owner_binding:
-        description: "Repair/rotation without OWNER_TELEGRAM_CHAT_ID: attest verified allowlist"
+        description: "Diagnose only: optional unverified allowlist attestation"
         required: false
         type: string
 
@@ -64,15 +64,23 @@ jobs:
           OWNER_CHAT_ID: ${{ secrets.OWNER_TELEGRAM_CHAT_ID }}
         run: |
           set -euo pipefail
-          if [ -n "${OWNER_CHAT_ID:-}" ]; then
-            [[ "$OWNER_CHAT_ID" =~ ^-?[0-9]{1,20}$ ]] || { echo '::error title=Invalid chat id::OWNER_TELEGRAM_CHAT_ID repository secret must be an integer'; exit 1; }
-            printf '::add-mask::%s\n' "$OWNER_CHAT_ID"
-            echo '::notice title=Owner verification::Verified repository secret OWNER_TELEGRAM_CHAT_ID is configured and will overwrite allowlist.'
-          elif [ "${OWNER_BINDING:-}" = 'VERIFIED_EXISTING_ALLOWLIST' ]; then
-            echo '::notice title=Owner verification::Operator attestation received; preserving existing allowlist. Contents remain unverified.'
-          else
-            echo '::error title=Owner authorization unverified::Repair requires either OWNER_TELEGRAM_CHAT_ID repository secret or operator attestation VERIFIED_EXISTING_ALLOWLIST. Presence is not proof. See the runbook.'
+          if [ -z "${OWNER_CHAT_ID:-}" ]; then
+            echo '::error title=Owner authorization unverified::Production changes require OWNER_TELEGRAM_CHAT_ID repository secret; attestation alone is read-only.'
             exit 1
+          fi
+          if ! python3 -c 'import os, re; s=os.environ["OWNER_CHAT_ID"]; raise SystemExit(not (re.fullmatch(r"[0-9]{1,16}", s) and 1 <= int(s) <= 9007199254740991))'; then
+            echo '::error title=Invalid chat id::OWNER_TELEGRAM_CHAT_ID must be a positive safe integer (1..9007199254740991).'
+            exit 1
+          fi
+          printf '::add-mask::%s\n' "$OWNER_CHAT_ID"
+          echo '::notice title=Owner verification::Repository secret OWNER_TELEGRAM_CHAT_ID is configured and will overwrite allowlist; identity provenance must be independently verified.'
+      - name: Report diagnose-only attestation
+        if: inputs.mode == 'diagnose'
+        env:
+          OWNER_BINDING: ${{ inputs.owner_binding }}
+        run: |
+          if [ "${OWNER_BINDING:-}" = 'VERIFIED_EXISTING_ALLOWLIST' ]; then
+            echo '::notice title=Owner attestation::Operator attestation is unverified and does not authorize production changes.'
           fi
       - name: Validate required repository secrets
         env:
@@ -206,7 +214,7 @@ jobs:
             fi
           done < /tmp/telegram.env
           [ "$masked" -eq 1 ] || { echo '::error::Expected exactly one prepared webhook secret'; exit 1; }
-      - name: Install bot and webhook secrets; preserve the allowlist
+      - name: Install bot, owner allowlist, and staging webhook secrets
         if: inputs.mode == 'repair' || inputs.mode == 'rotation' || inputs.mode == 'wedged-recovery'
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
@@ -224,18 +232,11 @@ jobs:
               exit 1
             fi
           fi
-          if [ "$MODE" = "wedged-recovery" ]; then
-            echo "::notice title=Telegram recovery::Wedged recovery re-keyed the webhook directly to primary secret."
-          fi
           while IFS='=' read -r key value; do
             case "$key" in
               TELEGRAM_BOT_TOKEN) target_key="TELEGRAM_BOT_TOKEN" ;;
               TELEGRAM_WEBHOOK_SECRET)
-                if [ "$MODE" = "wedged-recovery" ]; then
-                  target_key="TELEGRAM_WEBHOOK_SECRET"
-                else
-                  target_key="TELEGRAM_WEBHOOK_SECRET_STAGING"
-                fi
+                target_key="TELEGRAM_WEBHOOK_SECRET_STAGING"
                 ;;
               TELEGRAM_ALLOWED_CHAT_IDS)
                 [ -z "$value" ] || { echo "::error::Unexpected allowlist change in rearm mode"; exit 1; }
@@ -250,6 +251,17 @@ jobs:
               exit 1
             fi
           done < /tmp/telegram.env
+      - name: Preflight staging secret against deployed Worker
+        if: inputs.mode == 'repair' || inputs.mode == 'rotation' || inputs.mode == 'wedged-recovery'
+        run: |
+          set -euo pipefail
+          if output=$(python3 scripts/telegram_bootstrap.py --probe-prepared --url "$WEBHOOK_URL" \
+            --env-file /tmp/telegram.env 2>&1); then
+            echo "::notice title=Staging preflight::Signed ineligible update was ignored; Telegram has not been switched."
+          else
+            echo "::error title=Staging preflight::$output"
+            exit 1
+          fi
       - name: Register and verify the exact webhook URL
         if: inputs.mode == 'repair' || inputs.mode == 'rotation' || inputs.mode == 'wedged-recovery'
         env:
@@ -277,7 +289,7 @@ jobs:
             exit 1
           fi
       - name: Promote staging secret to primary and retire staging
-        if: inputs.mode != 'diagnose' && inputs.mode != 'wedged-recovery'
+        if: inputs.mode == 'repair' || inputs.mode == 'rotation' || inputs.mode == 'wedged-recovery'
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
@@ -293,7 +305,18 @@ jobs:
               fi
             fi
           done < /tmp/telegram.env
-          npx --yes wrangler@4.156.1 secret delete TELEGRAM_WEBHOOK_SECRET_STAGING --config wrangler.toml >/dev/null 2>&1 || true
+          if npx --yes wrangler@4.156.1 secret delete TELEGRAM_WEBHOOK_SECRET_STAGING --config wrangler.toml >/dev/null 2>&1; then
+            echo retired > /tmp/telegram-cleanup-status
+            echo '::notice title=Staging cleanup::Staging secret retired.'
+          elif npx --yes wrangler@4.156.1 secret list --format json --config wrangler.toml > /tmp/telegram-cleanup-inventory.json 2>/dev/null &&
+               python3 -c 'import json; x=json.load(open("/tmp/telegram-cleanup-inventory.json")); assert isinstance(x,list) and all(isinstance(i,dict) and isinstance(i.get("name"),str) for i in x); raise SystemExit(any(i["name"] == "TELEGRAM_WEBHOOK_SECRET_STAGING" for i in x))'; then
+            echo already-absent > /tmp/telegram-cleanup-status
+            echo '::notice title=Staging cleanup::Staging secret already absent.'
+          else
+            echo failed > /tmp/telegram-cleanup-status
+            echo '::error title=Staging cleanup::Deletion failed or absence could not be verified; staging may remain active.'
+            exit 1
+          fi
       - name: Summary
         if: always()
         env:
@@ -304,8 +327,11 @@ jobs:
             echo ""
             echo "A matching URL or a signed synthetic probe does not prove delivery to the real human owner."
             echo "No intentional pending-update deletion; no mutation to the other side was confirmed; delivery may still be delayed or lost."
+            if [ "$MODE" != "diagnose" ]; then
+              echo "Staging cleanup: $(cat /tmp/telegram-cleanup-status 2>/dev/null || echo 'not attempted; staging may remain active')."
+            fi
             if [ "$MODE" = "wedged-recovery" ]; then
-              echo "Wedged recovery re-keyed the webhook. In-flight updates previously retried with an unknown obsolete secret will fail authentication and cannot be recovered."
+              echo "If wedged recovery re-keyed the webhook, in-flight updates retried with an unknown obsolete secret will fail authentication and cannot be recovered."
             fi
           } >> "$GITHUB_STEP_SUMMARY"
       - name: Remove prepared secrets

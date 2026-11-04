@@ -493,9 +493,10 @@ class WorkflowSafetyTests(unittest.TestCase):
         self.assertLess(workflow.index("--diagnose"), workflow.index("--rearm-only"))
         self.assertLess(workflow.index("--rearm-only"), workflow.index("wrangler@4.156.1 secret put"))
         self.assertLess(workflow.index("wrangler@4.156.1 secret put"), workflow.index("--register-prepared"))
-        self.assertLess(workflow.index("--register-prepared"), workflow.index("--probe-prepared"))
+        self.assertLess(workflow.index("--probe-prepared"), workflow.index("--register-prepared"))
+        self.assertLess(workflow.index("--register-prepared"), workflow.rindex("--probe-prepared"))
         for name in ("Configure and verify read-only command menu", "Prepare a new webhook secret without changing Telegram",
-                     "Install bot and webhook secrets; preserve the allowlist", "Register and verify the exact webhook URL",
+                     "Install bot, owner allowlist, and staging webhook secrets", "Register and verify the exact webhook URL",
                      "Verify a signed ignored update without sending a message"):
             block = workflow.split("- name: " + name, 1)[1].split("\n      - name:", 1)[0]
             self.assertIn("if: inputs.mode == 'repair'", block)

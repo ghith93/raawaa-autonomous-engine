@@ -84,8 +84,8 @@ class FakeOpener:
             state["events"].append("worker:probe")
             save(state)
             assert "from" not in json.loads(request.data)["message"]
-            assert hashlib.sha256(secret.encode()).hexdigest() == state["worker_webhook_hash"]
-            if os.environ.get("MOCK_PROBE_FAILURE") == "1":
+            assert hashlib.sha256(secret.encode()).hexdigest() in (state.get("worker_primary_hash"), state.get("worker_staging_hash"))
+            if os.environ.get("MOCK_PROBE_FAILURE") == "1" or (os.environ.get("MOCK_POST_PROBE_FAILURE") == "1" and "telegram:setWebhook" in state["events"]):
                 raise HTTPError(url, 503, "unavailable", {}, None)
             return Response({"ok": True, "ignored": True})
         raise AssertionError("Unexpected network destination")
@@ -101,6 +101,8 @@ args = sys.argv[1:]
 if "secret" in args and "list" in args:
     state["events"].append("worker:secret-list")
     names = [{"name": "TELEGRAM_ALLOWED_CHAT_IDS"}] if os.environ.get("MOCK_NO_ALLOWLIST") != "1" else []
+    if state.get("staging_present"):
+        names.append({"name": "TELEGRAM_WEBHOOK_SECRET_STAGING"})
     print(json.dumps(names))
 elif "d1" in args and "execute" in args:
     state["events"].append("d1:aggregate-read")
@@ -112,8 +114,11 @@ elif "secret" in args and "put" in args:
     value = sys.stdin.buffer.read()
     assert value
     state["events"].append("worker:secret-put:" + key)
+    if key == "TELEGRAM_WEBHOOK_SECRET_STAGING":
+        state["staging_present"] = True
     if key in ("TELEGRAM_WEBHOOK_SECRET", "TELEGRAM_WEBHOOK_SECRET_STAGING"):
         state["worker_webhook_hash"] = hashlib.sha256(value).hexdigest()
+        state["worker_staging_hash" if key.endswith("_STAGING") else "worker_primary_hash"] = hashlib.sha256(value).hexdigest()
     elif key == "TELEGRAM_BOT_TOKEN":
         state["worker_token_hash"] = hashlib.sha256(value).hexdigest()
     if os.environ.get("MOCK_WRANGLER_ECHO") == "1":
@@ -125,6 +130,12 @@ elif "secret" in args and "put" in args:
 elif "secret" in args and "delete" in args:
     key = args[args.index("delete") + 1]
     state["events"].append("worker:secret-delete:" + key)
+    if os.environ.get("MOCK_DELETE_FAILURE"):
+        if os.environ["MOCK_DELETE_FAILURE"] == "absent":
+            state["staging_present"] = False
+        path.write_text(json.dumps(state))
+        sys.exit(1)
+    state["staging_present"] = False
 else:
     raise AssertionError("Unexpected npx invocation")
 path.write_text(json.dumps(state))
@@ -164,7 +175,7 @@ def simulate(mode, **extra):
                    PYTHONPATH=str(temp), MOCK_STATE=str(state), TELEGRAM_BOT_TOKEN=TOKEN,
                    CLOUDFLARE_API_TOKEN="synthetic-cf-token", CLOUDFLARE_ACCOUNT_ID="synthetic-account",
                    WEBHOOK_URL=WEBHOOK, EXPECTED_BOT=BOT, MODE=mode,
-                   OWNER_BINDING="VERIFIED_EXISTING_ALLOWLIST", MOCK_WEBHOOK_SECRET=WEBHOOK_SECRET,
+                   OWNER_BINDING="VERIFIED_EXISTING_ALLOWLIST", OWNER_CHAT_ID="123456789", MOCK_WEBHOOK_SECRET=WEBHOOK_SECRET,
                    GITHUB_STEP_SUMMARY=str(temp / "summary.txt"))
         env.update(extra)
         failed = False
@@ -174,9 +185,9 @@ def simulate(mode, **extra):
         for name, block, script in shell_steps():
             always = "if: always()" in block
             repair_only = "if: inputs.mode == 'repair'" in block or "if: inputs.mode != 'diagnose'" in block
-            if failed and not always or repair_only and mode == "diagnose":
+            if failed and not always or repair_only and mode == "diagnose" or "if: inputs.mode == 'diagnose'" in block and mode != "diagnose":
                 continue
-            for filename in ("telegram.env", "telegram-diagnostic.json", "telegram-worker-secrets.json", "telegram-receipt-counts.json"):
+            for filename in ("telegram.env", "telegram-diagnostic.json", "telegram-worker-secrets.json", "telegram-receipt-counts.json", "telegram-cleanup-status", "telegram-cleanup-inventory.json"):
                 script = script.replace("/tmp/" + filename, str(temp / filename))
             syntax = subprocess.run(["bash", "-n"], input=script, text=True, capture_output=True)
             if syntax.returncode:
@@ -197,6 +208,7 @@ def simulate(mode, **extra):
             executed.append((name, result.returncode))
             if result.returncode:
                 failed = True
+        outputs.append((temp / "summary.txt").read_text() if (temp / "summary.txt").exists() else "")
         return failed, json.loads(state.read_text()), "\n".join(outputs), executed, (temp / "telegram.env").exists()
 
 
@@ -218,10 +230,14 @@ class TelegramWorkflowOfflineIntegrationTests(unittest.TestCase):
         self.assertLess(events.index("telegram:getWebhookInfo"), events.index("telegram:setMyCommands"))
         self.assertLess(events.index("worker:secret-put:TELEGRAM_BOT_TOKEN"), events.index("telegram:setWebhook"))
         self.assertLess(events.index("worker:secret-put:TELEGRAM_WEBHOOK_SECRET_STAGING"), events.index("telegram:setWebhook"))
-        self.assertLess(events.index("telegram:setWebhook"), events.index("worker:probe"))
-        self.assertLess(events.index("worker:probe"), events.index("worker:secret-put:TELEGRAM_WEBHOOK_SECRET"))
+        probes = [i for i, event in enumerate(events) if event == "worker:probe"]
+        self.assertEqual(len(probes), 2)
+        self.assertLess(events.index("worker:secret-put:TELEGRAM_WEBHOOK_SECRET_STAGING"), probes[0])
+        self.assertLess(probes[0], events.index("telegram:setWebhook"))
+        self.assertLess(events.index("telegram:setWebhook"), probes[1])
+        self.assertLess(probes[1], events.index("worker:secret-put:TELEGRAM_WEBHOOK_SECRET"))
         self.assertLess(events.index("worker:secret-put:TELEGRAM_WEBHOOK_SECRET"), events.index("worker:secret-delete:TELEGRAM_WEBHOOK_SECRET_STAGING"))
-        self.assertNotIn("worker:secret-put:TELEGRAM_ALLOWED_CHAT_IDS", events)
+        self.assertIn("worker:secret-put:TELEGRAM_ALLOWED_CHAT_IDS", events)
         self.assertEqual(state["webhook"], WEBHOOK)
         self.assertEqual([entry["command"] for entry in state["menu"]], ["start", "help", "status", "report"])
         self.assertNotIn(TOKEN, output)
@@ -234,24 +250,42 @@ class TelegramWorkflowOfflineIntegrationTests(unittest.TestCase):
         self.assertFalse(failed, (executed, output))
         events = state["events"]
         self.assertIn("worker:secret-put:TELEGRAM_ALLOWED_CHAT_IDS", events)
-        self.assertIn("Verified repository secret OWNER_TELEGRAM_CHAT_ID is configured", output)
+        self.assertIn("Repository secret OWNER_TELEGRAM_CHAT_ID is configured", output)
         self.assertFalse(private_file_left)
 
-    def test_wedged_recovery_installs_primary_secret_directly(self):
-        failed, state, output, executed, private_file_left = simulate("wedged-recovery")
-        self.assertFalse(failed, (executed, output))
-        events = state["events"]
-        self.assertIn("worker:secret-put:TELEGRAM_WEBHOOK_SECRET", events)
-        self.assertNotIn("worker:secret-put:TELEGRAM_WEBHOOK_SECRET_STAGING", events)
-        self.assertIn("Wedged recovery re-keyed the webhook", output)
-        self.assertFalse(private_file_left)
+    def test_all_mutating_modes_use_staging_and_require_owner(self):
+        for mode in ("repair", "rotation", "wedged-recovery"):
+            with self.subTest(mode=mode):
+                failed, state, output, executed, _ = simulate(mode, OWNER_CHAT_ID="")
+                self.assertTrue(failed)
+                self.assertEqual(state["events"], [])
+                self.assertIn("Owner authorization unverified", output)
+                failed, state, output, executed, _ = simulate(mode)
+                self.assertFalse(failed, (executed, output))
+                events = state["events"]
+                probes = [i for i, event in enumerate(events) if event == "worker:probe"]
+                self.assertEqual(len(probes), 2)
+                self.assertLess(events.index("worker:secret-put:TELEGRAM_WEBHOOK_SECRET_STAGING"), probes[0])
+                self.assertLess(probes[0], events.index("telegram:setWebhook"))
+                self.assertLess(events.index("telegram:setWebhook"), probes[1])
+                self.assertLess(probes[1], events.index("worker:secret-put:TELEGRAM_WEBHOOK_SECRET"))
+                self.assertLess(events.index("worker:secret-put:TELEGRAM_WEBHOOK_SECRET"), events.index("worker:secret-delete:TELEGRAM_WEBHOOK_SECRET_STAGING"))
 
-    def test_unattested_repair_stops_before_provider_calls(self):
-        failed, state, output, _executed, private_file_left = simulate("repair", OWNER_BINDING="")
-        self.assertTrue(failed)
-        self.assertIn("Owner authorization unverified", output)
-        self.assertEqual(state["events"], [])
-        self.assertFalse(private_file_left)
+    def test_chat_id_boundaries(self):
+        for value, valid in [("0", False), ("-1", False), ("9007199254740992", False), ("9007199254740991", True), ("99999999999999999999", False), ("1", True)]:
+            with self.subTest(value=value):
+                failed, state, output, executed, _ = simulate("repair", OWNER_CHAT_ID=value)
+                self.assertEqual(failed, not valid, (executed, output))
+                if not valid:
+                    self.assertEqual(state["events"], [])
+
+    def test_cleanup_outcomes(self):
+        for result, expected, failed_expected in [("", "retired", False), ("absent", "already-absent", False), ("present", "failed", True)]:
+            with self.subTest(result=result):
+                failed, state, output, executed, _ = simulate("repair", MOCK_DELETE_FAILURE=result)
+                self.assertEqual(failed, failed_expected, (executed, output))
+                self.assertIn("Staging cleanup: " + expected, output)
+                self.assertIn("worker:secret-delete:TELEGRAM_WEBHOOK_SECRET_STAGING", state["events"])
 
     def test_wrangler_secret_output_is_suppressed_on_success_and_failure(self):
         for fail_key in ("", "TELEGRAM_WEBHOOK_SECRET_STAGING", "TELEGRAM_WEBHOOK_SECRET"):
@@ -274,7 +308,7 @@ class TelegramWorkflowOfflineIntegrationTests(unittest.TestCase):
                 self.assertFalse(private_file_left)
 
     def test_missing_allowlist_or_wrong_bot_stops_before_mutations(self):
-        for extra in ({"MOCK_NO_ALLOWLIST": "1"}, {"MOCK_BOT": "another_bot"}):
+        for extra in ({"MOCK_BOT": "another_bot"},):
             with self.subTest(extra=extra):
                 failed, state, output, _executed, private_file_left = simulate("repair", **extra)
                 self.assertTrue(failed)
@@ -316,14 +350,24 @@ class TelegramWorkflowOfflineIntegrationTests(unittest.TestCase):
         self.assertTrue(failed)
         self.assertIn("exact requested URL", output)
         self.assertIn("telegram:setWebhook", state["events"])
-        self.assertNotIn("worker:probe", state["events"])
+        self.assertEqual(state["events"].count("worker:probe"), 1)
         self.assertFalse(private_file_left)
+
+    def test_post_switch_probe_failure_blocks_promotion_and_reports_residual_staging(self):
+        failed, state, output, _executed, _ = simulate("rotation", MOCK_POST_PROBE_FAILURE="1")
+        self.assertTrue(failed)
+        self.assertIn("telegram:setWebhook", state["events"])
+        self.assertNotIn("worker:secret-put:TELEGRAM_WEBHOOK_SECRET", state["events"])
+        self.assertNotIn("worker:secret-delete:TELEGRAM_WEBHOOK_SECRET_STAGING", state["events"])
+        self.assertIn("Staging cleanup: not attempted; staging may remain active", output)
 
     def test_unavailable_worker_probe_is_failure_not_delivery_proof(self):
         failed, state, output, _executed, private_file_left = simulate("repair", MOCK_PROBE_FAILURE="1")
         self.assertTrue(failed)
         self.assertIn("signed Worker probe failed: HTTP 503", output)
         self.assertEqual(state["events"].count("worker:probe"), 6)
+        self.assertNotIn("telegram:setWebhook", state["events"])
+        self.assertNotIn("worker:secret-put:TELEGRAM_WEBHOOK_SECRET", state["events"])
         self.assertFalse(private_file_left)
 
 
