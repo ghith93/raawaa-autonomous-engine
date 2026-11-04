@@ -78,8 +78,8 @@ def build_workflow_run_manifest(
         raise WorkflowManifestError("only plan_only output can become a manifest")
     if (plan.get("dispatch_authorized") is not False
             or plan.get("execution_started") is not False
-            or plan.get("provider_calls") != 0
-            or plan.get("external_writes") != 0):
+            or type(plan.get("provider_calls")) is not int or plan.get("provider_calls") != 0
+            or type(plan.get("external_writes")) is not int or plan.get("external_writes") != 0):
         raise WorkflowManifestError("plan must remain non-dispatching and side-effect-free")
 
     raw_steps = plan.get("steps")
@@ -104,7 +104,8 @@ def build_workflow_run_manifest(
                 or any(not isinstance(dep, str) for dep in dependencies)
                 or len(dependencies) != len(set(dependencies))):
             raise WorkflowManifestError(f"step {step_id} has invalid dependencies")
-        if (step.get("task_type") not in {"research_brief", "code_review", "content_draft", "system_audit"}
+        if (not isinstance(step.get("task_type"), str)
+                or step.get("task_type") not in {"research_brief", "code_review", "content_draft", "system_audit"}
                 or not isinstance(step.get("title"), str) or not step["title"].strip()
                 or not isinstance(step.get("assigned_agent"), str) or not step["assigned_agent"].strip()
                 or type(step.get("priority", 50)) is not int
