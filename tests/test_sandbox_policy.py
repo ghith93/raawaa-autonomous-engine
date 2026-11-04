@@ -92,7 +92,7 @@ class BoundaryTest(unittest.TestCase):
         self.assertFalse([a for a in vector if a.startswith("--env") or a == "-e"])
 
     def test_the_builder_output_passes_the_independent_check(self):
-        self.assertEqual(assert_sandbox_argv(argv()), argv())
+        self.assertEqual(assert_sandbox_argv(argv(), expected_source_dir="/repo"), argv())
 
 
 class RefusalTest(unittest.TestCase):
@@ -154,29 +154,65 @@ class RefusalTest(unittest.TestCase):
             if weakener in ("-v", "-e"):
                 vector.append("/root/.ssh:/root/.ssh")
             with self.assertRaisesRegex(SandboxPolicyError, message, msg=weakener):
-                assert_sandbox_argv(vector)
+                assert_sandbox_argv(vector, expected_source_dir="/repo")
+
+    def test_resource_values_are_checked_not_merely_present(self):
+        cases = (
+            ("--pids-limit=999999", "pids limit"),
+            ("--memory=999999m", "memory limit"),
+            ("--cpus=999", "cpus"),
+            ("--memory-swap=1024m", "memory-swap"),
+        )
+        for replacement, message in cases:
+            vector = argv()
+            for index, value in enumerate(vector):
+                if value.startswith(replacement.split("=")[0] + "="):
+                    vector[index] = replacement
+                    break
+            with self.assertRaisesRegex(SandboxPolicyError, message, msg=replacement):
+                assert_sandbox_argv(vector, expected_source_dir="/repo")
+
+    def test_extra_read_only_mounts_and_wrong_source_are_refused(self):
+        for extra in (
+            "--mount=type=bind,src=/root/.ssh,dst=/credentials,readonly",
+            "--mount=type=bind,src=/etc,dst=/etc,readonly",
+        ):
+            with self.assertRaisesRegex(SandboxPolicyError, "trusted workspace bind mount"):
+                assert_sandbox_argv(argv() + [extra], expected_source_dir="/repo")
+        with self.assertRaisesRegex(SandboxPolicyError, "trusted workspace bind mount"):
+            assert_sandbox_argv(argv(source_dir="/etc"), expected_source_dir="/repo")
+
+    def test_duplicate_and_unrecognized_options_are_refused(self):
+        for extra in ("--read-only", "--memory=512m", "--foo=bar"):
+            with self.assertRaises(SandboxPolicyError, msg=extra):
+                assert_sandbox_argv(argv() + [extra], expected_source_dir="/repo")
+
+    def test_command_options_are_not_reparsed_as_docker_options(self):
+        vector = argv(command=("python3", "--version"))
+        self.assertEqual(assert_sandbox_argv(vector, expected_source_dir="/repo"), vector)
 
     def test_a_vector_missing_a_boundary_flag_is_refused(self):
         for flag in (f"--runtime={SANDBOX_RUNTIME}", "--network=none", "--read-only",
                      "--cap-drop=ALL", "--security-opt=no-new-privileges"):
             with self.assertRaisesRegex(SandboxPolicyError, "missing", msg=flag):
-                assert_sandbox_argv([a for a in argv() if a != flag])
+                assert_sandbox_argv([a for a in argv() if a != flag], expected_source_dir="/repo")
 
     def test_a_vector_without_limits_or_a_non_root_user_is_refused(self):
         with self.assertRaisesRegex(SandboxPolicyError, "non-root"):
-            assert_sandbox_argv([a for a in argv() if not a.startswith("--user=")])
+            assert_sandbox_argv([a for a in argv() if not a.startswith("--user=")], expected_source_dir="/repo")
         with self.assertRaisesRegex(SandboxPolicyError, "not run as root"):
             assert_sandbox_argv(
-                [a for a in argv() if a != f"--user={NON_ROOT_USER}"] + ["--user=root"]
+                [a for a in argv() if a != f"--user={NON_ROOT_USER}"] + ["--user=root"],
+                expected_source_dir="/repo",
             )
         for prefix in ("--pids-limit=", "--memory=", "--cpus="):
             with self.assertRaisesRegex(SandboxPolicyError, "missing", msg=prefix):
-                assert_sandbox_argv([a for a in argv() if not a.startswith(prefix)])
+                assert_sandbox_argv([a for a in argv() if not a.startswith(prefix)], expected_source_dir="/repo")
 
     def test_a_vector_that_does_not_start_with_docker_run_is_refused(self):
         for bad in ([], ["docker"], ["sudo", "docker", "run"], "docker run", ["docker", "exec"]):
             with self.assertRaises(SandboxPolicyError, msg=repr(bad)):
-                assert_sandbox_argv(bad)
+                assert_sandbox_argv(bad, expected_source_dir="/repo")
 
 
 class ReviewedRefTest(unittest.TestCase):
