@@ -77,8 +77,9 @@ def test_a_solana_leg_without_network_fees_is_not_profitable():
     # The evaluator asks for network + priority fees whenever a
     # solana_aggregator leg is present; silence is not zero.
     result = compare_legs(
-        buy=leg(price="60000"),
-        sell=leg(family="solana_aggregator", venue="jupiter", instrument="mint-a/mint-b", price="60900"),
+        buy=leg(price="60000", max_base_quantity="1"),
+        sell=leg(family="solana_aggregator", venue="jupiter", instrument="mint-a/mint-b",
+                 price="60900", max_base_quantity="1"),
         notional_quote="600", costs=FULL_COSTS, now=NOW,
     )
     assert result.status == "incomplete_costs"
@@ -89,8 +90,8 @@ def test_a_solana_leg_without_network_fees_is_not_profitable():
 def test_an_evm_leg_requires_gas_and_priority_fees():
     result = compare_legs(
         buy=leg(family="evm_amm", venue="uniswap_v2_ethereum", instrument="pool-1",
-                price="60000", data_type="on_chain_state"),
-        sell=leg(price="60900"),
+                price="60000", data_type="on_chain_state", max_base_quantity="1"),
+        sell=leg(price="60900", max_base_quantity="1"),
         notional_quote="600", costs=FULL_COSTS, now=NOW,
     )
     assert result.status == "incomplete_costs"
