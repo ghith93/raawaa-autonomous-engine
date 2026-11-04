@@ -4,10 +4,14 @@ from __future__ import annotations
 import json
 import re
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from engine.quota_manager import QuotaProfile
+
+
+VERIFICATION_MAX_AGE = timedelta(days=7)
+VERIFICATION_FUTURE_SKEW = timedelta(minutes=5)
 
 
 @dataclass(frozen=True)
@@ -21,6 +25,14 @@ class ProviderProfileEntry:
     model_stage: str
     model_terms_source_url: str
     profile: QuotaProfile
+
+    @property
+    def verification_is_current(self) -> bool:
+        verified_at = self.profile.verified_at
+        if not isinstance(verified_at, datetime) or verified_at.tzinfo is None:
+            return False
+        age = datetime.now(timezone.utc) - verified_at.astimezone(timezone.utc)
+        return -VERIFICATION_FUTURE_SKEW <= age <= VERIFICATION_MAX_AGE
 
     @property
     def ready_for_routing(self) -> bool:
@@ -45,7 +57,7 @@ class ProviderProfileEntry:
             and p.quota_source_url
             and p.terms_source_url
             and self.model_terms_source_url.startswith("https://")
-            and p.verified_at
+            and self.verification_is_current
             and p.max_output_tokens
         )
 

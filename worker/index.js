@@ -4,9 +4,56 @@ import { handlePaperLedger } from "./paper-ledger.js";
 import { handleTaskInvocation } from "./task-invocations.js";
 import { handleTelegramWebhook } from "./telegram-webhook.js";
 import { handleMobilePage, handleMobileStatus } from "./mobile-status.js";
-import { dispatchTaskRunnerIfStale } from "./task-runner-watchdog.js";
+import { dispatchDueWorkflows } from "./task-runner-watchdog.js";
 const JSON_HEADERS = { "content-type": "application/json; charset=utf-8", "cache-control": "no-store" };
 const MAX_BODY_BYTES = 32 * 1024;
+
+// A storage failure must travel to the authenticated caller with a bounded
+// reason. Swallowing it made the 2026-11-04 claim outage ("HTTP 503" and
+// nothing else) indistinguishable from any other unavailability, and D1 was
+// never told to anyone. The reason is truncated and flattened; no SQL text of
+// the request, headers, or credentials are included.
+const MAX_ERROR_DETAIL = 240;
+function storageDetail(error) {
+  const text = error && error.message ? String(error.message) : String(error ?? "unknown");
+  return text.replace(/\s+/g, " ").trim().slice(0, MAX_ERROR_DETAIL);
+}
+
+// Tables the Worker's own SQL depends on. A deploy that ships code referencing a
+// table no migration created is invisible until the first write fails: on
+// 2026-11-04 the claim route joined task_dependencies eight hours before that
+// table existed, and the queue answered 503 while every read stayed healthy.
+const REQUIRED_SCHEMA_TABLES = Object.freeze([
+  "tasks",
+  "task_dependencies",
+  "audit_log",
+  "schema_migrations",
+  "monetary_reservations",
+  "task_model_invocations",
+]);
+
+async function schemaProbe(env) {
+  const missing = [];
+  const reasons = {};
+  for (const table of REQUIRED_SCHEMA_TABLES) {
+    try {
+      await env.DB.prepare(`SELECT 1 FROM ${table} LIMIT 1`).all();
+    } catch (error) {
+      missing.push(table);
+      reasons[table] = storageDetail(error);
+    }
+  }
+  return {
+    ok: missing.length === 0,
+    checked: [...REQUIRED_SCHEMA_TABLES],
+    missing,
+    reasons,
+  };
+}
+// Release remains hard-disabled until issue #440 adversarial sandbox criteria pass.
+const CODESPACE_EXECUTOR_RELEASE_ENABLED = false;
+const CODESPACE_TASK_TYPES = new Set(["codespace_inspect", "codespace_test"]);
+const CODESPACE_TASK_SQL = "'codespace_inspect','codespace_test'";
 
 function json(data, status = 200) {
   return new Response(JSON.stringify(data), { status, headers: JSON_HEADERS });
@@ -37,6 +84,15 @@ async function readJson(request) {
   if (declared > MAX_BODY_BYTES) throw new Error("body_too_large");
   const raw = await request.text();
   if (new TextEncoder().encode(raw).byteLength > MAX_BODY_BYTES) throw new Error("body_too_large");
+  try { return JSON.parse(raw); } catch { throw new Error("invalid_json"); }
+}
+
+async function readOptionalJson(request) {
+  const declared = Number(request.headers.get("content-length") || 0);
+  if (declared > MAX_BODY_BYTES) throw new Error("body_too_large");
+  const raw = await request.text();
+  if (new TextEncoder().encode(raw).byteLength > MAX_BODY_BYTES) throw new Error("body_too_large");
+  if (!raw.trim()) return {};
   try { return JSON.parse(raw); } catch { throw new Error("invalid_json"); }
 }
 
@@ -164,7 +220,9 @@ export default {
   async scheduled(controller, env) {
     const cron = typeof controller?.cron === "string" ? controller.cron : "";
     if (cron === "1,6,11,16,21,26,31,36,41,46,51,56 * * * *") {
-      await dispatchTaskRunnerIfStale({
+      // Every watched workflow, not only the task runner: a dropped GitHub
+      // schedule produces no failure notification, so silence is the symptom.
+      await dispatchDueWorkflows({
         env,
         scheduledTime: controller?.scheduledTime,
       });
@@ -204,8 +262,12 @@ export default {
     if (telegramResponse) return telegramResponse;
 
     if (url.pathname !== "/v1/tasks" && url.pathname !== "/v1/tasks/enqueue" &&
-        url.pathname !== "/v1/tasks/claim" && url.pathname !== "/v1/tasks/recover" &&
+        url.pathname !== "/v1/tasks/claim" && url.pathname !== "/v1/codespace/status" &&
+        url.pathname !== "/v1/codespace/tasks/claim" &&
+        !/^\/v1\/codespace\/tasks\/[A-Za-z0-9-]+\/(heartbeat|finish)$/.test(url.pathname) &&
+        url.pathname !== "/v1/tasks/recover" &&
         url.pathname !== "/v1/diagnostics/auth" &&
+        url.pathname !== "/v1/diagnostics/schema" &&
         url.pathname !== "/v1/research/candidates" &&
         url.pathname !== "/v1/quota" &&
         url.pathname !== "/v1/monetary-ledger" &&
@@ -216,11 +278,28 @@ export default {
         !/^\/v1\/tasks\/[A-Za-z0-9-]+\/(heartbeat|finish|retry)$/.test(url.pathname)) {
       return json({ error: "not_found" }, 404);
     }
+    const codespaceClaimRoute = url.pathname === "/v1/codespace/tasks/claim";
+    const codespaceStatusRoute = url.pathname === "/v1/codespace/status";
+    const codespaceActionRoute = /^\/v1\/codespace\/tasks\/[A-Za-z0-9-]+\/(heartbeat|finish)$/.test(url.pathname);
+    const codespaceRoute = codespaceClaimRoute || codespaceStatusRoute || codespaceActionRoute;
+    if (codespaceRoute && !CODESPACE_EXECUTOR_RELEASE_ENABLED) {
+      return json({ error: "codespace_executor_disabled" }, 503);
+    }
+    const codespaceAuthorized = typeof env.ENGINE_CODESPACE_TOKEN === "string" &&
+      env.ENGINE_CODESPACE_TOKEN.length >= 32 &&
+      env.ENGINE_CODESPACE_TOKEN !== env.ENGINE_API_TOKEN &&
+      env.ENGINE_CODESPACE_TOKEN !== env.ENGINE_QUOTA_ADMIN_TOKEN &&
+      constantTimeEqual(bearer(request), env.ENGINE_CODESPACE_TOKEN);
     const quotaAdminAccess = url.pathname === "/v1/quota" &&
       Boolean(env.ENGINE_QUOTA_ADMIN_TOKEN) && env.ENGINE_QUOTA_ADMIN_TOKEN !== env.ENGINE_API_TOKEN &&
       constantTimeEqual(bearer(request), env.ENGINE_QUOTA_ADMIN_TOKEN);
-    if (!(await authorized(request, env)) && !quotaAdminAccess) {
+    if (codespaceRoute ? !codespaceAuthorized : (!(await authorized(request, env)) && !quotaAdminAccess)) {
       return json({ error: "unauthorized" }, 401);
+    }
+    if (codespaceStatusRoute) {
+      if (request.method !== "GET") return json({ error: "method_not_allowed" }, 405);
+      return json({ ok: true, executor: "codespace", capabilities: ["inspect", "test"],
+        task_types: [...CODESPACE_TASK_TYPES], max_lease_seconds: 900 });
     }
 
     const mobileStatusResponse = await handleMobileStatus(request, env, url);
@@ -246,6 +325,12 @@ export default {
       return json({ ok: true, authenticated: true });
     }
 
+    if (url.pathname === "/v1/diagnostics/schema") {
+      if (request.method !== "GET") return json({ error: "method_not_allowed" }, 405);
+      const probe = await schemaProbe(env);
+      return json(probe, probe.ok ? 200 : 503);
+    }
+
     if (request.method === "GET" && url.pathname === "/v1/tasks") {
       const rawLimit = Number(url.searchParams.get("limit") || 50);
       if (!Number.isInteger(rawLimit) || rawLimit < 1 || rawLimit > 100) {
@@ -253,9 +338,17 @@ export default {
       }
       try {
         const result = await env.DB.prepare(
-          "SELECT id,idempotency_key,task_type,title,payload_json,status,attempts,max_attempts,created_at,updated_at FROM tasks ORDER BY created_at DESC,id DESC LIMIT ?"
+          "SELECT id,idempotency_key,task_type,title,payload_json,status,attempts,max_attempts,created_at,updated_at,execution_mode,priority,dependencies_json FROM tasks ORDER BY created_at DESC,id DESC LIMIT ?"
         ).bind(rawLimit).all();
-        return json({ tasks: result.results || [] });
+        const tasks = (result.results || []).map(task => {
+          let dependsOn = [];
+          try {
+            const parsed = JSON.parse(task.dependencies_json || "[]");
+            if (Array.isArray(parsed)) dependsOn = parsed;
+          } catch { /* malformed legacy metadata stays empty and is not executable */ }
+          return { ...task, depends_on: dependsOn };
+        });
+        return json({ tasks });
       } catch {
         return json({ error: "storage_unavailable" }, 503);
       }
@@ -268,37 +361,86 @@ export default {
 
     // Claim one pending task atomically. The lease token is generated server-side
     // and returned only to the authenticated runner that claimed the task.
-    if (request.method === "POST" && url.pathname === "/v1/tasks/claim") {
+    if (request.method === "POST" &&
+        (url.pathname === "/v1/tasks/claim" || url.pathname === "/v1/codespace/tasks/claim")) {
+      const codespaceClaim = url.pathname === "/v1/codespace/tasks/claim";
+      let claimInput;
+      try { claimInput = await readOptionalJson(request); }
+      catch (error) {
+        return json({ error: error.message === "body_too_large" ? "body_too_large" : "invalid_json" }, 400);
+      }
+      const executionMode = claimInput?.execution_mode ?? "unknown";
+      if (!["unknown", "dry_run", "live_inference"].includes(executionMode)) {
+        return json({ error: "invalid_execution_mode" }, 400);
+      }
+      const taskTypeFilter = codespaceClaim
+        ? `AND task_type IN (${CODESPACE_TASK_SQL})`
+        : `AND task_type NOT IN (${CODESPACE_TASK_SQL})`;
       const leaseSeconds = 900;
       const now = new Date();
       const nowIso = now.toISOString();
       const expires = new Date(now.getTime() + leaseSeconds * 1000).toISOString();
       const leaseToken = crypto.randomUUID();
       try {
+        const blockedResult = await env.DB.prepare(`
+          WITH RECURSIVE blocked(id) AS (
+            SELECT child.id FROM tasks child
+            JOIN task_dependencies d ON d.task_id=child.id
+            JOIN tasks dependency ON dependency.id=d.dependency_task_id
+            WHERE child.status='pending' AND dependency.status IN ('failed','blocked')
+            UNION
+            SELECT child.id FROM tasks child
+            JOIN task_dependencies d ON d.task_id=child.id
+            JOIN blocked b ON b.id=d.dependency_task_id
+            WHERE child.status='pending'
+          )
+          SELECT id FROM blocked ORDER BY id LIMIT 50
+        `).all();
+        const blockedIds = (blockedResult.results || []).map(row => row.id);
+        if (blockedIds.length) {
+          const blockedStatements = [];
+          for (const blockedId of blockedIds) {
+            blockedStatements.push(env.DB.prepare(
+              "INSERT INTO audit_log(task_id,event,details_json,created_at) SELECT id,'task_blocked_by_dependency',?,? FROM tasks WHERE id=? AND status='pending'"
+            ).bind(JSON.stringify({ reason: "dependency_failed_or_blocked" }), nowIso, blockedId));
+            blockedStatements.push(env.DB.prepare(
+              "UPDATE tasks SET status='blocked',error='Dependency failed or was blocked.',updated_at=?,lease_token=NULL,lease_expires_at=NULL WHERE id=? AND status='pending'"
+            ).bind(nowIso, blockedId));
+          }
+          await env.DB.batch(blockedStatements);
+        }
         const claim = await env.DB.prepare(`
-          UPDATE tasks SET status='running', attempts=attempts+1, updated_at=?,
+          UPDATE tasks SET status='running', attempts=attempts+1, execution_mode=?, updated_at=?,
             lease_token=?, lease_expires_at=?
-          WHERE id=(SELECT id FROM tasks WHERE status='pending'
-            ORDER BY created_at,id LIMIT 1)
-            AND status='pending'
+          WHERE id=(SELECT candidate.id FROM tasks candidate WHERE candidate.status='pending' ${taskTypeFilter}
+            AND NOT EXISTS (
+              SELECT 1 FROM task_dependencies d
+              JOIN tasks dependency ON dependency.id=d.dependency_task_id
+              WHERE d.task_id=candidate.id
+                AND (dependency.status <> 'succeeded' OR dependency.execution_mode <> ?)
+            )
+            ORDER BY candidate.priority DESC, candidate.created_at ASC, candidate.id ASC LIMIT 1)
+            AND status='pending' ${taskTypeFilter}
           RETURNING id,idempotency_key,task_type,title,payload_json,status,attempts,
-            max_attempts,created_at,updated_at,lease_token,lease_expires_at
-        `).bind(nowIso, leaseToken, expires).first();
+            max_attempts,created_at,updated_at,execution_mode,priority,dependencies_json,lease_token,lease_expires_at
+        `).bind(executionMode, nowIso, leaseToken, expires, executionMode).first();
         if (!claim) return json({ task: null });
         await env.DB.prepare(
           "INSERT INTO audit_log(task_id,event,details_json,created_at) VALUES(?,?,?,?)"
         ).bind(claim.id, "task_claimed", JSON.stringify({
-          attempt: claim.attempts, lease_expires_at: expires
+          attempt: claim.attempts, lease_expires_at: expires, execution_mode: executionMode
         }), nowIso).run();
         return json({ task: claim, lease_token: leaseToken, lease_expires_at: expires });
-      } catch {
-        return json({ error: "storage_unavailable" }, 503);
+      } catch (error) {
+        return json({ error: "storage_unavailable", detail: storageDetail(error) }, 503);
       }
     }
 
     const taskAction = url.pathname.match(/^\/v1\/tasks\/([A-Za-z0-9-]+)\/(heartbeat|finish|retry)$/);
-    if (request.method === "POST" && taskAction) {
-      const [, taskId, action] = taskAction;
+    const codespaceTaskAction = url.pathname.match(/^\/v1\/codespace\/tasks\/([A-Za-z0-9-]+)\/(heartbeat|finish)$/);
+    if (request.method === "POST" && (taskAction || codespaceTaskAction)) {
+      const codespaceAction = Boolean(codespaceTaskAction);
+      const [, taskId, action] = codespaceAction ? codespaceTaskAction : taskAction;
       let input;
       try { input = await readJson(request); }
       catch (error) {
@@ -309,9 +451,12 @@ export default {
       const nowIso = new Date().toISOString();
       try {
         const current = await env.DB.prepare(
-          "SELECT id,status,attempts,max_attempts,lease_token,lease_expires_at FROM tasks WHERE id=?"
+          "SELECT id,status,attempts,max_attempts,task_type,execution_mode,lease_token,lease_expires_at FROM tasks WHERE id=?"
         ).bind(taskId).first();
         if (!current) return json({ error: "task_not_found" }, 404);
+        if (CODESPACE_TASK_TYPES.has(current.task_type) !== codespaceAction) {
+          return json({ error: "executor_mismatch" }, 403);
+        }
         if (current.status !== "running" || current.lease_token !== leaseToken ||
             !current.lease_expires_at || current.lease_expires_at < nowIso) {
           return json({ error: "lease_lost" }, 409);
@@ -356,14 +501,27 @@ export default {
           error = typeof input.error === "string" ? input.error.slice(0, 2000) : "Task retry requested.";
         }
 
+        let executionMode = current.execution_mode || "unknown";
+        if (input.execution_mode !== undefined) {
+          if (!["unknown", "dry_run", "live_inference"].includes(input.execution_mode)) {
+            return json({ error: "invalid_execution_mode" }, 400);
+          }
+          executionMode = input.execution_mode;
+        } else if (resultJson) {
+          let parsedResult;
+          try { parsedResult = JSON.parse(resultJson); } catch { parsedResult = null; }
+          if (["dry_run", "live_inference"].includes(parsedResult?.mode)) {
+            executionMode = parsedResult.mode;
+          }
+        }
         const update = await env.DB.prepare(
-          "UPDATE tasks SET status=?,result_json=?,error=?,updated_at=?,lease_token=NULL,lease_expires_at=NULL WHERE id=? AND status='running' AND lease_token=? AND lease_expires_at>=?"
-        ).bind(status, resultJson, error, nowIso, taskId, leaseToken, nowIso).run();
+          "UPDATE tasks SET status=?,result_json=?,error=?,execution_mode=?,updated_at=?,lease_token=NULL,lease_expires_at=NULL WHERE id=? AND status='running' AND lease_token=? AND lease_expires_at>=?"
+        ).bind(status, resultJson, error, executionMode, nowIso, taskId, leaseToken, nowIso).run();
         if (!update.meta?.changes) return json({ error: "lease_lost" }, 409);
         await env.DB.prepare(
           "INSERT INTO audit_log(task_id,event,details_json,created_at) VALUES(?,?,?,?)"
         ).bind(taskId, action === "retry" ? (status === "pending" ? "task_retry_scheduled" : "task_failed") : "task_" + status,
-          JSON.stringify({ error }), nowIso).run();
+          JSON.stringify({ error, execution_mode: executionMode }), nowIso).run();
         return json({ ok: true, status });
       } catch {
         return json({ error: "storage_unavailable" }, 503);
@@ -381,16 +539,29 @@ export default {
     }
 
     const taskType = input?.task_type;
+    if (CODESPACE_TASK_TYPES.has(taskType) && !CODESPACE_EXECUTOR_RELEASE_ENABLED) {
+      return json({ error: "codespace_executor_disabled" }, 503);
+    }
     const title = input?.title;
     const key = input?.idempotency_key;
     const payload = input?.payload ?? {};
     const maxAttempts = input?.max_attempts ?? 2;
+    const prioritySupplied = input?.priority !== undefined;
+    const dependenciesSupplied = input?.depends_on !== undefined;
+    const priority = input?.priority ?? 50;
+    const rawDependencies = input?.depends_on ?? [];
     if (!validText(taskType, 100) || !validText(title, 240) ||
         !validText(key, 200) || !payload || typeof payload !== "object" ||
         Array.isArray(payload) || !Number.isInteger(maxAttempts) ||
-        maxAttempts < 1 || maxAttempts > 5) {
+        maxAttempts < 1 || maxAttempts > 5 || !Number.isInteger(priority) ||
+        priority < 0 || priority > 100 || !Array.isArray(rawDependencies) ||
+        rawDependencies.length > 20 ||
+        rawDependencies.some(dep => !validText(dep, 128)) ||
+        new Set(rawDependencies).size !== rawDependencies.length) {
       return json({ error: "invalid_task" }, 400);
     }
+    const dependsOn = [...rawDependencies].sort();
+    const dependenciesJson = JSON.stringify(dependsOn);
 
     let payloadJson;
     try {
@@ -402,23 +573,73 @@ export default {
       return json({ error: "invalid_payload" }, 400);
     }
 
+    const normalizedTask = {
+      task_type: taskType.trim(), title: title.trim(), payload_json: payloadJson,
+      max_attempts: maxAttempts, priority, dependencies_json: dependenciesJson,
+    };
+    const matchesTask = task => task &&
+      (!prioritySupplied || task.priority === normalizedTask.priority) &&
+      (!dependenciesSupplied || (task.dependencies_json || "[]") === normalizedTask.dependencies_json);
+    const readDependencies = async taskId => {
+      const rows = await env.DB.prepare(
+        "SELECT dependency_task_id FROM task_dependencies WHERE task_id=? ORDER BY dependency_task_id"
+      ).bind(taskId).all();
+      return (rows.results || []).map(row => row.dependency_task_id);
+    };
+
     const id = crypto.randomUUID();
     const now = new Date().toISOString();
     try {
+      const existing = await env.DB.prepare(
+        "SELECT id,idempotency_key,task_type,title,payload_json,status,attempts,max_attempts,created_at,updated_at,execution_mode,priority,dependencies_json FROM tasks WHERE idempotency_key=?"
+      ).bind(key).first();
+      if (existing) {
+        if (!matchesTask(existing)) return json({ error: "idempotency_conflict" }, 409);
+        const existingDependencies = await readDependencies(existing.id);
+        if (dependenciesSupplied && JSON.stringify(existingDependencies) !== JSON.stringify(dependsOn)) {
+          return json({ error: "dependency_manifest_conflict" }, 409);
+        }
+        return json({ task: { ...existing, depends_on: existingDependencies }, created: false }, 200);
+      }
+
+      if (dependsOn.length) {
+        const placeholders = dependsOn.map(() => "?").join(",");
+        const dependencyResult = await env.DB.prepare(
+          `SELECT id,task_type FROM tasks WHERE id IN (${placeholders})`
+        ).bind(...dependsOn).all();
+        const dependencyRows = dependencyResult.results || [];
+        if (dependencyRows.length !== dependsOn.length) {
+          return json({ error: "unknown_task_dependency" }, 400);
+        }
+        if (dependencyRows.some(row => CODESPACE_TASK_TYPES.has(row.task_type))) {
+          return json({ error: "unsupported_dependency_executor" }, 400);
+        }
+      }
+
       const insert = env.DB.prepare(
-        "INSERT OR IGNORE INTO tasks(id,idempotency_key,task_type,title,payload_json,status,attempts,max_attempts,created_at,updated_at) VALUES(?,?,?,?,?,'pending',0,?,?,?)"
-      ).bind(id, key, taskType.trim(), title.trim(), payloadJson, maxAttempts, now, now);
+        "INSERT OR IGNORE INTO tasks(id,idempotency_key,task_type,title,payload_json,status,attempts,max_attempts,created_at,updated_at,execution_mode,priority,dependencies_json) VALUES(?,?,?,?,?,'pending',0,?,?,?,'not_started',?,?)"
+      ).bind(id, key, normalizedTask.task_type, normalizedTask.title, payloadJson,
+        maxAttempts, now, now, priority, dependenciesJson);
       const audit = env.DB.prepare(
-        "INSERT INTO audit_log(task_id,event,details_json,created_at) SELECT id,'task_enqueued',?,? FROM tasks WHERE idempotency_key=? AND changes() > 0"
-      ).bind(JSON.stringify({ task_type: taskType.trim() }), now, key);
-      await env.DB.batch([insert, audit]);
+        "INSERT INTO audit_log(task_id,event,details_json,created_at) SELECT id,'task_enqueued',?,? FROM tasks WHERE idempotency_key=? AND id=?"
+      ).bind(JSON.stringify({ task_type: normalizedTask.task_type, priority, depends_on: dependsOn }), now, key, id);
+      const edgeStatements = dependsOn.map(dependencyId => env.DB.prepare(
+        "INSERT OR IGNORE INTO task_dependencies(task_id,dependency_task_id) VALUES(?,?)"
+      ).bind(id, dependencyId));
+      await env.DB.batch([insert, audit, ...edgeStatements]);
+
       const task = await env.DB.prepare(
-        "SELECT id,idempotency_key,task_type,title,payload_json,status,attempts,max_attempts,created_at,updated_at FROM tasks WHERE idempotency_key=?"
+        "SELECT id,idempotency_key,task_type,title,payload_json,status,attempts,max_attempts,created_at,updated_at,execution_mode,priority,dependencies_json FROM tasks WHERE idempotency_key=?"
       ).bind(key).first();
       if (!task) return json({ error: "storage_unavailable" }, 503);
-      return json({ task, created: task.id === id }, task.id === id ? 201 : 200);
-    } catch {
-      return json({ error: "storage_unavailable" }, 503);
+      if (!matchesTask(task)) return json({ error: "idempotency_conflict" }, 409);
+      const storedDependencies = await readDependencies(task.id);
+      if (JSON.stringify(storedDependencies) !== JSON.stringify(dependsOn)) {
+        return json({ error: "dependency_manifest_conflict" }, 409);
+      }
+      return json({ task: { ...task, depends_on: storedDependencies }, created: task.id === id }, task.id === id ? 201 : 200);
+    } catch (error) {
+      return json({ error: "storage_unavailable", detail: storageDetail(error) }, 503);
     }
   }
 };

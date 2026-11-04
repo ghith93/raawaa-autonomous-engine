@@ -19,6 +19,9 @@ class CliTests(unittest.TestCase):
         parser = cli.build_parser()
         commands = [
             ["audit"],
+            ["executive-status"],
+            ["executive-status", "--limit", "5"],
+            ["workflow-plan", "--file", "workflow.json"],
             ["free-models", "--provider", "gemini"],
             ["enqueue", "--type", "research_brief", "--title", "Test"],
             ["list"],
@@ -34,11 +37,24 @@ class CliTests(unittest.TestCase):
             ["provider-profile-status"],
             ["research-discover"],
             ["quota-status"],
+            ["artemis-status"],
         ]
         for command in commands:
             with self.subTest(command=command):
                 self.assertEqual(parser.parse_args(command).command, command[0])
 
+
+    def test_artemis_status_is_offline_when_no_endpoint_is_configured(self):
+        output = io.StringIO()
+        with patch.dict(os.environ, {}, clear=True):
+            with patch("sys.argv", ["engine", "artemis-status"]):
+                with contextlib.redirect_stdout(output):
+                    self.assertEqual(cli.main(), 0)
+        result = json.loads(output.getvalue())
+        self.assertEqual(result["integration"], "google_artemis")
+        self.assertEqual(result["status"], "NOT_CONFIGURED")
+        self.assertEqual(result["network_calls"], 0)
+        self.assertFalse(result["task_submission_enabled"])
 
     def test_provider_profile_status_is_read_only_and_keeps_groq_disabled(self):
         output = io.StringIO()
@@ -68,11 +84,27 @@ class CliTests(unittest.TestCase):
         self.assertIn("safe dry-run", output.getvalue())
 
 
+    def test_audit_rejects_enabled_artemis_integration(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "config").mkdir()
+            for name in ("policy.json", "agents.json", "provider_profiles.json", "tool_permissions.json", "integrations.json"):
+                source = Path(cli.ROOT) / "config" / name
+                (root / "config" / name).write_text(source.read_text(encoding="utf-8"), encoding="utf-8")
+            integrations_path = root / "config" / "integrations.json"
+            integrations = json.loads(integrations_path.read_text(encoding="utf-8"))
+            integrations["integrations"]["google_artemis"]["enabled"] = True
+            integrations_path.write_text(json.dumps(integrations), encoding="utf-8")
+            output = io.StringIO()
+            with patch.object(cli, "ROOT", root), contextlib.redirect_stdout(output):
+                self.assertEqual(cli.audit(), 1)
+            self.assertIn("Google ARTEMIS must remain disabled", output.getvalue())
+
     def test_audit_rejects_budget_overrun_and_malformed_caps(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             (root / "config").mkdir()
-            for name in ("policy.json", "agents.json", "provider_profiles.json", "tool_permissions.json"):
+            for name in ("policy.json", "agents.json", "provider_profiles.json", "tool_permissions.json", "integrations.json"):
                 source = Path(cli.ROOT) / "config" / name
                 (root / "config" / name).write_text(source.read_text(encoding="utf-8"), encoding="utf-8")
             policy_path = root / "config" / "policy.json"
@@ -87,7 +119,7 @@ class CliTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             (root / "config").mkdir()
-            for name in ("policy.json", "agents.json", "provider_profiles.json", "tool_permissions.json"):
+            for name in ("policy.json", "agents.json", "provider_profiles.json", "tool_permissions.json", "integrations.json"):
                 source = Path(cli.ROOT) / "config" / name
                 (root / "config" / name).write_text(source.read_text(encoding="utf-8"), encoding="utf-8")
             policy_path = root / "config" / "policy.json"
@@ -104,7 +136,7 @@ class CliTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             (root / "config").mkdir()
-            for name in ("policy.json", "agents.json", "provider_profiles.json", "tool_permissions.json"):
+            for name in ("policy.json", "agents.json", "provider_profiles.json", "tool_permissions.json", "integrations.json"):
                 source = Path(cli.ROOT) / "config" / name
                 (root / "config" / name).write_text(source.read_text(encoding="utf-8"), encoding="utf-8")
             policy_path = root / "config" / "policy.json"
@@ -157,7 +189,7 @@ class CliTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             (root / "config").mkdir()
-            for name in ("policy.json", "agents.json", "provider_profiles.json", "tool_permissions.json"):
+            for name in ("policy.json", "agents.json", "provider_profiles.json", "tool_permissions.json", "integrations.json"):
                 source = Path(cli.ROOT) / "config" / name
                 (root / "config" / name).write_text(source.read_text(encoding="utf-8"), encoding="utf-8")
             profiles = json.loads((root / "config" / "provider_profiles.json").read_text(encoding="utf-8"))
@@ -282,6 +314,78 @@ class CliTests(unittest.TestCase):
                     self.assertEqual(cli.main(), 0)
         discover_all.assert_called_once_with()
         self.assertEqual(json.loads(output.getvalue()), expected)
+
+
+    def test_executive_status_cli_is_read_only_and_uses_existing_store(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = Path(tmp) / "engine.db"
+            task_store = TaskStore(db_path)
+            task_store.enqueue("system_audit", "Executive audit", idempotency_key="executive-cli-test")
+            output = io.StringIO()
+            with patch.dict(os.environ, {"RAAWAA_ENGINE_DB": str(db_path), "RAAWAA_ENGINE_API_URL": ""}, clear=False):
+                with patch("sys.argv", ["engine", "executive-status"]):
+                    with contextlib.redirect_stdout(output):
+                        self.assertEqual(cli.main(), 0)
+            result = json.loads(output.getvalue())
+            self.assertEqual(result["mode"], "read_only_decision_support")
+            self.assertEqual(result["tasks_inspected"], 1)
+            self.assertEqual(result["next_best_tasks"][0]["task_type"], "system_audit")
+            self.assertEqual(result["side_effects"]["tasks_claimed"], 0)
+            self.assertEqual(len(task_store.list_tasks()), 1)
+
+
+    def test_brain_cycle_cli_requests_the_portable_snapshot_limit(self):
+        """The remote adapter clamps at 100, so the CLI must not ask for 200."""
+        seen = {}
+
+        class FakeStore:
+            def list_tasks(self, limit=50):
+                seen["limit"] = limit
+                return [
+                    {"id": f"s{i}", "task_type": "code_review", "status": "succeeded"}
+                    for i in range(5)
+                ]
+
+        output = io.StringIO()
+        with patch("engine.cli.store", return_value=FakeStore()):
+            with patch("sys.argv", ["engine", "brain-cycle", "--limit", "2"]):
+                with contextlib.redirect_stdout(output):
+                    self.assertEqual(cli.main(), 0)
+        result = json.loads(output.getvalue())
+
+        self.assertEqual(seen["limit"], 100)
+        self.assertEqual(result["schema_version"], 2)
+        self.assertEqual(result["snapshot"]["requested_limit"], 100)
+        self.assertFalse(result["snapshot"]["truncated"])
+        self.assertEqual(result["excluded"], {"non_terminal": 0, "missing_task_type": 0, "malformed": 0})
+        self.assertEqual(result["learning"]["scorecards"][0]["sample_size"], 5)
+        self.assertEqual(result["guardrails"]["task_writes"], 0)
+        self.assertFalse(result["guardrails"]["dispatch_authorized"])
+
+
+    def test_workflow_plan_cli_validates_and_does_not_enqueue(self):
+        proposal = {
+            "id": "cli_plan",
+            "steps": [
+                {"id": "audit", "task_type": "system_audit", "title": "Inspect system",
+                 "acceptance_checks": ["Audit report is returned"]},
+                {"id": "review", "task_type": "code_review", "title": "Review changes",
+                 "depends_on": ["audit"], "acceptance_checks": ["Findings are recorded"]},
+            ],
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            proposal_path = Path(tmp) / "workflow.json"
+            proposal_path.write_text(json.dumps(proposal), encoding="utf-8")
+            output = io.StringIO()
+            with patch("sys.argv", ["engine", "workflow-plan", "--file", str(proposal_path)]):
+                with contextlib.redirect_stdout(output):
+                    self.assertEqual(cli.main(), 0)
+            result = json.loads(output.getvalue())
+            self.assertEqual(result["order"], ["audit", "review"])
+            self.assertEqual(result["assignments"], {"audit": "operator", "review": "reviewer"})
+            self.assertFalse(result["dispatch_authorized"])
+            self.assertEqual(result["provider_calls"], 0)
+            self.assertEqual(result["external_writes"], 0)
 
 
 if __name__ == "__main__":

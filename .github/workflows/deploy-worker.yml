@@ -1,12 +1,10 @@
 name: Deploy Control Worker
 
 on:
-  workflow_dispatch:
-    inputs:
-      confirm_deployment:
-        description: 'Type DEPLOY_CONTROL_WORKER to authorize a production Worker deployment'
-        required: true
-        type: string
+  # No workflow_dispatch on purpose: a manual trigger can be produced by any
+  # credential holding actions:write, so it is not an authorization boundary.
+  # Production deployment is authorized only by a reviewed merge to main whose
+  # commit message carries the explicit marker below.
   workflow_run:
     workflows: ["Engine CI"]
     types: [completed]
@@ -21,31 +19,27 @@ concurrency:
 
 jobs:
   deploy:
-    # API-first, browser-free dispatch: only a successful Engine CI push to main
+    # API-first, browser-free hand-off: only a successful Engine CI push to main
     # whose squash-merge commit message contains the explicit deployment marker.
-    # PR CI, ordinary main pushes, and failed CI runs cannot deploy.
+    # PR CI, ordinary main pushes, and failed CI runs cannot deploy, and no manual
+    # dispatch path exists.
     if: >-
       github.ref == 'refs/heads/main' &&
-      (
-        github.event_name == 'workflow_dispatch' ||
-        (
-        github.event_name == 'workflow_run' &&
-          github.event.workflow_run.event == 'push' &&
-        github.event.workflow_run.conclusion == 'success' &&
-        github.event.workflow_run.head_branch == 'main' &&
-        contains(github.event.workflow_run.head_commit.message, '[deploy-control-worker]')
-        )
-      )
+      github.event_name == 'workflow_run' &&
+      github.event.workflow_run.event == 'push' &&
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.head_branch == 'main' &&
+      contains(github.event.workflow_run.head_commit.message, '[deploy-control-worker]')
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
       - name: Check out reviewed main revision
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
-          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+          ref: ${{ github.event.workflow_run.head_sha }}
       - name: Require explicit deployment confirmation
         env:
-          CONFIRM_DEPLOYMENT: ${{ inputs.confirm_deployment || (github.event_name == 'workflow_run' && contains(github.event.workflow_run.head_commit.message, '[deploy-control-worker]') && 'DEPLOY_CONTROL_WORKER') }}
+          CONFIRM_DEPLOYMENT: ${{ contains(github.event.workflow_run.head_commit.message, '[deploy-control-worker]') && 'DEPLOY_CONTROL_WORKER' || '' }}
         run: |
           test "$CONFIRM_DEPLOYMENT" = "DEPLOY_CONTROL_WORKER" || {
             echo "Deployment confirmation did not match; refusing to deploy."
@@ -70,11 +64,25 @@ jobs:
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           ENGINE_API_TOKEN: ${{ secrets.ENGINE_API_TOKEN }}
         run: printf '%s' "$ENGINE_API_TOKEN" | npx --yes wrangler@4 secret put ENGINE_API_TOKEN --config wrangler.toml
+      - name: Refuse to deploy with an unapplied migration
+        # Worker code can reference a table that only a later migration creates.
+        # On 2026-11-04 the claim SQL shipped ahead of migration 0010, every
+        # write answered 503, and the queue was dead from 11:06 to 12:08 while
+        # the cause was invisible. Fail here instead of in the task runner.
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          npx --yes wrangler@4.156.1 d1 execute raawaa-autonomous-e --remote \
+            --config wrangler.toml --json \
+            --command "SELECT name FROM d1_migrations" > /tmp/d1-applied-migrations.json
+          python3 -m engine.migrations migrations /tmp/d1-applied-migrations.json
       - name: Deploy authenticated D1 control Worker
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-        run: npx --yes wrangler@4 deploy --config wrangler.toml
+        run: npx --yes wrangler@4 deploy --config wrangler.toml --keep-vars
       - name: Verify authenticated watchdog readiness without exposing secrets
         env:
           ENGINE_API_TOKEN: ${{ secrets.ENGINE_API_TOKEN }}
@@ -120,6 +128,8 @@ jobs:
           if not isinstance(missing, list) or any(not isinstance(item, str) for item in missing):
               raise SystemExit("Watchdog missing-settings metadata is invalid.")
           print("Missing setting names: " + (", ".join(missing) if missing else "none"))
+          if not watchdog["ready"]:
+              raise SystemExit("Task Runner watchdog is not ready after deployment; refusing to report a healthy production release.")
           last = watchdog.get("last_dispatch_requested")
           if isinstance(last, dict):
               print("Last watchdog dispatch request: " + str(last.get("created_at", "unknown")))
@@ -127,4 +137,45 @@ jobs:
           else:
               print("Last watchdog dispatch request: none recorded")
           print("No secret values or response body were written to logs.")
+          PY
+
+      - name: Verify the deployed Worker can see the schema it depends on
+        # The migration gate above reads the repository's migration files; this
+        # asks the deployed Worker what its own queries can actually reach. On
+        # 2026-11-04 those disagreeing produced a silent 503 queue outage.
+        env:
+          ENGINE_API_TOKEN: ${{ secrets.ENGINE_API_TOKEN }}
+          CF_ACCESS_CLIENT_ID: ${{ secrets.CF_ACCESS_CLIENT_ID }}
+          CF_ACCESS_CLIENT_SECRET: ${{ secrets.CF_ACCESS_CLIENT_SECRET }}
+        run: |
+          python3 - <<'PY'
+          import json
+          import os
+          from urllib.error import HTTPError
+          from urllib.request import Request, urlopen
+
+          client_id = os.environ.get("CF_ACCESS_CLIENT_ID", "")
+          client_secret = os.environ.get("CF_ACCESS_CLIENT_SECRET", "")
+          headers = {
+              "Accept": "application/json",
+              "Authorization": "Bearer " + os.environ["ENGINE_API_TOKEN"],
+              "User-Agent": "RaawaaAutonomousEngine/1.0 (+https://github.com/ghith93/raawaa-autonomous-engine)",
+          }
+          if client_id and client_secret:
+              headers["CF-Access-Client-Id"] = client_id
+              headers["CF-Access-Client-Secret"] = client_secret
+          request = Request(
+              "https://raawaa-autonomous-engine-control.ghith-shikhkhaled.workers.dev/v1/diagnostics/schema",
+              headers=headers,
+              method="GET",
+          )
+          try:
+              with urlopen(request, timeout=20) as response:
+                  payload = json.loads(response.read().decode("utf-8"))
+          except HTTPError as error:
+              body = error.read(2048).decode("utf-8", "replace")
+              raise SystemExit(f"Deployed Worker cannot see its schema (HTTP {error.code}): {body[:600]}")
+          if not payload.get("ok"):
+              raise SystemExit("Deployed Worker reports missing tables: " + ", ".join(payload.get("missing", [])))
+          print("Deployed Worker can read every table its SQL depends on: " + ", ".join(payload.get("checked", [])))
           PY

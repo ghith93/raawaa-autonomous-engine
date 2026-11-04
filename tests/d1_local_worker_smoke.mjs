@@ -9,6 +9,7 @@ import { setTimeout as delay } from "node:timers/promises";
 const PORT = 8792;
 const BASE = "http://127.0.0.1:" + PORT;
 const TOKEN = "test-engine-token-local-only";
+const CODESPACE_TOKEN = "test-codespace-token-0123456789abcdef0123456789abcdef";
 const WRANGLER = ["--yes", "wrangler@4.156.1"];
 const root = mkdtempSync(join(tmpdir(), "raawaa-d1-local-"));
 const stateDir = join(root, "state");
@@ -118,6 +119,7 @@ function launchWorker() {
     "--log-level", "error",
     "--persist-to", stateDir,
     "--var", "ENGINE_API_TOKEN:" + TOKEN,
+    "--var", "ENGINE_CODESPACE_TOKEN:" + CODESPACE_TOKEN,
     "--var", "QUOTA_ROUTE_LIMITS_JSON:" + JSON.stringify({
       "d1-local:concurrency": {
         enabled: true,
@@ -179,6 +181,8 @@ try {
   assertStatus(status, 200, "mobile status must query migrated D1");
   assert.equal(status.payload.unavailable_metrics.paper_ledger, "Available");
   assert.equal(status.payload.unavailable_metrics.provider_usage, "Available");
+  assert.equal(status.payload.execution_modes.available, true);
+  assert.equal(status.payload.execution_modes.counts.unknown, 0);
 
   const taskPayload = {
     task_type: "system_audit",
@@ -193,28 +197,185 @@ try {
   assertStatus(duplicate, 200, "idempotent task replay");
   assert.equal(duplicate.payload.task.id, enqueued.payload.task.id);
   assert.equal(duplicate.payload.created, false);
+  assert.equal(enqueued.payload.task.execution_mode, "not_started");
 
-  const claimed = await api("/v1/tasks/claim", { method: "POST", body: {} });
+  const claimed = await api("/v1/tasks/claim", {
+    method: "POST", body: { execution_mode: "dry_run" },
+  });
   assertStatus(claimed, 200, "task claim");
   assert.equal(claimed.payload.task.id, enqueued.payload.task.id);
   assert.equal(typeof claimed.payload.lease_token, "string");
+  assert.equal(claimed.payload.task.execution_mode, "dry_run");
 
   const finished = await api("/v1/tasks/" + enqueued.payload.task.id + "/finish", {
     method: "POST",
     body: {
       lease_token: claimed.payload.lease_token,
       status: "succeeded",
-      result: { local_d1_verified: true },
+      result: { mode: "dry_run", local_d1_verified: true },
     },
   });
   assertStatus(finished, 200, "task finish");
   assert.equal(finished.payload.status, "succeeded");
+  const taskReadback = await api("/v1/tasks?limit=10");
+  assertStatus(taskReadback, 200, "execution mode task readback");
+  const persistedTask = taskReadback.payload.tasks.find(task => task.id === enqueued.payload.task.id);
+  assert.equal(persistedTask.execution_mode, "dry_run");
+  status = await api("/v1/mobile/status");
+  assertStatus(status, 200, "mobile execution-mode aggregate");
+  assert.equal(status.payload.execution_modes.counts.dry_run, 1);
 
   const staleLease = await api("/v1/tasks/" + enqueued.payload.task.id + "/heartbeat", {
     method: "POST",
     body: { lease_token: claimed.payload.lease_token },
   });
   assertStatus(staleLease, 409, "finished task must reject stale lease");
+
+  // Priority and dependency eligibility are enforced by the real local D1 queue.
+  const parentTask = await api("/v1/tasks/enqueue", {
+    method: "POST",
+    body: {
+      task_type: "research_brief", title: "DAG parent", payload: { step: "parent" },
+      idempotency_key: "d1-local-dag-parent-" + randomUUID(), priority: 10, max_attempts: 1,
+    },
+  });
+  assertStatus(parentTask, 201, "DAG parent enqueue");
+  const childTask = await api("/v1/tasks/enqueue", {
+    method: "POST",
+    body: {
+      task_type: "content_draft", title: "DAG child", payload: { step: "child" },
+      idempotency_key: "d1-local-dag-child-" + randomUUID(), priority: 100,
+      depends_on: [parentTask.payload.task.id], max_attempts: 1,
+    },
+  });
+  assertStatus(childTask, 201, "DAG child enqueue");
+  const independentTask = await api("/v1/tasks/enqueue", {
+    method: "POST",
+    body: {
+      task_type: "system_audit", title: "Independent task", payload: { step: "independent" },
+      idempotency_key: "d1-local-dag-independent-" + randomUUID(), priority: 50, max_attempts: 1,
+    },
+  });
+  assertStatus(independentTask, 201, "independent task enqueue");
+  const independentClaim = await api("/v1/tasks/claim", {
+    method: "POST", body: { execution_mode: "dry_run" },
+  });
+  assert.equal(independentClaim.payload.task.id, independentTask.payload.task.id,
+    "higher-priority blocked child cannot bypass its dependency");
+  await api("/v1/tasks/" + independentTask.payload.task.id + "/finish", {
+    method: "POST", body: { lease_token: independentClaim.payload.lease_token,
+      status: "succeeded", result: { mode: "dry_run" } },
+  });
+  const parentClaim = await api("/v1/tasks/claim", {
+    method: "POST", body: { execution_mode: "dry_run" },
+  });
+  assert.equal(parentClaim.payload.task.id, parentTask.payload.task.id);
+  await api("/v1/tasks/" + parentTask.payload.task.id + "/finish", {
+    method: "POST", body: { lease_token: parentClaim.payload.lease_token,
+      status: "succeeded", result: { mode: "dry_run" } },
+  });
+  const wrongModeClaim = await api("/v1/tasks/claim", {
+    method: "POST", body: { execution_mode: "live_inference" },
+  });
+  assert.equal(wrongModeClaim.payload.task, null,
+    "a dry-run dependency must not release a live-inference task");
+  const childClaim = await api("/v1/tasks/claim", {
+    method: "POST", body: { execution_mode: "dry_run" },
+  });
+  assert.equal(childClaim.payload.task.id, childTask.payload.task.id);
+  await api("/v1/tasks/" + childTask.payload.task.id + "/finish", {
+    method: "POST", body: { lease_token: childClaim.payload.lease_token,
+      status: "succeeded", result: { mode: "dry_run" } },
+  });
+  const failureParent = await api("/v1/tasks/enqueue", {
+    method: "POST", body: {
+      task_type: "research_brief", title: "Failing DAG parent", payload: {},
+      idempotency_key: "d1-local-dag-fail-parent-" + randomUUID(), max_attempts: 1,
+    },
+  });
+  const failureChild = await api("/v1/tasks/enqueue", {
+    method: "POST", body: {
+      task_type: "content_draft", title: "Blocked DAG child", payload: {},
+      idempotency_key: "d1-local-dag-fail-child-" + randomUUID(),
+      depends_on: [failureParent.payload.task.id], max_attempts: 1,
+    },
+  });
+  const failureGrandchild = await api("/v1/tasks/enqueue", {
+    method: "POST", body: {
+      task_type: "code_review", title: "Blocked DAG grandchild", payload: {},
+      idempotency_key: "d1-local-dag-fail-grandchild-" + randomUUID(),
+      depends_on: [failureChild.payload.task.id], max_attempts: 1,
+    },
+  });
+  const failureClaim = await api("/v1/tasks/claim", {
+    method: "POST", body: { execution_mode: "dry_run" },
+  });
+  assert.equal(failureClaim.payload.task.id, failureParent.payload.task.id);
+  await api("/v1/tasks/" + failureParent.payload.task.id + "/finish", {
+    method: "POST", body: { lease_token: failureClaim.payload.lease_token,
+      status: "failed", error: "intentional local smoke failure" },
+  });
+  const afterFailureClaim = await api("/v1/tasks/claim", {
+    method: "POST", body: { execution_mode: "dry_run" },
+  });
+  assert.equal(afterFailureClaim.payload.task, null);
+  const dagReadback = await api("/v1/tasks?limit=100");
+  const byId = new Map(dagReadback.payload.tasks.map(task => [task.id, task]));
+  assert.equal(byId.get(failureChild.payload.task.id).status, "blocked");
+  assert.equal(byId.get(failureGrandchild.payload.task.id).status, "blocked");
+  assert.deepEqual(byId.get(childTask.payload.task.id).depends_on, [parentTask.payload.task.id]);
+  assert.equal(byId.get(childTask.payload.task.id).priority, 100);
+  const priorityConflict = await api("/v1/tasks/enqueue", {
+    method: "POST",
+    body: {
+      task_type: "research_brief", title: "DAG parent", payload: { step: "parent" },
+      idempotency_key: parentTask.payload.task.idempotency_key, priority: 99, max_attempts: 1,
+    },
+  });
+  assertStatus(priorityConflict, 409, "idempotency key cannot change priority");
+
+
+  // Codespaces remains hard-disabled until issue #440's adversarial sandbox
+  // acceptance criteria pass. Verify the real local D1 Worker rejects every
+  // activation path and does not enqueue a Codespace task.
+  const codespaceStatus = await api("/v1/codespace/status", { token: CODESPACE_TOKEN });
+  assertStatus(codespaceStatus, 503, "Codespace release gate");
+  assert.deepEqual(codespaceStatus.payload, { error: "codespace_executor_disabled" });
+  const sharedTokenDenied = await api("/v1/codespace/status", { token: TOKEN });
+  assertStatus(sharedTokenDenied, 503, "release gate precedes token validation");
+  const codespaceTask = await api("/v1/tasks/enqueue", {
+    method: "POST",
+    body: {
+      task_type: "codespace_test",
+      title: "Codespace D1 isolation smoke",
+      payload: { operation: "python_tests" },
+      idempotency_key: "d1-local-codespace-isolation-" + randomUUID(),
+      max_attempts: 1,
+    },
+  });
+  assertStatus(codespaceTask, 503, "Codespace enqueue blocked before D1 write");
+  assert.deepEqual(codespaceTask.payload, { error: "codespace_executor_disabled" });
+  const legacyCannotClaim = await api("/v1/tasks/claim", { method: "POST", body: {} });
+  assertStatus(legacyCannotClaim, 200, "legacy runner remains operational");
+  assert.equal(legacyCannotClaim.payload.task, null, "no Codespace task was enqueued");
+  const scopedCannotList = await api("/v1/tasks", { token: CODESPACE_TOKEN });
+  assertStatus(scopedCannotList, 401, "Codespace principal cannot list general tasks");
+  const codespaceClaim = await api("/v1/codespace/tasks/claim", {
+    method: "POST", body: {}, token: CODESPACE_TOKEN,
+  });
+  assertStatus(codespaceClaim, 503, "Codespace claim blocked");
+  const codespaceFinished = await api("/v1/codespace/tasks/local-disabled/finish", {
+    method: "POST",
+    token: CODESPACE_TOKEN,
+    body: { lease_token: "local-disabled", status: "succeeded" },
+  });
+  assertStatus(codespaceFinished, 503, "Codespace finish blocked");
+  const retryDenied = await api("/v1/codespace/tasks/local-disabled/retry", {
+    method: "POST",
+    token: CODESPACE_TOKEN,
+    body: { lease_token: "local-disabled" },
+  });
+  assertStatus(retryDenied, 404, "Codespace principal has no retry endpoint");
 
   // Durable model invocation identities survive retries and distinguish steps.
   const invocationTask = await api("/v1/tasks/enqueue", {
@@ -619,7 +780,12 @@ try {
   status = await api("/v1/mobile/status");
   assertStatus(status, 200, "mobile status after D1 writes");
   assert.equal(status.payload.paper_events.find(row => row.event_type === "candidate_detected")?.count, 1);
-  assert.equal(status.payload.tasks.find(row => row.status === "succeeded")?.count, 1);
+  assert.equal(status.payload.tasks.find(row => row.status === "succeeded")?.count, 4,
+    "the legacy task and three dependency-smoke tasks should be durably succeeded");
+  assert.equal(status.payload.tasks.find(row => row.status === "failed")?.count, 1,
+    "the failed dependency root remains visibly failed");
+  assert.equal(status.payload.tasks.find(row => row.status === "blocked")?.count, 2,
+    "failed dependency descendants remain blocked");
   assert.equal(status.payload.monetary_ledger.available, true);
   assert.equal(status.payload.monetary_ledger.pending_count, 1);
   assert.equal(status.payload.monetary_ledger.ambiguous_count, 1);

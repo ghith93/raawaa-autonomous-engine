@@ -100,8 +100,9 @@ def build_telemetry_statement(
     missing = [name for name in required if not environ.get(name, "").strip()]
     if missing:
         raise TelemetryPublishError("Missing required telemetry environment settings: " + ",".join(missing))
-    if environ["GITHUB_REF_NAME"] != "main" or environ["GITHUB_EVENT_NAME"] != "push":
-        raise TelemetryPublishError("Only main push CI telemetry may be written to Staging")
+    event_name = environ["GITHUB_EVENT_NAME"]
+    if environ["GITHUB_REF_NAME"] != "main" or event_name not in {"push", "workflow_dispatch"}:
+        raise TelemetryPublishError("Only main push or main workflow_dispatch CI telemetry may be written to Staging")
     if environ["GITHUB_WORKFLOW"] != "Engine CI":
         raise TelemetryPublishError("Unexpected workflow name")
     if not environ["GITHUB_RUN_ID"].isdigit() or not environ["GITHUB_RUN_NUMBER"].isdigit():
@@ -122,7 +123,7 @@ def build_telemetry_statement(
         "workflow": "Engine CI",
         "run_id": int(environ["GITHUB_RUN_ID"]),
         "run_number": int(environ["GITHUB_RUN_NUMBER"]),
-        "event": "push",
+        "event": event_name,
         "branch": "main",
         "head_sha": environ["GITHUB_SHA"],
         "conclusion": conclusion,

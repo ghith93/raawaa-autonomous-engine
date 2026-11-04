@@ -39,9 +39,11 @@ h2{font-size:16px;margin:0 0 10px}.rows{display:grid;gap:8px}.item{display:flex;
 <div class="grid">
 <div class="metric"><span>Pending tasks</span><strong id="pending">—</strong></div>
 <div class="metric"><span>Running tasks</span><strong id="running">—</strong></div>
-<div class="metric"><span>Completed tasks</span><strong id="succeeded">—</strong></div>
+<div class="metric"><span>Executed successfully</span><strong id="succeeded">—</strong></div>
+<div class="metric"><span>Dry-run simulations</span><strong id="simulated">—</strong></div>
 <div class="metric"><span>Failed / blocked</span><strong id="failed">—</strong></div>
 </div>
+<section class="panel"><h2>Task execution mode</h2><div id="executionModes" class="rows"></div><p class="muted">Dry run is simulation, not completed live work. Live inference means the live path was selected; it does not by itself prove a provider request completed.</p></section>
 <section class="panel"><h2>Paper research events</h2><div id="paper" class="rows"></div></section>
 <section class="panel"><h2>Provider usage · D1</h2><div id="usage" class="rows"></div></section>
 <section class="panel"><h2>Recorded model inference costs · USD</h2><div id="modelCosts" class="rows"></div><p class="muted">Recorded provider costs only; external or unreported spend is not inferred.</p></section>
@@ -74,6 +76,25 @@ async function load() {
   const tasks=Object.fromEntries((data.tasks||[]).map(x=>[x.status,x.count]));
   $("pending").textContent=tasks.pending||0;$("running").textContent=tasks.running||0;$("succeeded").textContent=tasks.succeeded||0;
   $("failed").textContent=(tasks.failed||0)+(tasks.blocked||0);
+  const executionModes=data.execution_modes||{};
+  const modeStatuses=executionModes.status_counts||{};
+  const modeSucceeded=mode=>Number(modeStatuses[mode]?.succeeded||0);
+  if(executionModes.available){
+    $("succeeded").textContent=modeSucceeded("live_inference");
+    $("simulated").textContent=modeSucceeded("dry_run");
+    rows("executionModes",[
+      ["Not started / not yet claimed",executionModes.counts.not_started||0],
+      ["Dry-run simulation succeeded · not executed",modeSucceeded("dry_run")],
+      ["Live inference completed",modeSucceeded("live_inference")],
+      ["Live inference running",Number(modeStatuses.live_inference?.running||0)],
+      ["Live inference failed / blocked",Number(modeStatuses.live_inference?.failed||0)+Number(modeStatuses.live_inference?.blocked||0)],
+      ["Legacy / unknown successes",modeSucceeded("unknown")],
+      ["Legacy / unknown total",executionModes.counts.unknown||0]
+    ],"No task execution modes recorded");
+  }else{
+    $("succeeded").textContent="—";$("simulated").textContent="—";
+    rows("executionModes",[],data.unavailable_metrics?.execution_modes||"Execution-mode migration is not available");
+  }
   rows("paper",(data.paper_events||[]).map(x=>[x.event_type,x.count]),"No paper events recorded");
   const usage=data.provider_usage||{};
   rows("usage",[
@@ -171,7 +192,7 @@ export async function handleMobileStatus(request, env, url) {
   try {
     const [tasks, migrations, workerCron, watchdogEvents, ciHealthRow, killSwitchRow, scanRows, sourceRows] = await Promise.all([
       env.DB.prepare("SELECT status,COUNT(*) AS count FROM tasks GROUP BY status").all(),
-      env.DB.prepare("SELECT version FROM schema_migrations WHERE version IN ('0003_durable_quota_ledger','0004_paper_event_ledger','0005_telegram_webhook_receipts','0006_monetary_budget_ledger','0007_task_model_invocations')").all(),
+      env.DB.prepare("SELECT version FROM schema_migrations WHERE version IN ('0003_durable_quota_ledger','0004_paper_event_ledger','0005_telegram_webhook_receipts','0006_monetary_budget_ledger','0007_task_model_invocations','0009_task_execution_mode')").all(),
       env.DB.prepare("SELECT created_at,details_json FROM audit_log WHERE task_id IS NULL AND event='worker_cron_tick' ORDER BY created_at DESC LIMIT 1").first(),
       env.DB.prepare("SELECT event,created_at,details_json FROM audit_log WHERE task_id IS NULL AND event IN ('task_runner_dispatch_requested','task_runner_dispatch_intent') ORDER BY created_at DESC LIMIT 2").all(),
       env.DB.prepare("SELECT created_at,details_json FROM audit_log WHERE task_id IS NULL AND event='ci_health_snapshot' ORDER BY created_at DESC LIMIT 1").first(),
@@ -180,6 +201,32 @@ export async function handleMobileStatus(request, env, url) {
       env.DB.prepare("SELECT created_at,details_json FROM audit_log WHERE task_id IS NULL AND event='research_source_observation' ORDER BY created_at DESC LIMIT 20").all(),
     ]);
     const applied = new Set((migrations.results || []).map(row => row.version));
+    let executionModes = null;
+    if (applied.has("0009_task_execution_mode")) {
+      try {
+        const result = await env.DB.prepare(
+          "SELECT execution_mode,status,COUNT(*) AS count FROM tasks GROUP BY execution_mode,status"
+        ).all();
+        const modes = ["not_started", "dry_run", "live_inference", "unknown"];
+        const statuses = ["pending", "running", "succeeded", "failed", "blocked"];
+        const counts = Object.fromEntries(modes.map(mode => [mode, 0]));
+        const statusCounts = Object.fromEntries(modes.map(mode => [
+          mode, Object.fromEntries(statuses.map(status => [status, 0])),
+        ]));
+        for (const row of result.results || []) {
+          const count = Number(row.count);
+          if (!Object.hasOwn(counts, row.execution_mode) || !statuses.includes(row.status) ||
+              !Number.isSafeInteger(count) || count < 0) {
+            throw new Error("invalid_execution_mode_aggregate");
+          }
+          counts[row.execution_mode] += count;
+          statusCounts[row.execution_mode][row.status] = count;
+        }
+        executionModes = { available: true, counts, status_counts: statusCounts };
+      } catch {
+        executionModes = { available: false };
+      }
+    }
     let taskInvocations = null;
     if (applied.has("0007_task_model_invocations")) {
       try {
@@ -410,6 +457,7 @@ export async function handleMobileStatus(request, env, url) {
     return json({
       generated_at: new Date().toISOString(),
       tasks: (tasks.results || []).map(row => ({ status: row.status, count: Number(row.count) || 0 })),
+      execution_modes: executionModes || { available: false },
       paper_events: (paper.results || []).map(row => ({ event_type: row.event_type, count: Number(row.count) || 0 })),
       latest_paper_event: latest ? {
         event_type: latest.event_type, candidate_id: latest.candidate_id, occurred_at: latest.occurred_at,
@@ -468,6 +516,8 @@ export async function handleMobileStatus(request, env, url) {
         paper_ledger: applied.has("0004_paper_event_ledger") ? "Available" : "Migration 0004 is not applied to this database",
         provider_usage: applied.has("0003_durable_quota_ledger") ? "Available" : "Migration 0003 is not applied to this database",
         monetary_ledger: applied.has("0006_monetary_budget_ledger") ? "Available" : "Migration 0006 is not applied to this database",
+        ...(!applied.has("0009_task_execution_mode") ? { execution_modes: "Migration 0009 is not applied to this database" } :
+          !executionModes?.available ? { execution_modes: "D1 execution-mode aggregate is unavailable" } : {}),
         ...(!applied.has("0007_task_model_invocations") ? { task_invocations: "Migration 0007 is not applied to this database" } :
           !taskInvocations?.available ? { task_invocations: "D1 invocation lifecycle aggregate is unavailable" } : {}),
       },

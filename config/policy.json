@@ -52,7 +52,6 @@
     "modify_storefront"
   ],
   "max_task_retries": 2,
-  "max_parallel_agents": 2,
   "default_task_timeout_seconds": 300,
   "live_inference_data_policy": {
     "require_explicit_classification": true,
@@ -98,5 +97,6 @@
       "phone",
       "address"
     ]
-  }
+  },
+  "max_parallel_agents": 2
 }
