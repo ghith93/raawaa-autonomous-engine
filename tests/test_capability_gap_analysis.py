@@ -69,7 +69,6 @@ class CapabilityGapAnalysisTests(unittest.TestCase):
         self.assertEqual(result["model_calls"], 0)
         self.assertEqual(result["network_calls"], 0)
         self.assertFalse(result["task_creation"])
-        self.assertFalse(result["automatic_adoption"])
         by_id = {item["capability"]: item for item in result["opportunities"]}
         self.assertEqual(by_id["agent_orchestration"]["candidate_count"], 1)
         self.assertEqual(by_id["coding_execution"]["candidate_count"], 1)
@@ -79,6 +78,9 @@ class CapabilityGapAnalysisTests(unittest.TestCase):
         self.assertEqual(by_id["memory"]["current_status"], "local_memory_with_optional_research_persistence")
         self.assertEqual(by_id["model_routing"]["current_status"], "profiles_staged_disabled")
         self.assertEqual(by_id["skill_security"]["current_status"], "static_preflight_implemented_not_verified")
+        self.assertEqual(by_id["skill_security"]["priority_score"], 4)
+        self.assertEqual(by_id["skill_security"]["priority_band"], "medium")
+        self.assertIn("qualitative heuristic", by_id["skill_security"]["scoring_method"])
         self.assertEqual(by_id["durable_execution"]["current_status"], "bounded_scheduled_runner")
 
     def test_missing_broker_and_research_sources_are_reported_without_guessing(self):
@@ -120,6 +122,37 @@ class CapabilityGapAnalysisTests(unittest.TestCase):
         result = analyze_capability_gaps(triage, self.root)
         self.assertEqual(result["unmapped_github_candidate_count"], 1)
         self.assertTrue(all(item["candidate_count"] == 0 for item in result["opportunities"]))
+
+    def test_all_opportunities_have_bounded_scores_and_reviewable_proposals(self):
+        result = analyze_capability_gaps(
+            {"schema_version": 1, "github_candidates": []}, self.root
+        )
+        self.assertEqual(len(result["task_proposals"]), 9)
+        for opportunity in result["opportunities"]:
+            self.assertGreaterEqual(opportunity["priority_score"], 0)
+            self.assertLessEqual(opportunity["priority_score"], 7)
+            self.assertIn(opportunity["risk_band"], {"low", "medium", "high"})
+            self.assertIn(opportunity["cost_band"], {"zero", "low", "medium", "high"})
+            self.assertIn(opportunity["complexity_band"], {"low", "medium", "high"})
+        self.assertFalse(result["task_creation"])
+        self.assertFalse(result["automatic_adoption"])
+        for opportunity in result["opportunities"]:
+            self.assertEqual(opportunity["decision_status"], "PROPOSED")
+            self.assertFalse(opportunity["automatic_task_creation"])
+            self.assertFalse(opportunity["automatic_adoption"])
+        for proposal in result["task_proposals"]:
+            self.assertEqual(proposal["task_type"], "capability_proposal")
+            self.assertEqual(proposal["status"], "PROPOSED")
+            self.assertTrue(proposal["acceptance_criteria"])
+            self.assertTrue(proposal["rollback_plan"])
+            self.assertTrue(proposal["independent_review_required"])
+            self.assertTrue(proposal["owner_approval_required"])
+            self.assertFalse(proposal["automatic_task_creation"])
+            self.assertFalse(proposal["task_store_write"])
+            self.assertFalse(proposal["automatic_execution"])
+            self.assertFalse(proposal["automatic_adoption"])
+            self.assertEqual(proposal["approval_state"], "not_requested")
+
 
     def test_rejects_unsupported_triage_schema(self):
         with self.assertRaisesRegex(ValueError, "schema_version 1"):
