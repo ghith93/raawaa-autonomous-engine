@@ -153,7 +153,10 @@ def webhook_state(token: str) -> dict:
         "url": info.get("url") or "",
         "pending_updates": info.get("pending_update_count"),
         "last_error": (info.get("last_error_message") or "")[:160],
-        "secret_token_set": bool(info.get("has_custom_certificate")) is False and bool(info.get("url")),
+        # Telegram's getWebhookInfo does not expose whether secret_token is set.
+        # has_custom_certificate refers to a custom TLS certificate, not the
+        # webhook secret. Keep this explicitly unknown instead of inferring it.
+        "secret_token_set": None,
     }
 
 
