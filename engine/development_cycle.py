@@ -178,8 +178,11 @@ def _pipeline_actions(state: dict[str, Any], now: datetime) -> list[dict[str, An
     return actions
 
 
-def _pull_request_actions(state: dict[str, Any], now: datetime) -> list[dict[str, Any]]:
+def _pull_request_actions(
+    state: dict[str, Any], now: datetime
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     actions: list[dict[str, Any]] = []
+    blocked: list[dict[str, Any]] = []
     for pr in state.get("open_pull_requests") or []:
         number = pr.get("number")
         if number is None:
@@ -192,6 +195,22 @@ def _pull_request_actions(state: dict[str, Any], now: datetime) -> list[dict[str
         checks = str(pr.get("checks") or "").lower()
         title = str(pr.get("title") or "")[:80]
         labels = [str(label).lower() for label in pr.get("labels") or []]
+        if "blocked" in labels or "needs-owner" in labels:
+            # A parked PR is not work: it is waiting on an external decision
+            # that has already been written down. Ranking it every six hours
+            # forever is how a backlog becomes noise.
+            blocked.append(
+                _item(
+                    "pull_request",
+                    target,
+                    "hold",
+                    W_BLOCKED,
+                    f"parked with an explicit unblock condition: {title}",
+                    gate="external decision required",
+                    evidence={"labels": labels, "age_days": round(age, 1)},
+                )
+            )
+            continue
         # A green check is evidence that nothing regressed; it is not evidence
         # that a change to a trust boundary is correct. Those two are flagged
         # separately so the loop cannot quietly merge one on the strength of CI.
@@ -302,7 +321,7 @@ def _pull_request_actions(state: dict[str, Any], now: datetime) -> list[dict[str
                     evidence={"mergeable": mergeable or "UNKNOWN", "checks": checks},
                 )
             )
-    return actions
+    return actions, blocked
 
 
 def _issue_actions(
@@ -403,7 +422,7 @@ def build_development_cycle(state: dict[str, Any] | None = None, *, limit: int =
     now = _now()
 
     pipeline = _pipeline_actions(state, now)
-    pull_requests = _pull_request_actions(state, now)
+    pull_requests, blocked_pull_requests = _pull_request_actions(state, now)
     issues, blocked, tracking = _issue_actions(state, now)
     hygiene = _hygiene_actions(state)
 
@@ -433,7 +452,7 @@ def build_development_cycle(state: dict[str, Any] | None = None, *, limit: int =
             "remote_branch_count": state.get("remote_branch_count"),
         },
         "next_actions": selected,
-        "blocked": blocked,
+        "blocked": blocked + blocked_pull_requests,
         "tracking": tracking,
         "deferred": ranked[len(selected):],
         "ranking_notes": {
