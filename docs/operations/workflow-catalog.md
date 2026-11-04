@@ -45,3 +45,13 @@
 ## Workflow discovery method
 
 Use the connected Activepieces GitHub action `trigger_workflow_dispatch` with repository `ghith93/raawaa-autonomous-engine`; resolve the `workflow` property after selecting the repository. This returned the authoritative 25-entry list above. The existing Activepieces flow `Raawaa GitHub Workflow Control` is preconfigured for the standard Task Runner workflow only; do not mistake it for a universal workflow selector.
+
+
+## Live workflow-tree reconciliation — 2026-11-04 00:51 UTC
+
+- The exact main tree at e6761d09de884d34bdc0ef7d01d7b7a8f1e1682e contains 23 workflow YAML files under .github/workflows. The current list includes the existing CI, Task Runner, research discovery, Cloudflare inventory/audit/billing, D1 inventory/migration, Staging deployment, Production Worker deployment, Groq connection and Staging smoke, and read-only market-data workflows. Reuse these exact entry points; do not add another scheduler or queue consumer.
+- The earlier catalog entry for openrouter-nemotron-free-smoke.yml is not present in the current main workflow tree. Treat that entry as stale/historical and do not dispatch it unless a current workflow file and selector entry are independently verified. The dynamic Dependabot workflow is platform-generated and is not a file in this repository tree.
+- Main CI run #41747902547 passed on exact main SHA e6761d09de884d34bdc0ef7d01d7b7a8f1e1682e, including all Staging migration, isolated Worker, monetary-ledger, telemetry, and authenticated mobile-status jobs.
+- The existing Task Runner workflow was dispatched through the existing Activepieces flow. TESTING flow run appXqFOAEJKRLnQoA8xJs succeeded and triggered GitHub run #41749347645. The bounded run completed with queue_idle and processed 0 tasks; this is not proof of live inference or business-task completion.
+- Production Control Worker workflow run #41748314581 was skipped. Production Worker and D1 remain unchanged.
+- The active main-protection ruleset requires PRs, strict test status, and resolved review threads, but currently requires zero approving reviews. Do not treat an independent approval as an enforced repository rule.
