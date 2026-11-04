@@ -168,6 +168,19 @@ the step summary. Both are readable through the checks API and the run page.
 A blocked task and a succeeded task are therefore distinguishable from outside,
 which the queue counters alone could never show.
 
+Everything that reaches those two channels is redacted first (`engine/redaction.py`).
+Annotations and step summaries are readable by anyone who can read this
+repository, which is public, so a traceback whose message embeds a header would
+otherwise be published verbatim. Masked: provider token prefixes (`ghp_`,
+`github_pat_`, `sk-`, `xox*-`, `AKIA`, JWT), `Authorization`/`Proxy-Authorization`
+values including their scheme, environment-style names carrying a sensitive stem
+(`ENGINE_API_TOKEN`, `CF_ACCESS_CLIENT_SECRET`, `GROQ_API_KEY`), JSON and quoted
+key/value pairs, and unbroken runs of 48 characters or more. Deliberately
+preserved: file paths, line numbers, exception classes and 40-character commit
+ids — a redactor that eats stack frames destroys the diagnostic it protects.
+Stated limitation: a secret shorter than 48 characters, with no recognisable
+prefix and no sensitive key attached, survives.
+
 A *storage* failure had the same shape from the other side. On 2026-11-04 the
 claim endpoint answered `HTTP 503` from 11:06 onward and the Worker discarded the
 D1 error that caused it, so the runner could only report "temporarily
