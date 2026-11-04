@@ -185,23 +185,28 @@ jobs:
           # A chat id that is not on the allowlist must be refused as unauthorized
           # or ignored — never answered. A 503 means the Worker is deployed without
           # the secrets, which is the failure this step exists to catch.
-          code=$(curl -s -o /tmp/reply.json -w '%{http_code}' -X POST "$WORKER_URL/v1/telegram/webhook" \
-            -H "content-type: application/json" \
-            -H "x-telegram-bot-api-secret-token: $secret" \
-            --data "$body" || echo "000")
-          reply=$(tr -d '\n' < /tmp/reply.json 2>/dev/null | cut -c1-300)
-          echo "worker replied HTTP $code"
-          printf '%s\n' "$reply"
-          # The reply is the only thing that distinguishes "wrong secret" from
-          # "route not deployed" from "secrets not installed", and it lives in a
-          # log nobody can read from outside — so it goes out as an annotation.
+          # A secret installed seconds ago may not be live on every edge isolate
+          # yet, so a single 401 is not a verdict. Retry with backoff and report
+          # each attempt; only the final answer decides the run.
+          code="000"
+          reply=""
+          for attempt in 1 2 3 4 5 6; do
+            code=$(curl -s -o /tmp/reply.json -w '%{http_code}' -X POST "$WORKER_URL/v1/telegram/webhook" \
+              -H "content-type: application/json" \
+              -H "x-telegram-bot-api-secret-token: $secret" \
+              --data "$body" || echo "000")
+            reply=$(tr -d '\n' < /tmp/reply.json 2>/dev/null | cut -c1-300)
+            echo "attempt $attempt: HTTP $code $reply"
+            case "$code" in 2*) break ;; esac
+            sleep $((attempt * 5))
+          done
           echo "::notice title=Worker probe::HTTP $code — $reply"
           case "$code" in
+            2*) ;;
             503) echo "::error title=webhook_disabled::The Worker is deployed without its Telegram secrets."; exit 1 ;;
-            401) echo "::error title=Secret mismatch::The Worker rejected the secret we just installed."; exit 1 ;;
+            401) echo "::error title=Secret mismatch::The Worker still rejects the secret after 6 attempts and 105 seconds. The value installed by wrangler is not the value the Worker reads."; exit 1 ;;
             404) echo "::error title=Route missing::This Worker deployment has no /v1/telegram/webhook route; redeploy main with [deploy-control-worker]."; exit 1 ;;
             000) echo "::error title=Unreachable::$WORKER_URL did not answer."; exit 1 ;;
-            2*) ;;
             *) echo "::error title=Unexpected status::The Worker answered HTTP $code — $reply"; exit 1 ;;
           esac
       - name: Summary
