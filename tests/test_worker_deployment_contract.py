@@ -146,6 +146,9 @@ class ProductionWorkerDeploymentContractTests(unittest.TestCase):
         self.assertEqual(classify(200)[0], namespace["EXIT_VERIFIED"])
         self.assertEqual(classify(401)[0], namespace["EXIT_MISMATCH"])
         self.assertEqual(classify(None)[0], namespace["EXIT_NO_VERDICT"])
+        # "not configured" is its own outcome, not a rejection and not a verdict.
+        self.assertNotEqual(namespace["EXIT_SECRET_ABSENT"], namespace["EXIT_MISMATCH"])
+        self.assertNotEqual(namespace["EXIT_SECRET_ABSENT"], namespace["EXIT_NO_VERDICT"])
         # A 403 or 5xx is an edge/Worker condition, not proof of a wrong token.
         for ambiguous in (403, 404, 500, 503):
             self.assertEqual(classify(ambiguous)[0], namespace["EXIT_NO_VERDICT"])
@@ -214,6 +217,30 @@ class ProductionWorkerDeploymentContractTests(unittest.TestCase):
 
         # An unreachable endpoint must be a verdict-free failure, not a rejection.
         self.assertIsNone(probe("unit-test-value", timeout=2, url="http://127.0.0.1:1/x"))
+
+    def test_absent_secret_is_reported_separately_and_never_as_a_mismatch(self):
+        """A repository without the secret must not read as a rejected credential."""
+        import os
+        from unittest.mock import patch
+
+        namespace: dict[str, object] = {"__name__": "probe_under_test"}
+        exec(compile(PROBE.read_text(encoding="utf-8"), str(PROBE), "exec"), namespace)
+        main = namespace["main"]
+        with patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("ENGINE_API_TOKEN", None)
+            # If the code tried to probe anyway, this would fail: there is no token.
+            with patch.object(namespace["probe"], "__call__", side_effect=AssertionError("probed")):
+                code = main()
+        self.assertEqual(code, namespace["EXIT_SECRET_ABSENT"])
+
+    def test_workflow_treats_absent_secret_as_a_warning_not_a_hard_stop(self):
+        workflow = _workflow_text()
+        preflight = workflow[workflow.index("name: Verify the deployed Worker already accepts"):]
+        preflight = preflight[: preflight.index("name: Deploy authenticated D1 control Worker")]
+        # 0 and 2 continue; anything else exits 1.
+        self.assertIn("0)", preflight)
+        self.assertIn("2)", preflight)
+        self.assertIn("exit 1", preflight)
 
     def test_probe_never_puts_the_token_in_the_request_url(self):
         source = PROBE.read_text(encoding="utf-8")

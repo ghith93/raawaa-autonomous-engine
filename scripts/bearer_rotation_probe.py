@@ -17,11 +17,19 @@ Exit codes:
 
 === =====================================================================
 0   the deployed Worker accepts the repository value; deploy may proceed
+2   ENGINE_API_TOKEN is not configured at all, so there is nothing to
+    verify. This is distinct from a mismatch: the workflow reports a
+    warning and continues, because a repository that has never had the
+    secret cannot be locked out by a deployment that does not write it
 3   the Worker answered and rejected the value (HTTP 401); stop — an
     operator must decide which of the two values is authoritative
-4   no verdict (transport failure, edge 403, 5xx, missing secret); stop
-    rather than deploy on an unverified credential state
+4   no verdict (transport failure, edge 403, 5xx); stop rather than
+    deploy on an unverified credential state
 === =====================================================================
+
+Exit 2 exists because conflating "no secret configured" with "secret
+rejected" turns a first-ever deployment into an unexplained hard failure.
+Neither case writes anything.
 
 The token is never printed, echoed, or placed on the workflow command line: it
 is read from the environment, and only the numeric HTTP status reaches the log.
@@ -42,6 +50,7 @@ USER_AGENT = (
 )
 
 EXIT_VERIFIED = 0
+EXIT_SECRET_ABSENT = 2
 EXIT_MISMATCH = 3
 EXIT_NO_VERDICT = 4
 
@@ -109,8 +118,16 @@ def classify(status: int | None) -> tuple[int, str]:
 def main() -> int:
     token = os.environ.get("ENGINE_API_TOKEN", "")
     if not token:
-        print("ENGINE_API_TOKEN is not configured; cannot verify the deployed Worker.")
-        return EXIT_NO_VERDICT
+        # Not a verdict about the deployed Worker: there is no value to present.
+        # The deployment does not write this secret, so continuing cannot change
+        # the credential state. Reported as a warning by the caller.
+        print(
+            "ENGINE_API_TOKEN is not configured, so the deployed Worker's bearer "
+            "state cannot be verified. This deployment does not write that secret, "
+            "so the credential state is unchanged by it. Configure the repository "
+            "secret before any workflow needs to authenticate against the Worker."
+        )
+        return EXIT_SECRET_ABSENT
     code, message = classify(probe(token))
     print(message)
     return code
