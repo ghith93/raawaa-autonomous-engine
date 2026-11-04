@@ -36,7 +36,8 @@ It does not query GitHub Actions variable values, D1 rows, provider consoles, de
 Each opportunity contains:
 - capability identifier and title;
 - current repository-derived status;
-- impact band;
+- impact, risk, cost and complexity bands;
+- a transparent priority score and priority band;
 - count and bounded shortlist of candidates discovered through the related topic;
 - repository evidence paths and explanatory evidence;
 - a proposed next step;
@@ -44,6 +45,10 @@ Each opportunity contains:
 - explicit `automatic_task_creation: false` and `automatic_adoption: false`.
 
 The triage score is a metadata heuristic, not a security, quality, compatibility or adoption score. Candidate shortlists are prompts for human/engineering review only.
+
+The report also emits one structured task proposal per capability with task_type `capability_proposal`, problem/evidence, expected benefit, proposed action, acceptance criteria, rollback plan, independent-review and owner-approval gates. These are proposals in the artifact only: they are not inserted into the task store, do not create issues or PRs, and cannot execute automatically.
+
+The qualitative priority score is max(0, 3*impact_points - risk_points - cost_points - complexity_points). Impact maps high/medium/low to 3/2/1; risk maps low/medium/high to 1/2/3; cost maps zero/low/medium/high to 0/1/2/3; complexity maps low/medium/high to 1/2/3. Scores are a qualitative sorting aid, not measured ROI or calibrated risk.
 
 ## Safety properties
 
@@ -62,7 +67,7 @@ The triage score is a metadata heuristic, not a security, quality, compatibility
 - Crossref and arXiv records are triaged as research candidates but are not automatically mapped to capability gaps because title-only topic inference would be too weak. arXiv abstracts and full text are not ingested.
 - SearXNG endpoint deployment and successful retrieval are not implied by the presence of the optional adapter; the endpoint is not configured in the current repository environment.
 - A capability may be partially implemented even when the repository contains no corresponding candidate in a scan.
-- The current report ranks by predefined impact band and count of related candidates; it is not a statistically calibrated value model.
+- The priority score is a predefined qualitative rubric; it is not measured ROI, calibrated risk, or a statistically validated value model. Candidate count is a weak relevance signal, not proof of candidate quality.
 - All opportunities remain `PROPOSED` until primary-source verification, measurable baseline, controlled experiment and independent review.
 
 ## Validation
