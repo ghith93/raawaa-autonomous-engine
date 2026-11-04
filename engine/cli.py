@@ -21,6 +21,7 @@ from engine.tool_broker import validate_permission_matrix
 from engine.artemis_gateway import probe_artemis
 from engine.executive_intelligence import executive_status
 from engine.orchestrator import validate_and_plan
+from engine.workflow_manifest import build_workflow_run_manifest
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -154,6 +155,10 @@ def build_parser() -> argparse.ArgumentParser:
     executive.add_argument("--limit", type=int, default=10)
     workflow_plan = sub.add_parser("workflow-plan", help="Validate a delegated workflow DAG without enqueuing or executing it")
     workflow_plan.add_argument("--file", required=True, help="Path to a JSON workflow proposal")
+    workflow_manifest = sub.add_parser("workflow-manifest", help="Create a stable, non-dispatching run manifest from a validated workflow plan")
+    workflow_manifest.add_argument("--file", required=True, help="Path to a JSON workflow proposal")
+    workflow_manifest.add_argument("--run-id", required=True, help="Stable caller-supplied run identifier")
+    workflow_manifest.add_argument("--plan-version", type=int, default=1)
     sub.add_parser("artemis-status", help="Read-only ARTEMIS daemon/device probe; never submits a mobile task")
 
     discovery = sub.add_parser(
@@ -220,11 +225,14 @@ def main() -> int:
         return audit()
     elif args.command == "executive-status":
         print(json.dumps(executive_status(store(), limit=args.limit), indent=2, ensure_ascii=False))
-    elif args.command == "workflow-plan":
+    elif args.command in {"workflow-plan", "workflow-manifest"}:
         proposal = load_json(Path(args.file))
         roster = load_json(ROOT / "config" / "agents.json")
         policy = load_json(ROOT / "config" / "policy.json")
-        print(json.dumps(validate_and_plan(proposal, roster, policy).as_dict(), indent=2, ensure_ascii=False))
+        plan = validate_and_plan(proposal, roster, policy).as_dict()
+        if args.command == "workflow-manifest":
+            plan = build_workflow_run_manifest(plan, args.run_id, args.plan_version).as_dict()
+        print(json.dumps(plan, indent=2, ensure_ascii=False))
     elif args.command == "artemis-status":
         print(json.dumps(probe_artemis(os.environ), indent=2, ensure_ascii=False))
     elif args.command == "free-models":
