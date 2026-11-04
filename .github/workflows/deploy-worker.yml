@@ -1,12 +1,10 @@
 name: Deploy Control Worker
 
 on:
-  workflow_dispatch:
-    inputs:
-      confirm_deployment:
-        description: 'Type DEPLOY_CONTROL_WORKER to authorize a production Worker deployment'
-        required: true
-        type: string
+  # No workflow_dispatch on purpose: a manual trigger can be produced by any
+  # credential holding actions:write, so it is not an authorization boundary.
+  # Production deployment is authorized only by a reviewed merge to main whose
+  # commit message carries the explicit marker below.
   workflow_run:
     workflows: ["Engine CI"]
     types: [completed]
@@ -21,31 +19,27 @@ concurrency:
 
 jobs:
   deploy:
-    # API-first, browser-free dispatch: only a successful Engine CI push to main
+    # API-first, browser-free hand-off: only a successful Engine CI push to main
     # whose squash-merge commit message contains the explicit deployment marker.
-    # PR CI, ordinary main pushes, and failed CI runs cannot deploy.
+    # PR CI, ordinary main pushes, and failed CI runs cannot deploy, and no manual
+    # dispatch path exists.
     if: >-
       github.ref == 'refs/heads/main' &&
-      (
-        github.event_name == 'workflow_dispatch' ||
-        (
-        github.event_name == 'workflow_run' &&
-          github.event.workflow_run.event == 'push' &&
-        github.event.workflow_run.conclusion == 'success' &&
-        github.event.workflow_run.head_branch == 'main' &&
-        contains(github.event.workflow_run.head_commit.message, '[deploy-control-worker]')
-        )
-      )
+      github.event_name == 'workflow_run' &&
+      github.event.workflow_run.event == 'push' &&
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.head_branch == 'main' &&
+      contains(github.event.workflow_run.head_commit.message, '[deploy-control-worker]')
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
       - name: Check out reviewed main revision
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
-          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+          ref: ${{ github.event.workflow_run.head_sha }}
       - name: Require explicit deployment confirmation
         env:
-          CONFIRM_DEPLOYMENT: ${{ inputs.confirm_deployment || (github.event_name == 'workflow_run' && contains(github.event.workflow_run.head_commit.message, '[deploy-control-worker]') && 'DEPLOY_CONTROL_WORKER') }}
+          CONFIRM_DEPLOYMENT: ${{ contains(github.event.workflow_run.head_commit.message, '[deploy-control-worker]') && 'DEPLOY_CONTROL_WORKER' || '' }}
         run: |
           test "$CONFIRM_DEPLOYMENT" = "DEPLOY_CONTROL_WORKER" || {
             echo "Deployment confirmation did not match; refusing to deploy."
