@@ -33,6 +33,21 @@ class ProviderProfileConfigTests(unittest.TestCase):
         self.assertFalse(entry.profile.production_use_allowed)
 
 
+    def test_nvidia_nemotron_candidate_is_registered_but_blocked_without_verified_quotas(self):
+        entries = load_provider_profile_registry(self.source)
+        entry = next(item for item in entries if item.profile.provider == "nvidia")
+        self.assertEqual(entry.profile.model, "nvidia/nemotron-3.5-lightning-30b-a3b")
+        self.assertFalse(entry.enabled)
+        self.assertFalse(entry.profile.free_verified)
+        self.assertFalse(entry.profile.commercial_use_allowed)
+        self.assertFalse(entry.production_use_allowed)
+        self.assertFalse(entry.ready_for_routing)
+        self.assertIsNone(entry.profile.minute_request_limit)
+        self.assertIsNone(entry.profile.daily_request_limit)
+        self.assertIsNone(entry.profile.monthly_request_limit)
+        self.assertEqual(entry.api_key_env, "NVIDIA_API_KEY")
+        self.assertEqual(entry.model_stage, "candidate")
+
     def test_production_gpt_oss_profiles_are_staged_with_priority_and_limits(self):
         entries = load_provider_profile_registry(self.source)
         by_model = {entry.profile.model: entry for entry in entries}
