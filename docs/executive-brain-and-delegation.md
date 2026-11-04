@@ -48,11 +48,11 @@ The proposer cannot select a different enabled agent to bypass the map. The rost
 
 The orchestrator rejects duplicate IDs, unknown dependencies, cycles, unsafe task types, disabled/missing specialists, capability mismatches, missing acceptance checks, malformed estimates, and per-task budget violations. It computes a deterministic topological order and execution waves. Independent tasks may share a wave, capped by max_parallel_agents; dependent work waits for upstream success.
 
-**Important:** this stage currently validates and previews the DAG only. The existing SQLite/D1 task queue does not yet enforce workflow dependency state at claim time. Do not enqueue a multi-step dependent workflow as if dependencies were enforced until a dependency-aware queue contract is implemented and tested in both SQLite and D1.
+**Important:** workflow planning still validates and previews the DAG only. F5 queue enforcement is under review in PR #457: it adds persisted priority, dependency-aware claims, same-execution-mode release, and failed-dependency propagation to SQLite and D1. Do not treat multi-step workflow dispatch as enabled; the planner remains proposal-only until a separate dispatcher contract is reviewed and approved.
 
 ### Step 5 — Execution and verification
 
-After the dependency-aware dispatcher is implemented, it may enqueue only currently eligible root/ready steps using stable idempotency keys. Existing workers claim tasks using fenced leases. The scheduler may run no more than the policy concurrency limit. A task becomes eligible for downstream work only after a successful terminal state is observed from the canonical ledger.
+After a separately reviewed dispatcher is implemented, it may enqueue only currently eligible root/ready steps using stable idempotency keys. Existing workers claim tasks using fenced leases. The scheduler may run no more than the policy concurrency limit. A dependent task becomes eligible only after every upstream task succeeds in the same execution mode; a dry-run success cannot release live-inference work.
 
 For consequential work, the reviewer role must be separate from the executor and must return evidence against the acceptance checks. Failed or ambiguous outcomes block dependent tasks and go to triage; they are not silently treated as success.
 
@@ -81,7 +81,7 @@ Implemented:
 Not yet implemented:
 - A persistent executive cycle that creates and reviews objectives on a schedule.
 - A live, verified free planning-model adapter.
-- Dependency-aware queue claims and downstream release in both SQLite and D1.
+- Dependency-aware queue claims and downstream release in both SQLite and D1 are implemented in PR #457 but remain unmerged and not Staging-verified.
 - Durable plan/decision version storage and cross-run orchestration state.
 - Independent reviewer enforcement as a required completion gate for consequential work.
 - A measured agent/model capability registry based on completed task outcomes.

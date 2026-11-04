@@ -38,6 +38,26 @@ class RemoteTaskStoreTests(unittest.TestCase):
         self.assertIsNone(request.get_header("Cf-access-client-id"))
 
     @patch("engine.remote_task_store.urlopen")
+    def test_enqueue_sends_priority_and_dependencies(self, open_url):
+        open_url.return_value = FakeResponse({"task": {"id": "child"}})
+        task = self.store.enqueue(
+            "content_draft", "Child", idempotency_key="child-key",
+            priority=85, depends_on=["parent-b", "parent-a"],
+        )
+        self.assertEqual(task["id"], "child")
+        payload = json.loads(open_url.call_args.args[0].data)
+        self.assertEqual(payload["priority"], 85)
+        self.assertEqual(payload["depends_on"], ["parent-a", "parent-b"])
+
+    def test_enqueue_rejects_invalid_priority_and_dependencies(self):
+        with self.assertRaises(ValueError):
+            self.store.enqueue("research_brief", "Bad priority", priority=101)
+        with self.assertRaises(ValueError):
+            self.store.enqueue("research_brief", "Bad dependencies", depends_on=["x", "x"])
+        with self.assertRaises(ValueError):
+            self.store.enqueue("research_brief", "Blank dependency", depends_on=["   "])
+
+    @patch("engine.remote_task_store.urlopen")
     def test_optional_cloudflare_access_service_token_headers(self, open_url):
         open_url.return_value = FakeResponse({"task": None})
         store = RemoteTaskStore(

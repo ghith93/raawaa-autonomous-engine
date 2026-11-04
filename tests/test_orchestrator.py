@@ -53,6 +53,29 @@ class OrchestratorTests(unittest.TestCase):
         plan = validate_and_plan(workflow, ROSTER, {"max_parallel_agents": 2}).as_dict()
         self.assertEqual(plan["execution_waves"], [["audit", "r1"], ["r2"]])
 
+    def test_priority_orders_ready_steps_deterministically(self):
+        workflow = {"id": "priority_plan", "steps": [
+            {"id": "low", "task_type": "research_brief", "title": "Low",
+             "acceptance_checks": ["Evidence exists"], "priority": 10},
+            {"id": "high", "task_type": "research_brief", "title": "High",
+             "acceptance_checks": ["Evidence exists"], "priority": 90},
+            {"id": "dependent", "task_type": "code_review", "title": "Dependent",
+             "acceptance_checks": ["Review exists"], "depends_on": ["low"], "priority": 100},
+        ]}
+        plan = validate_and_plan(workflow, ROSTER).as_dict()
+        self.assertEqual(plan["order"], ["high", "low", "dependent"])
+        self.assertEqual(plan["execution_waves"], [["high", "low"], ["dependent"]])
+        self.assertEqual(plan["steps"]["low"]["priority"], 10)
+
+    def test_invalid_priority_is_rejected(self):
+        workflow = self.workflow()
+        workflow["steps"][0]["priority"] = True
+        with self.assertRaisesRegex(WorkflowValidationError, "priority must be an integer"):
+            validate_and_plan(workflow, ROSTER)
+        workflow["steps"][0]["priority"] = 101
+        with self.assertRaisesRegex(WorkflowValidationError, "priority must be an integer"):
+            validate_and_plan(workflow, ROSTER)
+
     def test_non_object_policy_is_rejected_as_validation_error(self):
         with self.assertRaisesRegex(WorkflowValidationError, "policy must be an object"):
             validate_and_plan(self.workflow(), ROSTER, policy=[])

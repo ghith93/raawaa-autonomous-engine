@@ -20,6 +20,8 @@ function request(path, { method = "GET", token = TOKEN, body } = {}) {
 function dbMock(options = {}) {
   const calls = [];
   let insertedId = null;
+  let insertedTask = null;
+  let insertedDependencies = [];
   return {
     calls,
     prepare(sql) {
@@ -30,18 +32,17 @@ function dbMock(options = {}) {
           calls.push({ kind: "first", sql, values: this.values });
           if (sql.includes("INSERT INTO quota_cooldowns")) return { until_at: this.values[1] };
           if (sql.includes("FROM audit_log")) return null;
-          if (sql.includes("SELECT 1")) return { ok: 1 };
+          // Claim SQL contains a nested SELECT 1; match the UPDATE before generic probes.
           if (sql.includes("UPDATE tasks SET status='running'")) {
             return sql.includes("task_type IN") ? (options.codespaceClaim || null) : (options.normalClaim || null);
           }
+          if (sql.includes("SELECT 1")) return { ok: 1 };
           if (sql.includes("SELECT id,status,attempts")) return options.currentTask || {
             id: "task-1", status: "running", attempts: 1, max_attempts: 2,
             task_type: "research_brief", execution_mode: "not_started", lease_token: "lease-1",
             lease_expires_at: "2999-01-01T00:00:00.000Z",
           };
-          if (sql.includes("WHERE idempotency_key")) {
-            return { id: insertedId || "existing-id" };
-          }
+          if (sql.includes("WHERE idempotency_key")) return options.existingTask || insertedTask;
           return null;
         },
         async run() {
@@ -50,13 +51,28 @@ function dbMock(options = {}) {
         },
         async all() {
           calls.push({ kind: "all", sql, values: this.values });
+          if (sql.includes("FROM tasks WHERE id IN")) return { results: options.dependencyRows || [] };
+          if (sql.includes("FROM task_dependencies")) return { results: options.dependencyEdges || insertedDependencies };
+          if (sql.includes("WITH RECURSIVE blocked")) return { results: options.blockedTasks || [] };
           return { results: [] };
         },
       };
     },
     async batch(statements) {
       calls.push({ kind: "batch", statements: statements.map(x => ({ sql: x.sql, values: x.values })) });
-      insertedId = statements[0].values[0];
+      const insert = statements[0];
+      if (insert.sql.includes("INSERT OR IGNORE INTO tasks")) {
+        const v = insert.values;
+        insertedId = v[0];
+        insertedTask = {
+          id: v[0], idempotency_key: v[1], task_type: v[2], title: v[3],
+          payload_json: v[4], max_attempts: v[5], priority: v[8],
+          dependencies_json: v[9], status: "pending", attempts: 0,
+        };
+        insertedDependencies = statements
+          .filter(statement => statement.sql.includes("INSERT OR IGNORE INTO task_dependencies"))
+          .map(statement => ({ dependency_task_id: statement.values[1] }));
+      }
       return [];
     },
   };
@@ -88,7 +104,73 @@ test("enqueue validates input and uses parameterized batch statements", async ()
   assert.equal(batch.statements.length, 2);
   assert.match(batch.statements[0].sql, /INSERT OR IGNORE INTO tasks/);
   assert.deepEqual(batch.statements[0].values.slice(1, 5), ["key-1", "research", "Check D1", '{"q":"hello"}']);
+  assert.equal(batch.statements[0].values[8], 50);
+  assert.equal(batch.statements[0].values[9], "[]");
   assert.match(batch.statements[1].sql, /INSERT INTO audit_log/);
+});
+
+test("enqueue persists priority and validated dependency edges", async () => {
+  const DB = dbMock({ dependencyRows: [{ id: "parent-1", task_type: "research_brief" }] });
+  const response = await worker.fetch(request("/v1/tasks/enqueue", {
+    method: "POST",
+    body: {
+      task_type: "content_draft", title: "Dependent", idempotency_key: "child-key",
+      priority: 90, depends_on: ["parent-1"], payload: {},
+    },
+  }), { DB, ENGINE_API_TOKEN: TOKEN });
+  assert.equal(response.status, 201);
+  const payload = await response.json();
+  assert.equal(payload.task.priority, 90);
+  assert.deepEqual(payload.task.depends_on, ["parent-1"]);
+  const batch = DB.calls.find(call => call.kind === "batch");
+  assert.equal(batch.statements.length, 3);
+  assert.match(batch.statements[2].sql, /INSERT OR IGNORE INTO task_dependencies/);
+});
+
+test("enqueue rejects dependencies assigned to the disabled Codespace executor", async () => {
+  const DB = dbMock({ dependencyRows: [{ id: "codespace-parent", task_type: "codespace_test" }] });
+  const response = await worker.fetch(request("/v1/tasks/enqueue", {
+    method: "POST",
+    body: { task_type: "research", title: "Dependent", idempotency_key: "codespace-child",
+      depends_on: ["codespace-parent"] },
+  }), { DB, ENGINE_API_TOKEN: TOKEN });
+  assert.equal(response.status, 400);
+  assert.deepEqual(await response.json(), { error: "unsupported_dependency_executor" });
+});
+
+test("enqueue rejects out-of-range priority and unknown dependencies", async () => {
+  const invalidPriority = await worker.fetch(request("/v1/tasks/enqueue", {
+    method: "POST",
+    body: { task_type: "research", title: "Bad", idempotency_key: "bad-priority", priority: 101 },
+  }), { DB: dbMock(), ENGINE_API_TOKEN: TOKEN });
+  assert.equal(invalidPriority.status, 400);
+  const missingDependency = await worker.fetch(request("/v1/tasks/enqueue", {
+    method: "POST",
+    body: { task_type: "research", title: "Bad dependency", idempotency_key: "bad-dep", depends_on: ["missing"] },
+  }), { DB: dbMock(), ENGINE_API_TOKEN: TOKEN });
+  assert.equal(missingDependency.status, 400);
+  assert.deepEqual(await missingDependency.json(), { error: "unknown_task_dependency" });
+  const blankDependency = await worker.fetch(request("/v1/tasks/enqueue", {
+    method: "POST",
+    body: { task_type: "research", title: "Bad blank dependency", idempotency_key: "bad-blank-dep", depends_on: ["   "] },
+  }), { DB: dbMock(), ENGINE_API_TOKEN: TOKEN });
+  assert.equal(blankDependency.status, 400);
+  assert.deepEqual(await blankDependency.json(), { error: "invalid_task" });
+});
+
+test("enqueue rejects an idempotency key reused with a different priority", async () => {
+  const DB = dbMock({ existingTask: {
+    id: "existing", task_type: "research", title: "Same", payload_json: "{}",
+    max_attempts: 2, priority: 50, dependencies_json: "[]",
+  } });
+  const response = await worker.fetch(request("/v1/tasks/enqueue", {
+    method: "POST",
+    body: { task_type: "research", title: "Same", idempotency_key: "same-key",
+      payload: {}, priority: 90 },
+  }), { DB, ENGINE_API_TOKEN: TOKEN });
+  assert.equal(response.status, 409);
+  assert.deepEqual(await response.json(), { error: "idempotency_conflict" });
+  assert.equal(DB.calls.some(call => call.kind === "batch"), false);
 });
 
 test("enqueue rejects malformed task payload", async () => {
@@ -143,6 +225,18 @@ test("claim persists and returns a validated execution mode", async () => {
   const claim = DB.calls.find(x => x.kind === "first" && x.sql.includes("UPDATE tasks SET status='running'"));
   assert.match(claim.sql, /execution_mode=\?/);
   assert.equal(claim.values[0], "dry_run");
+});
+
+test("claim uses priority ordering and same-mode dependency eligibility", async () => {
+  const DB = dbMock({ normalClaim: { id: "ready", status: "running", priority: 90 } });
+  const response = await worker.fetch(request("/v1/tasks/claim", {
+    method: "POST", body: { execution_mode: "dry_run" },
+  }), { DB, ENGINE_API_TOKEN: TOKEN });
+  assert.equal(response.status, 200);
+  const claim = DB.calls.find(call => call.kind === "first" && call.sql.includes("UPDATE tasks SET status='running'"));
+  assert.match(claim.sql, /ORDER BY candidate\.priority DESC, candidate\.created_at ASC, candidate\.id ASC/);
+  assert.match(claim.sql, /dependency\.execution_mode <> \?/);
+  assert.ok(DB.calls.some(call => call.kind === "all" && call.sql.includes("WITH RECURSIVE blocked")));
 });
 
 test("claim rejects invalid execution modes before database writes", async () => {

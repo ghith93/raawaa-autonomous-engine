@@ -7,7 +7,8 @@ from __future__ import annotations
 
 import json
 import re
-from collections import defaultdict, deque
+import heapq
+from collections import defaultdict
 from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
 from typing import Any
@@ -133,6 +134,9 @@ def validate_and_plan(
         risk = step.get("risk", "low")
         if not isinstance(risk, str) or risk not in {"low", "medium", "high", "critical"}:
             raise WorkflowValidationError(f"invalid risk level for step: {step_id}")
+        priority = step.get("priority", 50)
+        if type(priority) is not int or not 0 <= priority <= 100:
+            raise WorkflowValidationError(f"priority must be an integer between 0 and 100: {step_id}")
         estimate = _cost(step.get("estimated_model_cost_usd", 0), f"{step_id}.estimated_model_cost_usd")
         if estimate > per_task_cap:
             raise WorkflowValidationError(f"step {step_id} exceeds the per-task model budget")
@@ -161,6 +165,7 @@ def validate_and_plan(
             "assigned_agent_role": contract["agent_role"],
             "required_capability": contract["required_capability"],
             "risk": risk,
+            "priority": priority,
             "estimated_model_cost_usd": estimate,
         }
 
@@ -173,17 +178,18 @@ def validate_and_plan(
             indegree[step_id] += 1
             children[dep].append(step_id)
 
-    queue = deque(sorted(key for key, degree in indegree.items() if degree == 0))
+    queue = [(-by_id[key]["priority"], key) for key, degree in indegree.items() if degree == 0]
+    heapq.heapify(queue)
     order: list[str] = []
     depth: dict[str, int] = {}
     while queue:
-        current = queue.popleft()
+        _, current = heapq.heappop(queue)
         order.append(current)
         for child in sorted(children[current]):
             depth[child] = max(depth.get(child, 0), depth.get(current, 0) + 1)
             indegree[child] -= 1
             if indegree[child] == 0:
-                queue.append(child)
+                heapq.heappush(queue, (-by_id[child]["priority"], child))
     if len(order) != len(by_id):
         raise WorkflowValidationError("workflow contains a dependency cycle")
 
@@ -199,7 +205,7 @@ def validate_and_plan(
         raw_waves[depth.get(step_id, 0)].append(step_id)
     execution_waves: list[tuple[str, ...]] = []
     for wave_depth in sorted(raw_waves):
-        wave = raw_waves[wave_depth]
+        wave = sorted(raw_waves[wave_depth], key=lambda step_id: (-by_id[step_id]["priority"], step_id))
         for start in range(0, len(wave), max_parallel):
             execution_waves.append(tuple(wave[start:start + max_parallel]))
 
@@ -229,6 +235,7 @@ def validate_and_plan(
             "depends_on": list(by_id[step_id]["depends_on"]),
             "acceptance_checks": [check.strip() for check in by_id[step_id]["acceptance_checks"]],
             "risk": by_id[step_id]["risk"],
+            "priority": by_id[step_id]["priority"],
             "estimated_model_cost_usd": float(by_id[step_id]["estimated_model_cost_usd"]),
         } for step_id in order},
         execution_waves=tuple(execution_waves),
