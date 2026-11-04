@@ -136,6 +136,28 @@ def _post(task: dict, base_url: str, token: str, timeout: int = 15) -> dict:
         return {"status": response.status, "body": json.loads(response.read().decode("utf-8"))}
 
 
+def report_lines(result: dict, stage: str) -> list[str]:
+    """Render the outcome so it is readable after the run, not just during it.
+
+    Downloading Actions logs is blocked from some environments (including the
+    session that built this), which made "did it enqueue?" unanswerable from the
+    outside. A notice annotation and a step summary are readable through the
+    checks API and the run page, so the workflow now states its own outcome.
+    """
+    action = result.get("action", "unknown")
+    reason = result.get("reason", "unknown")
+    comment_id = result.get("comment_id")
+    detail = f"action={action} reason={reason} comment={comment_id}"
+    if stage:
+        detail += f" stage={stage}"
+    if action == "enqueue" and "task" in result:
+        detail += f" idempotency_key={result['task']['idempotency_key']}"
+    return [
+        f"::notice title=Issue comment ingest::{detail}",
+        f"### Issue comment ingest\n\n`{detail}`\n",
+    ]
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument(
@@ -164,6 +186,16 @@ def main(argv: list[str] | None = None) -> int:
         printable["task"] = result["task"]
     print(json.dumps(printable, indent=2, ensure_ascii=False))
 
+    notice, summary = report_lines(result, "")
+    print(notice)
+    summary_path = os.environ.get("GITHUB_STEP_SUMMARY", "")
+    if summary_path:
+        try:
+            with open(summary_path, "a", encoding="utf-8") as handle:
+                handle.write(summary)
+        except OSError:
+            pass
+
     if result["action"] == "reject":
         for error in result.get("errors", []):
             print(f"ENVELOPE ERROR: {error}", file=sys.stderr)
@@ -191,6 +223,15 @@ def main(argv: list[str] | None = None) -> int:
 
     created = outcome["body"].get("created")
     print(f"enqueued: HTTP {outcome['status']} created={created}", file=sys.stderr)
+    notice, summary = report_lines(result, f"http_{outcome['status']}_created_{created}")
+    print(notice)
+    summary_path = os.environ.get("GITHUB_STEP_SUMMARY", "")
+    if summary_path:
+        try:
+            with open(summary_path, "a", encoding="utf-8") as handle:
+                handle.write(summary)
+        except OSError:
+            pass
     return 0
 
 
