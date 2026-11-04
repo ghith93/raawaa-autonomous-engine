@@ -110,6 +110,39 @@ def plan(
     return decision("enqueue", "valid_envelope", task=task, warnings=warnings)
 
 
+def _comment_from_event_payload(payload: object) -> tuple[dict, int]:
+    """Extract the comment and issue number from GitHub's event JSON.
+
+    Reading the runner-provided event file avoids interpolating arbitrary
+    comment text into workflow YAML. Keep validation strict so a malformed or
+    unexpected event cannot silently become a different task.
+    """
+    if not isinstance(payload, dict):
+        raise ValueError("GitHub event payload must be an object")
+    comment = payload.get("comment")
+    issue = payload.get("issue")
+    if not isinstance(comment, dict) or not isinstance(issue, dict):
+        raise ValueError("GitHub event payload is missing comment or issue")
+    user = comment.get("user")
+    if not isinstance(user, dict):
+        raise ValueError("GitHub event comment is missing its user")
+    comment_id = comment.get("id")
+    issue_number = issue.get("number")
+    author = user.get("login")
+    author_type = user.get("type")
+    body = comment.get("body")
+    if type(comment_id) is not int or type(issue_number) is not int:
+        raise ValueError("GitHub event comment or issue id is invalid")
+    if not isinstance(author, str) or not isinstance(author_type, str) or not isinstance(body, str):
+        raise ValueError("GitHub event comment fields are invalid")
+    return {
+        "id": comment_id,
+        "author": author,
+        "author_type": author_type,
+        "body": body,
+    }, issue_number
+
+
 def _post(task: dict, base_url: str, token: str, timeout: int = 15) -> dict:
     import urllib.error
     import urllib.request
@@ -168,13 +201,25 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--today", help="override today's date (YYYY-MM-DD)")
     args = parser.parse_args(argv)
 
-    comment = {
-        "id": int(os.environ["COMMENT_ID"]) if os.environ.get("COMMENT_ID", "").isdigit() else None,
-        "author": os.environ.get("COMMENT_AUTHOR", ""),
-        "author_type": os.environ.get("COMMENT_AUTHOR_TYPE", "User"),
-        "body": os.environ.get("COMMENT_BODY", ""),
-    }
-    issue_number = int(os.environ.get("ISSUE_NUMBER", "0") or 0)
+    event_path = os.environ.get("GITHUB_EVENT_PATH", "")
+    if event_path:
+        try:
+            with open(event_path, encoding="utf-8") as event_file:
+                comment, issue_number = _comment_from_event_payload(json.load(event_file))
+        except (OSError, json.JSONDecodeError, ValueError) as error:
+            print(f"INVALID GITHUB EVENT PAYLOAD: {type(error).__name__}", file=sys.stderr)
+            return 2
+    else:
+        # Local/manual compatibility for deterministic tests and dry runs. The
+        # Actions workflow always supplies GITHUB_EVENT_PATH and never passes
+        # comment content through environment expressions.
+        comment = {
+            "id": int(os.environ["COMMENT_ID"]) if os.environ.get("COMMENT_ID", "").isdigit() else None,
+            "author": os.environ.get("COMMENT_AUTHOR", ""),
+            "author_type": os.environ.get("COMMENT_AUTHOR_TYPE", "User"),
+            "body": os.environ.get("COMMENT_BODY", ""),
+        }
+        issue_number = int(os.environ.get("ISSUE_NUMBER", "0") or 0)
     allowed_actor = os.environ.get("ALLOWED_ACTOR", "ghith93")
     allowed_issue = int(os.environ.get("ALLOWED_ISSUE", "464"))
 

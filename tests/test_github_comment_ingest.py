@@ -8,10 +8,15 @@ can write to issues would still be able to loop.
 
 from __future__ import annotations
 
+import contextlib
+import io
 import json
+import os
 import sys
+import tempfile
 import unittest
 from datetime import date
+from unittest.mock import patch
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -104,6 +109,56 @@ class DecisionTests(unittest.TestCase):
         self.assertEqual(self._plan(body=fenced)["action"], "ignore")
 
 
+class EventPayloadTests(unittest.TestCase):
+    def test_extracts_comment_body_without_interpreting_shell_metacharacters(self):
+        body = "TASK v1\nacceptance: $(touch /tmp/not-run); `echo nope`\n"
+        payload = {
+            "issue": {"number": 464},
+            "comment": {
+                "id": 6600000001,
+                "user": {"login": "ghith93", "type": "User"},
+                "body": body,
+            },
+        }
+        extracted, issue_number = ingest._comment_from_event_payload(payload)
+        self.assertEqual(issue_number, 464)
+        self.assertEqual(extracted["body"], body)
+        self.assertEqual(extracted["id"], 6600000001)
+
+    def test_rejects_malformed_event_payloads(self):
+        for payload in (None, {}, {"comment": {}, "issue": {}}, {
+            "issue": {"number": True},
+            "comment": {"id": 1, "user": {"login": "x", "type": "User"}, "body": ""},
+        }):
+            with self.subTest(payload=payload), self.assertRaises(ValueError):
+                ingest._comment_from_event_payload(payload)
+
+    def test_main_uses_runner_event_payload_instead_of_environment_body(self):
+        body = ENVELOPE.replace("ARENA-INGEST-001", "ARENA-EVENT-001")
+        payload = {
+            "issue": {"number": 464},
+            "comment": {
+                "id": 6600000002,
+                "user": {"login": "ghith93", "type": "User"},
+                "body": body,
+            },
+        }
+        with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8") as event_file:
+            json.dump(payload, event_file)
+            event_file.flush()
+            stdout = io.StringIO()
+            with patch.dict(os.environ, {
+                "GITHUB_EVENT_PATH": event_file.name,
+                "COMMENT_BODY": "not the event content",
+                "ALLOWED_ACTOR": "ghith93",
+                "ALLOWED_ISSUE": "464",
+            }, clear=False), contextlib.redirect_stdout(stdout):
+                self.assertEqual(ingest.main(["--today", "2026-11-04"]), 0)
+        rendered = json.loads(stdout.getvalue().split("\n::notice", 1)[0])
+        self.assertEqual(rendered["task"]["payload"]["envelope"]["id"], "ARENA-EVENT-001")
+        self.assertEqual(rendered["comment_id"], 6600000002)
+
+
 class WorkflowPostureTests(unittest.TestCase):
     def setUp(self):
         self.text = WORKFLOW.read_text(encoding="utf-8")
@@ -141,6 +196,11 @@ class WorkflowPostureTests(unittest.TestCase):
 
     def test_runs_the_ingest_script(self):
         self.assertIn("scripts/github_comment_ingest.py --post", self.text)
+
+    def test_untrusted_comment_body_is_not_interpolated_into_workflow(self):
+        self.assertNotIn("${{ github.event.comment.body }}", self.text)
+        self.assertNotIn("COMMENT_BODY:", self.text)
+        self.assertIn("GITHUB_EVENT_PATH", (ROOT / "scripts" / "github_comment_ingest.py").read_text(encoding="utf-8"))
 
 class ReportingTests(unittest.TestCase):
     """The run must state its own outcome: log download is blocked in some

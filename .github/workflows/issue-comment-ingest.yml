@@ -38,12 +38,9 @@ jobs:
         with:
           python-version: "3.11"
       - name: Plan and enqueue from comment
+        # Read the untrusted comment body from GitHub's runner-provided event
+        # file inside the script; never interpolate it into workflow YAML/env.
         env:
-          ISSUE_NUMBER: ${{ github.event.issue.number }}
-          COMMENT_ID: ${{ github.event.comment.id }}
-          COMMENT_AUTHOR: ${{ github.event.comment.user.login }}
-          COMMENT_AUTHOR_TYPE: ${{ github.event.comment.user.type }}
-          COMMENT_BODY: ${{ github.event.comment.body }}
           ALLOWED_ACTOR: ghith93
           ALLOWED_ISSUE: "464"
           ENGINE_API_URL: https://raawaa-autonomous-engine-control.ghith-shikhkhaled.workers.dev
