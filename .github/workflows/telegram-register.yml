@@ -123,31 +123,21 @@ jobs:
           fi
           printf '%s\n' "$output" | tail -n 5 | sed 's/^/::warning title=Discovery::/'
 
-          # Telegram has nothing queued — usually because a webhook already drained
-          # it. The Worker has been receiving this owner's messages, so its receipts
-          # table knows the chat id even when Telegram does not. That is the
-          # difference between "the owner must message the bot again" and "we finish
-          # this without them".
-          recovered="$(npx --yes wrangler@4.156.1 d1 execute raawaa-autonomous-e --remote \
-            --config wrangler.toml --json \
-            --command "SELECT chat_id FROM telegram_update_receipts ORDER BY created_at DESC LIMIT 1" \
-            2>/dev/null | jq -r 'if type == "array" then .[0].results else .results end | (.[0].chat_id // "")' 2>/dev/null || true)"
-
-          if [ -z "$recovered" ]; then
-            if [ "$REPLACE_WEBHOOK_FOR_DISCOVERY" = "true" ]; then
-              echo "::notice title=Webhook intentionally paused::Pending updates were preserved. Send /start to the correct bot, then rerun this workflow with replace_webhook_for_discovery=true."
-              exit 1
-            fi
-            # Default mode never deletes an existing webhook. If no owner id exists
-            # in receipts, re-arm without changing the current allowlist.
-            echo "::notice title=Rearming without discovery::No chat id anywhere; rotating the webhook secret and leaving the allowlist unchanged."
+          # Never infer the owner from the most recent webhook receipt: an allowed
+          # chat is not necessarily the account owner. Require an explicit owner id
+          # or a fresh private-human update from the deliberate discovery flow.
+          if [ "$REPLACE_WEBHOOK_FOR_DISCOVERY" = "true" ]; then
+            echo "::notice title=Discovery paused::If the webhook was paused, pending updates remain queued. Send /start to the correct bot and rerun with replace_webhook_for_discovery=true."
+            exit 1
+          fi
+          if printf '%s' "$output" | grep -Eq "webhook is already registered|no private human chat found"; then
+            echo "::notice title=Rearming without discovery::No verified owner id found; rotating the webhook secret and leaving the allowlist unchanged."
             run_bootstrap --rearm-only || exit 1
-            echo "::warning title=Allowlist unverified::If the Worker has no correct owner id, it will ignore messages. Use the explicit discovery flow or provide the verified chat_id."
+            echo "::warning title=Allowlist unverified::A real owner /status reply is still unverified. Use an explicit owner chat_id or the pause-and-discover flow."
             exit 0
           fi
-          echo "::notice title=Chat id recovered::from telegram_update_receipts, so the owner does not need to message the bot again."
-          run_bootstrap --chat-id "$recovered"
-
+          echo "::error title=Bootstrap failed::Unexpected Telegram discovery error; no automatic webhook or allowlist change was attempted."
+          exit 1
       - name: Install the three Worker secrets
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
