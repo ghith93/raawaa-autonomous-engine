@@ -1,113 +1,107 @@
-# What the owner has to do — 2026-11-04
+# Operator action and Telegram recovery guide
 
-Everything that cannot be done without you, in the order that unblocks the most
-work. Each item is deliberately small; the column on the right is what happens
-automatically afterwards.
+This is a recovery playbook, not proof of the live system's current state. Recheck
+GitHub, CI and production before acting. Routine engineering, secrets management,
+merges and deployment are delegated under the project's safety gates; only an
+action that may incur spending needs separate owner approval. Do not paste tokens,
+webhook secrets, chat IDs, or recovery codes into chat, issues or workflow logs.
 
-If you do nothing, the project keeps moving: the loop continues on code, tests,
-docs and review, and simply never reaches the surfaces that need a human account.
+## Telegram: diagnose before changing production (#228)
 
-## 1. Telegram bot — 2 minutes, unblocks #228 and the phone surface
+The production Worker has a read-only Telegram route at
+`/v1/telegram/webhook`. It accepts only private messages from an allowlisted
+human. The previous registration workflow could point Telegram at the Worker
+origin instead of this path, discard pending updates, delete the webhook during
+chat discovery and infer ownership from an unauthenticated sender. **Do not run
+that old workflow.** The signed ignored-update probe in historical run
+[#41891392653](https://github.com/ghith93/raawaa-autonomous-engine/actions/runs/41891392653)
+does not prove that Telegram was pointed at the route, that the owner is in the
+allowlist, or that a real reply was delivered.
 
-Everything else in #228 is already written (`worker/telegram-webhook.js`, 15
-Worker tests across `telegram_webhook.test.js` and `telegram-mobile-contract.test.js`,
-idempotent receipts in D1, private-chat allowlist, `/help` `/status` `/report`).
-The surface is simply not registered, because a bot token can only come from you.
+The replacement `telegram-register.yml` must first be reviewed, tested and merged
+to `main`; only then can it be dispatched. Default **diagnose** mode makes no
+Telegram or Worker changes: it checks the configured bot identity with `getMe`,
+compares `getWebhookInfo.url` with the exact webhook path, reports a sanitized
+pending-update count and last-error class, probes the Worker's unsigned
+configuration gate, checks only whether the Worker allowlist secret exists, and
+reads aggregate D1 receipt counts when available. The unsigned probe posts an
+ineligible empty update without a secret; the expected response is HTTP 401.
+It does not read the allowlist value, discover an owner, or send a message:
 
-1. Open Telegram → **@BotFather** → `/newbot` → give it a name and a username
-   ending in `bot`. Copy the token it prints (`123456789:AA...`).
-2. Open your new bot and send it any message — `/start` is enough. This is how the
-   automation learns your chat id without you looking it up.
-3. GitHub → this repository → **Settings → Secrets and variables → Actions →
-   New repository secret** → name `TELEGRAM_BOT_TOKEN`, value = the token.
+```sh
+gh workflow run telegram-register.yml --ref main \
+  -f confirm=REGISTER_TELEGRAM_WEBHOOK -f mode=diagnose
+```
 
-Then tell me it is done (one word). I will run **Register Telegram webhook**
-(`.github/workflows/telegram-register.yml`), which:
+Review the resulting run and check-run annotations before deciding whether a
+repair is appropriate. The existence of `TELEGRAM_ALLOWED_CHAT_IDS` does not
+prove it is valid, contains the owner's ID, or belongs to the correct bot.
+`getWebhookInfo` does not reveal the configured webhook secret. A nonmatching
+URL is a confirmed configuration defect only when reported by this live check.
 
-- discovers your private chat id from the pending update,
-- generates the webhook secret (32 random bytes, never printed),
-- installs all three values as Worker secrets,
-- points Telegram at `https://raawaa-autonomous-engine-control.ghith-shikhkhaled.workers.dev/v1/telegram/webhook`,
-- posts a signed update to prove the Worker accepts and gates it,
-- and I close #228 with the evidence.
+After exact-head tests, independent review, and an authorized Worker deployment
+(including the `/start` alias), **repair** mode is a separate explicit action.
+Before dispatch, independently verify the provenance and authorization of **every**
+identity in the existing allowlist, including that there are no unintended extra
+identities. The old bootstrap could have enrolled an unsolicited sender; restoring
+that unknown list to service could expose private information. If the existing
+list cannot be verified, do not attest or run repair. Cloudflare secret presence
+and structural readiness are not verification. Resolve a missing identity only
+through a trusted channel and a separately reviewed configuration change.
 
-**Do not paste the token into this chat.** Nothing here needs to see it.
+Only after that verification, the operator can attest it for this run:
 
-## 2. One decision on where task code executes — 1 minute, unblocks #440
+```sh
+gh workflow run telegram-register.yml --ref main \
+  -f confirm=REGISTER_TELEGRAM_WEBHOOK -f mode=repair \
+  -f owner_binding=VERIFIED_EXISTING_ALLOWLIST
+```
 
-#440 is blocked because the Codespaces bridge is not a security boundary: task
-code runs as the same Unix user as the bridge. Three ways out, pick a letter:
+This attestation is a fail-closed operational reminder, not automated evidence of
+identity; the workflow cannot inspect or prove the allowlist contents. Repair
+checks the bot identity, requires the existing allowlist secret and a
+successful unsigned readiness probe, snapshots the existing default command menu,
+sets and reads back `/start`, `/help`, `/status`, `/report`, prepares a fresh
+webhook secret in a private runner file, installs the bot and webhook secrets
+**without replacing the allowlist**, then calls `setWebhook` and checks its exact
+URL. If command setup or readback fails, it attempts to restore and read back the
+snapshot, reporting explicitly if rollback could not be verified. Finally it sends a synthetic signed update with no human sender;
+that update must be ignored and cannot prove owner authorization or end-to-end
+delivery. The new webhook secret is registered with GitHub's log masker before
+it is passed to Wrangler; Wrangler's secret-write output is suppressed. The
+prepared file is removed in an always-run cleanup step.
 
-- **A — sandbox in the Codespace** (`docker run --network none --read-only`,
-  dropped capabilities, no credentials mounted). Real boundary, reuses what
-  exists, needs Docker inside the Codespace.
-- **B — GitHub Actions job as the boundary.** Each task is one ephemeral job.
-  Cheapest to build, strongest credential isolation, slow (~40 s/task) and the
-  job can still reach the network.
-- **C — no repository-controlled code executes at all.** Only deterministic
-  dry-run handlers run; anything needing real code stays a proposal. Zero risk,
-  and the engine stops at "plan" rather than "execute".
+Repair refuses a **known non-empty pending queue**, both before mutations and
+again immediately before `setWebhook`. `drop_pending_updates` is false; this is
+not a backup or a guarantee of delivery. New updates can arrive between the last
+check and registration, and the Worker may acknowledge and ignore unauthorized
+messages. If installation succeeds but registration fails, old and new secrets
+may briefly differ; do not claim rollback. Investigate the failure and queue,
+then, when safe, rerun reviewed repair to install and register a fresh matching
+secret. Cloudflare does not disclose the previous Worker secret value for
+restoration.
 
-My recommendation is **A**, with **C** as the fallback for anything that is not
-clearly ours. Reply with one letter.
+A separate human message and observed delivery are needed to verify the complete
+path. If the bot remains silent, inspect fresh sanitized diagnostics and receipt
+counts. Never infer the owner from the first unsolicited message or replace an
+allowlist using an unverified ID. An owner identity must be confirmed through an
+independent trusted channel before a new private-chat ID is installed.
 
-## 3. Free provider keys — 5 minutes, optional, unblocks live inference in #346
+A previously exposed bot token must be revoked with BotFather `/revoke`. The
+replacement belongs in the GitHub Actions secret `TELEGRAM_BOT_TOKEN`; never send
+it through chat. The user reported changing the key, but that alone does not
+prove the exposed token was revoked or that all configurations now use the new
+one. A live `getMe` check verifies the configured token's bot identity, not
+whether an old token was revoked.
 
-Only needed when you want the engine to actually call a model. All free tiers,
-$0, no card:
+## Other active safety boundaries
 
-- Groq → https://console.groq.com/keys → create key → add as repository secret
-  `GROQ_API_KEY`.
-- Gemini → https://aistudio.google.com/apikey → create key → add as
-  `GEMINI_API_KEY`.
-
-After that I verify the model catalog with the existing read-only checker
-(`scripts/groq_connection_check.py`), enable exactly one route in
-`config/provider_profiles.json`, and run a bounded smoke — never more than the
-free quota, and the daily/monthly caps in the ledger still apply.
-
-If you skip this, #346 stays "verified but disabled", which is a fine place to
-be: nothing else depends on it.
-
-## 4. One question for #357 — 30 seconds
-
-Is the Cloudflare account on **Workers Free** or **Workers Paid**? Free means
-Workers AI gives 10,000 Neurons/day and hard-fails after that — which is exactly
-the behaviour the engine wants. Paid means overage is billed, and the engine must
-enforce the cap itself.
-
-Look at Cloudflare dashboard → Workers & Pages → Plans. One word back.
-
-## 5. #405 — 5 seconds
-
-The parked Workers AI Neuron ledger PR (#405, labelled `blocked`). Keep it parked
-until there is a real workload, or close it? Reply **keep** or **close**. Doing
-nothing keeps it parked, which is also fine.
-
-## 6. Spend — no action required
-
-The delegation says explicit approval is required only for actions that can incur
-charges. Current state: **$0 spend**, every provider route `enabled: false`, no
-paid plan, no inference. If that ever needs to change, you will get one sentence
-stating the amount and what it buys. Until then I default to zero.
-
----
-
-## What I never need from you
-
-- Passwords, API tokens, OAuth codes or 2FA codes — never send these in chat, and
-  I will never ask. Everything above is a value you paste into a settings field,
-  not into a message.
-- Permission changes, GitHub Apps, or ruleset edits.
-- Approval for merges, commits, branches, PRs, migrations or deployments: that is
-  delegated, and the engineering gates (tests, exact-head CI, migrations applied
-  before code that needs them) are what stand in for approval.
-
-## What is already moving without you
-
-- #175: comparator increment merged; next is wiring adapter output into it, then
-  triangular enumeration, then the evaluation harness.
-- The development loop: ranking, freshness, stale-branch hygiene, and the
-  queued-check-is-not-green fix.
-- Documentation that disagrees with the code is being corrected as it is found —
-  two such documents were corrected today.
+- Sandbox issue #440: Codespace execution remains release-disabled. A validator
+  test or CI run is not a live sandbox escape proof. Do not run the adversarial
+  live workflow until its exact changes and provenance have been independently
+  reviewed.
+- Model providers: remain disabled unless account eligibility, terms, hard spend
+  limits and the existing inference gates are verified. No live inference, paid
+  fallback or usage with uncertain cost is authorized by this playbook.
+- Financial/market execution remains disabled. No wallet signing, orders, live
+  market calls, swaps or other financial actions are implied by Telegram setup.
