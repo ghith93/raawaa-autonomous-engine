@@ -217,7 +217,7 @@ def assert_sandbox_argv(argv: list[str], *, expected_source_dir: str) -> list[st
     if not isinstance(expected_source_dir, str) or not expected_source_dir.startswith("/"):
         raise SandboxPolicyError("expected_source_dir must be an absolute trusted workspace path")
     expected_source = expected_source_dir.rstrip("/")
-    if expected_source in ("", "/") or ".." in expected_source.split("/"):
+    if expected_source in ("", "/") or ".." in expected_source.split("/") or "," in expected_source:
         raise SandboxPolicyError("expected_source_dir must be a specific directory")
     image_indexes = [i for i, arg in enumerate(argv[2:], 2) if _DIGEST_IMAGE.fullmatch(arg)]
     if len(image_indexes) != 1:
