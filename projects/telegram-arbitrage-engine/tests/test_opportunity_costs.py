@@ -205,3 +205,10 @@ def test_exact_depth_swept_gross_profit_override_preserves_quote_precision():
     )
     assert negative.gross_profit_quote == Decimal("-0.5")
     assert negative.net_profit_quote < 0
+
+
+def test_unknown_depth_is_not_treated_as_a_full_fill():
+    result = evaluate(buy_fill_fraction=None)
+    assert result.status == "depth_unverified"
+    assert result.gross_profit_quote == Decimal("20")
+    assert result.net_profit_quote is None
