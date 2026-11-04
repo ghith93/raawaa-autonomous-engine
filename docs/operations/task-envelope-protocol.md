@@ -168,6 +168,14 @@ the step summary. Both are readable through the checks API and the run page.
 A blocked task and a succeeded task are therefore distinguishable from outside,
 which the queue counters alone could never show.
 
+A *crashing* batch used to be the exception: no JSON on stdout meant
+`stop_reason=unknown` and nothing else, so two failed runs on 2026-11-04
+(41818670566, 41820241562) could not be diagnosed after the fact. The runner now
+keeps the last 4 KB of stderr next to the batch result and `run_report.py`
+renders it into one `::error` annotation (single line, workflow-command markers
+neutralised) plus a fenced block in the step summary. A failure states its
+traceback through the same two channels as a success.
+
 ### What `succeeded` means
 
 `succeeded` means **validated and recorded — nothing more**. The stored result

@@ -330,6 +330,11 @@ jobs:
           # are not downloadable from this project's own tooling, so a result that
           # only exists on stdout is effectively unreportable.
           Path("/tmp/raawaa-batch.json").write_text(result.stdout or "", encoding="utf-8")
+          # A crash leaves no JSON, so stop_reason degrades to "unknown" and the
+          # traceback is the only evidence. Logs are not downloadable here, so the
+          # tail is kept for the reporting step to turn into an annotation.
+          Path("/tmp/raawaa-batch.stderr").write_text(
+              (result.stderr or "")[-4000:], encoding="utf-8")
           if result.stdout:
               print(result.stdout, end="")
           if result.stderr:
@@ -366,7 +371,7 @@ jobs:
         # Annotations and the step summary are readable through the checks API and
         # the run page; raw job logs are not. Always run, so a failed batch still
         # says which task failed and why.
-        run: python -m engine.run_report /tmp/raawaa-batch.json
+        run: python -m engine.run_report /tmp/raawaa-batch.json /tmp/raawaa-batch.stderr
 
       - name: Publish bounded Task Runner status
         if: always()

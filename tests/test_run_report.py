@@ -125,5 +125,68 @@ class EmitTests(unittest.TestCase):
         self.assertIn("processed=2", out)
 
 
+class StderrTailTests(unittest.TestCase):
+    """A crashing batch must say why it crashed, not just that it did.
+
+    The two failed 2026-11-04 task-runner runs (41818670566, 41820241562) left
+    only ``tasks_processed=0 stop_reason=unknown`` because a crash produces no
+    JSON on stdout and the traceback went to a log nobody can download.
+    """
+
+    def _main(self, argv):
+        stream = io.StringIO()
+        with redirect_stdout(stream):
+            code = run_report.main(argv)
+        return code, stream.getvalue()
+
+    def test_crash_tail_becomes_one_error_annotation(self):
+        tail = 'Traceback (most recent call last):\n  File "engine/x.py", line 1\nValueError: remote said ::oops::\n'
+        line = run_report.stderr_notice(tail)
+        self.assertIsNotNone(line)
+        self.assertTrue(line.startswith("::error title=Task batch crashed::"))
+        self.assertNotIn("\n", line)
+        # A raw traceback must not be able to inject a workflow command.
+        self.assertNotIn("::oops", line)
+
+    def test_blank_tail_is_silent(self):
+        self.assertIsNone(run_report.stderr_notice(""))
+        self.assertIsNone(run_report.stderr_notice("  \n\n "))
+        self.assertEqual(run_report.stderr_markdown(""), "")
+
+    def test_emit_adds_the_crash_to_the_stream_and_the_summary(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            summary = Path(tmp) / "summary.md"
+            stream = io.StringIO()
+            run_report.emit({}, str(summary), stream=stream, stderr_text="ValueError: boom")
+            self.assertIn("::error title=Task batch crashed::", stream.getvalue())
+            written = summary.read_text(encoding="utf-8")
+            self.assertIn("#### stderr tail", written)
+            self.assertIn("ValueError: boom", written)
+
+    def test_main_reads_the_stderr_file_beside_the_batch(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            batch = Path(tmp) / "batch.json"
+            batch.write_text("", encoding="utf-8")
+            tail = Path(tmp) / "batch.stderr"
+            tail.write_text("KeyError: 'task_type'", encoding="utf-8")
+            code, out = self._main([str(batch), str(tail)])
+        self.assertEqual(code, 0)
+        self.assertIn("::error", out)
+        self.assertIn("KeyError", out)
+
+    def test_missing_stderr_file_stays_silent(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            batch = Path(tmp) / "batch.json"
+            batch.write_text(json.dumps(BATCH), encoding="utf-8")
+            code, out = self._main([str(batch), str(Path(tmp) / "absent.stderr")])
+        self.assertEqual(code, 0)
+        self.assertNotIn("::error", out)
+        self.assertIn("processed=2", out)
+
+    def test_long_tail_is_bounded(self):
+        line = run_report.stderr_notice("x" * 50000)
+        self.assertLessEqual(len(line), run_report.MAX_ANNOTATION_CHARS + 60)
+
+
 if __name__ == "__main__":
     unittest.main()
