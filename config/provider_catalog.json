@@ -72,7 +72,7 @@
       "model_discovery": "manual_pricing_catalog",
       "docs": "https://docs.z.ai/guides/overview/pricing",
       "priority": "zero_cost_glm_flash_candidate_pending_account_and_terms_verification",
-      "note": "Public pricing lists GLM-4.7-Flash, GLM-4.5-Flash, and GLM-4.6V-Flash at zero input/output price. Account quotas are console-only/unverified. API Additional Terms prohibit decision-making activities with undefined scope; no autonomous-agent use until written provider clarification. No live adapter, credentials, inference, or paid fallback."
+      "note": "Public pricing lists GLM-4.7-Flash, GLM-4.5-Flash, and GLM-4.6V-Flash product labels at zero input/output price; exact request-time API model IDs and account quotas remain unverified. API Additional Terms prohibit decision-making activities with undefined scope; retention is not established as zero. No autonomous-agent use until written provider clarification. No live adapter, credentials, inference, or paid fallback."
     }
   ],
   "gateways_to_evaluate": [
