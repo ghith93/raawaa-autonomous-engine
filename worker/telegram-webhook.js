@@ -52,6 +52,9 @@ function commandOf(text) {
 }
 
 async function commandReply(command, env) {
+  if (command === "start") {
+    return "Raawaa Engine control is connected.\n/help — show commands\n/status — task queue health\n/report — paper research event counts";
+  }
   if (command === "help") {
     return "Raawaa Engine — read-only controls\n/help — show commands\n/status — task queue health\n/report — paper research event counts";
   }
