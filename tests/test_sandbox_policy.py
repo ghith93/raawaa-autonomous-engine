@@ -9,7 +9,10 @@ refused when it tries. The live adversarial tests live in
 Unittest rather than pytest on purpose: root CI runs ``unittest discover``, so a
 pytest-style file here would be imported and never executed.
 """
+import shutil
+import tempfile
 import unittest
+from pathlib import Path
 
 from engine.sandbox_policy import (
     CEILINGS,
@@ -223,6 +226,60 @@ class RefusalTest(unittest.TestCase):
         for bad in ([], ["docker"], ["sudo", "docker", "run"], "docker run", ["docker", "exec"]):
             with self.assertRaises(SandboxPolicyError, msg=repr(bad)):
                 assert_sandbox_argv(bad, expected_source_dir="/repo")
+
+
+class SymlinkSourceTest(unittest.TestCase):
+    """A read-only bind mount still *reads* whatever the symlink points at (#440).
+
+    ``--mount=type=bind`` resolves symlinks on the host, so ``/repo/workspace``
+    pointing at ``/`` mounts the host root read-only into the container under
+    ``/workspace``. ``readonly`` stops writes, not reads of ``/etc/shadow`` or a
+    runner home directory.
+    """
+
+    def setUp(self):
+        self.root = Path(tempfile.mkdtemp()).resolve()
+        self.addCleanup(shutil.rmtree, self.root, True)
+
+    def test_a_source_directory_that_is_a_symlink_is_refused(self):
+        link = self.root / "workspace"
+        link.symlink_to("/", target_is_directory=True)
+        with self.assertRaisesRegex(SandboxPolicyError, "symlink-free"):
+            build_docker_argv(request(source_dir=str(link)))
+
+    def test_a_symlinked_intermediate_component_is_refused(self):
+        (self.root / "inner").mkdir()
+        link = self.root / "inner" / "etc"
+        link.symlink_to("/etc", target_is_directory=True)
+        with self.assertRaisesRegex(SandboxPolicyError, "symlink-free"):
+            build_docker_argv(request(source_dir=str(link / "passwd")))
+
+    def test_the_independent_check_refuses_a_symlinked_source(self):
+        real = self.root / "repo"
+        real.mkdir()
+        link = self.root / "repo-link"
+        link.symlink_to(real, target_is_directory=True)
+        vector = build_docker_argv(request(source_dir=str(real)))
+        with self.assertRaisesRegex(SandboxPolicyError, "symlink-free"):
+            assert_sandbox_argv(vector, expected_source_dir=str(link))
+        # A hand-built vector whose mount source is the symlink is refused as well,
+        # because the only accepted mount is the exact canonical one.
+        hand_built = list(vector)
+        hand_built[hand_built.index(f"--mount=type=bind,src={real},dst=/workspace,readonly")] = (
+            f"--mount=type=bind,src={link},dst=/workspace,readonly"
+        )
+        with self.assertRaisesRegex(SandboxPolicyError, "trusted workspace bind mount"):
+            assert_sandbox_argv(hand_built, expected_source_dir=str(real))
+
+    def test_a_canonical_directory_is_still_accepted(self):
+        real = self.root / "repo"
+        real.mkdir()
+        vector = build_docker_argv(request(source_dir=str(real)))
+        self.assertEqual(assert_sandbox_argv(vector, expected_source_dir=str(real)), vector)
+
+    def test_a_comma_in_the_source_cannot_add_mount_options(self):
+        with self.assertRaisesRegex(SandboxPolicyError, "specific directory"):
+            build_docker_argv(request(source_dir="/repo,dst=/host"))
 
 
 class ReviewedRefTest(unittest.TestCase):

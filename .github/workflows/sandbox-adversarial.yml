@@ -87,13 +87,22 @@ jobs:
 
       - name: Summary
         if: always()
+        env:
+          # The dispatch input is data, never script. It reaches the shell only
+          # through the environment: interpolating `${{ inputs.image }}` into a
+          # `run:` block would let a value that the digest check above rejects
+          # still execute as a command here, because this step runs on failure.
+          IMAGE: ${{ inputs.image }}
         run: |
+          # Strip control characters as well, so a rejected value cannot forge
+          # extra lines in the job summary.
+          SAFE_IMAGE="$(printf '%s' "$IMAGE" | tr -d '\r\n')"
           {
             echo "### Sandbox escape proof"
             echo ""
-            echo "- image: \`${{ inputs.image }}\`"
+            printf -- '- image: `%s`\n' "$SAFE_IMAGE"
             echo "- runtime: runsc (gVisor), network none, read-only rootfs, cap-drop ALL, non-root"
-            echo "- probes: parent environ, own environ, docker socket, /root/.ssh, egress, root write"
+            echo "- probes: host canary outside the mount, positive control read, docker socket, /root/.ssh, egress, root write"
             echo ""
             echo "A skipped or partially run probe is reported as a failure, never as containment."
           } >> "$GITHUB_STEP_SUMMARY"
