@@ -54,7 +54,7 @@ Cloudflare Worker watchdog secret names: `GITHUB_APP_ID`, `GITHUB_APP_INSTALLATI
 ## Reusable workflows — inspect before creating new ones
 
 - `task-runner.yml`: bounded D1 Task Runner; scheduled/manual; one-shot public research input.
-- `deploy-worker.yml`: Production Control Worker deployment; **no manual dispatch**; authorized only by a `main` push whose commit message contains `[deploy-control-worker]`.
+- `deploy-worker.yml`: Production Control Worker deployment; **no manual dispatch**; authorized only by a `main` push whose commit message contains `[deploy-control-worker]`. Wrangler is pinned to `4.156.1` for the D1 gate and the deploy, and the workflow **does not write Worker secrets**; a read-only `POST /v1/diagnostics/auth` preflight must first show the deployed Worker accepts the repository `ENGINE_API_TOKEN` (issue [#521](https://github.com/ghith93/raawaa-autonomous-engine/issues/521)).
 - `cloudflare-access-inventory.yml` and `cloudflare-access-audit.yml`: read-only Access inventory/audit.
 - `cloudflare-worker-inventory.yml`: read-only Worker inventory and health.
 - `cloudflare-billing-inventory.yml`: read-only subscriptions and spend-policy inventory.
