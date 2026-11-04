@@ -103,6 +103,7 @@ try:
         for line in handle:
             if line.startswith("usage_usec "):
                 usage_before = int(line.split()[1])
+    started = time.monotonic()
     cpu_children = [
         subprocess.Popen(
             [sys.executable, "-c", "import time; end=time.monotonic()+3; x=0\nwhile time.monotonic()<end: x+=1"],
@@ -110,7 +111,6 @@ try:
         )
         for _ in range(2)
     ]
-    started = time.monotonic()
     for child in cpu_children:
         child.wait(timeout=10)
     elapsed = time.monotonic() - started
@@ -258,6 +258,7 @@ class SandboxEscapeTest(unittest.TestCase):
         self.assertLessEqual(int(cpu_parts[0]) / int(cpu_parts[1]), 1.0)
         self.assertTrue(self.output.get("pids_limit_enforced"), self.output)
         self.assertTrue(self.output.get("memory_limit_enforced"), self.output)
+        self.assertGreater(self.output.get("cpu_cores_used", 0), 0.1, self.output)
         self.assertLessEqual(self.output.get("cpu_cores_used", 99), 1.5, self.output)
 
     def test_the_public_network_is_unreachable(self):
