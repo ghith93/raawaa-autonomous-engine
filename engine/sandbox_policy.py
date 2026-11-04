@@ -257,7 +257,7 @@ def assert_sandbox_argv(argv: list[str], *, expected_source_dir: str) -> list[st
     def one(prefix: str) -> str:
         values = [arg[len(prefix):] for arg in options if arg.startswith(prefix)]
         if len(values) != 1 or not values[0]:
-            raise SandboxPolicyError(f"argv must contain exactly one {prefix}<value>")
+            raise SandboxPolicyError(f"argv is missing or duplicates {prefix}<value>")
         return values[0]
 
     try:
