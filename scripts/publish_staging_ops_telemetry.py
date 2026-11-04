@@ -52,6 +52,16 @@ def _policy_snapshot(root: Path, live_inference_value: str) -> dict:
     if (not re.search(gate, env_block)
             or workflow.count("RAAWAA_ENGINE_LIVE_INFERENCE:") != 1):
         raise TelemetryPublishError("Task Runner live-inference gate must be an explicit disabled batch-step setting")
+    guard = """      - name: Refuse unverified one-shot live research
+        if: github.event_name == 'workflow_dispatch' && inputs.run_public_research_once
+        run: |
+          echo '::error::One-shot live research is disabled: account tier, provider-side zero-cost controls, and safe task isolation must be independently verified before re-enabling.'
+          exit 1
+"""
+    checkout = "      - name: Check out reviewed main"
+    if (workflow.count(guard + checkout) != 1 or workflow.count(checkout) != 1
+            or "        continue-on-error:" in batch[0]):
+        raise TelemetryPublishError("Task Runner one-shot refusal guard is missing or weak")
     if live_inference_value == "enabled":
         live_default = "enabled"
     elif live_inference_value in ("", "disabled"):
