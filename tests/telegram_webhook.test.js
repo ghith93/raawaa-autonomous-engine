@@ -100,6 +100,31 @@ test("duplicate update IDs are acknowledged without sending duplicate replies", 
   assert.deepEqual(await response.json(), { ok: true, duplicate_or_rate_limited: true });
 });
 
+test("/start confirms the owner control channel is connected", async () => {
+  const originalFetch = globalThis.fetch;
+  let sent;
+  globalThis.fetch = async (_url, init) => {
+    sent = JSON.parse(init.body);
+    return new Response(JSON.stringify({ ok: true, result: { message_id: 10 } }), { status: 200 });
+  };
+  try {
+    const DB = dbMock();
+    const response = await handleTelegramWebhook(
+      request({ update_id: 87, message: {
+        chat: { id: 12345, type: "private" },
+        from: { id: 12345, is_bot: false },
+        text: "/start",
+      } }),
+      { ...ENV, DB },
+      new URL("https://engine.example/v1/telegram/webhook"),
+    );
+    assert.equal(response.status, 200);
+    assert.equal((await response.json()).delivery_status, "sent");
+    assert.equal(sent.chat_id, "12345");
+    assert.match(sent.text, /control is connected/);
+  } finally { globalThis.fetch = originalFetch; }
+});
+
 test("allowed read-only commands send a bounded reply and record delivery", async () => {
   const originalFetch = globalThis.fetch;
   let sent;
