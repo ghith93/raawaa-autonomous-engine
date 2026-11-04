@@ -58,6 +58,10 @@ except OSError as exc:
 try:
     scratch = os.statvfs("/scratch")
     result["scratch_bytes"] = scratch.f_blocks * scratch.f_frsize
+    with open("/tmp/probe-canary", "w", encoding="utf-8") as handle:
+        handle.write("tmp")
+    tmpfs = os.statvfs("/tmp")
+    result["tmp_bytes"] = tmpfs.f_blocks * tmpfs.f_frsize
 except OSError as exc:
     result["scratch_bytes_error"] = type(exc).__name__
 try:
@@ -177,10 +181,11 @@ class SandboxEscapeTest(unittest.TestCase):
         )
         self.assertEqual(self.source_canary.read_text(encoding="utf-8"), "source-must-remain-immutable")
 
-    def test_only_bounded_tmpfs_scratch_is_writable(self):
+    def test_only_bounded_tmpfs_scratch_paths_are_writable(self):
         self.assertEqual(self.output.get("scratch_write"), "succeeded")
-        self.assertGreater(self.output.get("scratch_bytes", 0), 0)
-        self.assertLessEqual(self.output.get("scratch_bytes", 0), 33 * 1024 * 1024)
+        for key in ("scratch_bytes", "tmp_bytes"):
+            self.assertGreater(self.output.get(key, 0), 0)
+            self.assertLessEqual(self.output.get(key, 0), 33 * 1024 * 1024)
 
     def test_host_environment_marker_is_not_inherited(self):
         self.assertTrue(self.output.get("host_env_marker_absent"), self.output)
