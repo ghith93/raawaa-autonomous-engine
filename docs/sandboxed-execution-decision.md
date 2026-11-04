@@ -67,11 +67,21 @@ gate is spend, and every option below is $0.
   run.
 - Limits above the ceiling are **refused, not clamped**, because a limit the code
   under it can raise is not a limit.
+- The source path must be **canonical and symlink-free**. `--mount=type=bind`
+  resolves symlinks on the host, so a lexically innocent source directory that
+  points at `/` mounts the host root under `/workspace` — and read-only still
+  reads `/etc/shadow` and a runner's `$HOME`. `os.path.realpath()` must equal the
+  given path, and a comma is refused because it is how a mount value gains options.
 
-`tests/test_sandbox_policy.py` (20 tests) pins each of those properties.
+`tests/test_sandbox_policy.py` (30 tests) pins each of those properties.
 `tests/adversarial/test_sandbox_escape.py` holds the probes that can only run under
 a real sandbox, and `.github/workflows/sandbox-adversarial.yml` runs them on an
-ephemeral runner with gVisor installed.
+ephemeral runner with gVisor installed. Those probes carry a positive control — a
+read of `/workspace/README.md` that must succeed — and the host canary is created
+in a world-traversable directory outside the resolved workspace with a per-run
+marker. `tests/adversarial/test_probe_harness.py` (17 offline tests) pins that
+harness contract, and `tests/test_sandbox_adversarial_workflow.py` pins that the
+workflow never interpolates its dispatch input into a shell script.
 
 ## What is still missing before #427 may merge
 
