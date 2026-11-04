@@ -20,7 +20,7 @@ from engine.budget_policy import validate_budget_policy
 from engine.tool_broker import validate_permission_matrix
 from engine.artemis_gateway import probe_artemis
 from engine.executive_intelligence import executive_status
-from engine.brain_cycle import build_brain_cycle
+from engine.brain_cycle import DEFAULT_SNAPSHOT_LIMIT, build_brain_cycle
 from engine.orchestrator import validate_and_plan
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -224,7 +224,10 @@ def main() -> int:
     elif args.command == "executive-status":
         print(json.dumps(executive_status(store(), limit=args.limit), indent=2, ensure_ascii=False))
     elif args.command == "brain-cycle":
-        print(json.dumps(build_brain_cycle(store().list_tasks(limit=200), limit=args.limit), indent=2, ensure_ascii=False))
+        # DEFAULT_SNAPSHOT_LIMIT is 100: the remote D1 adapter clamps list_tasks
+        # at 100 and rejects responses over 64 KB, so asking for 200 would
+        # silently return 100 in production.
+        print(json.dumps(build_brain_cycle(store().list_tasks(limit=DEFAULT_SNAPSHOT_LIMIT), limit=args.limit), indent=2, ensure_ascii=False))
     elif args.command == "workflow-plan":
         proposal = load_json(Path(args.file))
         roster = load_json(ROOT / "config" / "agents.json")
