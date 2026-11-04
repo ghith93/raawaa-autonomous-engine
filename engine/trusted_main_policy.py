@@ -13,8 +13,14 @@ from urllib.error import HTTPError, URLError
 from urllib.request import HTTPRedirectHandler, Request, build_opener
 
 TRUSTED_REPOSITORY = "ghith93/raawaa-autonomous-engine"
-TRUSTED_REMOTE_HTTPS = "https://github.com/" + TRUSTED_REPOSITORY + ".git"
-TRUSTED_REMOTE_SSH = "git@github.com:" + TRUSTED_REPOSITORY + ".git"
+TRUSTED_REMOTE_HTTPS = {
+    "https://github.com/" + TRUSTED_REPOSITORY,
+    "https://github.com/" + TRUSTED_REPOSITORY + ".git",
+}
+TRUSTED_REMOTE_SSH = {
+    "git@github.com:" + TRUSTED_REPOSITORY,
+    "git@github.com:" + TRUSTED_REPOSITORY + ".git",
+}
 GITHUB_API = "https://api.github.com"
 COMMIT_RE = re.compile(r"^[0-9a-f]{40}$")
 
@@ -94,7 +100,7 @@ def verify_trusted_checkout(
         return {"trusted": False, "reason": "workspace_root_mismatch"}
     if results["branch"] != "main":
         return {"trusted": False, "reason": "branch_not_main"}
-    if results["origin"] not in {TRUSTED_REMOTE_HTTPS, TRUSTED_REMOTE_SSH}:
+    if results["origin"] not in TRUSTED_REMOTE_HTTPS | TRUSTED_REMOTE_SSH:
         return {"trusted": False, "reason": "origin_not_canonical"}
     if results["status"]:
         return {"trusted": False, "reason": "working_tree_not_clean"}
