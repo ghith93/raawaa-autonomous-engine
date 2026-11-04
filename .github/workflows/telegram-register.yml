@@ -118,8 +118,14 @@ jobs:
             2>/dev/null | jq -r 'if type == "array" then .[0].results else .results end | (.[0].chat_id // "")' 2>/dev/null || true)"
 
           if [ -z "$recovered" ]; then
-            echo "::error title=No chat id::Neither Telegram nor the D1 receipts table yielded one. Send the bot one message and run this again."
-            exit 1
+            # Nothing to discover anywhere: Telegram has no queue and the Worker has
+            # never received a message. The Worker still knows its allowlist (if one
+            # was ever installed), so the useful move is to re-arm the webhook with a
+            # fresh secret and let the next real message prove the path end to end.
+            echo "::notice title=Rearming without discovery::No chat id anywhere; rotating the secret and re-registering, leaving the allowlist as it is."
+            run_bootstrap --rearm-only || exit 1
+            echo "::warning title=Allowlist unverified::If the Worker has no allowlist yet, it will ignore every message. Send the bot one message, then run this again."
+            exit 0
           fi
           echo "::notice title=Chat id recovered::from telegram_update_receipts, so the owner does not need to message the bot again."
           run_bootstrap --chat-id "$recovered"
@@ -137,6 +143,12 @@ jobs:
               TELEGRAM_BOT_TOKEN|TELEGRAM_WEBHOOK_SECRET|TELEGRAM_ALLOWED_CHAT_IDS) ;;
               *) echo "Unexpected key in the env file: $key"; exit 1 ;;
             esac
+            # An empty value means "leave the Worker's existing value alone" — used
+            # by rearm mode, where the allowlist is already correct.
+            if [ -z "$value" ]; then
+              echo "::notice title=Left untouched::$key keeps its current value on the Worker"
+              continue
+            fi
             printf '%s' "$value" | npx --yes wrangler@4.156.1 secret put "$key" --config wrangler.toml
           done < /tmp/telegram.env
       - name: Point Telegram at the Worker
