@@ -56,10 +56,14 @@ Properties, each covered by a test:
   `409` (`run_identity_conflict`, `run_digest_conflict` or `step_contract_conflict`),
   because `steps_digest` hashes step content only: two dispatches could share it and
   still name different tasks through a different `workflow_id` or version.
-- **Task ids are exact.** A step's task is `wf-<run_id>-<step_id>`, with no
-  truncation, and a combination longer than 128 characters is rejected at validation
-  (`step_task_id_too_long`) rather than silently shortened — a truncated id would
-  collide in the reconciliation path, which is the one place the id must be exact.
+- **Task ids are exact.** A step's task is `wf-<run_id>-<step_id>`, never truncated:
+  with both fields allowed 64 characters the id can reach 132, and shortening it
+  would collide in the reconciliation path — the one place the id must be exact.
+  Uniqueness inside a run is structural (step ids are unique per run). Across runs
+  the separator is theoretically ambiguous (`run "a"` + `step "b-c"` renders the
+  same as `run "a-b"` + `step "c"`); that case is resolved by the strict task
+  insert — the batch rolls back and the caller gets `409 step_contract_conflict`,
+  rather than two identities being silently merged.
 - **`plan_digest` is opaque here.** The Worker checks its shape and treats it as the
   caller's run identity; it does not recompute the canonical planner digest, because
   it never receives the plan. Content consistency is `steps_digest`, and Python

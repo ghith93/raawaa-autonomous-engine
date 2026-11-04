@@ -315,31 +315,48 @@ test("findCycle is acyclic-aware", () => {
   ]), ["a", "b"]);
 });
 
-test("a long run id and step id cannot collapse onto one task id", async () => {
-  // Both fields allow 64 characters, so `wf-<run>-<step>` can reach 132.
-  // Truncating would map two distinct steps onto one task id — in the very path
-  // (reconciliation) that exists to prove nothing was lost.
-  const result = await validatePlan(plan({
-    run_id: "r".repeat(64),
-    steps: [
-      { step_id: "a".repeat(64), task_type: "system_audit", title: "first" },
-      { step_id: "a".repeat(63) + "b", task_type: "system_audit", title: "second" },
-    ],
-  }));
-  assert.equal(result.error, "step_task_id_too_long");
-  assert.ok(result.detail.startsWith("a"));
-});
-
-test("a combination exactly at the boundary is accepted and is not truncated", async () => {
-  const runId = "r".repeat(60);
-  const stepId = "s".repeat(59); // "wf-" + 60 + "-" + 59 = 125
+test("maximum-length identifiers keep distinct task ids", async () => {
+  // Both fields allow 64 characters, so the id can reach 132. Truncating at 128
+  // made two distinct long step ids share one task id — in the reconciliation
+  // path, which exists to prove that nothing was lost.
+  const runId = "r".repeat(64);
+  const stepA = "a".repeat(64);
+  const stepB = "a".repeat(63) + "b";
   const result = await validatePlan(plan({
     run_id: runId,
-    steps: [{ step_id: stepId, task_type: "system_audit", title: "only" }],
+    steps: [
+      { step_id: stepA, task_type: "system_audit", title: "first" },
+      { step_id: stepB, task_type: "system_audit", title: "second" },
+    ],
   }));
   assert.ok(result.plan, result.error);
-  assert.equal(result.plan.steps[0].id, `wf-${runId}-${stepId}`);
-  assert.ok(result.plan.steps[0].id.length <= 128);
+  const ids = result.plan.steps.map(step => step.id);
+  assert.equal(ids[0], `wf-${runId}-${stepA}`);
+  assert.notEqual(ids[0], ids[1], "distinct steps must never share a task id");
+  assert.ok(ids.every(id => id.length > 128), "and the ids are not silently shortened");
+});
+
+test("the separator ambiguity across runs fails closed at the database, not silently", async () => {
+  // run "a" + step "b-c" and run "a-b" + step "c" both render as `wf-a-b-c`.
+  // Uniqueness inside a run is guaranteed; across runs the strict INSERT is what
+  // refuses to merge two identities, so the route must not use INSERT OR IGNORE.
+  const first = await validatePlan(plan({
+    run_id: "a", steps: [{ step_id: "b-c", task_type: "system_audit", title: "x" }],
+  }));
+  const second = await validatePlan(plan({
+    run_id: "a-b", steps: [{ step_id: "c", task_type: "system_audit", title: "y" }],
+  }));
+  assert.equal(first.plan.steps[0].id, second.plan.steps[0].id);
+
+  const db = fakeDb();
+  db.batch = async () => {
+    throw new Error("D1_ERROR: UNIQUE constraint failed: tasks.id: SQLITE_CONSTRAINT");
+  };
+  const response = await handleWorkflowDispatch(post(plan({
+    run_id: "a-b", steps: [{ step_id: "c", task_type: "system_audit", title: "y" }],
+  })), { DB: db }, url);
+  assert.equal(response.status, 409);
+  assert.equal((await response.json()).error, "step_contract_conflict");
 });
 
 test("a replay under a different workflow id or version is an identity conflict", async () => {

@@ -121,12 +121,18 @@ function validText(value, max) {
 // any process, on any retry.
 //
 // No truncation. `run_id` and `step_id` are each allowed 64 characters, so the
-// combined id can reach 132; a `.slice(0, 128)` would make two distinct long
-// step ids collapse onto one task id — a lossy identity in exactly the path
-// (reconciliation) that exists to prove nothing was lost. The combination is
-// rejected at validation instead, where the caller can still fix it.
-const MAX_TASK_ID = 128;
-
+// combined id can reach 132; a `.slice(0, 128)` made two distinct long step ids
+// collapse onto one task id — a lossy identity in exactly the path
+// (reconciliation) that exists to prove nothing was lost. SQLite TEXT has no
+// length limit, so there was never a reason to shorten it.
+//
+// Uniqueness within a run is what the rest of the system needs: step ids are
+// unique per run and run_id is the key of workflow_runs, so two steps of one run
+// can never share an id. Across runs the separator is theoretically ambiguous
+// (run "a" + step "b-c" reads the same as run "a-b" + step "c"); that case is not
+// silently merged — the strict INSERT meets the tasks primary key, the batch
+// rolls back, and the caller gets 409. A collision has to fail closed; it does
+// not have to be impossible.
 export function taskIdFor(runId, stepId) {
   return `wf-${runId}-${stepId}`;
 }
@@ -238,9 +244,6 @@ export async function validatePlan(input, { codespaceTaskTypes = new Set(), exec
     }
 
     const taskId = taskIdFor(runId.trim(), stepId);
-    if (taskId.length > MAX_TASK_ID) {
-      return { error: "step_task_id_too_long", detail: `${stepId}:${taskId.length}` };
-    }
 
     normalized.push({
       step_id: stepId,
