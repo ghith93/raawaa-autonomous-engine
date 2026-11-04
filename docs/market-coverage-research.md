@@ -76,9 +76,11 @@ Implementation has since gone further than this document claims, so the accurate
 statement lives in **[market-coverage-status-2026-11-04.md](market-coverage-status-2026-11-04.md)**:
 CEX spot adapters (Binance, Bybit, OKX, Kraken, Coinbase), a quote-only Solana
 aggregator (Jupiter), perpetual funding data, and on-chain EVM V2/V3 all exist
-with fixture tests. What does **not** exist is a cross-family comparator (the
-comparator is CEX-spot only), triangular/cyclic route enumeration, a derivatives
-strategy module, a cross-chain comparator, or an evaluation harness.
+with fixture tests. A cross-family comparator now exists
+(`market_sources/multi_family.py`, 2026-11-04). What does **not** exist is
+triangular/cyclic route enumeration, a derivatives strategy module, a
+cross-chain comparator, an evaluation harness, or automatic wiring of the
+existing adapters' output into that comparator.
 
 Every source remains `source_documented_not_live_verified`; no live endpoint has
 been called. Track remaining work in issue #175; it must still be delivered
