@@ -1,11 +1,33 @@
 # GitHub App setup for the Task Runner watchdog
 
+## Current status — read this before quoting the rest of the page
+
+**The five-minute fallback dispatch is NOT active.** The code is deployed and the
+cron fires, but the handler returns `disabled` before any D1 access or network
+call unless the activation variable is present in the Production environment:
+
+- Gate: `worker/task-runner-watchdog.js:25` requires `GITHUB_APP_WATCHDOG_ENABLED === "enabled"`; otherwise `:162` returns `{status: "disabled", reason: "missing_configuration"}`.
+- The variable is **intentionally absent** from `wrangler.toml` and `wrangler.staging.toml` (presence is an activation decision, not a code default).
+- Latest independent readiness evidence: `docs/operations/asset-register-latest.md:37` — `watchdog_ready=not_ready`, `watchdog_missing=GITHUB_APP_WATCHDOG_ENABLED`.
+- The **15-minute** stale-lease recovery in the same Worker *is* alive and independent: cron heartbeat `*/15 * * * *`, last recorded `2026-11-03T22:30:34.171Z`, stale leases requeued `0`, failed `0`.
+
+Two consequences that are easy to get wrong:
+
+1. A configured cron is not a working dispatch. `wrangler.toml:13` listing the five-minute expression proves scheduling, not activation.
+2. The 15-minute recovery pass touches **D1 tasks only**. It does not ingest GitHub comments and does not recover missed issue or PR activity.
+
+Restoring the fallback requires an owner action — set the non-secret Production
+variable, deploy under the contract below, and require an authenticated
+`/v1/mobile/status` readback showing `task_runner_watchdog.ready=true` and
+`missing=[]`. Until that readback exists, cite this page only for the *mechanism*,
+never as evidence that dispatch is live.
+
 ## Purpose
 
 The Cloudflare Worker has two independent scheduled responsibilities:
 
 - Every 15 minutes: bounded stale-lease recovery in D1.
-- Every five minutes on an offset schedule: check whether GitHub's Task Runner schedule is stale and, only if necessary, dispatch the existing Task Runner workflow.
+- Every five minutes on an offset schedule: check whether GitHub's Task Runner schedule is stale and, only if necessary, dispatch the existing Task Runner workflow. **Currently inactive — see Current status above.**
 
 The watchdog is a fallback. It does not replace the GitHub schedule or the Python Task Runner. It skips dispatch when a Task Runner run is queued/running, when any Task Runner run on main was created within the previous 10 minutes (regardless of trigger type), or when a durable D1 dispatch intent was reserved within the previous 10 minutes.
 
