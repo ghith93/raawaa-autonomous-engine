@@ -239,3 +239,19 @@
 10. أعلى فرصة آمنة للدورة التالية.
 
 **قاعدة الاستمرار:** بعد كل دورة، ابدأ التالية ما دام هناك وقت وميزانية وصلاحية. عند نهاية الجلسة احفظ checkpoint واضحاً؛ لا تدّعِ أن العمل يستمر بعد انتهاء الجلسة إلا إذا أثبتته جدولة أو خدمة منشورة تعمل فعلاً.
+
+
+## 14. أحدث دورة موثقة — 2026-11-04
+
+أُجريت مراجعة حية للمستودع والأدوات والتكاملات والمشاريع الفرعية، وسُجلت النتائج والقرارات وحدودها في [تقرير دورة البحث والتطوير الشاملة](research/raawaa-system-rd-cycle-2026-11-04.ar.md).
+
+أهم تحديثات خط الأساس:
+- main عند SHA `5c5605ddcc3e9cec623a66474aca8348e714bd04`، وCI المطابق run `41899750086` نجح شاملاً Staging migrations وWorker وtelemetry وmobile status.
+- PR #457 دمج dependency-aware claims في SQLite وD1 مع same-execution-mode release وfailed-dependency propagation؛ مخطط DAG ما زال proposal-only ولا يرسل خطة تلقائياً.
+- سجل الأدوات الحالي لجلسة ChatGPT: 1,912 تعريف أداة و62 namespace group، و259 skill ضمن 37 حزمة. هذه ليست صلاحيات موروثة للمحرك.
+- Activepieces يحتوي Flow واحداً يدوياً يستدعي GitHub workflow_dispatch لـTask Runner، مع اتصال GitHub واحد وتشغيلين TESTING ناجحين؛ لا يوجد production run في الجرد الحالي. كتالوج النماذج الـ20 لا يثبت أنها مجانية أو مؤهلة.
+- قواعد main نشطة لكنها لا تتطلب موافقة مراجِع (0 approvals)، وتسمح بتجاوز RepositoryRole actor id 5 بوضع always؛ لا توصف بأنها تفرض مراجعة مستقلة.
+- الذاكرة ما زالت محلية SQLite وبحث LIKE؛ لا D1 persistence ولا embeddings. Tool Broker لا يملك adapters مسجلة في العامل، ومجلد المهارات لا يحتوي مهارات معتمدة للتنفيذ.
+- ظهر مرشح Cloudflare GLM-4.7-Flash لتقييم لاحق، مع Gemma 4 وNemotron 3 Super؛ جميعها غير مفعلة ولم يُرسل أي inference.
+
+**حدود هذه الدورة:** بحث وتحليل وتوثيق وتصحيح انحراف توثيقي فقط. لا تفعيل مزود، ولا inference، ولا تغيير secrets أو صلاحيات أو billing، ولا نشر Production. مسار Telegram باقٍ لدى Arena، ونقاش التقرير معه مؤجل حتى إنهاء ذلك المسار.
