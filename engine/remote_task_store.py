@@ -22,6 +22,34 @@ class _RejectRedirects(HTTPRedirectHandler):
         return None
 
 
+#: The Worker answers a storage failure with ``{"error": ..., "detail": ...}``.
+#: Reading it back is the difference between "temporarily unavailable" and a
+#: diagnosable cause; the body is truncated and control characters are dropped.
+MAX_ERROR_DETAIL_CHARS = 240
+
+
+def _error_detail(exc: HTTPError) -> str:
+    """Return a bounded reason from an error response body, or "" when absent."""
+    try:
+        body = exc.read(1024)
+    except Exception:  # noqa: BLE001 - a missing body must never mask the status
+        return ""
+    if not body:
+        return ""
+    try:
+        parsed = json.loads(body.decode("utf-8", "replace"))
+    except (ValueError, UnicodeDecodeError):
+        return ""
+    if not isinstance(parsed, dict):
+        return ""
+    parts = []
+    for key in ("error", "detail"):
+        value = parsed.get(key)
+        if isinstance(value, str) and value.strip():
+            parts.append(" ".join(value.split())[:MAX_ERROR_DETAIL_CHARS])
+    return f": {' | '.join(parts)}" if parts else ""
+
+
 class RemoteTaskStore:
     def __init__(self, base_url: str | None = None, token: str | None = None,
                  timeout: float = 15.0, access_client_id: str | None = None,
@@ -90,7 +118,9 @@ class RemoteTaskStore:
             if exc.code == 429:
                 raise RemoteTaskStoreError("Remote task API rate limit reached; retry in a later run") from None
             if 500 <= exc.code <= 599 or exc.code == 408:
-                raise RemoteTaskStoreError(f"Remote task API temporarily unavailable (HTTP {exc.code})") from None
+                raise RemoteTaskStoreError(
+                    f"Remote task API temporarily unavailable (HTTP {exc.code}){_error_detail(exc)}"
+                ) from None
             raise RemoteTaskStoreError(f"Remote task API returned HTTP {exc.code}") from None
         except (URLError, TimeoutError, OSError, json.JSONDecodeError, UnicodeDecodeError):
             raise RemoteTaskStoreError("Remote task API is unavailable or returned invalid JSON") from None

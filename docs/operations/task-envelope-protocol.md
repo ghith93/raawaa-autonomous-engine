@@ -168,6 +168,15 @@ the step summary. Both are readable through the checks API and the run page.
 A blocked task and a succeeded task are therefore distinguishable from outside,
 which the queue counters alone could never show.
 
+A *storage* failure had the same shape from the other side. On 2026-11-04 the
+claim endpoint answered `HTTP 503` from 11:06 onward and the Worker discarded the
+D1 error that caused it, so the runner could only report "temporarily
+unavailable". The Worker now returns `{"error": "storage_unavailable", "detail":
+...}` (bounded to 240 characters, flattened, no credentials) and
+`RemoteTaskStore` appends that reason to `RemoteTaskStoreError`. Combined with
+the stderr channel above, a rejected write now names its cause in the run's
+annotations.
+
 A *crashing* batch used to be the exception: no JSON on stdout meant
 `stop_reason=unknown` and nothing else, so two failed runs on 2026-11-04
 (41818670566, 41820241562) could not be diagnosed after the fact. The runner now

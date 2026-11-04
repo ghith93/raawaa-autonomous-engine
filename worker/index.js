@@ -7,6 +7,17 @@ import { handleMobilePage, handleMobileStatus } from "./mobile-status.js";
 import { dispatchDueWorkflows } from "./task-runner-watchdog.js";
 const JSON_HEADERS = { "content-type": "application/json; charset=utf-8", "cache-control": "no-store" };
 const MAX_BODY_BYTES = 32 * 1024;
+
+// A storage failure must travel to the authenticated caller with a bounded
+// reason. Swallowing it made the 2026-11-04 claim outage ("HTTP 503" and
+// nothing else) indistinguishable from any other unavailability, and D1 was
+// never told to anyone. The reason is truncated and flattened; no SQL text of
+// the request, headers, or credentials are included.
+const MAX_ERROR_DETAIL = 240;
+function storageDetail(error) {
+  const text = error && error.message ? String(error.message) : String(error ?? "unknown");
+  return text.replace(/\s+/g, " ").trim().slice(0, MAX_ERROR_DETAIL);
+}
 // Release remains hard-disabled until issue #440 adversarial sandbox criteria pass.
 const CODESPACE_EXECUTOR_RELEASE_ENABLED = false;
 const CODESPACE_TASK_TYPES = new Set(["codespace_inspect", "codespace_test"]);
@@ -381,8 +392,8 @@ export default {
           attempt: claim.attempts, lease_expires_at: expires, execution_mode: executionMode
         }), nowIso).run();
         return json({ task: claim, lease_token: leaseToken, lease_expires_at: expires });
-      } catch {
-        return json({ error: "storage_unavailable" }, 503);
+      } catch (error) {
+        return json({ error: "storage_unavailable", detail: storageDetail(error) }, 503);
       }
     }
 
@@ -588,8 +599,8 @@ export default {
         return json({ error: "dependency_manifest_conflict" }, 409);
       }
       return json({ task: { ...task, depends_on: storedDependencies }, created: task.id === id }, task.id === id ? 201 : 200);
-    } catch {
-      return json({ error: "storage_unavailable" }, 503);
+    } catch (error) {
+      return json({ error: "storage_unavailable", detail: storageDetail(error) }, 503);
     }
   }
 };
