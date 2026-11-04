@@ -24,6 +24,7 @@ from engine.brain_cycle import DEFAULT_SNAPSHOT_LIMIT, build_brain_cycle
 from engine.development_cycle import build_development_cycle, render_markdown as render_development_markdown
 from engine.profile_routing import build_route_plan, render_markdown as render_route_plan
 from engine.orchestrator import validate_and_plan
+from engine.workflow_dispatch import dispatch_body, render_markdown as render_dispatch_markdown
 from engine.workflow_manifest import build_workflow_run_manifest
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -174,6 +175,14 @@ def build_parser() -> argparse.ArgumentParser:
     workflow_manifest.add_argument("--file", required=True, help="Path to a JSON workflow proposal")
     workflow_manifest.add_argument("--run-id", required=True, help="Stable caller-supplied run identifier")
     workflow_manifest.add_argument("--plan-version", type=int, default=1)
+    workflow_dispatch = sub.add_parser(
+        "workflow-dispatch-body",
+        help="Build the /v1/workflows/dispatch request body for a manifest (prints it, sends nothing)",
+    )
+    workflow_dispatch.add_argument("--file", required=True, help="Path to a JSON workflow proposal")
+    workflow_dispatch.add_argument("--run-id", required=True, help="Stable caller-supplied run identifier")
+    workflow_dispatch.add_argument("--plan-version", type=int, default=1)
+    workflow_dispatch.add_argument("--format", choices=("json", "markdown"), default="json")
     sub.add_parser("artemis-status", help="Read-only ARTEMIS daemon/device probe; never submits a mobile task")
     route = sub.add_parser(
         "route-plan",
@@ -258,14 +267,23 @@ def main() -> int:
             print(render_development_markdown(report), end="")
         else:
             print(json.dumps(report, indent=2, ensure_ascii=False))
-    elif args.command in {"workflow-plan", "workflow-manifest"}:
+    elif args.command in {"workflow-plan", "workflow-manifest", "workflow-dispatch-body"}:
         proposal = load_json(Path(args.file))
         roster = load_json(ROOT / "config" / "agents.json")
         policy = load_json(ROOT / "config" / "policy.json")
         plan = validate_and_plan(proposal, roster, policy).as_dict()
         if args.command == "workflow-manifest":
             plan = build_workflow_run_manifest(plan, args.run_id, args.plan_version).as_dict()
-        print(json.dumps(plan, indent=2, ensure_ascii=False))
+            print(json.dumps(plan, indent=2, ensure_ascii=False))
+        elif args.command == "workflow-dispatch-body":
+            manifest = build_workflow_run_manifest(plan, args.run_id, args.plan_version)
+            body = dispatch_body(manifest)
+            if args.format == "markdown":
+                print(render_dispatch_markdown(body), end="")
+            else:
+                print(json.dumps(body, indent=2, ensure_ascii=False))
+        else:
+            print(json.dumps(plan, indent=2, ensure_ascii=False))
     elif args.command == "artemis-status":
         print(json.dumps(probe_artemis(os.environ), indent=2, ensure_ascii=False))
     elif args.command == "route-plan":
