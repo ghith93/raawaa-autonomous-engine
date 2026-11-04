@@ -150,6 +150,12 @@ test("enqueue rejects out-of-range priority and unknown dependencies", async () 
   }), { DB: dbMock(), ENGINE_API_TOKEN: TOKEN });
   assert.equal(missingDependency.status, 400);
   assert.deepEqual(await missingDependency.json(), { error: "unknown_task_dependency" });
+  const blankDependency = await worker.fetch(request("/v1/tasks/enqueue", {
+    method: "POST",
+    body: { task_type: "research", title: "Bad blank dependency", idempotency_key: "bad-blank-dep", depends_on: ["   "] },
+  }), { DB: dbMock(), ENGINE_API_TOKEN: TOKEN });
+  assert.equal(blankDependency.status, 400);
+  assert.deepEqual(await blankDependency.json(), { error: "invalid_task" });
 });
 
 test("enqueue rejects an idempotency key reused with a different priority", async () => {

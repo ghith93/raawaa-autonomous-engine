@@ -110,7 +110,7 @@ class RemoteTaskStore:
             request_payload["priority"] = priority
         if depends_on is not None:
             if (not isinstance(depends_on, list) or len(depends_on) > 20
-                    or any(not isinstance(dep, str) or not dep or len(dep) > 128 for dep in depends_on)
+                    or any(not isinstance(dep, str) or not dep.strip() or len(dep) > 128 for dep in depends_on)
                     or len(depends_on) != len(set(depends_on))):
                 raise ValueError("depends_on must be a unique list of at most 20 task IDs")
             request_payload["depends_on"] = sorted(depends_on)

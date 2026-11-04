@@ -101,6 +101,8 @@ class TaskStoreTests(unittest.TestCase):
     def test_enqueue_validates_dependencies_and_idempotency_manifest(self):
         with self.assertRaisesRegex(ValueError, "unknown task dependency"):
             self.store.enqueue("research_brief", "Unknown", depends_on=["missing-task"])
+        with self.assertRaisesRegex(ValueError, "depends_on must be a unique list"):
+            self.store.enqueue("research_brief", "Whitespace", depends_on=["   "])
         first = self.store.enqueue("research_brief", "Stable", idempotency_key="stable", priority=25)
         replay = self.store.enqueue("research_brief", "Stable", idempotency_key="stable", priority=25)
         self.assertEqual(first["id"], replay["id"])

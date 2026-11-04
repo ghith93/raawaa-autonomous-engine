@@ -54,6 +54,8 @@ class RemoteTaskStoreTests(unittest.TestCase):
             self.store.enqueue("research_brief", "Bad priority", priority=101)
         with self.assertRaises(ValueError):
             self.store.enqueue("research_brief", "Bad dependencies", depends_on=["x", "x"])
+        with self.assertRaises(ValueError):
+            self.store.enqueue("research_brief", "Blank dependency", depends_on=["   "])
 
     @patch("engine.remote_task_store.urlopen")
     def test_optional_cloudflare_access_service_token_headers(self, open_url):
