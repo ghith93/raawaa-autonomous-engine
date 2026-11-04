@@ -58,6 +58,7 @@ class TaskStoreTests(unittest.TestCase):
         self.assertEqual(saved["status"], "running")
         self.assertEqual(saved["execution_mode"], "dry_run")
 
+    # Queue priority is persisted; dependency eligibility is evaluated before this ordering.
     def test_priority_selects_highest_eligible_task_first(self):
         self.store.enqueue("research_brief", "Low", priority=10)
         high = self.store.enqueue("research_brief", "High", priority=90)
