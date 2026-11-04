@@ -50,13 +50,15 @@ class BoundaryTest(unittest.TestCase):
     def test_the_root_filesystem_is_read_only_and_writable_paths_are_bounded(self):
         vector = argv()
         self.assertIn("--read-only", vector)
+        self.assertIn("--entrypoint=", vector)
         tmpfs = [a for a in vector if a.startswith("--tmpfs=")]
-        self.assertTrue(tmpfs, "a read-only rootfs needs at least one writable scratch path")
-        for entry in tmpfs:
-            self.assertIn("noexec", entry)
-            self.assertIn("nosuid", entry)
-            self.assertIn("size=", entry)
+        self.assertEqual(len(tmpfs), 1, "scratch must be the only writable path")
+        self.assertIn("noexec", tmpfs[0])
+        self.assertIn("nosuid", tmpfs[0])
+        self.assertIn("nodev", tmpfs[0])
+        self.assertIn("size=32m", tmpfs[0])
         self.assertIn("--tmpfs=/scratch:rw,noexec,nosuid,nodev,size=32m", vector)
+        self.assertFalse(any(a.startswith("--tmpfs=/tmp") for a in vector))
 
     def test_capabilities_are_dropped_and_cannot_be_regained(self):
         vector = argv()
@@ -92,7 +94,7 @@ class BoundaryTest(unittest.TestCase):
         self.assertFalse([a for a in vector if a.startswith("--env") or a == "-e"])
 
     def test_the_builder_output_passes_the_independent_check(self):
-        self.assertEqual(assert_sandbox_argv(argv()), argv())
+        self.assertEqual(assert_sandbox_argv(argv(), expected_source_dir="/repo"), argv())
 
 
 class RefusalTest(unittest.TestCase):
@@ -154,24 +156,81 @@ class RefusalTest(unittest.TestCase):
             if weakener in ("-v", "-e"):
                 vector.append("/root/.ssh:/root/.ssh")
             with self.assertRaisesRegex(SandboxPolicyError, message, msg=weakener):
-                assert_sandbox_argv(vector)
+                assert_sandbox_argv(vector, expected_source_dir="/repo")
 
     def test_a_vector_missing_a_boundary_flag_is_refused(self):
         for flag in (f"--runtime={SANDBOX_RUNTIME}", "--network=none", "--read-only",
                      "--cap-drop=ALL", "--security-opt=no-new-privileges"):
             with self.assertRaisesRegex(SandboxPolicyError, "missing", msg=flag):
-                assert_sandbox_argv([a for a in argv() if a != flag])
+                assert_sandbox_argv([a for a in argv() if a != flag], expected_source_dir="/repo")
 
     def test_a_vector_without_limits_or_a_non_root_user_is_refused(self):
         with self.assertRaisesRegex(SandboxPolicyError, "non-root"):
-            assert_sandbox_argv([a for a in argv() if not a.startswith("--user=")])
+            assert_sandbox_argv([a for a in argv() if not a.startswith("--user=")], expected_source_dir="/repo")
         with self.assertRaisesRegex(SandboxPolicyError, "not run as root"):
             assert_sandbox_argv(
-                [a for a in argv() if a != f"--user={NON_ROOT_USER}"] + ["--user=root"]
+                [a for a in argv() if a != f"--user={NON_ROOT_USER}"] + ["--user=root"], expected_source_dir="/repo"
             )
         for prefix in ("--pids-limit=", "--memory=", "--cpus="):
             with self.assertRaisesRegex(SandboxPolicyError, "missing", msg=prefix):
-                assert_sandbox_argv([a for a in argv() if not a.startswith(prefix)])
+                assert_sandbox_argv([a for a in argv() if not a.startswith(prefix)], expected_source_dir="/repo")
+
+    def test_oversized_resource_values_are_rejected(self):
+        base = argv()
+        replacements = (
+            ("--pids-limit=64", "--pids-limit=100000"),
+            ("--memory=512m", "--memory=64g"),
+            ("--memory-swap=512m", "--memory-swap=128g"),
+            ("--cpus=1", "--cpus=64"),
+        )
+        for old, new in replacements:
+            with self.subTest(option=new):
+                vector = [new if item == old else item for item in base]
+                with self.assertRaises(SandboxPolicyError):
+                    assert_sandbox_argv(vector, expected_source_dir="/repo")
+
+    def test_memory_swap_must_equal_memory(self):
+        vector = [("--memory-swap=512m" if item == "--memory-swap=512m" else item) for item in argv()]
+        vector = ["--memory-swap=1024m" if item == "--memory-swap=512m" else item for item in vector]
+        with self.assertRaisesRegex(SandboxPolicyError, "must equal"):
+            assert_sandbox_argv(vector, expected_source_dir="/repo")
+
+    def test_only_the_exact_trusted_workspace_bind_is_accepted(self):
+        base = argv()
+        extra = "--mount=type=bind,src=/,dst=/host,readonly"
+        with self.assertRaisesRegex(SandboxPolicyError, "exactly one"):
+            assert_sandbox_argv(base + [extra], expected_source_dir="/repo")
+        replaced = [
+            "--mount=type=bind,src=/root/.ssh,dst=/workspace,readonly"
+            if item.startswith("--mount=") else item for item in base
+        ]
+        with self.assertRaisesRegex(SandboxPolicyError, "trusted read-only workspace"):
+            assert_sandbox_argv(replaced, expected_source_dir="/repo")
+        with self.assertRaisesRegex(SandboxPolicyError, "trusted workspace"):
+            assert_sandbox_argv(base, expected_source_dir="/")
+
+    def test_extra_or_unbounded_writable_mounts_are_rejected(self):
+        base = argv()
+        for extra in (
+            "--tmpfs=/tmp:rw,size=1g",
+            "--mount=type=bind,src=/host,dst=/host,rw",
+            "--tmpfs=/scratch:rw,nosuid,nodev,size=99999m",
+        ):
+            with self.subTest(extra=extra):
+                with self.assertRaises(SandboxPolicyError):
+                    assert_sandbox_argv(base + [extra], expected_source_dir="/repo")
+
+    def test_duplicate_or_unexpected_flags_are_rejected(self):
+        base = argv()
+        for extra in ("--network=none", "--pid=host", "--entrypoint=/bin/sh", "--privileged"):
+            with self.subTest(extra=extra):
+                with self.assertRaises(SandboxPolicyError):
+                    assert_sandbox_argv(base + [extra], expected_source_dir="/repo")
+
+    def test_entrypoint_is_explicitly_disabled(self):
+        vector = [item for item in argv() if item != "--entrypoint="]
+        with self.assertRaisesRegex(SandboxPolicyError, "exactly one --entrypoint"):
+            assert_sandbox_argv(vector, expected_source_dir="/repo")
 
     def test_a_vector_that_does_not_start_with_docker_run_is_refused(self):
         for bad in ([], ["docker"], ["sudo", "docker", "run"], "docker run", ["docker", "exec"]):
