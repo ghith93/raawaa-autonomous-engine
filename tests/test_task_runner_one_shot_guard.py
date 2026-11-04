@@ -30,10 +30,12 @@ class OneShotDisabledTests(unittest.TestCase):
 
     def test_no_live_route_evidence_fabrication_or_enqueue_remains(self):
         for token in ('provider_hard_stop_verified', 'provider_hard_stop_evidence', 'verified_at',
-                      'RAAWAA_ENGINE_LIVE_INFERENCE:', '/v1/tasks/enqueue', 'steps.research.outputs',
+                      '/v1/tasks/enqueue', 'steps.research.outputs',
                       'groq-free-gpt-oss-20b-primary'):
             with self.subTest(token=token):
                 self.assertNotIn(token, self.source)
+        self.assertIn("RAAWAA_ENGINE_LIVE_INFERENCE: disabled", self.source)
+        self.assertEqual(self.source.count("RAAWAA_ENGINE_LIVE_INFERENCE:"), 1)
         self.assertIn('"--max-tasks", "5", "--max-seconds", "60"', self.source)
 
     def test_no_main_push_smoke_is_triggered_by_workflow_change(self):

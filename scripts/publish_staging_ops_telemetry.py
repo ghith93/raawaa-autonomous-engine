@@ -41,8 +41,17 @@ def _ci_conclusion(results: dict[str, str]) -> str:
 def _policy_snapshot(root: Path, live_inference_value: str) -> dict:
     policy = json.loads((root / "config" / "policy.json").read_text(encoding="utf-8"))
     workflow = (root / ".github" / "workflows" / "task-runner.yml").read_text(encoding="utf-8")
-    if "RAAWAA_ENGINE_LIVE_INFERENCE:" not in workflow:
-        raise TelemetryPublishError("Task Runner live-inference gate is not wired")
+    # Fail closed if the specific batch-step gate is missing, dynamic, or duplicated.
+    # This is a narrow configuration invariant, not runtime/provider evidence.
+    steps = re.split(r"(?m)^      - name: ", workflow)[1:]
+    batch = [step for step in steps if step.splitlines()[0] == "Process bounded D1 task batch"]
+    gate = r"(?m)^          RAAWAA_ENGINE_LIVE_INFERENCE: disabled[ \t]*$"
+    env_block = ""
+    if len(batch) == 1 and batch[0].count("        env:\n") == 1:
+        env_block = re.split(r"(?m)^        [A-Za-z_-]+:", batch[0].split("        env:\n", 1)[1], maxsplit=1)[0]
+    if (not re.search(gate, env_block)
+            or workflow.count("RAAWAA_ENGINE_LIVE_INFERENCE:") != 1):
+        raise TelemetryPublishError("Task Runner live-inference gate must be an explicit disabled batch-step setting")
     if live_inference_value == "enabled":
         live_default = "enabled"
     elif live_inference_value in ("", "disabled"):
