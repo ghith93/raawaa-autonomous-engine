@@ -7,7 +7,7 @@ import sys
 import time
 from pathlib import Path
 from urllib.error import HTTPError, URLError
-from urllib.request import Request, urlopen
+from urllib.request import HTTPRedirectHandler, Request, build_opener
 
 
 USER_AGENT = "RaawaaAutonomousEngine-Research/1.0 (+https://github.com/ghith93/raawaa-autonomous-engine)"
@@ -15,6 +15,17 @@ USER_AGENT = "RaawaaAutonomousEngine-Research/1.0 (+https://github.com/ghith93/r
 
 class ResearchPersistenceError(RuntimeError):
     pass
+
+
+class _RejectRedirects(HTTPRedirectHandler):
+    """Never forward engine bearer or Cloudflare Access credentials across redirects."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        raise HTTPError(req.full_url, code, "redirects are disabled for authenticated D1 requests", headers, fp)
+
+
+def _open_without_redirects(request: Request, timeout: int):
+    return build_opener(_RejectRedirects).open(request, timeout=timeout)
 
 
 def load_candidates(snapshot: dict) -> list[dict]:
@@ -36,6 +47,20 @@ def load_candidates(snapshot: dict) -> list[dict]:
         if key not in seen:
             seen.add(key)
             candidates.append({**item, "source": "crossref"})
+    for item in snapshot.get("arxiv_candidates", []):
+        if not isinstance(item, dict) or not isinstance(item.get("arxiv_id"), str):
+            continue
+        key = "arxiv:" + item["arxiv_id"].lower()
+        if key not in seen:
+            seen.add(key)
+            candidates.append({**item, "source": "arxiv"})
+    for item in snapshot.get("searxng_candidates", []):
+        if not isinstance(item, dict) or not isinstance(item.get("url"), str):
+            continue
+        key = "searxng:" + item["url"][:900]
+        if key not in seen:
+            seen.add(key)
+            candidates.append({**item, "source": "searxng"})
     return candidates
 
 
@@ -55,7 +80,7 @@ def _post(base_url: str, token: str, candidates: list[dict],
     request = Request(base_url.rstrip("/") + "/v1/research/candidates",
                       data=payload, headers=headers, method="POST")
     try:
-        with urlopen(request, timeout=timeout) as response:
+        with _open_without_redirects(request, timeout) as response:
             raw = response.read(16 * 1024 + 1)
             if len(raw) > 16 * 1024:
                 raise ResearchPersistenceError("research persistence response exceeded limit")
@@ -141,11 +166,16 @@ def persist_candidates(snapshot: dict, environ=None, request_fn=None, batch_size
     if not isinstance(rows, list):
         raise ResearchPersistenceError("research readback endpoint returned an invalid candidate list")
     found = {row.get("source_key") for row in rows if isinstance(row, dict)}
-    expected = {
-        ("github:" + item["full_name"].lower()) if item["source"] == "github"
-        else ("crossref:" + item["doi"].lower())
-        for item in candidates
-    }
+    expected = set()
+    for item in candidates:
+        if item["source"] == "github":
+            expected.add("github:" + item["full_name"].lower())
+        elif item["source"] == "crossref":
+            expected.add("crossref:" + item["doi"].lower())
+        elif item["source"] == "arxiv":
+            expected.add("arxiv:" + item["arxiv_id"].lower())
+        elif item["source"] == "searxng":
+            expected.add("searxng:" + item["url"][:900])
     if expected - found:
         raise ResearchPersistenceError("research D1 readback did not confirm every submitted candidate")
     return {"discovered": len(candidates), "persisted": persisted, "verified": len(expected), "batches": batches, "sources": sources}
