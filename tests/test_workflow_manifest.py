@@ -71,10 +71,20 @@ class WorkflowRunManifestTests(unittest.TestCase):
         with self.assertRaisesRegex(WorkflowManifestError, "forward dependency"):
             build_workflow_run_manifest(invalid, "run-001")
 
-    def test_rejects_incomplete_or_duplicate_plan_order(self):
+    def test_rejects_incomplete_duplicate_and_unhashable_plan_order(self):
+        for order in (["research", "research"], ["research", {}]):
+            invalid = dict(self.plan)
+            invalid["order"] = order
+            with self.subTest(order=order):
+                with self.assertRaisesRegex(WorkflowManifestError, "every step exactly once"):
+                    build_workflow_run_manifest(invalid, "run-001")
+
+    def test_rejects_unhashable_dependency_values(self):
         invalid = dict(self.plan)
-        invalid["order"] = ["research", "research"]
-        with self.assertRaisesRegex(WorkflowManifestError, "every step exactly once"):
+        invalid["steps"] = dict(self.plan["steps"])
+        invalid["steps"]["draft"] = dict(self.plan["steps"]["draft"])
+        invalid["steps"]["draft"]["depends_on"] = [{}]
+        with self.assertRaisesRegex(WorkflowManifestError, "invalid dependencies"):
             build_workflow_run_manifest(invalid, "run-001")
 
 
