@@ -112,8 +112,8 @@ class MultiFamilyComparison:
     buy: LegQuote
     sell: LegQuote
     requested_base_quantity: Decimal
-    buy_fill_fraction: Decimal
-    sell_fill_fraction: Decimal
+    buy_fill_fraction: Decimal | None
+    sell_fill_fraction: Decimal | None
     evidence: tuple[tuple[str, str], ...]
 
     @property
@@ -125,10 +125,10 @@ class MultiFamilyComparison:
         return self.label == "net_positive_candidate"
 
 
-def _fill_fraction(leg: LegQuote, requested_base: Decimal) -> Decimal:
-    """How much of what we want to trade this leg's price actually covers."""
+def _fill_fraction(leg: LegQuote, requested_base: Decimal) -> Decimal | None:
+    """Return None when the source did not declare depth; never infer a full fill."""
     if leg.max_base_quantity is None:
-        return Decimal("1")
+        return None
     if leg.max_base_quantity >= requested_base:
         return Decimal("1")
     return leg.max_base_quantity / requested_base
@@ -198,7 +198,14 @@ def compare_legs(
         ("sell_family", sell.market_family),
         ("sell_data_type", sell.data_type),
         ("sell_provenance", sell.provenance),
-        ("depth_basis", "quoted" if (buy.max_base_quantity or sell.max_base_quantity) else "undeclared"),
+        ("buy_depth_basis", "quoted" if buy.max_base_quantity is not None else "undeclared"),
+        ("sell_depth_basis", "quoted" if sell.max_base_quantity is not None else "undeclared"),
+        (
+            "depth_basis",
+            "quoted" if buy.max_base_quantity is not None and sell.max_base_quantity is not None
+            else "partially_declared" if buy.max_base_quantity is not None or sell.max_base_quantity is not None
+            else "undeclared",
+        ),
     )
 
     if evaluation.status == "net_positive_estimate":
