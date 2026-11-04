@@ -356,7 +356,7 @@ class MainFlowTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             replies = {
                 "getMe": {"username": "raawaa_bot"},
-                "getUpdates": [{"message": {"chat": {"id": 7, "type": "private"}}}],
+                "getUpdates": [{"message": {"chat": {"id": 7, "type": "private"}, "from": {"id": 7, "is_bot": False}}}],
             }
             with patch.object(bootstrap, "_call", side_effect=lambda t, m, p=None, **k: replies[m]):
                 with patch.dict(os.environ, {"TELEGRAM_BOT_TOKEN": VALID_TOKEN}):
