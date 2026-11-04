@@ -116,8 +116,8 @@ def evaluate_two_leg_spread(
     now: datetime | None = None,
     max_quote_age_seconds: int = 5,
     max_quote_skew_seconds: int = 2,
-    buy_fill_fraction: Decimal | str = "1",
-    sell_fill_fraction: Decimal | str = "1",
+    buy_fill_fraction: Decimal | str | None = "1",
+    sell_fill_fraction: Decimal | str | None = "1",
     cross_chain: bool = False,
     uses_borrow: bool = False,
 ) -> OpportunityEvaluation:
@@ -147,9 +147,9 @@ def evaluate_two_leg_spread(
     buy_price = _decimal(buy_price_quote_per_base, "buy_price_quote_per_base", positive=True)
     sell_price = _decimal(sell_price_quote_per_base, "sell_price_quote_per_base", positive=True)
     notional = _decimal(notional_quote, "notional_quote", positive=True)
-    buy_fill = _decimal(buy_fill_fraction, "buy_fill_fraction")
-    sell_fill = _decimal(sell_fill_fraction, "sell_fill_fraction")
-    if buy_fill > 1 or sell_fill > 1:
+    buy_fill = None if buy_fill_fraction is None else _decimal(buy_fill_fraction, "buy_fill_fraction")
+    sell_fill = None if sell_fill_fraction is None else _decimal(sell_fill_fraction, "sell_fill_fraction")
+    if (buy_fill is not None and buy_fill > 1) or (sell_fill is not None and sell_fill > 1):
         raise OpportunityEvaluationError("fill fractions cannot exceed 1")
 
     buy_time = _aware(buy_fetched_at, "buy_fetched_at")
@@ -226,11 +226,17 @@ def evaluate_two_leg_spread(
     stale = future_dated or max_age > Decimal(max_quote_age_seconds)
     quote_skew = Decimal(str(abs((buy_time - sell_time).total_seconds())))
     unsynchronized = quote_skew > Decimal(max_quote_skew_seconds)
-    insufficient_depth = buy_fill < 1 or sell_fill < 1
+    depth_unverified = buy_fill is None or sell_fill is None
+    insufficient_depth = (
+        (buy_fill is not None and buy_fill < 1)
+        or (sell_fill is not None and sell_fill < 1)
+    )
     if stale:
         status = "stale_data"
     elif unsynchronized:
         status = "unsynchronized_data"
+    elif depth_unverified:
+        status = "depth_unverified"
     elif insufficient_depth:
         status = "insufficient_depth"
     elif missing:
