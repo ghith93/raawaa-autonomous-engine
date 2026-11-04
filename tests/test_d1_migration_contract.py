@@ -8,6 +8,7 @@ ROOT = Path(__file__).resolve().parents[1]
 MIGRATION = ROOT / "migrations" / "0001_initial.sql"
 MIGRATION_2 = ROOT / "migrations" / "0002_research_candidates.sql"
 MIGRATION_9 = ROOT / "migrations" / "0009_task_execution_mode.sql"
+MIGRATION_10 = ROOT / "migrations" / "0010_task_priority_dependencies.sql"
 
 
 class D1MigrationContractTests(unittest.TestCase):
@@ -105,6 +106,35 @@ class D1MigrationContractTests(unittest.TestCase):
         self.assertEqual(self.db.execute(
             "SELECT version FROM schema_migrations WHERE version='0009_task_execution_mode'"
         ).fetchone(), ("0009_task_execution_mode",))
+
+    def test_task_priority_and_dependencies_migration_is_additive_and_constrained(self):
+        self.db.executescript(self.sql)
+        self.db.executescript(MIGRATION_9.read_text(encoding="utf-8"))
+        self.db.execute("""INSERT INTO tasks
+            (id,idempotency_key,task_type,title,payload_json,status,attempts,max_attempts,created_at,updated_at,execution_mode)
+            VALUES ('legacy-task','legacy-key','research_brief','Legacy','{}','succeeded',1,2,'2026-01-01','2026-01-01','unknown')""")
+        self.db.executescript(MIGRATION_10.read_text(encoding="utf-8"))
+        legacy = self.db.execute(
+            "SELECT priority,depends_on FROM tasks WHERE id='legacy-task'"
+        ).fetchone()
+        self.assertEqual(legacy, (0, "[]"))
+        self.db.execute("""INSERT INTO tasks
+            (id,idempotency_key,task_type,title,payload_json,status,attempts,max_attempts,
+             created_at,updated_at,execution_mode,priority,depends_on)
+            VALUES ('child-task','child-key','research_brief','Child','{}','pending',0,2,
+             '2026-01-02','2026-01-02','not_started',75,'["legacy-task"]')""")
+        self.assertEqual(self.db.execute(
+            "SELECT priority,depends_on FROM tasks WHERE id='child-task'"
+        ).fetchone(), (75, '["legacy-task"]'))
+        with self.assertRaises(sqlite3.IntegrityError):
+            self.db.execute("UPDATE tasks SET priority=101 WHERE id='child-task'")
+        with self.assertRaises(sqlite3.IntegrityError):
+            self.db.execute("UPDATE tasks SET depends_on='not-json' WHERE id='child-task'")
+        indexes = {row[1] for row in self.db.execute("PRAGMA index_list(tasks)")}
+        self.assertIn("idx_tasks_claim_priority", indexes)
+        self.assertEqual(self.db.execute(
+            "SELECT version FROM schema_migrations WHERE version='0010_task_priority_dependencies'"
+        ).fetchone(), ("0010_task_priority_dependencies",))
 
     def test_operations_and_usage_constraints(self):
         self.db.executescript(self.sql)
