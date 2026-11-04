@@ -64,6 +64,20 @@ jobs:
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           ENGINE_API_TOKEN: ${{ secrets.ENGINE_API_TOKEN }}
         run: printf '%s' "$ENGINE_API_TOKEN" | npx --yes wrangler@4 secret put ENGINE_API_TOKEN --config wrangler.toml
+      - name: Refuse to deploy with an unapplied migration
+        # Worker code can reference a table that only a later migration creates.
+        # On 2026-11-04 the claim SQL shipped ahead of migration 0010, every
+        # write answered 503, and the queue was dead from 11:06 to 12:08 while
+        # the cause was invisible. Fail here instead of in the task runner.
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          npx --yes wrangler@4.156.1 d1 execute raawaa-autonomous-e --remote \
+            --config wrangler.toml --json \
+            --command "SELECT name FROM d1_migrations" > /tmp/d1-applied-migrations.json
+          python3 -m engine.migrations migrations /tmp/d1-applied-migrations.json
       - name: Deploy authenticated D1 control Worker
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
