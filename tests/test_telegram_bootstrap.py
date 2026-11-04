@@ -70,6 +70,60 @@ class ChatDiscoveryTest(unittest.TestCase):
         self.assertEqual(chat_ids, [])
 
 
+class RerunTest(unittest.TestCase):
+    """A second run must work: the script's own success leaves a webhook behind."""
+
+    def test_a_409_deletes_the_webhook_once_and_retries(self):
+        calls = []
+        updates_after = [{"update_id": 2, "message": {"chat": {"id": 55, "type": "private"}}}]
+
+        def fake_call(token, method, payload=None, **kwargs):
+            calls.append(method)
+            if method == "getMe":
+                return {"username": "raawaa_bot"}
+            if method == "getUpdates":
+                if calls.count("getUpdates") == 1:
+                    raise bootstrap.BootstrapError("getUpdates failed: HTTP 409 (token not shown)")
+                return updates_after
+            if method == "deleteWebhook":
+                return True
+            raise AssertionError(method)
+
+        with patch.object(bootstrap, "_call", side_effect=fake_call):
+            chat_ids, username, seen = bootstrap.find_private_chat_ids(VALID_TOKEN)
+        self.assertEqual(chat_ids, [55])
+        self.assertEqual(seen, 1)
+        self.assertEqual(calls.count("deleteWebhook"), 1, "exactly one delete, then retry")
+
+    def test_an_empty_retry_says_to_send_one_more_message(self):
+        state = {"getupdates": 0}
+
+        def fake_call(token, method, payload=None, **kwargs):
+            if method == "getMe":
+                return {"username": "raawaa_bot"}
+            if method == "deleteWebhook":
+                return True
+            state["getupdates"] += 1
+            if state["getupdates"] == 1:
+                raise bootstrap.BootstrapError("getUpdates failed: HTTP 409 (token not shown)")
+            return []  # the webhook had already delivered everything
+
+        with patch.object(bootstrap, "_call", side_effect=fake_call):
+            with self.assertRaises(bootstrap.BootstrapError) as caught:
+                bootstrap.find_private_chat_ids(VALID_TOKEN)
+        self.assertIn("one more message", str(caught.exception))
+
+    def test_another_api_error_is_not_swallowed(self):
+        def fake_call(token, method, payload=None, **kwargs):
+            if method == "getMe":
+                return {"username": "raawaa_bot"}
+            raise bootstrap.BootstrapError("getUpdates failed: HTTP 500 (token not shown)")
+
+        with patch.object(bootstrap, "_call", side_effect=fake_call):
+            with self.assertRaisesRegex(bootstrap.BootstrapError, "HTTP 500"):
+                bootstrap.find_private_chat_ids(VALID_TOKEN)
+
+
 class ResultShapeTest(unittest.TestCase):
     """Bot API results are not all objects; getUpdates is a list."""
 
