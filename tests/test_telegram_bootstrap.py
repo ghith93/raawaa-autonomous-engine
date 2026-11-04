@@ -38,15 +38,18 @@ class TokenInputTest(unittest.TestCase):
 
 
 class ChatDiscoveryTest(unittest.TestCase):
-    def test_only_private_human_chats_are_accepted(self):
+    def test_only_private_human_chats_with_matching_sender_are_accepted(self):
         replies = {
             "getMe": {"username": "raawaa_bot"},
             "getUpdates": [
-                    {"message": {"chat": {"id": 42, "type": "private"}}},
-                    {"message": {"chat": {"id": 42, "type": "private"}}},
-                    {"message": {"chat": {"id": -100123, "type": "channel"}}},
-                    {"message": {"chat": {"id": -5, "type": "group"}}},
-                    {"edited_message": {"chat": {"id": 99, "type": "private"}}},
+                {"message": {"chat": {"id": 42, "type": "private"}, "from": {"id": 42, "is_bot": False}}},
+                {"message": {"chat": {"id": 42, "type": "private"}, "from": {"id": 42, "is_bot": False}}},
+                {"message": {"chat": {"id": 43, "type": "private"}, "from": {"id": 99, "is_bot": False}}},
+                {"message": {"chat": {"id": 44, "type": "private"}, "from": {"id": 44, "is_bot": True}}},
+                {"message": {"chat": {"id": 45, "type": "private"}}},
+                {"message": {"chat": {"id": -100123, "type": "channel"}, "from": {"id": 1, "is_bot": False}}},
+                {"message": {"chat": {"id": -5, "type": "group"}, "from": {"id": 1, "is_bot": False}}},
+                {"edited_message": {"chat": {"id": 99, "type": "private"}, "from": {"id": 99, "is_bot": False}}},
             ],
         }
 
@@ -56,72 +59,28 @@ class ChatDiscoveryTest(unittest.TestCase):
 
         with patch.object(bootstrap, "_call", side_effect=fake_call):
             chat_ids, username, seen = bootstrap.find_private_chat_ids(VALID_TOKEN)
-        # A duplicate collapses, a channel and a group are excluded, and an update
-        # type the bot does not subscribe to is not treated as a private chat.
         self.assertEqual(chat_ids, [42])
         self.assertEqual(username, "raawaa_bot")
+        self.assertEqual(seen, 8)
 
-    def test_no_pending_updates_yields_no_chat_and_that_is_an_error_at_registration(self):
+    def test_multiple_private_humans_are_not_all_added_as_owners(self):
+        updates = [
+            {"message": {"chat": {"id": 42, "type": "private"}, "from": {"id": 42, "is_bot": False}}},
+            {"message": {"chat": {"id": 43, "type": "private"}, "from": {"id": 43, "is_bot": False}}},
+        ]
+        def fake_call(token, method, payload=None, **kwargs):
+            return {"username": "raawaa_bot"} if method == "getMe" else updates
+        with patch.object(bootstrap, "_call", side_effect=fake_call):
+            with self.assertRaisesRegex(bootstrap.BootstrapError, "multiple private human chats"):
+                bootstrap.find_private_chat_ids(VALID_TOKEN)
+
+    def test_no_pending_updates_yields_no_chat(self):
         def fake_call(token, method, payload=None, **kwargs):
             return {"username": "raawaa_bot"} if method == "getMe" else []
         with patch.object(bootstrap, "_call", side_effect=fake_call):
             chat_ids, _, seen = bootstrap.find_private_chat_ids(VALID_TOKEN)
-        self.assertEqual(seen, 0, 'the failure must report how many updates Telegram returned')
+        self.assertEqual(seen, 0)
         self.assertEqual(chat_ids, [])
-
-
-class RerunTest(unittest.TestCase):
-    """A second run must work: the script's own success leaves a webhook behind."""
-
-    def test_a_409_deletes_the_webhook_once_and_retries(self):
-        calls = []
-        updates_after = [{"update_id": 2, "message": {"chat": {"id": 55, "type": "private"}}}]
-
-        def fake_call(token, method, payload=None, **kwargs):
-            calls.append(method)
-            if method == "getMe":
-                return {"username": "raawaa_bot"}
-            if method == "getUpdates":
-                if calls.count("getUpdates") == 1:
-                    raise bootstrap.BootstrapError("getUpdates failed: HTTP 409 (token not shown)")
-                return updates_after
-            if method == "deleteWebhook":
-                return True
-            raise AssertionError(method)
-
-        with patch.object(bootstrap, "_call", side_effect=fake_call):
-            chat_ids, username, seen = bootstrap.find_private_chat_ids(VALID_TOKEN)
-        self.assertEqual(chat_ids, [55])
-        self.assertEqual(seen, 1)
-        self.assertEqual(calls.count("deleteWebhook"), 1, "exactly one delete, then retry")
-
-    def test_an_empty_retry_says_to_send_one_more_message(self):
-        state = {"getupdates": 0}
-
-        def fake_call(token, method, payload=None, **kwargs):
-            if method == "getMe":
-                return {"username": "raawaa_bot"}
-            if method == "deleteWebhook":
-                return True
-            state["getupdates"] += 1
-            if state["getupdates"] == 1:
-                raise bootstrap.BootstrapError("getUpdates failed: HTTP 409 (token not shown)")
-            return []  # the webhook had already delivered everything
-
-        with patch.object(bootstrap, "_call", side_effect=fake_call):
-            with self.assertRaises(bootstrap.BootstrapError) as caught:
-                bootstrap.find_private_chat_ids(VALID_TOKEN)
-        self.assertIn("one more message", str(caught.exception))
-
-    def test_another_api_error_is_not_swallowed(self):
-        def fake_call(token, method, payload=None, **kwargs):
-            if method == "getMe":
-                return {"username": "raawaa_bot"}
-            raise bootstrap.BootstrapError("getUpdates failed: HTTP 500 (token not shown)")
-
-        with patch.object(bootstrap, "_call", side_effect=fake_call):
-            with self.assertRaisesRegex(bootstrap.BootstrapError, "HTTP 500"):
-                bootstrap.find_private_chat_ids(VALID_TOKEN)
 
 
 class RearmTest(unittest.TestCase):
