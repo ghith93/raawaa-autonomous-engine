@@ -1168,3 +1168,47 @@ test("an enqueue storage failure also reports its reason", async () => {
   assert.equal(response.status, 503);
   assert.ok(body.detail.includes("database is locked"), body.detail);
 });
+
+test("schema diagnostics report every table the Worker depends on", async () => {
+  const response = await worker.fetch(request("/v1/diagnostics/schema", {
+    method: "GET", token: TOKEN,
+  }), { DB: dbMock(), ENGINE_API_TOKEN: TOKEN });
+  const body = await response.json();
+  assert.equal(response.status, 200);
+  assert.equal(body.ok, true);
+  assert.deepEqual(body.missing, []);
+  assert.ok(body.checked.includes("task_dependencies"), "task_dependencies must be probed");
+  assert.equal(body.checked.length, 6);
+});
+
+test("schema diagnostics name the table a deploy forgot to migrate", async () => {
+  const DB = {
+    prepare(sql) {
+      if (sql.includes("FROM task_dependencies")) {
+        throw new Error("D1_ERROR: no such table: task_dependencies: SQLITE_ERROR");
+      }
+      return { async all() { return { results: [] }; } };
+    },
+    async batch() { return []; },
+  };
+  const response = await worker.fetch(request("/v1/diagnostics/schema", {
+    method: "GET", token: TOKEN,
+  }), { DB, ENGINE_API_TOKEN: TOKEN });
+  const body = await response.json();
+  assert.equal(response.status, 503);
+  assert.equal(body.ok, false);
+  assert.deepEqual(body.missing, ["task_dependencies"]);
+  assert.ok(body.reasons.task_dependencies.includes("no such table"));
+});
+
+test("schema diagnostics reject a non-GET method and an unauthenticated caller", async () => {
+  const wrongMethod = await worker.fetch(request("/v1/diagnostics/schema", {
+    method: "POST", token: TOKEN, body: {},
+  }), { DB: dbMock(), ENGINE_API_TOKEN: TOKEN });
+  assert.equal(wrongMethod.status, 405);
+
+  const unauthenticated = await worker.fetch(request("/v1/diagnostics/schema", {
+    method: "GET", token: "wrong-token",
+  }), { DB: dbMock(), ENGINE_API_TOKEN: TOKEN });
+  assert.equal(unauthenticated.status, 401);
+});

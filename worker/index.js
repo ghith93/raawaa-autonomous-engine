@@ -18,6 +18,38 @@ function storageDetail(error) {
   const text = error && error.message ? String(error.message) : String(error ?? "unknown");
   return text.replace(/\s+/g, " ").trim().slice(0, MAX_ERROR_DETAIL);
 }
+
+// Tables the Worker's own SQL depends on. A deploy that ships code referencing a
+// table no migration created is invisible until the first write fails: on
+// 2026-11-04 the claim route joined task_dependencies eight hours before that
+// table existed, and the queue answered 503 while every read stayed healthy.
+const REQUIRED_SCHEMA_TABLES = Object.freeze([
+  "tasks",
+  "task_dependencies",
+  "audit_log",
+  "schema_migrations",
+  "monetary_reservations",
+  "task_model_invocations",
+]);
+
+async function schemaProbe(env) {
+  const missing = [];
+  const reasons = {};
+  for (const table of REQUIRED_SCHEMA_TABLES) {
+    try {
+      await env.DB.prepare(`SELECT 1 FROM ${table} LIMIT 1`).all();
+    } catch (error) {
+      missing.push(table);
+      reasons[table] = storageDetail(error);
+    }
+  }
+  return {
+    ok: missing.length === 0,
+    checked: [...REQUIRED_SCHEMA_TABLES],
+    missing,
+    reasons,
+  };
+}
 // Release remains hard-disabled until issue #440 adversarial sandbox criteria pass.
 const CODESPACE_EXECUTOR_RELEASE_ENABLED = false;
 const CODESPACE_TASK_TYPES = new Set(["codespace_inspect", "codespace_test"]);
@@ -235,6 +267,7 @@ export default {
         !/^\/v1\/codespace\/tasks\/[A-Za-z0-9-]+\/(heartbeat|finish)$/.test(url.pathname) &&
         url.pathname !== "/v1/tasks/recover" &&
         url.pathname !== "/v1/diagnostics/auth" &&
+        url.pathname !== "/v1/diagnostics/schema" &&
         url.pathname !== "/v1/research/candidates" &&
         url.pathname !== "/v1/quota" &&
         url.pathname !== "/v1/monetary-ledger" &&
@@ -290,6 +323,12 @@ export default {
     if (url.pathname === "/v1/diagnostics/auth") {
       if (request.method !== "POST") return json({ error: "method_not_allowed" }, 405);
       return json({ ok: true, authenticated: true });
+    }
+
+    if (url.pathname === "/v1/diagnostics/schema") {
+      if (request.method !== "GET") return json({ error: "method_not_allowed" }, 405);
+      const probe = await schemaProbe(env);
+      return json(probe, probe.ok ? 200 : 503);
     }
 
     if (request.method === "GET" && url.pathname === "/v1/tasks") {

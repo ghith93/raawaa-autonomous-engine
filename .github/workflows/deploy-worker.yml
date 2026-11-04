@@ -138,3 +138,44 @@ jobs:
               print("Last watchdog dispatch request: none recorded")
           print("No secret values or response body were written to logs.")
           PY
+
+      - name: Verify the deployed Worker can see the schema it depends on
+        # The migration gate above reads the repository's migration files; this
+        # asks the deployed Worker what its own queries can actually reach. On
+        # 2026-11-04 those disagreeing produced a silent 503 queue outage.
+        env:
+          ENGINE_API_TOKEN: ${{ secrets.ENGINE_API_TOKEN }}
+          CF_ACCESS_CLIENT_ID: ${{ secrets.CF_ACCESS_CLIENT_ID }}
+          CF_ACCESS_CLIENT_SECRET: ${{ secrets.CF_ACCESS_CLIENT_SECRET }}
+        run: |
+          python3 - <<'PY'
+          import json
+          import os
+          from urllib.error import HTTPError
+          from urllib.request import Request, urlopen
+
+          client_id = os.environ.get("CF_ACCESS_CLIENT_ID", "")
+          client_secret = os.environ.get("CF_ACCESS_CLIENT_SECRET", "")
+          headers = {
+              "Accept": "application/json",
+              "Authorization": "Bearer " + os.environ["ENGINE_API_TOKEN"],
+              "User-Agent": "RaawaaAutonomousEngine/1.0 (+https://github.com/ghith93/raawaa-autonomous-engine)",
+          }
+          if client_id and client_secret:
+              headers["CF-Access-Client-Id"] = client_id
+              headers["CF-Access-Client-Secret"] = client_secret
+          request = Request(
+              "https://raawaa-autonomous-engine-control.ghith-shikhkhaled.workers.dev/v1/diagnostics/schema",
+              headers=headers,
+              method="GET",
+          )
+          try:
+              with urlopen(request, timeout=20) as response:
+                  payload = json.loads(response.read().decode("utf-8"))
+          except HTTPError as error:
+              body = error.read(2048).decode("utf-8", "replace")
+              raise SystemExit(f"Deployed Worker cannot see its schema (HTTP {error.code}): {body[:600]}")
+          if not payload.get("ok"):
+              raise SystemExit("Deployed Worker reports missing tables: " + ", ".join(payload.get("missing", [])))
+          print("Deployed Worker can read every table its SQL depends on: " + ", ".join(payload.get("checked", [])))
+          PY
