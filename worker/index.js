@@ -311,7 +311,7 @@ export default {
     if (url.pathname !== "/v1/tasks" && url.pathname !== "/v1/tasks/enqueue" &&
         url.pathname !== "/v1/tasks/claim" && url.pathname !== "/v1/codespace/status" &&
         url.pathname !== "/v1/codespace/tasks/claim" &&
-        !/^\/v1\/codespace\/tasks\/[A-Za-z0-9_-]+\/(heartbeat|finish)$/.test(url.pathname) &&
+        !/^\/v1\/codespace\/tasks\/[A-Za-z0-9-]+\/(heartbeat|finish)$/.test(url.pathname) &&
         url.pathname !== "/v1/tasks/recover" &&
         url.pathname !== "/v1/diagnostics/auth" &&
         url.pathname !== "/v1/diagnostics/schema" &&
@@ -329,7 +329,7 @@ export default {
     }
     const codespaceClaimRoute = url.pathname === "/v1/codespace/tasks/claim";
     const codespaceStatusRoute = url.pathname === "/v1/codespace/status";
-    const codespaceActionRoute = /^\/v1\/codespace\/tasks\/[A-Za-z0-9_-]+\/(heartbeat|finish)$/.test(url.pathname);
+    const codespaceActionRoute = /^\/v1\/codespace\/tasks\/[A-Za-z0-9-]+\/(heartbeat|finish)$/.test(url.pathname);
     const codespaceRoute = codespaceClaimRoute || codespaceStatusRoute || codespaceActionRoute;
     if (codespaceRoute && !CODESPACE_EXECUTOR_RELEASE_ENABLED) {
       return json({ error: "codespace_executor_disabled" }, 503);
