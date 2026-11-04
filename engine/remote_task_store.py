@@ -109,7 +109,7 @@ class RemoteTaskStore:
             raise ValueError("depends_on must be a list of task IDs")
         if (len(dependencies) > 20 or
                 any(not isinstance(dep, str) or not dep or len(dep) > 128 or dep.strip() != dep
-                    or any(not (char.isalnum() or char in "-_") for char in dep)
+                    or not dep.isascii() or any(not (char.isalnum() or char in "-_") for char in dep)
                     for dep in dependencies) or
                 len(dependencies) != len(set(dependencies))):
             raise ValueError("depends_on must contain up to 20 unique valid task IDs")
