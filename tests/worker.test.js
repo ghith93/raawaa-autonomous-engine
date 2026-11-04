@@ -266,17 +266,18 @@ test("heartbeat requires the current lease and records a bounded extension", asy
   assert.ok(DB.calls.some(x => x.kind === "run" && x.sql.startsWith("UPDATE tasks")));
 });
 
-test("a dispatched step whose id contains an underscore can heartbeat and finish", async () => {
-  // workflow and step ids are /^[A-Za-z][A-Za-z0-9_-]{0,63}$/, and taskIdFor()
-  // joins them as wf-<run>-<step>. The action routes only accepted [A-Za-z0-9-],
-  // so every step id with an underscore — the natural way to write "verify_ci" —
-  // was routed to 404 and the task could never be reported back.
-  const taskId = "wf-run-2026-11-04-verify_ci";
-  for (const action of ["heartbeat", "finish"]) {
+test("a dispatched step whose run and step ids contain underscores can heartbeat, finish, and retry", async () => {
+  // Both run_id and step_id accept underscores. taskIdFor() emits
+  // wf-<run_id>-<step_id>, so ordinary task action routes must accept both.
+  // The separate disabled Codespace route grammar must remain unchanged.
+  const taskId = "wf-run_2026-11-04-verify_ci";
+  const actions = [
+    ["heartbeat", { lease_token: "lease-1" }],
+    ["finish", { lease_token: "lease-1", status: "succeeded", result: { mode: "dry_run" } }],
+    ["retry", { lease_token: "lease-1", error: "retry test" }],
+  ];
+  for (const [action, body] of actions) {
     const DB = dbMock();
-    const body = action === "heartbeat"
-      ? { lease_token: "lease-1" }
-      : { lease_token: "lease-1", status: "succeeded", result: { mode: "dry_run" } };
     const response = await worker.fetch(request(`/v1/tasks/${taskId}/${action}`, {
       method: "POST", body,
     }), { DB, ENGINE_API_TOKEN: TOKEN });
@@ -285,6 +286,60 @@ test("a dispatched step whose id contains an underscore can heartbeat and finish
     const update = DB.calls.find(x => x.kind === "run" && x.sql.startsWith("UPDATE tasks"));
     assert.ok(update.values.includes(taskId), `${action} must bind the routed task id`);
   }
+});
+
+test("a task id with underscores reaches the authenticated invocation lifecycle", async () => {
+  const taskId = "wf-run_2026-11-04-verify_ci";
+  const calls = [];
+  const DB = {
+    prepare(sql) {
+      return {
+        sql,
+        values: [],
+        bind(...values) { this.values = values; return this; },
+        async first() {
+          calls.push({ kind: "first", sql, values: this.values });
+          if (sql.includes("SELECT id,status,lease_token,lease_expires_at FROM tasks")) {
+            return {
+              id: taskId, status: "running", lease_token: "lease-1",
+              lease_expires_at: "2999-01-01T00:00:00.000Z",
+            };
+          }
+          if (sql.includes("SELECT invocation_id,task_id,step_key,task_kind,request_id,status,last_route_id")) {
+            return {
+              invocation_id: "00000000-0000-4000-8000-000000000001",
+              task_id: taskId,
+              step_key: "model-step",
+              task_kind: "research_brief",
+              request_id: "00000000-0000-4000-8000-000000000002",
+              status: "prepared",
+              last_route_id: null,
+            };
+          }
+          return null;
+        },
+        async run() {
+          calls.push({ kind: "run", sql, values: this.values });
+          return { meta: { changes: 1 } };
+        },
+      };
+    },
+  };
+  const response = await worker.fetch(request(`/v1/tasks/${taskId}/invocations`, {
+    method: "POST",
+    body: { action: "prepare", lease_token: "lease-1", step_key: "model-step", task_kind: "research_brief" },
+  }), { DB, ENGINE_API_TOKEN: TOKEN });
+  assert.equal(response.status, 201);
+  const payload = await response.json();
+  assert.equal(payload.invocation.task_id, taskId);
+  assert.ok(calls.some(call => call.values.includes(taskId)));
+});
+
+test("Codespace action grammar does not expand to underscore-bearing task ids", async () => {
+  const response = await worker.fetch(request("/v1/codespace/tasks/task_code/heartbeat", {
+    method: "POST", token: CODESPACE_TOKEN, body: { lease_token: "lease-1" },
+  }), { DB: dbMock(), ENGINE_API_TOKEN: TOKEN, ENGINE_CODESPACE_TOKEN: CODESPACE_TOKEN });
+  assert.equal(response.status, 404);
 });
 
 test("a task id that is not an identifier is still not routable", async () => {
