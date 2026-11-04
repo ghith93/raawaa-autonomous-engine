@@ -39,6 +39,16 @@ def status_payload():
             "ci_health": "Not yet ingested from GitHub Actions",
             "kill_switch": "Engine policy state is not yet mirrored to the Worker",
         },
+        "execution_modes": {
+            "available": True,
+            "counts": {"not_started": 2, "dry_run": 2, "live_inference": 1, "unknown": 7},
+            "status_counts": {
+                "not_started": {"pending": 2, "running": 0, "succeeded": 0, "failed": 0, "blocked": 0},
+                "dry_run": {"pending": 0, "running": 0, "succeeded": 2, "failed": 0, "blocked": 0},
+                "live_inference": {"pending": 0, "running": 0, "succeeded": 1, "failed": 0, "blocked": 0},
+                "unknown": {"pending": 0, "running": 0, "succeeded": 7, "failed": 0, "blocked": 0},
+            },
+        },
         "tasks": [
             {"status": "pending", "count": 2},
             {"status": "running", "count": 1},
@@ -92,10 +102,37 @@ class MobileStatusProbeTests(unittest.TestCase):
             "kill_switch": "not_mirrored",
             "tasks_pending": "2",
             "tasks_running": "1",
+            "task_execution_modes": "available",
+            "tasks_dry_run_succeeded": "2",
+            "tasks_live_inference_succeeded": "1",
+            "tasks_unknown_succeeded": "7",
             "paper_events": "7",
         })
         self.assertNotIn("model_costs", result)
         self.assertNotIn("99.99", json.dumps(result))
+
+    def test_execution_mode_summary_excludes_simulations_and_unknowns_from_live_success(self):
+        result = probe.summarize_mobile_status(status_payload())
+        self.assertEqual(result["task_execution_modes"], "available")
+        self.assertEqual(result["tasks_dry_run_succeeded"], "2")
+        self.assertEqual(result["tasks_live_inference_succeeded"], "1")
+        self.assertEqual(result["tasks_unknown_succeeded"], "7")
+
+    def test_inconsistent_execution_mode_totals_fail_closed(self):
+        payload = status_payload()
+        payload["execution_modes"]["counts"]["dry_run"] = 99
+        result = probe.summarize_mobile_status(payload)
+        self.assertEqual(result["task_execution_modes"], "invalid")
+        self.assertEqual(result["tasks_dry_run_succeeded"], "unknown")
+        self.assertEqual(result["tasks_live_inference_succeeded"], "unknown")
+
+    def test_missing_execution_mode_migration_is_not_reported_as_zero(self):
+        payload = status_payload()
+        payload["execution_modes"] = {"available": False}
+        result = probe.summarize_mobile_status(payload)
+        self.assertEqual(result["task_execution_modes"], "not_available")
+        self.assertEqual(result["tasks_dry_run_succeeded"], "unknown")
+        self.assertEqual(result["tasks_live_inference_succeeded"], "unknown")
 
     def test_ci_health_and_kill_switch_snapshots_override_unavailable_placeholders(self):
         payload = status_payload()
@@ -322,6 +359,10 @@ class MobileStatusProbeTests(unittest.TestCase):
             self.assertEqual(parsed["watchdog_last_dispatch_intent_at"], "none")
             self.assertEqual(parsed["worker_cron_requeued"], "2")
             self.assertEqual(parsed["tasks_pending"], "2")
+            self.assertEqual(parsed["task_execution_modes"], "available")
+            self.assertEqual(parsed["tasks_dry_run_succeeded"], "2")
+            self.assertEqual(parsed["tasks_live_inference_succeeded"], "1")
+            self.assertEqual(parsed["tasks_unknown_succeeded"], "7")
             self.assertEqual(parsed["paper_events"], "7")
             self.assertNotIn(TOKEN, stdout.getvalue())
             self.assertNotIn("99.99", stdout.getvalue())
