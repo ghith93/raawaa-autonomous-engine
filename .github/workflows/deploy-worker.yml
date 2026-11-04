@@ -72,18 +72,29 @@ jobs:
             --config wrangler.toml --json \
             --command "SELECT name FROM d1_migrations" > /tmp/d1-applied-migrations.json
           python3 -m engine.migrations migrations /tmp/d1-applied-migrations.json
-      # Do not mutate the production Worker secret until the read-only schema gate passes.
-      - name: Install application bearer token as Worker secret
+      - name: Verify the deployed Worker already accepts the repository bearer token
+        # This workflow deploys code; it does not manage credentials. Rewriting the
+        # live ENGINE_API_TOKEN secret on every deployment meant a routine merge
+        # could replace a working credential with a value the deployed Worker
+        # rejects, and Cloudflare cannot read the old value back for rollback.
+        # The preflight below reads nothing from D1 and mutates nothing; it only
+        # proves the two stores already agree, then the deploy proceeds.
         env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           ENGINE_API_TOKEN: ${{ secrets.ENGINE_API_TOKEN }}
-        run: printf '%s' "$ENGINE_API_TOKEN" | npx --yes wrangler@4 secret put ENGINE_API_TOKEN --config wrangler.toml
+          CF_ACCESS_CLIENT_ID: ${{ secrets.CF_ACCESS_CLIENT_ID }}
+          CF_ACCESS_CLIENT_SECRET: ${{ secrets.CF_ACCESS_CLIENT_SECRET }}
+        run: |
+          status=0
+          python3 scripts/bearer_rotation_probe.py || status=$?
+          if [ "$status" -ne 0 ]; then
+            echo "::error title=Bearer preflight failed::The deployed Worker does not accept the repository ENGINE_API_TOKEN, or the preflight produced no verdict. No secret was written and nothing was deployed."
+            exit 1
+          fi
       - name: Deploy authenticated D1 control Worker
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-        run: npx --yes wrangler@4 deploy --config wrangler.toml --keep-vars
+        run: npx --yes wrangler@4.156.1 deploy --config wrangler.toml --keep-vars
       - name: Verify authenticated watchdog readiness without exposing secrets
         env:
           ENGINE_API_TOKEN: ${{ secrets.ENGINE_API_TOKEN }}

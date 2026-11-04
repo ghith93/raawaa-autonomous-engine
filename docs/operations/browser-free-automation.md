@@ -19,7 +19,9 @@ The remaining route is deliberately narrow:
 - Ordinary pushes to main do not deploy.
 - Failed or cancelled CI runs do not deploy.
 - The deploy job checks out the exact successful CI head SHA, not a moving branch tip.
-- The same three deployment secrets are validated before any Worker secret update or deploy command.
+- The same three deployment secrets are validated for presence before any deploy command.
+- Wrangler is pinned to the exact reviewed version `4.156.1`, both for the D1 migration gate and for the deploy.
+- The workflow writes no Worker secret. A read-only preflight (`scripts/bearer_rotation_probe.py` → `POST /v1/diagnostics/auth`) must first show that the deployed Worker already accepts the repository `ENGINE_API_TOKEN`; a rejection or an unverifiable result stops the run. Rotating that credential is a separate operator action, not a side effect of shipping code (issue [#521](https://github.com/ghith93/raawaa-autonomous-engine/issues/521)).
 - The workflow's concurrency group prevents overlapping Worker deployments.
 
 To request one guarded rollout through the normal reviewed code path, use a PR title containing `[deploy-control-worker]`. Merge only after exact-head CI passes and review findings are clear. The merge creates a push to main; Engine CI runs first; the deployment workflow is eligible only after that CI succeeds. This uses GitHub's native event/API pipeline and does not require a browser agent, personal token in source, or paid automation credits.
