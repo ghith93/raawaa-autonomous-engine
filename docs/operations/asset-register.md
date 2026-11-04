@@ -182,3 +182,10 @@ Google ARTEMIS remains registered but disabled and not runtime verified. No daem
 ### Next safe action
 
 Keep PR #459 draft until ignored-file integrity is corrected and an actual enforced independent-approval gate exists. Continue using the existing D1 queue, Task Runner, Worker Cron, CI, and Staging verification paths. Do not add a scheduler, queue, provider, integration, paid route, or Production mutation.
+
+
+### Task Runner schedule-liveness check — 2026-11-04 00:53 UTC
+
+- The current Task Runner workflow still has its existing five-minute schedule at minute offsets 2, 7, 12, 17, 22, 27, 32, 37, 42, 47, 52, and 57 UTC, plus the existing manual workflow_dispatch. Its concurrency group remains d1-task-runner.
+- A fresh repository Actions-runs query (first 100 returned runs) showed the latest Task Runner events as workflow_dispatch #41749347645 and push #41743485185; no event=schedule was visible in that result. Primary GitHub schedule liveness is therefore still unverified, not proven disabled. GitHub scheduled events are best-effort.
+- The Worker Cron heartbeat is a separate maintenance signal and was current at 00:45:34Z. The GitHub App watchdog is a separate fallback and remains not_ready because GITHUB_APP_WATCHDOG_ENABLED is missing. No schedule, watchdog, Worker variable, secret, or permissions were changed.
