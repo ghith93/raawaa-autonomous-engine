@@ -315,6 +315,58 @@ test("findCycle is acyclic-aware", () => {
   ]), ["a", "b"]);
 });
 
+test("a long run id and step id cannot collapse onto one task id", async () => {
+  // Both fields allow 64 characters, so `wf-<run>-<step>` can reach 132.
+  // Truncating would map two distinct steps onto one task id — in the very path
+  // (reconciliation) that exists to prove nothing was lost.
+  const result = await validatePlan(plan({
+    run_id: "r".repeat(64),
+    steps: [
+      { step_id: "a".repeat(64), task_type: "system_audit", title: "first" },
+      { step_id: "a".repeat(63) + "b", task_type: "system_audit", title: "second" },
+    ],
+  }));
+  assert.equal(result.error, "step_task_id_too_long");
+  assert.ok(result.detail.startsWith("a"));
+});
+
+test("a combination exactly at the boundary is accepted and is not truncated", async () => {
+  const runId = "r".repeat(60);
+  const stepId = "s".repeat(59); // "wf-" + 60 + "-" + 59 = 125
+  const result = await validatePlan(plan({
+    run_id: runId,
+    steps: [{ step_id: stepId, task_type: "system_audit", title: "only" }],
+  }));
+  assert.ok(result.plan, result.error);
+  assert.equal(result.plan.steps[0].id, `wf-${runId}-${stepId}`);
+  assert.ok(result.plan.steps[0].id.length <= 128);
+});
+
+test("a replay under a different workflow id or version is an identity conflict", async () => {
+  const digest = await normalizedDigest();
+  for (const override of [{ workflow_id: "other-workflow" }, { plan_version: 2 }]) {
+    const db = fakeDb({ run: runRow({ steps_digest: digest }) });
+    const response = await handleWorkflowDispatch(post(plan(override)), { DB: db }, url);
+    assert.equal(response.status, 409, JSON.stringify(override));
+    assert.equal((await response.json()).error, "run_identity_conflict");
+    assert.equal(db.state.batches, 0);
+  }
+});
+
+test("the concurrent-conflict path enforces the same identity rule", async () => {
+  // The uniqueness-conflict reconciliation calls replayOf too; it must not be a
+  // second, weaker door.
+  const digest = await normalizedDigest();
+  const db = fakeDb();
+  db.batch = async () => {
+    db.state.run = runRow({ workflow_id: "other-workflow", steps_digest: digest });
+    throw new Error("D1_ERROR: UNIQUE constraint failed: workflow_runs.run_id: SQLITE_CONSTRAINT");
+  };
+  const response = await handleWorkflowDispatch(post(plan()), { DB: db }, url);
+  assert.equal(response.status, 409);
+  assert.equal((await response.json()).error, "run_identity_conflict");
+});
+
 test("the lookup route reconciles a lost response without writing", async () => {
   const digest = await normalizedDigest();
   const db = fakeDb({ run: runRow({ steps_digest: digest }) });
