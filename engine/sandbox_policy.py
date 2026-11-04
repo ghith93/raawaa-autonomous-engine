@@ -240,7 +240,7 @@ def assert_sandbox_argv(argv: list[str], *, expected_source_dir: str) -> list[st
 
     users = [arg for arg in options if arg.startswith("--user=")]
     if len(users) != 1:
-        raise SandboxPolicyError("argv must contain exactly one user identity")
+        raise SandboxPolicyError("argv must set exactly one non-root user identity")
     if users[0] in ("--user=0", "--user=0:0", "--user=root") or "root" in users[0]:
         raise SandboxPolicyError("argv must not run as root")
     if users[0] != f"--user={NON_ROOT_USER}":
@@ -253,7 +253,7 @@ def assert_sandbox_argv(argv: list[str], *, expected_source_dir: str) -> list[st
     ]
     for flag in fixed:
         if options.count(flag) != 1:
-            raise SandboxPolicyError(f"argv must contain exactly one {flag}")
+            raise SandboxPolicyError(f"argv is missing or duplicates {flag}")
 
     def one(prefix: str) -> str:
         values = [arg[len(prefix):] for arg in options if arg.startswith(prefix)]
