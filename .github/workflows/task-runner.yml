@@ -319,12 +319,17 @@ jobs:
           import os
           import subprocess
           import sys
+          from pathlib import Path
 
           run_research = os.environ.get("RUN_PUBLIC_RESEARCH_ONCE", "").lower() == "true"
           max_tasks = "1" if run_research else "5"
           command = [sys.executable, "-m", "engine.cli", "run-batch",
                      "--max-tasks", max_tasks, "--max-seconds", "60"]
           result = subprocess.run(command, capture_output=True, text=True, check=False)
+          # Keep the per-task JSON where the reporting step can reach it. Job logs
+          # are not downloadable from this project's own tooling, so a result that
+          # only exists on stdout is effectively unreportable.
+          Path("/tmp/raawaa-batch.json").write_text(result.stdout or "", encoding="utf-8")
           if result.stdout:
               print(result.stdout, end="")
           if result.stderr:
@@ -356,6 +361,13 @@ jobs:
               output.write(f"tasks_processed={tasks_processed}\nstop_reason={stop_reason}\n")
           raise SystemExit(result.returncode)
           PY
+      - name: Publish per-task outcomes
+        if: always()
+        # Annotations and the step summary are readable through the checks API and
+        # the run page; raw job logs are not. Always run, so a failed batch still
+        # says which task failed and why.
+        run: python -m engine.run_report /tmp/raawaa-batch.json
+
       - name: Publish bounded Task Runner status
         if: always()
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9
