@@ -56,7 +56,7 @@ def verify_commit_is_on_main(commit_sha: str, opener_factory: Callable[..., Any]
 
 
 def verify_trusted_checkout(
-    root,
+    root=None,
     runner: Callable[..., Any] | None = None,
     commit_verifier: Callable[[str], bool] = verify_commit_is_on_main,
 ) -> dict[str, Any]:
@@ -64,7 +64,7 @@ def verify_trusted_checkout(
     from pathlib import Path
     import subprocess
 
-    workspace = Path(root).resolve()
+    workspace = Path(root).resolve() if root is not None else Path(__file__).resolve().parent.parent
     run = runner or subprocess.run
     commands = {
         "root": ["git", "rev-parse", "--show-toplevel"],
