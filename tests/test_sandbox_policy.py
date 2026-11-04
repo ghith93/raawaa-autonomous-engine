@@ -150,9 +150,11 @@ class RefusalTest(unittest.TestCase):
             ("--mount=type=bind,src=/root/.ssh,dst=/root/.ssh", "read-only"),
         )
         for weakener, message in cases:
-            vector = argv() + [weakener]
+            vector = argv()
+            image_index = vector.index(IMAGE)
+            vector.insert(image_index, weakener)
             if weakener in ("-v", "-e"):
-                vector.append("/root/.ssh:/root/.ssh")
+                vector.insert(image_index + 1, "/root/.ssh:/root/.ssh")
             with self.assertRaisesRegex(SandboxPolicyError, message, msg=weakener):
                 assert_sandbox_argv(vector, expected_source_dir="/repo")
 
@@ -178,14 +180,18 @@ class RefusalTest(unittest.TestCase):
             "--mount=type=bind,src=/etc,dst=/etc,readonly",
         ):
             with self.assertRaisesRegex(SandboxPolicyError, "trusted workspace bind mount"):
-                assert_sandbox_argv(argv() + [extra], expected_source_dir="/repo")
+                vector = argv()
+                vector.insert(vector.index(IMAGE), extra)
+                assert_sandbox_argv(vector, expected_source_dir="/repo")
         with self.assertRaisesRegex(SandboxPolicyError, "trusted workspace bind mount"):
             assert_sandbox_argv(argv(source_dir="/etc"), expected_source_dir="/repo")
 
     def test_duplicate_and_unrecognized_options_are_refused(self):
         for extra in ("--read-only", "--memory=512m", "--foo=bar"):
             with self.assertRaises(SandboxPolicyError, msg=extra):
-                assert_sandbox_argv(argv() + [extra], expected_source_dir="/repo")
+                vector = argv()
+                vector.insert(vector.index(IMAGE), extra)
+                assert_sandbox_argv(vector, expected_source_dir="/repo")
 
     def test_command_options_are_not_reparsed_as_docker_options(self):
         vector = argv(command=("python3", "--version"))
