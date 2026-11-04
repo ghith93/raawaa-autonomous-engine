@@ -2,9 +2,9 @@
 
 The Worker needs three secrets (`TELEGRAM_BOT_TOKEN`, `TELEGRAM_WEBHOOK_SECRET`,
 `TELEGRAM_ALLOWED_CHAT_IDS`), and Telegram needs the same secret in its setWebhook
-call plus a public HTTPS URL. Five things to get right by hand is four too many, so
-this script does the fiddly parts and leaves the owner two actions that only they
-can take: create the bot in BotFather, and send it one message.
+call plus a public HTTPS URL. This script discovers only one private human sender,
+never silently pauses an existing webhook, and preserves queued updates when
+registering or re-registering. A webhook pause requires explicit operator opt-in.
 
 The token is read from the environment or prompted for, never echoed, never
 written to stdout, and never put on a command line. Output that the owner does need
@@ -13,7 +13,7 @@ repository already ignores, and the printed instructions read from that file so
 nothing secret appears in a terminal scrollback, a chat window, or a shell history.
 
     # 1. create a bot with @BotFather, copy the token
-    # 2. send the bot any message (e.g. /start)
+    # 2. send the bot /start (discovery requires a private human sender)
     read -rs TELEGRAM_BOT_TOKEN && export TELEGRAM_BOT_TOKEN
     python3 scripts/telegram_bootstrap.py --url https://<worker>.workers.dev
 
