@@ -118,9 +118,19 @@ At every session start, refresh counts, account/connection status, app permissio
 - Proposed additive migration: `migrations/0009_task_execution_mode.sql`; SQLite compatibility migration is in `engine/task_store.py`.
 - Updated D1 Worker task list/claim/finish endpoints and Mobile Status to expose execution-mode aggregates.
 - Values: `not_started`, `dry_run`, `live_inference`, `unknown`. Legacy rows remain `unknown`; new tasks begin `not_started`.
-- Status: merged into `main` (PR #448); migration 0009 applied to Staging and Staging Worker deployed/remote monetary ledger verified in run `41742923497`. Ephemeral Staging tokens were revoked. The sanitized telemetry publisher rejected the manual event, so mobile-status readback remains pending PR #456. Production Worker/D1 unchanged.
+- Status: merged into `main` (PR #448); migration 0009 applied to Staging. PR #456 fixed guarded manual Staging telemetry publication. Post-merge run #41746574412 completed isolated Staging Worker deployment, remote ledger verification, telemetry publication, and authenticated mobile-status readback. Production Worker/D1 unchanged.
 
 ## F1 dashboard accuracy follow-up — 2026-11-04
 
 - Mobile Status now separates successful live-inference tasks from successful dry-run simulations; unknown legacy successes are not included in executed totals.
 - Task Runner status and Staging mobile verification expose aggregate execution-mode/status counts only.
+
+
+## F5 priority and dependency queue — 2026-11-04
+
+- PR #457 merged as `381e2094af5f6b47d56a812a6a544c8d6b23f13c`. Additive migration `0010_task_priority_dependencies.sql` applied to the isolated Staging D1 database; a follow-up migration list confirmed no pending migrations.
+- Queue priority is bounded 0–100 (default 50) and ordered by priority descending, then creation time and task ID. SQLite and D1 enforce the same dependency edges, same-execution-mode success gate, transitive failure blocking, and audit events.
+- Exact-head CI #41746324349 passed, including local D1 Worker smoke. Post-merge Engine CI #41746574412, Staging Worker deployment, remote ledger verification, telemetry publish, and authenticated mobile status readback all passed.
+- Mobile readback: `status=verified`, `ci_health=success`, `kill_switch=engaged`, `external_writes=false`, `paid_model_calls=false`, `paid_fallback=false`.
+- Ephemeral Staging bearer/quota-admin tokens were revoked. Production Control Worker deployment #41747019726 was skipped. No Production D1/Worker change, model-provider call, paid inference, or external write.
+- Workflow planner remains proposal-only; no automatic workflow dispatch is enabled. Direct dependency behavior was integration-tested against local D1; no task was claimed from the shared Staging queue.
