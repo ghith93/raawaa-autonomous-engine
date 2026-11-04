@@ -24,6 +24,7 @@ from engine.brain_cycle import DEFAULT_SNAPSHOT_LIMIT, build_brain_cycle
 from engine.development_cycle import build_development_cycle, render_markdown as render_development_markdown
 from engine.profile_routing import build_route_plan, render_markdown as render_route_plan
 from engine.orchestrator import validate_and_plan
+from engine.workflow_manifest import build_workflow_run_manifest
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -166,6 +167,13 @@ def build_parser() -> argparse.ArgumentParser:
     dev.add_argument("--format", choices=["json", "markdown"], default="json")
     workflow_plan = sub.add_parser("workflow-plan", help="Validate a delegated workflow DAG without enqueuing or executing it")
     workflow_plan.add_argument("--file", required=True, help="Path to a JSON workflow proposal")
+    workflow_manifest = sub.add_parser(
+        "workflow-manifest",
+        help="Create a stable, non-dispatching run manifest from a validated workflow plan",
+    )
+    workflow_manifest.add_argument("--file", required=True, help="Path to a JSON workflow proposal")
+    workflow_manifest.add_argument("--run-id", required=True, help="Stable caller-supplied run identifier")
+    workflow_manifest.add_argument("--plan-version", type=int, default=1)
     sub.add_parser("artemis-status", help="Read-only ARTEMIS daemon/device probe; never submits a mobile task")
     route = sub.add_parser(
         "route-plan",
@@ -250,11 +258,14 @@ def main() -> int:
             print(render_development_markdown(report), end="")
         else:
             print(json.dumps(report, indent=2, ensure_ascii=False))
-    elif args.command == "workflow-plan":
+    elif args.command in {"workflow-plan", "workflow-manifest"}:
         proposal = load_json(Path(args.file))
         roster = load_json(ROOT / "config" / "agents.json")
         policy = load_json(ROOT / "config" / "policy.json")
-        print(json.dumps(validate_and_plan(proposal, roster, policy).as_dict(), indent=2, ensure_ascii=False))
+        plan = validate_and_plan(proposal, roster, policy).as_dict()
+        if args.command == "workflow-manifest":
+            plan = build_workflow_run_manifest(plan, args.run_id, args.plan_version).as_dict()
+        print(json.dumps(plan, indent=2, ensure_ascii=False))
     elif args.command == "artemis-status":
         print(json.dumps(probe_artemis(os.environ), indent=2, ensure_ascii=False))
     elif args.command == "route-plan":
