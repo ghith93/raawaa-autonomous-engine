@@ -10,15 +10,15 @@ Add Z.ai's GLM family to the provider/model evaluation set, but do not yet class
 
 The official Z.ai API pricing table lists **GLM-4.7-Flash**, **GLM-4.5-Flash**, and **GLM-4.6V-Flash** as Free for input, cached input, cached-input storage, and output. This is a strong public zero-price candidate, but it is not proof that this account has access, a fixed quota, a stable production SLA, or any particular card/billing requirement. The pricing page publishes no numeric RPM/TPM/RPD/TPD allowance for these rows. The account's rate-limit console and current eligibility remain unverified.
 
-The current flagship **GLM-5.3** and **GLM-5.3-Flash** are paid API models in the published table. They are not eligible for live use under the current zero-spend default unless a separately verified no-charge entitlement exists and the operator explicitly authorizes any paid spend.
+The current flagship **GLM-5.3** and **GLM-5.3-Flash** are paid API models in the published table. The free-row product labels are not yet verified request-time model IDs; do not send them as API model values until the official API model catalog or the authenticated account confirms the exact identifiers. They are not eligible for live use under the current zero-spend default unless a separately verified no-charge entitlement exists and the operator explicitly authorizes any paid spend.
 
 ## Candidate matrix
 
 | Model / route | Official public price status | Best evaluation target | Current decision |
 |---|---|---|---|
-| `glm-4.7-flash` | Free input, cached input/storage, output | First text-model candidate: coding, tool use, Arabic/English research, JSON | First account-verification candidate; disabled |
-| `glm-4.5-flash` | Free input, cached input/storage, output | Secondary text baseline and fallback comparison | Secondary candidate; disabled |
-| `glm-4.6v-flash` | Free input, cached input/storage, output | Vision/document/image understanding | Vision candidate; disabled |
+| GLM-4.7-Flash (pricing label; API ID unverified) | Free input, cached input/storage, output | First text-model candidate: coding, tool use, Arabic/English research, JSON | First account-verification candidate; disabled |
+| GLM-4.5-Flash (pricing label; API ID unverified) | Free input, cached input/storage, output | Secondary text baseline and fallback comparison | Secondary candidate; disabled |
+| GLM-4.6V-Flash (pricing label; API ID unverified) | Free input, cached input/storage, output | Vision/document/image understanding | Vision candidate; disabled |
 | `glm-5.3-flash` | $0.15 input / $0.50 output per 1M tokens; cached input $0.03 | Stronger agentic/coding evaluation | Paid; do not call without explicit spend authorization |
 | `glm-5.3` | $1.40 input / $4.40 output per 1M tokens; cached input $0.26 | Higher-capability coding/long-horizon benchmark | Paid; do not call without explicit spend authorization |
 | `glm-5.3-flashx` | $0.37 input / $1.25 output per 1M tokens | Premium Flash comparison only if separately authorized | Paid; do not call |
@@ -28,7 +28,7 @@ Prices are USD per million tokens from the official Z.ai API pricing table check
 ## Capability and deployment notes
 
 - Z.ai documents an OpenAI-compatible API endpoint: `https://api.z.ai/api/paas/v4/`, and its Quick Start demonstrates use of the OpenAI Python and Node SDKs. Compatibility is a useful integration shortcut, not proof that every feature (tool calls, streaming, structured outputs, retries, usage accounting) behaves identically.
-- Z.ai's Quick Start directs users to the Billing Page to top up "if needed". The public pricing page does not publish numeric free-model rate limits. Do not infer that a payment card is or is not required; verify the actual account flow without making a purchase.
+- Z.ai's Quick Start directs users to the Billing Page to top up "if needed". The public pricing page does not publish numeric free-model rate limits. Pricing-row display names are not proof of the exact request-time model identifiers; the exact identifiers for the three free rows remain unverified in the public API reference and this account's model catalog. Do not infer that a payment card is or is not required; verify the actual account flow without making a purchase.
 - GLM-5.3 model documentation describes a 1M-token context window and agentic coding / long-horizon engineering focus. These are vendor-published capability claims, not independent benchmark results.
 - GLM-5.3 is open-weight under a Z.AI-specific license, not simply Apache-2.0 or MIT. It grants broad rights but includes a special security-review clause for a Model-as-a-Service operator whose aggregate revenue exceeds USD 10B over a consecutive 12-month period. Review the exact license before redistribution or hosted service.
 - GLM-5.3-Flash is listed with an MIT license on its Hugging Face model card. Verify the exact repository/license for any chosen checkpoint and do not infer the license of one GLM model from another.
@@ -74,12 +74,12 @@ Score quality, correctness, latency, reliability, context efficiency, and actual
 
 - Z.ai API pricing: https://docs.z.ai/guides/overview/pricing
 - Z.ai API quick start and OpenAI SDK compatibility: https://docs.z.ai/guides/overview/quick-start
-- Z.ai Terms of Use and API Additional Terms: https://chat.z.ai/legal-agreement/terms-of-service
-- Z.ai Privacy Policy and API Data Processing Addendum: https://chat.z.ai/legal-agreement/privacy-policy
+- Z.ai Terms of Use and API Additional Terms: https://docs.z.ai/legal-agreement/terms-of-use
+- Z.ai Privacy Policy and API Data Processing Addendum: https://docs.z.ai/legal-agreement/privacy-policy
 - GLM-5.3 model card: https://huggingface.co/zai-org/GLM-5.3
 - GLM-5.3 license: https://huggingface.co/zai-org/GLM-5.3/blob/main/LICENSE
 - GLM-5.3-Flash model card and license: https://huggingface.co/zai-org/GLM-5.3-Flash
 
 ## Review outcome
 
-**Recommendation:** retain GLM as a research candidate, with GLM-4.7-Flash as the first no-spend account-verification target. Do not add an enabled provider profile or use it for autonomous decision-making yet. The API Terms' undefined decision-making prohibition must be clarified in writing, in addition to verifying account quota, availability, billing requirements, and operational quality.
+**Recommendation:** retain GLM as a public-pricing/discovery candidate only. The exact API request IDs for the free pricing rows are unverified; GLM-4.7-Flash is a product-label verification target, not a callable model ID. Do not add an enabled provider profile or use it for autonomous decision-making yet. The API Terms' undefined decision-making prohibition must be clarified in writing, in addition to verifying account quota, availability, billing requirements, and operational quality.
