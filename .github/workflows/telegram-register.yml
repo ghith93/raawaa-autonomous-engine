@@ -115,7 +115,7 @@ jobs:
           if [ "$REPLACE_WEBHOOK_FOR_DISCOVERY" = "true" ]; then
             DISCOVERY_ARGS=(--replace-webhook-to-discover)
           fi
-          if output="$(run_bootstrap "\${DISCOVERY_ARGS[@]}" 2>&1)"; then
+          if output="$(run_bootstrap "${DISCOVERY_ARGS[@]}" 2>&1)"; then
             printf '%s\n' "$output" | head -n 20
             exit 0
           fi
