@@ -38,7 +38,7 @@ Prices are USD per million tokens from the official Z.ai API pricing table check
 ## Data protection and terms — important distinction
 
 - The current Terms of Use (updated 2026-04-14) state that API customers/developers are also governed by the Additional Terms for API Services, and that the Additional Terms prevail in case of inconsistency.
-- The API Additional Terms state that Z.ai will use API End User Content only as necessary to provide the API, comply with law, enforce policies, and prevent abuse; it says API content will not be used to develop or improve services unless the customer explicitly agrees.
+- The API Additional Terms state that Z.ai will use API End User Content only as necessary to provide the API, comply with law, enforce policies, and prevent abuse; it says API content will not be used to develop or improve services unless the customer explicitly agrees. This is not a zero-retention guarantee: the reviewed terms do not establish a complete retention schedule for operational logs, abuse/security records, backups, or legal holds. Obtain a written retention answer before sending non-public data.
 - **Critical terms ambiguity:** the same API Additional Terms prohibit use of Z.ai for "decision-making activities" (section 1.f.iv). The scope is not defined on the page. Autonomous agents that plan tasks, choose providers/tools, review code, or initiate actions may be considered decision-making. Do not use GLM for those Engine roles until Z.ai provides written clarification that the intended internal/business workflow is permitted. The fact that API integration for downstream systems is generally allowed does not resolve this specific restriction.
 - The API Data Processing Addendum describes Z.ai as processor for customer personal data and says it processes such data on the customer's behalf for API support. The DPA also describes Singapore as the general processing location and refers to safeguards for international transfers. Review the full current DPA and any applicable order/contract before sending personal data.
 - Do not confuse the consumer Z.ai chat privacy policy/consumer terms with the API Additional Terms. The consumer terms permit broader service-improvement use of individual-user content; API-specific clauses are different.
@@ -49,7 +49,7 @@ Prices are USD per million tokens from the official Z.ai API pricing table check
 Before creating an enabled provider profile:
 
 1. Confirm whether the existing operator account can access Z.ai from its registered region and account type.
-2. Verify that `glm-4.7-flash` is selectable and actually returns a zero-price entitlement in the account console; record exact RPM, TPM, daily/monthly caps, concurrency, expiry/renewal, and whether failed requests count.
+2. Verify the exact request-time API model identifier corresponding to the GLM-4.7-Flash pricing row in the authenticated account catalog or official API schema. Only after that, confirm that it is selectable and returns a zero-price entitlement; record exact RPM, TPM, daily/monthly caps, concurrency, expiry/renewal, and whether failed requests count.
 3. Confirm the official endpoint, model ID, current price, free-quota expiry/renewal, and whether a payment method, prepaid balance, or billing activation is required. Do not top up or enable billing.
 4. Review current Terms, API Additional Terms, DPA, subprocessors, data-location provisions, and model-specific license. Until reviewed, send only public, non-confidential synthetic prompts.
 5. Add a hard-zero-cost provider profile: no paid fallback, no automatic model alias that can silently route to a paid model, no credit purchase, no billing enablement, and no call when verified free entitlement is absent or exhausted.
@@ -74,6 +74,7 @@ Score quality, correctness, latency, reliability, context efficiency, and actual
 
 - Z.ai API pricing: https://docs.z.ai/guides/overview/pricing
 - Z.ai API quick start and OpenAI SDK compatibility: https://docs.z.ai/guides/overview/quick-start
+- Z.ai Chat Completion API reference (verify request-time model identifiers): https://docs.z.ai/api-reference/llm/chat-completion
 - Z.ai Terms of Use and API Additional Terms: https://docs.z.ai/legal-agreement/terms-of-use
 - Z.ai Privacy Policy and API Data Processing Addendum: https://docs.z.ai/legal-agreement/privacy-policy
 - GLM-5.3 model card: https://huggingface.co/zai-org/GLM-5.3
