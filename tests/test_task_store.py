@@ -58,6 +58,50 @@ class TaskStoreTests(unittest.TestCase):
         self.assertEqual(saved["status"], "running")
         self.assertEqual(saved["execution_mode"], "dry_run")
 
+    def test_priority_selects_highest_eligible_task_first(self):
+        self.store.enqueue("research_brief", "Low", priority=10)
+        high = self.store.enqueue("research_brief", "High", priority=90)
+        claimed = self.store.claim_next(execution_mode="dry_run")
+        self.assertEqual(claimed["id"], high["id"])
+        self.assertEqual(claimed["priority"], 90)
+
+    def test_dependencies_wait_for_success_in_the_same_execution_mode(self):
+        parent = self.store.enqueue("research_brief", "Parent", priority=10)
+        child = self.store.enqueue("content_draft", "Child", priority=100,
+                                   depends_on=[parent["id"]])
+        self.assertEqual(child["depends_on"], [parent["id"]])
+        claimed_parent = self.store.claim_next(execution_mode="dry_run")
+        self.assertEqual(claimed_parent["id"], parent["id"])
+        self.store.finish(parent["id"], "succeeded", result={"mode": "dry_run"},
+                          lease_token=claimed_parent["lease_token"])
+        self.assertIsNone(self.store.claim_next(execution_mode="live_inference"))
+        claimed_child = self.store.claim_next(execution_mode="dry_run")
+        self.assertEqual(claimed_child["id"], child["id"])
+
+    def test_failed_dependency_blocks_all_pending_descendants(self):
+        parent = self.store.enqueue("research_brief", "Failing parent", max_attempts=1)
+        child = self.store.enqueue("content_draft", "Child", depends_on=[parent["id"]])
+        grandchild = self.store.enqueue("code_review", "Grandchild", depends_on=[child["id"]])
+        claim = self.store.claim_next(execution_mode="dry_run")
+        self.assertEqual(claim["id"], parent["id"])
+        self.store.finish(parent["id"], "failed", error="test failure",
+                          lease_token=claim["lease_token"])
+        self.assertIsNone(self.store.claim_next(execution_mode="dry_run"))
+        tasks = {task["id"]: task for task in self.store.list_tasks()}
+        self.assertEqual(tasks[child["id"]]["status"], "blocked")
+        self.assertEqual(tasks[grandchild["id"]]["status"], "blocked")
+        self.assertTrue(any(event["event"] == "task_blocked_by_dependency"
+                            for event in self.store.audit_events()))
+
+    def test_enqueue_validates_dependencies_and_idempotency_manifest(self):
+        with self.assertRaisesRegex(ValueError, "unknown task dependency"):
+            self.store.enqueue("research_brief", "Unknown", depends_on=["missing-task"])
+        first = self.store.enqueue("research_brief", "Stable", idempotency_key="stable", priority=25)
+        replay = self.store.enqueue("research_brief", "Stable", idempotency_key="stable", priority=25)
+        self.assertEqual(first["id"], replay["id"])
+        with self.assertRaisesRegex(ValueError, "idempotency key conflicts"):
+            self.store.enqueue("research_brief", "Stable", idempotency_key="stable", priority=90)
+
     def test_existing_database_rows_migrate_to_unknown_mode(self):
         legacy_path = Path(self.tmp.name) / "legacy.db"
         with sqlite3.connect(legacy_path) as db:

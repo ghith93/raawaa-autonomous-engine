@@ -96,12 +96,22 @@ class RemoteTaskStore:
             raise RemoteTaskStoreError("Remote task API is unavailable or returned invalid JSON") from None
 
     def enqueue(self, task_type: str, title: str, payload: dict[str, Any] | None = None,
-                idempotency_key: str | None = None, max_attempts: int = 2) -> dict[str, Any]:
+                idempotency_key: str | None = None, max_attempts: int = 2,
+                priority: int = 50, depends_on: list[str] | None = None) -> dict[str, Any]:
         import uuid
+        if type(priority) is not int or not 0 <= priority <= 100:
+            raise ValueError("priority must be an integer between 0 and 100")
+        if depends_on is None:
+            depends_on = []
+        if (not isinstance(depends_on, list) or len(depends_on) > 20
+                or any(not isinstance(dep, str) or not dep or len(dep) > 128 for dep in depends_on)
+                or len(depends_on) != len(set(depends_on))):
+            raise ValueError("depends_on must be a unique list of at most 20 task IDs")
         result = self._request("/v1/tasks/enqueue", "POST", {
             "task_type": task_type, "title": title, "payload": payload or {},
             "idempotency_key": idempotency_key or str(uuid.uuid4()),
-            "max_attempts": max_attempts,
+            "max_attempts": max_attempts, "priority": priority,
+            "depends_on": sorted(depends_on),
         })
         task = result.get("task")
         if not isinstance(task, dict):

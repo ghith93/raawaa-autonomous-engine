@@ -8,6 +8,7 @@ ROOT = Path(__file__).resolve().parents[1]
 MIGRATION = ROOT / "migrations" / "0001_initial.sql"
 MIGRATION_2 = ROOT / "migrations" / "0002_research_candidates.sql"
 MIGRATION_9 = ROOT / "migrations" / "0009_task_execution_mode.sql"
+MIGRATION_10 = ROOT / "migrations" / "0010_task_priority_dependencies.sql"
 
 
 class D1MigrationContractTests(unittest.TestCase):
@@ -105,6 +106,32 @@ class D1MigrationContractTests(unittest.TestCase):
         self.assertEqual(self.db.execute(
             "SELECT version FROM schema_migrations WHERE version='0009_task_execution_mode'"
         ).fetchone(), ("0009_task_execution_mode",))
+
+    def test_task_priority_dependency_migration_is_additive_and_constrained(self):
+        self.db.executescript(self.sql)
+        self.db.executescript(MIGRATION_9.read_text(encoding="utf-8"))
+        self.db.executescript(MIGRATION_10.read_text(encoding="utf-8"))
+        columns = {row[1] for row in self.db.execute("PRAGMA table_info(tasks)")}
+        self.assertIn("priority", columns)
+        self.assertIn("dependencies_json", columns)
+        self.db.execute("""INSERT INTO tasks
+            (id,idempotency_key,task_type,title,payload_json,status,attempts,max_attempts,
+             created_at,updated_at)
+            VALUES ('parent','parent-key','research_brief','Parent','{}','succeeded',1,2,'now','now')""")
+        self.db.execute("""INSERT INTO tasks
+            (id,idempotency_key,task_type,title,payload_json,status,attempts,max_attempts,
+             created_at,updated_at,priority,dependencies_json)
+            VALUES ('child','child-key','content_draft','Child','{}','pending',0,2,'now','now',90,'["parent"]')""")
+        self.db.execute("INSERT INTO task_dependencies(task_id,dependency_task_id) VALUES('child','parent')")
+        self.assertEqual(self.db.execute("SELECT priority FROM tasks WHERE id='parent'").fetchone()[0], 50)
+        self.assertEqual(self.db.execute("SELECT priority FROM tasks WHERE id='child'").fetchone()[0], 90)
+        with self.assertRaises(sqlite3.IntegrityError):
+            self.db.execute("INSERT INTO task_dependencies(task_id,dependency_task_id) VALUES('child','missing')")
+        with self.assertRaises(sqlite3.IntegrityError):
+            self.db.execute("INSERT INTO task_dependencies(task_id,dependency_task_id) VALUES('child','child')")
+        self.assertEqual(self.db.execute(
+            "SELECT version FROM schema_migrations WHERE version='0010_task_priority_dependencies'"
+        ).fetchone(), ("0010_task_priority_dependencies",))
 
     def test_operations_and_usage_constraints(self):
         self.db.executescript(self.sql)
