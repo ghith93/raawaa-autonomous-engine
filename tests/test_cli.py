@@ -63,7 +63,7 @@ class CliTests(unittest.TestCase):
                 self.assertEqual(cli.main(), 0)
         result = json.loads(output.getvalue())
         self.assertEqual(result["network_calls_performed"], 0)
-        self.assertEqual(len(result["profiles"]), 3)
+        self.assertEqual(len(result["profiles"]), 4)
         profile = next(item for item in result["profiles"] if item["model"] == "openai/gpt-oss-20b")
         self.assertEqual(profile["model"], "openai/gpt-oss-20b")
         self.assertEqual(profile["api_key_env_configured_by_name_only"], "GROQ_API_KEY")
@@ -79,7 +79,7 @@ class CliTests(unittest.TestCase):
         output = io.StringIO()
         with contextlib.redirect_stdout(output):
             self.assertEqual(cli.audit(), 0)
-        self.assertIn("3 provider profiles", output.getvalue())
+        self.assertIn("4 provider profiles", output.getvalue())
         self.assertIn("2 deny-by-default tool definitions", output.getvalue())
         self.assertIn("safe dry-run", output.getvalue())
 
@@ -210,7 +210,7 @@ class CliTests(unittest.TestCase):
                         self.assertEqual(cli.main(), 0)
             result = json.loads(output.getvalue())
             self.assertEqual(result["network_calls_performed"], 0)
-            self.assertEqual(result["route_count"], 3)
+            self.assertEqual(result["route_count"], 4)
             self.assertEqual(result["eligible_routes"], 0)
             self.assertEqual(result["alerts"], [])
             self.assertTrue(all(not route["enabled"] for route in result["routes"]))
