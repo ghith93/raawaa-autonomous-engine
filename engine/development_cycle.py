@@ -215,7 +215,43 @@ def _pull_request_actions(state: dict[str, Any], now: datetime) -> list[dict[str
                     evidence={"mergeable": mergeable, "age_days": round(age, 1)},
                 )
             )
-        elif checks in {"success", "green"} and mergeable in {"MERGEABLE", ""} and merge_state == "BEHIND":
+        elif checks in {"failure", "failing", "red"}:
+            # Checked before mergeability: a red branch needs diagnosing whether
+            # or not GitHub has got round to computing whether it would merge.
+            actions.append(
+                _item(
+                    "pull_request",
+                    target,
+                    "diagnose_failing_check",
+                    W_READY_PR + 6 * age_credit,
+                    f"checks are failing, so the branch cannot be judged: {title}",
+                    gate=gate,
+                    evidence={"checks": checks},
+                )
+            )
+        elif mergeable != "MERGEABLE":
+            # GitHub computes mergeability lazily, so a PR that was just pushed,
+            # rebased by another actor, or read from a cold cache reports UNKNOWN.
+            # Dropping it silently is the worst option: two live PRs disappeared
+            # from this ranking exactly this way.
+            actions.append(
+                _item(
+                    "pull_request",
+                    target,
+                    "inspect_pull_request_state",
+                    W_READY_PR - 8 + 2 * age_credit,
+                    f"mergeability is not yet known, so neither merge nor rebase can be "
+                    f"decided from the API: {title}",
+                    gate=gate,
+                    evidence={
+                        "mergeable": mergeable or "UNKNOWN",
+                        "merge_state_status": merge_state or "UNKNOWN",
+                        "checks": checks,
+                        "age_days": round(age, 1),
+                    },
+                )
+            )
+        elif checks in {"success", "green"} and merge_state == "BEHIND":
             # Green on an old base is not evidence about current main: the run
             # that produced the check never saw the commits it will merge into.
             actions.append(
@@ -236,7 +272,7 @@ def _pull_request_actions(state: dict[str, Any], now: datetime) -> list[dict[str
                     },
                 )
             )
-        elif checks in {"success", "green"} and mergeable in {"MERGEABLE", ""}:
+        elif checks in {"success", "green"}:
             actions.append(
                 _item(
                     "pull_request",
@@ -254,16 +290,16 @@ def _pull_request_actions(state: dict[str, Any], now: datetime) -> list[dict[str
                     },
                 )
             )
-        elif checks in {"failure", "failing", "red"}:
+        else:
             actions.append(
                 _item(
                     "pull_request",
                     target,
-                    "diagnose_failing_check",
-                    W_READY_PR + 6 * age_credit,
-                    f"checks are failing, so the branch cannot be judged: {title}",
+                    "inspect_pull_request_state",
+                    W_READY_PR - 8 + 2 * age_credit,
+                    f"state is neither green nor red, so it needs a human read: {title}",
                     gate=gate,
-                    evidence={"checks": checks},
+                    evidence={"mergeable": mergeable or "UNKNOWN", "checks": checks},
                 )
             )
     return actions

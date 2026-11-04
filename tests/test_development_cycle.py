@@ -75,6 +75,19 @@ class PullRequestClassificationTests(unittest.TestCase):
         report = self._report(mergeable="MERGEABLE", merge_state_status="CLEAN", checks="success")
         self.assertEqual(report["next_actions"][0]["action"], "merge_after_verification")
 
+    def test_unknown_mergeability_is_inspected_not_dropped(self):
+        # GitHub computes mergeability lazily; two live PRs fell out of the
+        # ranking entirely because their state was UNKNOWN.
+        report = self._report(mergeable="UNKNOWN", merge_state_status="UNKNOWN", checks="success")
+        action = report["next_actions"][0]
+        self.assertEqual(action["action"], "inspect_pull_request_state")
+        self.assertEqual(action["evidence"]["mergeable"], "UNKNOWN")
+        self.assertLess(action["score"], 60)  # below a verified-ready merge, above bare issues
+
+    def test_missing_mergeability_is_treated_as_unknown(self):
+        report = self._report(mergeable=None, checks="success")
+        self.assertEqual(report["next_actions"][0]["action"], "inspect_pull_request_state")
+
     def test_failing_checks_are_diagnosed_not_merged(self):
         report = self._report(mergeable="MERGEABLE", checks="failure")
         self.assertEqual(report["next_actions"][0]["action"], "diagnose_failing_check")
