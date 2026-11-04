@@ -29,7 +29,7 @@ async function leaseOwned(db, taskId, leaseToken, now) {
  * are attempts under that identity; only explicit rejection permits route rotation.
  */
 export async function handleTaskInvocation(request, env, url) {
-  const match = url.pathname.match(/^\/v1\/tasks\/([A-Za-z0-9-]+)\/invocations$/);
+  const match = url.pathname.match(/^\/v1\/tasks\/([A-Za-z0-9_-]+)\/invocations$/);
   if (!match) return null;
   if (request.method !== "POST") return json({error:"method_not_allowed"},405);
   let input;
