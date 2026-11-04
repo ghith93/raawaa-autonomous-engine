@@ -44,6 +44,11 @@ try:
 except OSError as exc:
     result["host_canary"] = "denied:" + type(exc).__name__
 try:
+    with open(HOST_CREDENTIAL_PATH, "r", encoding="utf-8") as handle:
+        result["host_credential"] = handle.read(256)
+except OSError as exc:
+    result["host_credential"] = "denied:" + type(exc).__name__
+try:
     with open(SOURCE_CANARY_PATH, "w", encoding="utf-8") as handle:
         handle.write("modified")
     result["source_write"] = "succeeded"
@@ -93,6 +98,39 @@ finally:
     for child in children:
         child.wait(timeout=3)
 try:
+    usage_before = 0
+    with open("/sys/fs/cgroup/cpu.stat", encoding="utf-8") as handle:
+        for line in handle:
+            if line.startswith("usage_usec "):
+                usage_before = int(line.split()[1])
+    cpu_children = [
+        subprocess.Popen(
+            [sys.executable, "-c", "import time; end=time.monotonic()+3; x=0\nwhile time.monotonic()<end: x+=1"],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        )
+        for _ in range(2)
+    ]
+    started = time.monotonic()
+    for child in cpu_children:
+        child.wait(timeout=10)
+    elapsed = time.monotonic() - started
+    usage_after = 0
+    with open("/sys/fs/cgroup/cpu.stat", encoding="utf-8") as handle:
+        for line in handle:
+            if line.startswith("usage_usec "):
+                usage_after = int(line.split()[1])
+    result["cpu_cores_used"] = ((usage_after - usage_before) / 1_000_000) / elapsed
+except (OSError, ValueError, subprocess.TimeoutExpired) as exc:
+    result["cpu_probe_error"] = type(exc).__name__
+try:
+    memory_probe = subprocess.run(
+        [sys.executable, "-c", "data=bytearray(600*1024*1024); data[::4096]=b'\\x01'*(len(data)//4096)"],
+        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=20, check=False,
+    )
+    result["memory_limit_enforced"] = memory_probe.returncode != 0
+except (OSError, subprocess.TimeoutExpired) as exc:
+    result["memory_probe_error"] = type(exc).__name__
+try:
     result["own_environ"] = "|".join(sorted(os.environ))[:400]
 except OSError as exc:
     result["own_environ_error"] = type(exc).__name__
@@ -128,6 +166,15 @@ class SandboxEscapeTest(unittest.TestCase):
         )
         cls.addClassCleanup(cls.workspace_tmp.cleanup)
         cls.workspace = Path(cls.workspace_tmp.name).resolve(strict=True)
+        cls.host_credential_dir = tempfile.TemporaryDirectory(
+            prefix="raawaa-host-credentials-", dir=Path.home(),
+        )
+        cls.addClassCleanup(cls.host_credential_dir.cleanup)
+        credential_dir = Path(cls.host_credential_dir.name) / ".ssh"
+        credential_dir.mkdir()
+        cls.host_credential = credential_dir / "id_rsa"
+        cls.host_credential.write_text("host-credential-canary", encoding="utf-8")
+        cls.addClassCleanup(cls.host_credential.unlink, missing_ok=True)
         with tempfile.NamedTemporaryFile(
             mode="w", prefix="raawaa-host-canary-", dir=Path.home(), delete=False,
             encoding="utf-8",
@@ -147,7 +194,7 @@ class SandboxEscapeTest(unittest.TestCase):
         os.environ["RAAWAA_PROBE_SECRET"] = SECRET_MARKER
         cls.vector = build_docker_argv(SandboxRequest(
             image=IMAGE,
-            command=("python3", "-c", PROBE.replace("HOST_CANARY_PATH", repr(str(cls.host_canary))).replace("SOURCE_CANARY_PATH", repr(str(cls.source_canary)))),
+            command=("python3", "-c", PROBE.replace("HOST_CANARY_PATH", repr(str(cls.host_canary))).replace("HOST_CREDENTIAL_PATH", repr(str(cls.host_credential))).replace("SOURCE_CANARY_PATH", repr(str(cls.source_canary)))),
             source_dir=str(cls.workspace),
             limits=SandboxLimits(memory_mb=512, cpus=1.0, pids=64, wall_seconds=90, scratch_mb=32),
         ))
@@ -180,6 +227,11 @@ class SandboxEscapeTest(unittest.TestCase):
             self.output.get("host_canary"),
         )
         self.assertNotIn(HOST_CANARY_MARKER, self.output.get("host_canary", ""))
+        self.assertTrue(
+            str(self.output.get("host_credential", "")).startswith("denied:"),
+            self.output.get("host_credential"),
+        )
+        self.assertNotIn("host-credential-canary", self.output.get("host_credential", ""))
         self.assertNotIn(SECRET_MARKER, self.output.get("own_environ", ""))
 
     def test_the_mounted_source_is_immutable(self):
@@ -205,6 +257,8 @@ class SandboxEscapeTest(unittest.TestCase):
         self.assertEqual(len(cpu_parts), 2, self.output)
         self.assertLessEqual(int(cpu_parts[0]) / int(cpu_parts[1]), 1.0)
         self.assertTrue(self.output.get("pids_limit_enforced"), self.output)
+        self.assertTrue(self.output.get("memory_limit_enforced"), self.output)
+        self.assertLessEqual(self.output.get("cpu_cores_used", 99), 1.5, self.output)
 
     def test_the_public_network_is_unreachable(self):
         self.assertTrue(
