@@ -137,7 +137,7 @@ Use the manual [D1 Migration Inventory workflow](../.github/workflows/d1-migrati
 
 Production side effects are deliberately separated from code merge:
 
-- `.github/workflows/deploy-worker.yml` is manual-only. Dispatch requires the exact confirmation string `DEPLOY_CONTROL_WORKER`; a push or PR merge does not deploy the Worker.
+- `.github/workflows/deploy-worker.yml` has **no manual dispatch trigger**. Production deployment is authorized only by a successful `Engine CI` push to `main` whose commit message contains the exact marker `[deploy-control-worker]`. A dispatch was removed because any credential holding `actions: write` can produce one, so it is not an authorization boundary; `scripts/check_workflow_dispatch_guards.py` now fails CI if a production-class workflow exposes `workflow_dispatch`.
 - The automatic production migration workflow was removed. The retained `.github/workflows/d1-migrate.yml` is manual-only and requires the exact database confirmation `raawaa-autonomous-e`.
 - A merge that changes `worker/**` or `migrations/**` therefore does not deploy code or apply schema changes by itself.
 - Do not dispatch either workflow as part of routine CI or PR completion. First review the exact main SHA, migration status, rollback/recovery plan, and non-production integration evidence; production deployment/migration requires a separate explicit operator decision.

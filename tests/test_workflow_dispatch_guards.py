@@ -2,7 +2,12 @@
 import unittest
 from pathlib import Path
 
-from scripts.check_workflow_dispatch_guards import job_blocks, workflow_violations
+from scripts.check_workflow_dispatch_guards import (
+    PRODUCTION_CLASS,
+    job_blocks,
+    production_dispatch_violations,
+    workflow_violations,
+)
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -58,6 +63,54 @@ jobs:
 """
         self.assertEqual(workflow_violations("safe.yml", no_secret), [])
         self.assertEqual(workflow_violations("push.yml", no_dispatch), [])
+
+    def test_production_class_workflow_must_not_be_dispatchable(self):
+        content = """on:
+  workflow_dispatch:
+  workflow_run:
+    workflows: ["Engine CI"]
+    types: [completed]
+jobs:
+  deploy:
+    if: github.ref == 'refs/heads/main'
+    steps:
+      - env:
+          TOKEN: ${{ secrets.DEPLOY_TOKEN }}
+"""
+        violations = production_dispatch_violations(".github/workflows/deploy-worker.yml", content)
+        self.assertEqual(len(violations), 1)
+        self.assertIn("must not expose workflow_dispatch", violations[0])
+
+    def test_production_class_workflow_passes_without_dispatch(self):
+        content = """on:
+  workflow_run:
+    workflows: ["Engine CI"]
+    types: [completed]
+jobs:
+  deploy:
+    if: github.ref == 'refs/heads/main'
+    steps:
+      - env:
+          TOKEN: ${{ secrets.DEPLOY_TOKEN }}
+"""
+        self.assertEqual(production_dispatch_violations(".github/workflows/deploy-worker.yml", content), [])
+
+    def test_non_production_workflow_may_keep_dispatch(self):
+        content = """on:
+  workflow_dispatch:
+jobs:
+  inspect:
+    steps:
+      - run: echo safe
+"""
+        self.assertEqual(production_dispatch_violations(".github/workflows/d1-migrate.yml", content), [])
+        self.assertEqual(production_dispatch_violations(".github/workflows/maintenance.yml", content), [])
+
+    def test_repository_production_workflows_have_no_dispatch(self):
+        for name in sorted(PRODUCTION_CLASS):
+            content = (ROOT / ".github" / "workflows" / name).read_text(encoding="utf-8")
+            self.assertEqual(production_dispatch_violations(f".github/workflows/{name}", content), [],
+                             f"{name} must not expose workflow_dispatch")
 
     def test_each_secret_bearing_job_is_checked_independently(self):
         content = """on:

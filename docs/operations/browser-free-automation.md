@@ -8,12 +8,13 @@ The primary replacement is **API-first execution through the existing GitHub int
 
 ## Worker deployment without a paid browser
 
-`.github/workflows/deploy-worker.yml` supports two guarded entry points:
+`.github/workflows/deploy-worker.yml` has a single guarded entry point:
 
-1. Manual `workflow_dispatch` with `confirm_deployment=DEPLOY_CONTROL_WORKER`.
-2. A browser-free `workflow_run` hand-off after **Engine CI** completes successfully for a push to `main`, but only when the resulting main commit message contains the exact marker `[deploy-control-worker]`.
+1. A browser-free `workflow_run` hand-off after **Engine CI** completes successfully for a push to `main`, but only when the resulting main commit message contains the exact marker `[deploy-control-worker]`.
 
-The second route is deliberately narrow:
+The manual `workflow_dispatch` route was removed deliberately: any credential holding `actions: write` can dispatch a workflow, so a dispatch is not an authorization boundary. `scripts/check_workflow_dispatch_guards.py` enforces this in CI.
+
+The remaining route is deliberately narrow:
 - Pull-request CI runs do not deploy.
 - Ordinary pushes to main do not deploy.
 - Failed or cancelled CI runs do not deploy.
