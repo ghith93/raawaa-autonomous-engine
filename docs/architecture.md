@@ -59,3 +59,10 @@ The D1 schema is additive in `migrations/0003_durable_quota_ledger.sql`; it does
 - Cloudflare Worker Cron independently performs stale-lease recovery every fifteen minutes. This maintenance trigger does not execute Python task handlers.
 - Durable Objects Alarms are deferred: they cannot run the current Python handlers, and Worker Cron already performs stale-lease recovery. Do not add a second scheduler or queue until a Worker-native executor is deliberately implemented and measured.
 - D1 remains the canonical task ledger. No paid hosting, inference, or account upgrade is authorized by this architecture.
+
+
+## Read-only executive brain cycle v1
+
+The first executable brain-cycle slice is implemented in `engine.brain_cycle` and exposed as `python -m engine.cli brain-cycle`. It composes the existing executive portfolio snapshot with per-task-type terminal execution-reliability observations. Samples below five are explicitly insufficient; failure shares of 20% or more at five or more samples generate investigation candidates. These are execution reliability signals, not semantic quality scores. The command is read-only: no model/provider calls, task writes/claims, queue reordering, memory writes, external writes, policy changes, or dispatch. See [Read-only Executive Brain Cycle v1](read-only-executive-brain-cycle-v1.md).
+
+This is not yet an always-on autonomous brain. It does not add a scheduler, persist cycle state, tune prompts, or execute model-assisted planning. Those increments remain gated on durable shared memory, independent reviewer evidence, frozen regression/holdout evaluation, and a verified free-only provider route.
