@@ -358,12 +358,12 @@ test("offset watchdog Cron dispatches after the primary Task Runner phase", asyn
         status: 201, headers: { "content-type": "application/json" },
       });
     }
-    if (target.includes("/actions/workflows/task-runner.yml/runs?")) {
+    if (/\/actions\/workflows\/[^/]+\/runs\?/.test(target)) {
       return new Response(JSON.stringify({ workflow_runs: [] }), {
         status: 200, headers: { "content-type": "application/json" },
       });
     }
-    if (target.endsWith("/actions/workflows/task-runner.yml/dispatches")) {
+    if (/\/actions\/workflows\/[^/]+\/dispatches$/.test(target)) {
       return new Response(null, { status: 204 });
     }
     throw new Error("unexpected_url");
@@ -382,8 +382,16 @@ test("offset watchdog Cron dispatches after the primary Task Runner phase", asyn
   } finally {
     globalThis.fetch = originalFetch;
   }
-  assert.equal(calls.length, 3);
-  assert.equal(calls[2].url.endsWith("/actions/workflows/task-runner.yml/dispatches"), true);
+  // One installation token, then a run-list read and a dispatch per watched
+  // workflow: the fallback must cover every dropped schedule, not only the
+  // task runner, and it must not re-authenticate once per workflow.
+  const tokens = calls.filter(call => call.url.endsWith("/access_tokens"));
+  const dispatches = calls.filter(call => call.url.endsWith("/dispatches"));
+  const runLists = calls.filter(call => call.url.includes("/runs?"));
+  assert.equal(tokens.length, 1);
+  assert.equal(runLists.length, 6);
+  assert.equal(dispatches.length, 6);
+  assert.ok(dispatches.some(call => call.url.endsWith("/actions/workflows/task-runner.yml/dispatches")));
   assert.ok(DB.calls.some(call => call.kind === "run" && call.values[0] === "task_runner_dispatch_intent"));
 });
 
@@ -1123,4 +1131,84 @@ test("Codespace release gate blocks even a weak configured token", async () => {
   });
   assert.equal(response.status, 503);
   assert.deepEqual(await response.json(), { error: "codespace_executor_disabled" });
+});
+
+test("a storage failure on claim tells the caller why D1 rejected the write", async () => {
+  // The 2026-11-04 outage surfaced as a bare "HTTP 503": the runner could not
+  // record a cause anywhere, so every later investigation started from zero.
+  const failure = new Error("D1_ERROR: too many SQL variables: SQLITE_ERROR\n  at claim");
+  const DB = {
+    prepare() { throw failure; },
+    async batch() { throw failure; },
+  };
+  const response = await worker.fetch(request("/v1/tasks/claim", {
+    method: "POST", token: TOKEN, body: { execution_mode: "dry_run" },
+  }), { DB, ENGINE_API_TOKEN: TOKEN });
+  const body = await response.json();
+
+  assert.equal(response.status, 503);
+  assert.equal(body.error, "storage_unavailable");
+  assert.ok(body.detail.includes("D1_ERROR"), body.detail);
+  assert.ok(!body.detail.includes("\n"), "detail must be one line");
+  assert.ok(body.detail.length <= 240, "detail must stay bounded");
+  assert.ok(!body.detail.toLowerCase().includes("bearer"), "no credentials in detail");
+});
+
+test("an enqueue storage failure also reports its reason", async () => {
+  const failure = new Error("D1_ERROR: database is locked");
+  const DB = {
+    prepare() { throw failure; },
+    async batch() { throw failure; },
+  };
+  const response = await worker.fetch(request("/v1/tasks/enqueue", {
+    method: "POST", token: TOKEN,
+    body: { task_type: "system_audit", title: "Storage probe", idempotency_key: "storage-probe-1" },
+  }), { DB, ENGINE_API_TOKEN: TOKEN });
+  const body = await response.json();
+  assert.equal(response.status, 503);
+  assert.ok(body.detail.includes("database is locked"), body.detail);
+});
+
+test("schema diagnostics report every table the Worker depends on", async () => {
+  const response = await worker.fetch(request("/v1/diagnostics/schema", {
+    method: "GET", token: TOKEN,
+  }), { DB: dbMock(), ENGINE_API_TOKEN: TOKEN });
+  const body = await response.json();
+  assert.equal(response.status, 200);
+  assert.equal(body.ok, true);
+  assert.deepEqual(body.missing, []);
+  assert.ok(body.checked.includes("task_dependencies"), "task_dependencies must be probed");
+  assert.equal(body.checked.length, 6);
+});
+
+test("schema diagnostics name the table a deploy forgot to migrate", async () => {
+  const DB = {
+    prepare(sql) {
+      if (sql.includes("FROM task_dependencies")) {
+        throw new Error("D1_ERROR: no such table: task_dependencies: SQLITE_ERROR");
+      }
+      return { async all() { return { results: [] }; } };
+    },
+    async batch() { return []; },
+  };
+  const response = await worker.fetch(request("/v1/diagnostics/schema", {
+    method: "GET", token: TOKEN,
+  }), { DB, ENGINE_API_TOKEN: TOKEN });
+  const body = await response.json();
+  assert.equal(response.status, 503);
+  assert.equal(body.ok, false);
+  assert.deepEqual(body.missing, ["task_dependencies"]);
+  assert.ok(body.reasons.task_dependencies.includes("no such table"));
+});
+
+test("schema diagnostics reject a non-GET method and an unauthenticated caller", async () => {
+  const wrongMethod = await worker.fetch(request("/v1/diagnostics/schema", {
+    method: "POST", token: TOKEN, body: {},
+  }), { DB: dbMock(), ENGINE_API_TOKEN: TOKEN });
+  assert.equal(wrongMethod.status, 405);
+
+  const unauthenticated = await worker.fetch(request("/v1/diagnostics/schema", {
+    method: "GET", token: "wrong-token",
+  }), { DB: dbMock(), ENGINE_API_TOKEN: TOKEN });
+  assert.equal(unauthenticated.status, 401);
 });

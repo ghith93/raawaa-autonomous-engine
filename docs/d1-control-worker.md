@@ -26,8 +26,8 @@ API token as an application bearer token.
 
 Deployment lifecycle (verified against the workflow files on 2026-11-03):
 
-- `.github/workflows/deploy-worker.yml` is **manual-dispatch only**. It does not deploy on pushes or merges to `main`.
-- The dispatch input `confirm_deployment` must equal `DEPLOY_CONTROL_WORKER`. The workflow checks `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`, and the dedicated `ENGINE_API_TOKEN` secret, installs the application bearer token as a Worker secret, then deploys the reviewed `main` revision with Wrangler.
+- `.github/workflows/deploy-worker.yml` is **merge-marker only**. It does not expose `workflow_dispatch` and deploys only when a successful `Engine CI` run for a push to `main` carries the exact marker `[deploy-control-worker]` in the commit message. Ordinary pushes and PR CI runs do not deploy.
+- The confirmation step requires the derived value `DEPLOY_CONTROL_WORKER`, which is produced only from the reviewed commit marker. The workflow checks `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`, and the dedicated `ENGINE_API_TOKEN` secret, installs the application bearer token as a Worker secret, then deploys the reviewed `main` revision with Wrangler.
 - `.github/workflows/d1-migrate.yml` is also **manual-dispatch only**. Its `confirm_database` input must equal `raawaa-autonomous-e`; it first lists remote migration status and then applies reviewed migrations to that explicitly confirmed production D1 database.
 - Neither Worker deployment nor production D1 migration is automatic after a merge. Treat them as separate production actions with separate explicit confirmations.
 

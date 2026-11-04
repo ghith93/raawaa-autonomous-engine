@@ -200,11 +200,15 @@ class D1PaperLedgerTests(unittest.TestCase):
                 occurred_at=__import__("datetime").datetime(2026, 11, 2), payload={},
             )
 
-    def test_production_deploy_and_migration_are_manual_only(self):
+    def test_production_deploy_is_merge_marker_only_and_migration_is_manual_only(self):
         deploy = (ROOT / ".github" / "workflows" / "deploy-worker.yml").read_text(encoding="utf-8")
         manual_migrate = (ROOT / ".github" / "workflows" / "d1-migrate.yml").read_text(encoding="utf-8")
-        self.assertIn("workflow_dispatch:", deploy)
+        # Production deployment must not be dispatchable: any credential holding
+        # actions:write can dispatch, so a dispatch is not an authorization boundary.
+        self.assertNotIn("workflow_dispatch:", deploy)
+        self.assertIn("workflow_run:", deploy)
         self.assertIn("DEPLOY_CONTROL_WORKER", deploy)
+        self.assertIn("[deploy-control-worker]", deploy)
         self.assertNotIn("  push:", deploy)
         self.assertIn("workflow_dispatch:", manual_migrate)
         self.assertIn("raawaa-autonomous-e", manual_migrate)

@@ -19,7 +19,7 @@
 | Apply D1 Migrations | `d1-migrate.yml` | **Database write** | Inspect target and environment before use. Use Staging only for new migrations. Never assume the target from the workflow name. |
 | D1 Migration Inventory (Read Only) | `d1-migration-inventory.yml` | Read-only schema inventory | Does not apply migrations. |
 | D1 Staging Inventory (Read Only) | `d1-staging-inventory.yml` | Read-only staging inventory | Verifies isolated Staging target/schema. |
-| Deploy Control Worker | `deploy-worker.yml` | **Production deployment** | Requires `confirm_deployment=DEPLOY_CONTROL_WORKER`; after PR #432, preserve dashboard vars and fail if watchdog is not ready. |
+| Deploy Control Worker | `deploy-worker.yml` | **Production deployment** | No manual dispatch; authorized only by a `main` push whose commit message contains `[deploy-control-worker]`. After PR #432, preserve dashboard vars and fail if watchdog is not ready. |
 | V2 Flash Swap Solidity Tests | `flash-swap-solidity.yml` | Test/CI | Solidity tests; not a deployment workflow. |
 | Groq API Connection Check | `groq-connection-check.yml` | Read-only provider check | Authentication/catalog only; does not prove free inference success. |
 | One-shot Groq Free inference Staging smoke | `groq-free-inference-staging-smoke.yml` | **One-shot provider inference in Staging** | Uses isolated Staging and ephemeral bearer credentials; intended to revoke them. Run only after inspecting exact script and quota evidence. |

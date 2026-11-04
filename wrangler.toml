@@ -13,4 +13,12 @@ migrations_dir = "migrations"
 crons = ["*/15 * * * *", "1,6,11,16,21,26,31,36,41,46,51,56 * * * *"]
 
 [vars]
+# The watchdog opt-in lives here, not in the Cloudflare dashboard.
+#
+# It was dashboard-managed once and went missing: the deploy still uploaded, the
+# post-deploy readiness gate still ran, and the only symptom was a fallback
+# scheduler that silently never dispatched. A non-secret switch that decides
+# whether a safety net is armed belongs in version control, where a change is a
+# reviewed diff and cannot drift from the code that reads it.
+GITHUB_APP_WATCHDOG_ENABLED = "enabled"
 QUOTA_ROUTE_LIMITS_JSON = '''{"groq:primary:openai/gpt-oss-20b":{"enabled":false,"minute_request_limit":30,"minute_token_limit":8000,"daily_request_limit":1000,"daily_token_limit":200000,"monthly_request_limit":10000,"monthly_token_limit":2000000,"per_task_request_limit":3,"per_task_token_limit":16000},"groq:primary:openai/gpt-oss-120b":{"enabled":false,"minute_request_limit":30,"minute_token_limit":8000,"daily_request_limit":1000,"daily_token_limit":200000,"monthly_request_limit":10000,"monthly_token_limit":2000000,"per_task_request_limit":3,"per_task_token_limit":16000},"groq:primary:qwen/qwen3.8-27b":{"enabled":false,"minute_request_limit":30,"minute_token_limit":8000,"daily_request_limit":1000,"daily_token_limit":200000,"monthly_request_limit":10000,"monthly_token_limit":2000000,"per_task_request_limit":3,"per_task_token_limit":16000}}'''
