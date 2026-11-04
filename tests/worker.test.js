@@ -96,6 +96,58 @@ test("enqueue validates input and uses parameterized batch statements", async ()
   assert.match(batch.statements[1].sql, /INSERT INTO audit_log/);
 });
 
+test("enqueue persists validated priority and existing dependency IDs", async () => {
+  const DB = dbMock({ dependencyRows: [{ id: "parent-task" }] });
+  const response = await worker.fetch(request("/v1/tasks/enqueue", {
+    method: "POST",
+    body: {
+      task_type: "code_review", title: "Dependent review", idempotency_key: "child-key",
+      priority: 75, depends_on: ["parent-task"],
+    },
+  }), { DB, ENGINE_API_TOKEN: TOKEN });
+  assert.equal(response.status, 201);
+  const batch = DB.calls.find(x => x.kind === "batch" &&
+    x.statements[0].sql.includes("INSERT OR IGNORE INTO tasks"));
+  assert.match(batch.statements[0].sql, /priority,depends_on/);
+  assert.equal(batch.statements[0].values.at(-2), 75);
+  assert.equal(batch.statements[0].values.at(-1), '["parent-task"]');
+  assert.match(batch.statements[1].values[0], /"priority":75/);
+  assert.match(batch.statements[1].values[0], /"depends_on":\["parent-task"\]/);
+});
+
+test("enqueue rejects invalid priority and missing dependencies before writes", async () => {
+  const invalidPriority = await worker.fetch(request("/v1/tasks/enqueue", {
+    method: "POST",
+    body: { task_type: "research", title: "Bad priority", idempotency_key: "bad-priority", priority: 101 },
+  }), { DB: dbMock(), ENGINE_API_TOKEN: TOKEN });
+  assert.equal(invalidPriority.status, 400);
+  assert.deepEqual(await invalidPriority.json(), { error: "invalid_task" });
+
+  const missingDependencyDB = dbMock();
+  const missingDependency = await worker.fetch(request("/v1/tasks/enqueue", {
+    method: "POST",
+    body: {
+      task_type: "research", title: "Missing dependency", idempotency_key: "missing-dependency",
+      depends_on: ["not-present"],
+    },
+  }), { DB: missingDependencyDB, ENGINE_API_TOKEN: TOKEN });
+  assert.equal(missingDependency.status, 400);
+  assert.deepEqual(await missingDependency.json(), { error: "unknown_dependency" });
+  assert.equal(missingDependencyDB.calls.some(x => x.kind === "batch"), false);
+});
+
+test("enqueue rejects duplicate or malformed dependency arrays", async () => {
+  const response = await worker.fetch(request("/v1/tasks/enqueue", {
+    method: "POST",
+    body: {
+      task_type: "research", title: "Duplicate dependencies", idempotency_key: "duplicate-deps",
+      depends_on: ["parent-1", "parent-1"],
+    },
+  }), { DB: dbMock(), ENGINE_API_TOKEN: TOKEN });
+  assert.equal(response.status, 400);
+  assert.deepEqual(await response.json(), { error: "invalid_task" });
+});
+
 test("enqueue rejects malformed task payload", async () => {
   const response = await worker.fetch(request("/v1/tasks/enqueue", {
     method: "POST",
@@ -117,6 +169,25 @@ test("task invocation lifecycle route is authenticated", async () => {
   assert.equal(response.status, 401);
 });
 
+
+test("claim orders by priority and requires live-executed dependencies", async () => {
+  const DB = dbMock({ normalClaim: {
+    id: "priority-task", status: "running", attempts: 1, execution_mode: "live_inference",
+    priority: 90, depends_on: '["parent-task"]',
+  }});
+  const response = await worker.fetch(request("/v1/tasks/claim", {
+    method: "POST", body: { execution_mode: "live_inference" },
+  }), { DB, ENGINE_API_TOKEN: TOKEN });
+  assert.equal(response.status, 200);
+  const claim = DB.calls.find(x => x.kind === "first" && x.sql.includes("UPDATE tasks AS candidate"));
+  assert.match(claim.sql, /ORDER BY candidate_task\.priority DESC,candidate_task\.created_at/);
+  assert.match(claim.sql, /json_each\(candidate_task\.depends_on\)/);
+  assert.match(claim.sql, /parent\.execution_mode!='live_inference'/);
+  const dependencyBatch = DB.calls.find(x => x.kind === "batch" &&
+    x.statements[0].sql.includes("UPDATE tasks AS child"));
+  assert.ok(dependencyBatch);
+  assert.match(dependencyBatch.statements[1].sql, /task_blocked_dependency/);
+});
 
 test("claim endpoint is authenticated and returns an empty queue safely", async () => {
   const DB = dbMock();
