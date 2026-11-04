@@ -118,6 +118,31 @@ test("allowed read-only commands send a bounded reply and record delivery", asyn
   } finally { globalThis.fetch = originalFetch; }
 });
 
+test("/start and /help provide the same read-only command guidance to an authorized human", async () => {
+  const originalFetch = globalThis.fetch;
+  const replies = [];
+  globalThis.fetch = async (_url, init) => {
+    replies.push(JSON.parse(init.body));
+    return new Response(JSON.stringify({ ok: true }), { status: 200 });
+  };
+  try {
+    const DB = dbMock();
+    for (const [update_id, text] of [[90, "/start"], [91, "/help"]]) {
+      const response = await handleTelegramWebhook(
+        request({ update_id, message: { chat: { id: 12345, type: "private" }, text } }),
+        { ...ENV, DB }, new URL("https://engine.example/v1/telegram/webhook"),
+      );
+      assert.equal((await response.json()).delivery_status, "sent");
+    }
+    assert.equal(replies.length, 2);
+    assert.equal(replies[0].text, replies[1].text);
+    for (const command of ["/start", "/help", "/status", "/report"]) {
+      assert.ok(replies[0].text.includes(command));
+    }
+    assert.equal(DB.calls.filter(call => call.kind === "all").length, 0);
+  } finally { globalThis.fetch = originalFetch; }
+});
+
 test("Telegram network ambiguity is recorded and never causes webhook replay", async () => {
   const originalFetch = globalThis.fetch;
   globalThis.fetch = async () => { throw new Error("network timeout"); };

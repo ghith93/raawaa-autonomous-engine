@@ -1,17 +1,10 @@
 name: Register Telegram webhook
 
-# Turns one owner action — adding the bot token as a repository secret — into a
-# working /status on a phone.
-#
-# The owner's remaining steps are the two that genuinely cannot be delegated:
-# create the bot with @BotFather, and send it one message. Everything after that
-# is here: discover the private chat id from the pending update, generate the
-# webhook secret, install all three values as Worker secrets, point Telegram at
-# the Worker, and prove the Worker accepts a signed update.
-#
-# Manual dispatch on purpose: it is an operational action against production, it
-# must not run on every push, and its confirmation input names the database it
-# touches (the same pattern as d1-migrate.yml).
+# `diagnose` is read-only. `repair` rotates the webhook secret, preserves the
+# current allowlist, refuses a known non-empty queue, does not explicitly drop
+# pending updates, and sets the read-only command menu. It never infers an owner
+# from an unsolicited private message.
+# A confirmed repair is a production operation, restricted to reviewed main.
 
 on:
   workflow_dispatch:
@@ -20,11 +13,14 @@ on:
         description: "Type REGISTER_TELEGRAM_WEBHOOK to confirm"
         required: true
         type: string
-      chat_id:
-        description: "Optional numeric chat id; skips discovery (use after a webhook has already drained the queue)"
-        required: false
-        default: ""
-        type: string
+      mode:
+        description: "Read-only diagnostics or repair existing configuration"
+        required: true
+        type: choice
+        default: diagnose
+        options:
+          - diagnose
+          - repair
 
 permissions:
   contents: read
@@ -34,18 +30,19 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  WORKER_URL: https://raawaa-autonomous-engine-control.ghith-shikhkhaled.workers.dev
+  WEBHOOK_URL: https://raawaa-autonomous-engine-control.ghith-shikhkhaled.workers.dev/v1/telegram/webhook
+  EXPECTED_BOT: Raawaa_control_bot
 
 jobs:
   register:
-    # A dispatch can be issued from any branch by anyone holding actions:write,
-    # so the ref is pinned as well: only reviewed main may touch production.
     if: github.ref == 'refs/heads/main' && inputs.confirm == 'REGISTER_TELEGRAM_WEBHOOK'
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 12
     steps:
       - name: Check out reviewed main
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
       - name: Set up Node.js
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
         with:
@@ -54,164 +51,184 @@ jobs:
         uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7
         with:
           python-version: "3.12"
-      - name: Validate required secrets
+      - name: Validate required repository secrets
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         run: |
-          # Name the missing secret, not just "a secret is missing": the owner's
-          # fix differs per case (never added, wrong name, environment secret,
-          # wrong repository), and a blind red X answers none of them. Presence is
-          # tested, never printed.
-          missing=0
-          require() {
-            name="$1"; hint="$2"
+          set -euo pipefail
+          for name in TELEGRAM_BOT_TOKEN CLOUDFLARE_API_TOKEN CLOUDFLARE_ACCOUNT_ID; do
             if [ -z "${!name:-}" ]; then
-              echo "::error title=Missing repository secret::$name is not configured. $hint"
-              missing=$((missing + 1))
+              echo "::error title=Missing repository secret::$name is not configured."
+              exit 1
             fi
-          }
-          require TELEGRAM_BOT_TOKEN "Create the bot with @BotFather, send it one message, then add the token as a repository secret."
-          require CLOUDFLARE_API_TOKEN "Needed to install Worker secrets; it must be a repository secret, not an environment secret."
-          require CLOUDFLARE_ACCOUNT_ID "Needed together with CLOUDFLARE_API_TOKEN."
-          if [ "$missing" -ne 0 ]; then
-            echo "::error title=Registration not attempted::$missing required secret name(s) missing (see the annotations above)."
-            exit 1
-          fi
-      - name: Discover the private chat and generate the webhook secret
+          done
+      - name: Inspect bot and Telegram webhook without changing them
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          MODE: ${{ inputs.mode }}
         run: |
-          set -uo pipefail
-          CHAT_ID="${{ inputs.chat_id }}"
-          if [ -n "$CHAT_ID" ] && ! printf '%s' "$CHAT_ID" | grep -Eq '^-?[0-9]+(,-?[0-9]+)*$'; then
-            echo "::error title=Invalid chat_id::chat_id must be numeric (or comma-separated)"
+          set -euo pipefail
+          if output=$(python3 scripts/telegram_bootstrap.py --diagnose --url "$WEBHOOK_URL" --expected-bot "$EXPECTED_BOT" 2>&1); then
+            printf '%s\n' "$output" > /tmp/telegram-diagnostic.json
+          else
+            echo "::error title=Telegram diagnostics::$output"
             exit 1
           fi
-
-          run_bootstrap() {
-            python3 scripts/telegram_bootstrap.py --url "$WORKER_URL" --env-file /tmp/telegram.env "$@"
-          }
-
-          if [ -n "$CHAT_ID" ]; then
-            run_bootstrap --chat-id "$CHAT_ID" || exit 1
-            exit 0
+          python3 - <<'PY'
+          import json, os
+          data = json.load(open('/tmp/telegram-diagnostic.json', encoding='utf-8'))
+          message = (f"bot={data['bot']}, webhook_matches={data['webhook_matches']}, "
+                     f"pending_updates={data['pending_updates']}, last_delivery_error={data['last_delivery_error']}; "
+                     "webhook secret and owner authorization are unknown")
+          print(f"::notice title=Telegram diagnostics::{message}")
+          if os.environ['MODE'] == 'repair' and data['pending_updates']:
+              print('::error title=Pending updates::Repair refuses to redirect a known non-empty queue; investigate before changing production.')
+              raise SystemExit(1)
+          PY
+      - name: Check unsigned Worker configuration gate without sending a message
+        env:
+          MODE: ${{ inputs.mode }}
+        run: |
+          set -euo pipefail
+          if output=$(python3 scripts/telegram_bootstrap.py --probe-unsigned --url "$WEBHOOK_URL" 2>&1); then
+            echo "::notice title=Worker readiness::Unsigned request rejected with HTTP 401; configuration is structurally valid at this edge, but owner authorization is unknown."
+          elif [ "$MODE" = repair ]; then
+            echo "::error title=Worker readiness::$output"
+            exit 1
+          else
+            echo "::warning title=Worker readiness::$output"
           fi
-
-          if output="$(run_bootstrap 2>&1)"; then
-            printf '%s\n' "$output" | head -n 20
-            exit 0
+      - name: Check Worker allowlist secret presence only
+        id: worker_secrets
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          MODE: ${{ inputs.mode }}
+        run: |
+          set -euo pipefail
+          if ! npx --yes wrangler@4.156.1 secret list --format json --config wrangler.toml > /tmp/telegram-worker-secrets.json; then
+            echo "::error title=Worker secret inventory::Unable to list Worker secret names. No secret value was requested."
+            exit 1
           fi
-          printf '%s\n' "$output" | tail -n 5 | sed 's/^/::warning title=Discovery::/'
-
-          # Telegram has nothing queued — usually because a webhook already drained
-          # it. The Worker has been receiving this owner's messages, so its receipts
-          # table knows the chat id even when Telegram does not. That is the
-          # difference between "the owner must message the bot again" and "we finish
-          # this without them".
-          recovered="$(npx --yes wrangler@4.156.1 d1 execute raawaa-autonomous-e --remote \
-            --config wrangler.toml --json \
-            --command "SELECT chat_id FROM telegram_update_receipts ORDER BY created_at DESC LIMIT 1" \
-            2>/dev/null | jq -r 'if type == "array" then .[0].results else .results end | (.[0].chat_id // "")' 2>/dev/null || true)"
-
-          if [ -z "$recovered" ]; then
-            # Nothing to discover anywhere: Telegram has no queue and the Worker has
-            # never received a message. The Worker still knows its allowlist (if one
-            # was ever installed), so the useful move is to re-arm the webhook with a
-            # fresh secret and let the next real message prove the path end to end.
-            echo "::notice title=Rearming without discovery::No chat id anywhere; rotating the secret and re-registering, leaving the allowlist as it is."
-            run_bootstrap --rearm-only || exit 1
-            echo "::warning title=Allowlist unverified::If the Worker has no allowlist yet, it will ignore every message. Send the bot one message, then run this again."
-            exit 0
-          fi
-          echo "::notice title=Chat id recovered::from telegram_update_receipts, so the owner does not need to message the bot again."
-          run_bootstrap --chat-id "$recovered"
-
-      - name: Install the three Worker secrets
+          python3 - <<'PY'
+          import json, os
+          items = json.load(open('/tmp/telegram-worker-secrets.json', encoding='utf-8'))
+          if not isinstance(items, list):
+              raise SystemExit('Unexpected Worker secret inventory shape')
+          present = any(isinstance(item, dict) and item.get('name') == 'TELEGRAM_ALLOWED_CHAT_IDS' for item in items)
+          print(f'::notice title=Worker allowlist::secret_present={str(present).lower()}; value and owner identity were not read')
+          if not present and os.environ['MODE'] == 'repair':
+              print('::error title=Owner authorization missing::Repair will not guess an allowed chat or replace an absent allowlist.')
+              raise SystemExit(1)
+          PY
+      - name: Inspect aggregate Telegram receipt counts
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         run: |
           set -euo pipefail
-          # Values go from the 0600 file to wrangler's stdin; they never appear in
-          # argv, in the workflow log, or in an error message.
-          while IFS='=' read -r key value; do
-            case "$key" in
-              TELEGRAM_BOT_TOKEN|TELEGRAM_WEBHOOK_SECRET|TELEGRAM_ALLOWED_CHAT_IDS) ;;
-              *) echo "Unexpected key in the env file: $key"; exit 1 ;;
-            esac
-            # An empty value means "leave the Worker's existing value alone" — used
-            # by rearm mode, where the allowlist is already correct.
-            if [ -z "$value" ]; then
-              echo "::notice title=Left untouched::$key keeps its current value on the Worker"
-              continue
-            fi
-            printf '%s' "$value" | npx --yes wrangler@4.156.1 secret put "$key" --config wrangler.toml
-          done < /tmp/telegram.env
-      - name: Point Telegram at the Worker
-        env:
-          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-        run: |
-          set -euo pipefail
-          secret=$(grep '^TELEGRAM_WEBHOOK_SECRET=' /tmp/telegram.env | cut -d= -f2-)
-          chats=$(grep '^TELEGRAM_ALLOWED_CHAT_IDS=' /tmp/telegram.env | cut -d= -f2-)
-          if [ -z "$chats" ]; then
-            # Rearm mode already called setWebhook while discovering that there was
-            # nothing to discover. Re-registering here would need a chat id we have
-            # deliberately not got, and the webhook is already pointed at us.
-            echo "::notice title=Already registered::rearm mode set the webhook without touching the allowlist"
-            python3 scripts/telegram_bootstrap.py --check --url "$WORKER_URL/v1/telegram/webhook" \
-              | tee /tmp/registration.json
+          if ! npx --yes wrangler@4.156.1 d1 execute raawaa-autonomous-e --remote --config wrangler.toml --json \
+            --command "SELECT COUNT(*) AS total, COALESCE(SUM(CASE WHEN delivery_status='sent' THEN 1 ELSE 0 END),0) AS sent FROM telegram_update_receipts" \
+            > /tmp/telegram-receipt-counts.json 2>/dev/null; then
+            echo "::warning title=Receipt counts unavailable::D1 aggregate read failed; no identifiers or messages were requested."
             exit 0
           fi
-          python3 scripts/telegram_bootstrap.py --register --url "$WORKER_URL/v1/telegram/webhook" \
-            --secret "$secret" --chat-id "$chats" | tee /tmp/registration.json
           python3 - <<'PY'
           import json
-          state = json.load(open("/tmp/registration.json"))
-          webhook = state.get("webhook") or {}
-          if not str(webhook.get("url", "")).startswith("https://"):
-              raise SystemExit("Telegram did not accept the webhook URL")
-          print("webhook registered:", webhook["url"])
+          data = json.load(open('/tmp/telegram-receipt-counts.json', encoding='utf-8'))
+          result = data[0] if isinstance(data, list) and data else data
+          rows = result.get('results', []) if isinstance(result, dict) else []
+          if not rows or not isinstance(rows[0], dict):
+              print('::warning title=Receipt counts unavailable::Unexpected D1 response shape')
+          else:
+              total, sent = rows[0].get('total'), rows[0].get('sent')
+              if not all(isinstance(n, int) and not isinstance(n, bool) and n >= 0 for n in (total, sent)):
+                  raise SystemExit('Invalid aggregate receipt counts')
+              print(f'::notice title=Telegram receipts::total={total}, sent={sent}; aggregates do not prove the owner identity')
           PY
-      - name: Prove the Worker accepts a signed update
+      - name: Configure and verify read-only command menu
+        if: inputs.mode == 'repair'
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
         run: |
           set -euo pipefail
-          secret=$(grep '^TELEGRAM_WEBHOOK_SECRET=' /tmp/telegram.env | cut -d= -f2-)
-          body='{"update_id":1,"message":{"message_id":1,"date":0,"chat":{"id":0,"type":"private"},"text":"/help"}}'
-          # A chat id that is not on the allowlist must be refused as unauthorized
-          # or ignored — never answered. A 503 means the Worker is deployed without
-          # the secrets, which is the failure this step exists to catch.
-          # A secret installed seconds ago may not be live on every edge isolate
-          # yet, so a single 401 is not a verdict. Retry with backoff and report
-          # each attempt; only the final answer decides the run.
-          code="000"
-          reply=""
-          for attempt in 1 2 3 4 5 6; do
-            code=$(curl -s -o /tmp/reply.json -w '%{http_code}' -X POST "$WORKER_URL/v1/telegram/webhook" \
-              -H "content-type: application/json" \
-              -H "x-telegram-bot-api-secret-token: $secret" \
-              --data "$body" || echo "000")
-            reply=$(tr -d '\n' < /tmp/reply.json 2>/dev/null | cut -c1-300)
-            echo "attempt $attempt: HTTP $code $reply"
-            case "$code" in 2*) break ;; esac
-            sleep $((attempt * 5))
-          done
-          echo "::notice title=Worker probe::HTTP $code — $reply"
-          case "$code" in
-            2*) ;;
-            503) echo "::error title=webhook_disabled::The Worker is deployed without its Telegram secrets."; exit 1 ;;
-            401) echo "::error title=Secret mismatch::The Worker still rejects the secret after 6 attempts and 105 seconds. The value installed by wrangler is not the value the Worker reads."; exit 1 ;;
-            404) echo "::error title=Route missing::This Worker deployment has no /v1/telegram/webhook route; redeploy main with [deploy-control-worker]."; exit 1 ;;
-            000) echo "::error title=Unreachable::$WORKER_URL did not answer."; exit 1 ;;
-            *) echo "::error title=Unexpected status::The Worker answered HTTP $code — $reply"; exit 1 ;;
-          esac
-      - name: Summary
+          if output=$(python3 scripts/telegram_bootstrap.py --configure-commands --expected-bot "$EXPECTED_BOT" 2>&1); then
+            echo "::notice title=Telegram commands::Menu read back successfully: /start, /help, /status, /report. No messages sent."
+          else
+            echo "::error title=Telegram command setup::$output"
+            exit 1
+          fi
+      - name: Prepare a new webhook secret without changing Telegram
+        if: inputs.mode == 'repair'
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
         run: |
-          echo "### Telegram webhook registered" >> "$GITHUB_STEP_SUMMARY"
-          echo "" >> "$GITHUB_STEP_SUMMARY"
-          echo "Send /status to the bot from an allowed chat." >> "$GITHUB_STEP_SUMMARY"
-          echo "The token, the generated secret and the chat id were written only to Worker secrets." >> "$GITHUB_STEP_SUMMARY"
+          set -euo pipefail
+          if output=$(python3 scripts/telegram_bootstrap.py --rearm-only --url "$WEBHOOK_URL" \
+            --expected-bot "$EXPECTED_BOT" --env-file /tmp/telegram.env 2>&1); then
+            echo "::notice title=Preparation::Prepared private file; existing allowlist remains untouched."
+          else
+            echo "::error title=Telegram preparation::$output"
+            exit 1
+          fi
+      - name: Install bot and webhook secrets; preserve the allowlist
+        if: inputs.mode == 'repair'
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          while IFS='=' read -r key value; do
+            case "$key" in
+              TELEGRAM_BOT_TOKEN|TELEGRAM_WEBHOOK_SECRET) ;;
+              TELEGRAM_ALLOWED_CHAT_IDS)
+                [ -z "$value" ] || { echo "::error::Unexpected allowlist change in rearm mode"; exit 1; }
+                continue ;;
+              *) echo "::error::Unexpected prepared key"; exit 1 ;;
+            esac
+            [ -n "$value" ] || { echo "::error::Empty prepared secret"; exit 1; }
+            printf '%s' "$value" | npx --yes wrangler@4.156.1 secret put "$key" --config wrangler.toml
+          done < /tmp/telegram.env
+      - name: Register and verify the exact webhook URL
+        if: inputs.mode == 'repair'
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+        run: |
+          set -euo pipefail
+          if output=$(python3 scripts/telegram_bootstrap.py --register-prepared --url "$WEBHOOK_URL" \
+            --expected-bot "$EXPECTED_BOT" --env-file /tmp/telegram.env 2>&1); then
+            echo "::notice title=Telegram webhook::Exact destination verified; pending updates were not explicitly dropped."
+          else
+            echo "::error title=Telegram registration::$output"
+            exit 1
+          fi
+      - name: Verify a signed ignored update without sending a message
+        if: inputs.mode == 'repair'
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+        run: |
+          set -euo pipefail
+          if output=$(python3 scripts/telegram_bootstrap.py --probe-prepared --url "$WEBHOOK_URL" \
+            --env-file /tmp/telegram.env 2>&1); then
+            echo "::notice title=Worker probe::HTTP 200 and exact ignored response; owner authorization and delivery remain unverified."
+          else
+            echo "::error title=Worker probe::$output"
+            exit 1
+          fi
+      - name: Summary
+        if: always()
+        env:
+          MODE: ${{ inputs.mode }}
+        run: |
+          {
+            echo "### Telegram $MODE"
+            echo ""
+            echo "A matching URL or a signed synthetic probe does not prove the owner's chat is authorized or that a reply was delivered."
+            echo "Repair preserves the existing allowlist and does not explicitly drop pending updates."
+            echo "If a repair fails between secret installation and registration, retry repair to install and register a fresh matching secret."
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Remove prepared secrets
+        if: always()
+        run: rm -f /tmp/telegram.env

@@ -52,8 +52,8 @@ function commandOf(text) {
 }
 
 async function commandReply(command, env) {
-  if (command === "help") {
-    return "Raawaa Engine — read-only controls\n/help — show commands\n/status — task queue health\n/report — paper research event counts";
+  if (command === "start" || command === "help") {
+    return "Raawaa Engine — read-only controls\n/start, /help — show commands\n/status — task queue health\n/report — paper research event counts";
   }
   if (command === "status") {
     const rows = await env.DB.prepare("SELECT status,COUNT(*) AS count FROM tasks GROUP BY status").all();

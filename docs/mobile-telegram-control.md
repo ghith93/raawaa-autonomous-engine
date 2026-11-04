@@ -1,46 +1,68 @@
-# Mobile Telegram control (deployed; owner verification pending)
+# Mobile Telegram control
 
 ## Scope
 
-The Worker-native webhook provides a mobile-operated, cloud-executed read-only command path. It deliberately does not execute shell commands, invoke arbitrary CLI operations, start scans, alter strategy settings, access wallets, place orders, sign transactions, swap assets, or submit transactions.
+The Worker-native webhook provides a mobile-operated, cloud-executed read-only
+command path. It does not execute shell commands, invoke arbitrary CLI operations,
+start scans, alter strategy settings, access wallets, place orders, sign
+transactions, swap assets, or submit transactions. The existing Python
+long-polling controller is not replaced or started by this feature.
 
-Supported commands:
-- `/help`
+Commands in the source (deployment must be verified separately):
+
+- `/start`: alias for help.
+- `/help`: show the read-only controls.
 - `/status`: counts existing task states in D1.
 - `/report`: counts append-only paper research event types.
 
-The existing Python long-polling controller is not replaced or started by this feature.
-
 ## Security contract
 
-The Worker requires three operator-owned settings:
-- `TELEGRAM_WEBHOOK_SECRET`: Telegram webhook secret token (16–256 characters; only letters, digits, underscore and hyphen).
+The route returns `503 webhook_disabled` until all three operator-owned settings
+are structurally valid as Cloudflare Worker secrets/variables:
+
+- `TELEGRAM_WEBHOOK_SECRET`: Telegram webhook secret (16–256 letters, digits,
+  underscores or hyphens).
 - `TELEGRAM_BOT_TOKEN`: Telegram bot token.
-- `TELEGRAM_ALLOWED_CHAT_IDS`: comma-separated positive private-chat IDs.
+- `TELEGRAM_ALLOWED_CHAT_IDS`: comma-separated numeric private-chat IDs.
 
-The Worker validates the `X-Telegram-Bot-Api-Secret-Token` header, requires a private chat in the allowlist, and additionally requires `from.id == chat.id` with `is_bot === false`. It caps webhook JSON at 8 KiB and limits each allowlisted chat to ten accepted updates per rolling minute. Update IDs are unique in D1; duplicate deliveries are acknowledged without sending a second reply. Delivery is recorded as `sent`, `failed`, or `unknown`. A network timeout is ambiguous and is never automatically replayed because Telegram may already have accepted the message.
+The Worker validates the `X-Telegram-Bot-Api-Secret-Token` header, requires a
+private chat in the allowlist, and requires `from.id == chat.id` with
+`is_bot === false`. It caps webhook JSON at 8 KiB and limits each allowlisted
+chat to ten accepted updates per rolling minute. Update IDs are unique in D1;
+duplicate deliveries are acknowledged without a second reply. Delivery is
+recorded as `sent`, `failed`, or `unknown`. A network timeout is ambiguous and
+is never automatically replayed because Telegram may already have accepted the
+message. Do not publish secret values or private chat IDs.
 
-## Current production state (2026-11-04)
+## Historical production evidence and recovery
 
-- Migration `0005_telegram_webhook_receipts.sql` is applied to production D1.
-- Control Worker production version: `b38e46fc-2526-458b-81a8-879713ec1e52`.
-- The reviewed registration workflow installed the Telegram Worker secrets and registered the webhook.
-- The signed synthetic probe returned HTTP 200 with an ignored update. Because the probe deliberately uses a non-owner chat and omits a real sender, it confirms that the webhook secret/configuration path was accepted at that time; it does **not** prove that the configured allowlist contains the owner's actual chat ID or that a real owner command receives a reply.
-- No secret values or chat IDs are recorded in this document. Do not paste bot tokens, webhook secrets, or allowlist values into chat or commits.
+Migration `0005_telegram_webhook_receipts.sql` was applied to production D1.
+Production deployment [#41888263905](https://github.com/ghith93/raawaa-autonomous-engine/actions/runs/41888263905)
+succeeded on source SHA `148cb669d219c9cc4a346336d0c73f0cf4c848b8`. A later
+registration run [#41891392653](https://github.com/ghith93/raawaa-autonomous-engine/actions/runs/41891392653)
+returned HTTP 200 for a signed synthetic ignored update. This verified that
+probe's authentication/configuration path at that time, not the live Telegram
+webhook destination, owner's allowlist membership, command menu or delivery of a
+real reply. The deployed source and actual state must be rechecked before use.
 
-## Safe owner discovery and recovery
+The old registration workflow could set the Worker **origin**, not the required
+`/v1/telegram/webhook` path, and its check accepted any non-empty URL. It could
+also delete the webhook for discovery and drop pending updates. **Do not rerun
+it.** Earlier documentation describing a pause/discovery flag as available on
+main was ahead of the actual unmerged implementation.
 
-The registration script and workflow now fail more safely:
-
-1. Supplying a verified positive `chat_id` bypasses `getUpdates`; it does not pause or delete an existing webhook.
-2. Default discovery refuses to delete an existing webhook automatically.
-3. If the owner ID is unknown, the owner can explicitly set `replace_webhook_for_discovery=true`. This pauses the webhook while preserving pending updates. If no update is queued yet, send `/start` to the correct bot and rerun the workflow with the same option.
-4. Discovery accepts only one unique private human sender where `from.id == chat.id` and `is_bot === false`; it refuses multiple candidate owners.
-5. Re-registration preserves pending updates (`drop_pending_updates=false)).
-6. The production registration workflow is restricted to reviewed `main` and the repository owner account.
-
-A successful webhook registration is not the same as verified owner access. Do not declare Telegram operational until a real `/status` command from the owner receives a reply.
+See [the recovery guide](operations/owner-actions.md) for the replacement
+workflow's read-only diagnostic mode and separately confirmed repair mode.
+Review and merge it before dispatching it. The proposed repair preserves the
+existing allowlist, refuses a known non-empty queue, never derives ownership from
+an arbitrary sender, does not delete the webhook to discover a chat and does not
+explicitly drop pending updates. Telegram updates can arrive between checks and
+registration; unauthorized ones may still be delivered and ignored. A synthetic
+ignored probe verifies only the handler contract, not owner identity or delivery.
 
 ## Validation
 
-Run `npm run test:worker`, `python -m unittest tests.test_telegram_bootstrap`, and the repository's full Engine CI. Tests stub Telegram's HTTP API; they do not contact Telegram. The explicit pause/discovery workflow is a production operation and must only be run by the owner when needed.
+Run `npm run test:worker`, the Python suite, and the full Engine CI. Tests stub
+Telegram's HTTP API; they do not contact Telegram. No production credentials are
+required. Verify a real owner `/status` reply separately before claiming
+end-to-end operation.
