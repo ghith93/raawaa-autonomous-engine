@@ -207,62 +207,102 @@ def build_docker_argv(request: SandboxRequest) -> list[str]:
     ]
 
 
-def assert_sandbox_argv(argv: list[str]) -> list[str]:
-    """Re-check a finished argument vector against the contract.
-
-    Used on this module's own output and on any vector a caller assembles by hand,
-    because the interesting failures are the ones nobody intended: a helpful
-    ``--privileged`` added to make a test pass, a ``-v /var/run/docker.sock``
-    copied from a CI recipe. Returns the vector so it can be used inline.
-    """
+def assert_sandbox_argv(argv: list[str], *, expected_source_dir: str) -> list[str]:
+    """Validate exact limits and bind-mount provenance against trusted configuration."""
     if not isinstance(argv, list) or not all(isinstance(a, str) for a in argv):
         raise SandboxPolicyError("argv must be a list of strings")
-    if len(argv) < 2 or argv[0] != "docker" or argv[1] != "run":
-        raise SandboxPolicyError("argv must begin with 'docker run'")
+    if len(argv) < 4 or argv[0:2] != ["docker", "run"]:
+        raise SandboxPolicyError("argv must begin with 'docker run' and include image and command")
+    if not isinstance(expected_source_dir, str) or not expected_source_dir.startswith("/"):
+        raise SandboxPolicyError("expected_source_dir must be an absolute trusted workspace path")
+    expected_source = expected_source_dir.rstrip("/")
+    if expected_source in ("", "/") or ".." in expected_source.split("/"):
+        raise SandboxPolicyError("expected_source_dir must be a specific directory")
+    image_indexes = [i for i, arg in enumerate(argv[2:], 2) if _DIGEST_IMAGE.fullmatch(arg)]
+    if len(image_indexes) != 1:
+        raise SandboxPolicyError("argv must contain exactly one digest-pinned image")
+    image_index = image_indexes[0]
+    if image_index == len(argv) - 1:
+        raise SandboxPolicyError("argv must include a command after the image")
+    if any(_BAD_ARG.search(arg) for arg in argv):
+        raise SandboxPolicyError("argv arguments must not contain NUL or newlines")
+    options = argv[2:image_index]
+    for flag, why in _FORBIDDEN_FLAGS.items():
+        if any(arg == flag or arg.startswith(flag + "=") for arg in options):
+            raise SandboxPolicyError(f"{flag} is refused: {why}")
+    if any("docker.sock" in arg for arg in options):
+        raise SandboxPolicyError("a Docker socket mount hands the task the host daemon; refused")
+    if any(arg in ("-v", "--volume") or arg.startswith("--volume=") for arg in options):
+        raise SandboxPolicyError("volume flags are refused; use the exact approved --mount")
+    if any(arg == "-e" or arg.startswith("--env") or arg.startswith("-e=") for arg in options):
+        raise SandboxPolicyError("the contract has no environment path: secrets cannot be passed in")
 
-    for arg in argv:
-        for flag, why in _FORBIDDEN_FLAGS.items():
-            if arg == flag or arg.startswith(flag + "="):
-                raise SandboxPolicyError(f"{flag} is refused: {why}")
-        if "docker.sock" in arg:
-            raise SandboxPolicyError(
-                "a Docker socket mount hands the task the host daemon; refused"
-            )
-        if arg in ("-v", "--volume") or arg.startswith("--volume="):
-            # The contract mounts through --mount so that "readonly" is explicit;
-            # the -v short form is refused rather than parsed, because a parser is
-            # another place for a missing ",ro" to hide.
-            raise SandboxPolicyError(
-                "volume flags are refused; use --mount with explicit readonly"
-            )
-        if arg == "-e" or arg.startswith("--env") or arg.startswith("-e="):
-            raise SandboxPolicyError(
-                "the contract has no environment path: secrets cannot be passed in"
-            )
-        if arg.startswith("--mount=type=bind") and ",readonly" not in arg:
-            raise SandboxPolicyError("every bind mount must be read-only")
+    fixed = [
+        "--rm", f"--runtime={SANDBOX_RUNTIME}", "--network=none", "--read-only",
+        "--cap-drop=ALL", "--security-opt=no-new-privileges",
+        f"--user={NON_ROOT_USER}", "--workdir=/workspace",
+    ]
+    for flag in fixed:
+        if options.count(flag) != 1:
+            raise SandboxPolicyError(f"argv must contain exactly one {flag}")
 
-    required = (
-        f"--runtime={SANDBOX_RUNTIME}",
-        "--network=none",
-        "--read-only",
-        "--cap-drop=ALL",
-        "--security-opt=no-new-privileges",
-    )
-    for flag in required:
-        if flag not in argv:
-            raise SandboxPolicyError(f"argv is missing {flag}")
+    def one(prefix: str) -> str:
+        values = [arg[len(prefix):] for arg in options if arg.startswith(prefix)]
+        if len(values) != 1 or not values[0]:
+            raise SandboxPolicyError(f"argv must contain exactly one {prefix}<value>")
+        return values[0]
 
-    user_flags = [a for a in argv if a.startswith("--user=")]
-    if not user_flags:
-        raise SandboxPolicyError("argv must set a non-root user")
-    if any(u == "--user=0" or u == "--user=0:0" or "root" in u for u in user_flags):
-        raise SandboxPolicyError("argv must not run as root")
-    for prefix in ("--pids-limit=", "--memory=", "--cpus="):
-        if not any(a.startswith(prefix) for a in argv):
-            raise SandboxPolicyError(f"argv is missing {prefix}<value>")
+    try:
+        pids_raw = one("--pids-limit=")
+        memory_raw = one("--memory=")
+        swap_raw = one("--memory-swap=")
+        cpus_raw = one("--cpus=")
+        pids = int(pids_raw)
+        memory = int(memory_raw[:-1]) if memory_raw.endswith("m") else 0
+        swap = int(swap_raw[:-1]) if swap_raw.endswith("m") else 0
+        cpus = float(cpus_raw)
+    except (TypeError, ValueError):
+        raise SandboxPolicyError("resource limits must use valid numeric values") from None
+    if not 1 <= pids <= CEILINGS["pids"]:
+        raise SandboxPolicyError(f"pids limit must be between 1 and {CEILINGS['pids']}")
+    if not 1 <= memory <= CEILINGS["memory_mb"]:
+        raise SandboxPolicyError(f"memory limit must be between 1m and {CEILINGS['memory_mb']}m")
+    if swap != memory:
+        raise SandboxPolicyError("memory-swap must exactly equal memory; swap headroom is forbidden")
+    if not 0 < cpus <= CEILINGS["cpus"]:
+        raise SandboxPolicyError(f"cpus must be greater than 0 and at most {CEILINGS['cpus']}")
+
+    ulimits = [arg for arg in options if arg.startswith("--ulimit=")]
+    if sorted(ulimits) != ["--ulimit=core=0:0", "--ulimit=nofile=256:256"]:
+        raise SandboxPolicyError("argv must contain only the exact nofile and core ulimits")
+    tmpfs = [arg for arg in options if arg.startswith("--tmpfs=")]
+    pattern = re.compile(r"--tmpfs=(/tmp|/scratch):rw,noexec,nosuid,nodev,size=(\d+)m")
+    sizes = {}
+    for arg in tmpfs:
+        match = pattern.fullmatch(arg)
+        if not match or match.group(1) in sizes:
+            raise SandboxPolicyError("tmpfs mounts must use exact bounded /tmp and /scratch options")
+        sizes[match.group(1)] = int(match.group(2))
+    if set(sizes) != {"/tmp", "/scratch"} or sizes["/tmp"] != sizes["/scratch"]:
+        raise SandboxPolicyError("argv must contain matching bounded /tmp and /scratch tmpfs mounts")
+    if not 1 <= sizes["/scratch"] <= CEILINGS["scratch_mb"]:
+        raise SandboxPolicyError(f"scratch limit must not exceed {CEILINGS['scratch_mb']}m")
+
+    mounts = [arg for arg in options if arg.startswith("--mount=")]
+    expected_mount = f"--mount=type=bind,src={expected_source},dst={WORKSPACE_MOUNT},readonly"
+    if mounts != [expected_mount]:
+        raise SandboxPolicyError("argv must contain only the exact trusted workspace bind mount")
+
+    allowed = set(fixed)
+    allowed.update(["--pids-limit=" + pids_raw, "--memory=" + memory_raw,
+                    "--memory-swap=" + swap_raw, "--cpus=" + cpus_raw])
+    allowed.update(ulimits)
+    allowed.update(tmpfs)
+    allowed.add(expected_mount)
+    unknown = [arg for arg in options if arg not in allowed]
+    if unknown:
+        raise SandboxPolicyError(f"unrecognized or duplicate sandbox options: {unknown!r}")
     return argv
-
 
 def reviewed_ref_only(ref: str, *, allow_pr_heads: bool = False) -> str:
     """Refuse to run task code from anything but reviewed main.
