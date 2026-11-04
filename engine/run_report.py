@@ -19,6 +19,13 @@ from pathlib import Path
 
 MAX_NOTICE_ITEMS = 20
 
+#: A crashing batch leaves no JSON on stdout, so ``stop_reason`` degrades to
+#: "unknown" and the traceback is the only evidence of what happened. Job logs
+#: are unreachable from this project's tooling, so the tail is rendered into the
+#: two channels that *are* reachable: annotations and the step summary.
+MAX_STDERR_CHARS = 4000
+MAX_ANNOTATION_CHARS = 1200
+
 INTERESTING_FIELDS = ("status", "reason", "mode", "provider", "model", "error")
 
 
@@ -101,16 +108,50 @@ def markdown(batch: object) -> str:
     return "\n".join(lines) + "\n"
 
 
-def emit(batch: object, summary_path: str | None = None, stream=None) -> list[str]:
+def read_stderr_tail(path: str | Path | None) -> str:
+    """Return the bounded tail of a captured stderr file, or "" when absent."""
+    if path is None:
+        return ""
+    try:
+        text = Path(path).read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return ""
+    return text[-MAX_STDERR_CHARS:]
+
+
+def stderr_notice(text: str) -> str | None:
+    """Render a stderr tail as one single-line ``::error`` annotation."""
+    if not text or not text.strip():
+        return None
+    flattened = " ".join(line.strip() for line in text.splitlines() if line.strip())
+    flattened = flattened.replace("::", ":").replace("%", "pct")[-MAX_ANNOTATION_CHARS:]
+    return f"::error title=Task batch crashed::{flattened}"
+
+
+def stderr_markdown(text: str) -> str:
+    """Render the raw tail for the step summary, where multi-line output is safe."""
+    if not text or not text.strip():
+        return ""
+    return "#### stderr tail\n\n```text\n" + text.strip()[-MAX_STDERR_CHARS:] + "\n```\n"
+
+
+def emit(batch: object, summary_path: str | None = None, stream=None,
+         stderr_text: str = "") -> list[str]:
     """Print notices and append the markdown table to the step summary if asked."""
     stream = stream or sys.stdout
     lines = notices(batch)
+    crash = stderr_notice(stderr_text)
+    if crash:
+        lines.append(crash)
     for line in lines:
         print(line, file=stream)
     if summary_path:
         try:
             with open(summary_path, "a", encoding="utf-8") as handle:
                 handle.write(markdown(batch) + "\n")
+                tail = stderr_markdown(stderr_text)
+                if tail:
+                    handle.write(tail + "\n")
         except OSError:
             print("::warning title=Task batch::step summary unavailable", file=stream)
     return lines
@@ -119,6 +160,7 @@ def emit(batch: object, summary_path: str | None = None, stream=None) -> list[st
 def main(argv: list[str] | None = None) -> int:
     argv = list(sys.argv[1:] if argv is None else argv)
     path = Path(argv[0]) if argv else None
+    stderr_text = read_stderr_tail(argv[1] if len(argv) > 1 else None)
     raw = ""
     if path is not None and path.exists():
         raw = path.read_text(encoding="utf-8")
@@ -129,7 +171,7 @@ def main(argv: list[str] | None = None) -> int:
     except ValueError:
         print("::warning title=Task batch::batch result was not valid JSON", file=sys.stdout)
         batch = {}
-    emit(batch, os.environ.get("GITHUB_STEP_SUMMARY"))
+    emit(batch, os.environ.get("GITHUB_STEP_SUMMARY"), stderr_text=stderr_text)
     return 0
 
 
