@@ -7,6 +7,8 @@ on:
 
 permissions:
   contents: read
+  issues: read
+  pull-requests: read
 
 concurrency:
   group: engine-maintenance
@@ -25,3 +27,21 @@ jobs:
         run: python -m engine.cli audit
       - name: Run complete test suite
         run: python -m unittest discover -s tests -v
+
+      # The development loop's read half. It ranks work; it cannot do work:
+      # no merge, deploy, migration, provider activation or spend is reachable
+      # from here, and the ranking is published, not acted on.
+      - name: Rank the next development actions (read-only)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python scripts/build_development_state.py --out /tmp/development-state.json
+          python -m engine.cli dev-cycle --state /tmp/development-state.json --format markdown >> "$GITHUB_STEP_SUMMARY"
+          python -m engine.cli dev-cycle --state /tmp/development-state.json > /tmp/development-cycle.json
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: development-cycle
+          path: |
+            /tmp/development-state.json
+            /tmp/development-cycle.json
+          retention-days: 14
