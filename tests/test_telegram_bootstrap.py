@@ -41,18 +41,16 @@ class ChatDiscoveryTest(unittest.TestCase):
     def test_only_private_human_chats_are_accepted(self):
         replies = {
             "getMe": {"username": "raawaa_bot"},
-            "getUpdates": {
-                "updates": [
+            "getUpdates": [
                     {"message": {"chat": {"id": 42, "type": "private"}}},
                     {"message": {"chat": {"id": 42, "type": "private"}}},
                     {"message": {"chat": {"id": -100123, "type": "channel"}}},
                     {"message": {"chat": {"id": -5, "type": "group"}}},
                     {"edited_message": {"chat": {"id": 99, "type": "private"}}},
-                ],
-            },
+            ],
         }
 
-        def fake_call(token, method, payload=None, *, timeout=15.0):
+        def fake_call(token, method, payload=None, *, timeout=15.0, expect="dict"):
             self.assertEqual(token, VALID_TOKEN)
             return replies[method]
 
@@ -64,10 +62,61 @@ class ChatDiscoveryTest(unittest.TestCase):
         self.assertEqual(username, "raawaa_bot")
 
     def test_no_pending_updates_yields_no_chat_and_that_is_an_error_at_registration(self):
-        with patch.object(bootstrap, "_call", side_effect=lambda *a, **k: {"updates": []}):
+        def fake_call(token, method, payload=None, **kwargs):
+            return {"username": "raawaa_bot"} if method == "getMe" else []
+        with patch.object(bootstrap, "_call", side_effect=fake_call):
             chat_ids, _, seen = bootstrap.find_private_chat_ids(VALID_TOKEN)
         self.assertEqual(seen, 0, 'the failure must report how many updates Telegram returned')
         self.assertEqual(chat_ids, [])
+
+
+class ResultShapeTest(unittest.TestCase):
+    """Bot API results are not all objects; getUpdates is a list."""
+
+    class _Response:
+        def __init__(self, payload):
+            self._payload = payload
+
+        def read(self):
+            return json.dumps(self._payload).encode("utf-8")
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+    def test_a_list_result_is_returned_as_a_list(self):
+        payload = {"ok": True, "result": [
+            {"update_id": 1, "message": {"chat": {"id": 42, "type": "private"}}},
+        ]}
+        with patch.object(bootstrap, "urlopen", return_value=self._Response(payload)):
+            result = bootstrap._call(VALID_TOKEN, "getUpdates", {}, expect="list")
+        self.assertEqual(len(result), 1)
+        self.assertEqual(result[0]["message"]["chat"]["id"], 42)
+
+    def test_the_same_call_without_the_list_expectation_would_have_hidden_it(self):
+        # This is the bug, pinned: silently {} instead of the seven pending updates
+        # Telegram was reporting, which read as "the owner never messaged the bot".
+        payload = {"ok": True, "result": [{"update_id": 1}]}
+        with patch.object(bootstrap, "urlopen", return_value=self._Response(payload)):
+            as_dict = bootstrap._call(VALID_TOKEN, "getUpdates", {})
+        self.assertEqual(as_dict, {})
+
+    def test_discovery_finds_a_chat_from_a_real_list_result(self):
+        updates = {"ok": True, "result": [
+            {"update_id": 7, "message": {"chat": {"id": 4242, "type": "private"}}},
+        ]}
+        me = {"ok": True, "result": {"username": "raawaa_bot", "is_bot": True}}
+
+        def fake_urlopen(request, timeout=None):
+            return self._Response(me if "/getMe" in request.full_url else updates)
+
+        with patch.object(bootstrap, "urlopen", side_effect=fake_urlopen):
+            chat_ids, username, seen = bootstrap.find_private_chat_ids(VALID_TOKEN)
+        self.assertEqual(chat_ids, [4242])
+        self.assertEqual(username, "raawaa_bot")
+        self.assertEqual(seen, 1)
 
 
 class ErrorHygieneTest(unittest.TestCase):
@@ -127,7 +176,7 @@ class RegisterTest(unittest.TestCase):
     def test_setwebhook_payload_carries_the_secret_and_drops_stale_updates(self):
         calls = []
 
-        def fake_call(token, method, payload=None, *, timeout=15.0):
+        def fake_call(token, method, payload=None, *, timeout=15.0, expect="dict"):
             calls.append((method, payload))
             if method == "getWebhookInfo":
                 return {"url": "https://worker.test/v1/telegram/webhook", "pending_update_count": 0}
@@ -150,7 +199,7 @@ class MainFlowTest(unittest.TestCase):
             env_file = Path(tmp) / "telegram.env"
             replies = {
                 "getMe": {"username": "raawaa_bot"},
-                "getUpdates": {"updates": [{"message": {"chat": {"id": 7, "type": "private"}}}]},
+                "getUpdates": [{"message": {"chat": {"id": 7, "type": "private"}}}],
             }
             with patch.object(bootstrap, "_call", side_effect=lambda t, m, p=None, **k: replies[m]):
                 with patch.dict(os.environ, {"TELEGRAM_BOT_TOKEN": VALID_TOKEN}):
@@ -165,7 +214,7 @@ class MainFlowTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             replies = {
                 "getMe": {"username": "raawaa_bot"},
-                "getUpdates": {"updates": [{"message": {"chat": {"id": 7, "type": "private"}}}]},
+                "getUpdates": [{"message": {"chat": {"id": 7, "type": "private"}}}],
             }
             with patch.object(bootstrap, "_call", side_effect=lambda t, m, p=None, **k: replies[m]):
                 with patch.dict(os.environ, {"TELEGRAM_BOT_TOKEN": VALID_TOKEN}):
@@ -195,7 +244,7 @@ class NoChatFoundTest(unittest.TestCase):
         # _call() already unwraps "result", so these are the payloads it returns.
         replies = {
             "getMe": {"username": "raawaa_control_bot", "is_bot": True},
-            "getUpdates": {"updates": []},
+            "getUpdates": [],
             # reached only on the failure path, to report webhook/pending state
             "getWebhookInfo": {"url": "", "pending_update_count": 0},
         }
