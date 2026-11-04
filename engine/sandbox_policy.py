@@ -190,6 +190,8 @@ def build_docker_argv(request: SandboxRequest) -> list[str]:
         "--cap-drop=ALL",
         "--security-opt=no-new-privileges",
         f"--user={NON_ROOT_USER}",
+        # Disable any image-defined entrypoint so it cannot intercept the command.
+        "--entrypoint=",
         # limits
         f"--pids-limit={limits.pids}",
         f"--memory={limits.memory_mb}m",
@@ -197,8 +199,7 @@ def build_docker_argv(request: SandboxRequest) -> list[str]:
         f"--cpus={float(limits.cpus):g}",
         "--ulimit=nofile=256:256",
         "--ulimit=core=0:0",
-        f"--tmpfs=/tmp:rw,noexec,nosuid,nodev,size={limits.scratch_mb}m",
-        # mounts: source read-only, one bounded writable scratch
+        # Only the bounded scratch directory is writable; /tmp remains read-only.
         f"--mount=type=bind,src={req.source_dir.rstrip('/')},dst={WORKSPACE_MOUNT},readonly",
         f"--tmpfs={SCRATCH_MOUNT}:rw,noexec,nosuid,nodev,size={limits.scratch_mb}m",
         f"--workdir={WORKSPACE_MOUNT}",
@@ -207,62 +208,129 @@ def build_docker_argv(request: SandboxRequest) -> list[str]:
     ]
 
 
-def assert_sandbox_argv(argv: list[str]) -> list[str]:
-    """Re-check a finished argument vector against the contract.
+def assert_sandbox_argv(argv: list[str], *, expected_source_dir: str) -> list[str]:
+    """Re-check the complete Docker contract, including exact values and mounts.
 
-    Used on this module's own output and on any vector a caller assembles by hand,
-    because the interesting failures are the ones nobody intended: a helpful
-    ``--privileged`` added to make a test pass, a ``-v /var/run/docker.sock``
-    copied from a CI recipe. Returns the vector so it can be used inline.
+    expected_source_dir must come from the trusted checkout resolver, not task
+    input. Requiring it makes a hand-built vector unable to swap the approved
+    workspace for /, a home directory, runner credentials, or another host path.
     """
+    import math
+    import posixpath
+
     if not isinstance(argv, list) or not all(isinstance(a, str) for a in argv):
         raise SandboxPolicyError("argv must be a list of strings")
-    if len(argv) < 2 or argv[0] != "docker" or argv[1] != "run":
+    if len(argv) < 3 or argv[0:2] != ["docker", "run"]:
         raise SandboxPolicyError("argv must begin with 'docker run'")
+    if not isinstance(expected_source_dir, str) or not expected_source_dir.startswith("/"):
+        raise SandboxPolicyError("expected_source_dir must be an absolute trusted workspace path")
+    if _BAD_ARG.search(expected_source_dir):
+        raise SandboxPolicyError("expected_source_dir contains an invalid character")
+    source = expected_source_dir.rstrip("/")
+    if not source or source == "/" or posixpath.normpath(source) != source or ".." in source.split("/"):
+        raise SandboxPolicyError("expected_source_dir must be a canonical workspace directory")
+    parts = [p for p in source.split("/") if p]
+    forbidden_roots = ("/root", "/tmp", "/var", "/etc", "/proc", "/sys", "/dev", "/run",
+                       "/usr", "/bin", "/sbin", "/mnt", "/media", "/opt")
+    if any(source == root or source.startswith(root + "/") for root in forbidden_roots):
+        raise SandboxPolicyError("expected_source_dir is inside a sensitive host path")
+    if source == "/home" or source == "/home/runner" or (
+        source.startswith("/home/") and not (
+            len(parts) >= 5 and parts[:3] == ["home", "runner", "work"]
+        )
+    ):
+        raise SandboxPolicyError("expected_source_dir is not the canonical workspace")
 
-    for arg in argv:
+    if any(_BAD_ARG.search(arg) for arg in argv):
+        raise SandboxPolicyError("argv arguments must not contain NUL or newlines")
+
+    image_indexes = [i for i, arg in enumerate(argv) if _DIGEST_IMAGE.fullmatch(arg)]
+    if len(image_indexes) != 1:
+        raise SandboxPolicyError("argv must contain exactly one digest-pinned image")
+    image_index = image_indexes[0]
+    if image_index < 3 or image_index == len(argv) - 1:
+        raise SandboxPolicyError("argv must contain Docker options, an image, and a command")
+    options = argv[2:image_index]
+    command = argv[image_index + 1:]
+    if not command or any(not item for item in command):
+        raise SandboxPolicyError("container command must contain non-empty arguments")
+
+    for arg in options:
         for flag, why in _FORBIDDEN_FLAGS.items():
             if arg == flag or arg.startswith(flag + "="):
                 raise SandboxPolicyError(f"{flag} is refused: {why}")
         if "docker.sock" in arg:
-            raise SandboxPolicyError(
-                "a Docker socket mount hands the task the host daemon; refused"
-            )
+            raise SandboxPolicyError("a Docker socket mount hands the task the host daemon; refused")
         if arg in ("-v", "--volume") or arg.startswith("--volume="):
-            # The contract mounts through --mount so that "readonly" is explicit;
-            # the -v short form is refused rather than parsed, because a parser is
-            # another place for a missing ",ro" to hide.
-            raise SandboxPolicyError(
-                "volume flags are refused; use --mount with explicit readonly"
-            )
+            raise SandboxPolicyError("volume flags are refused; use the exact --mount contract")
         if arg == "-e" or arg.startswith("--env") or arg.startswith("-e="):
-            raise SandboxPolicyError(
-                "the contract has no environment path: secrets cannot be passed in"
-            )
-        if arg.startswith("--mount=type=bind") and ",readonly" not in arg:
-            raise SandboxPolicyError("every bind mount must be read-only")
+            raise SandboxPolicyError("the contract has no environment path: secrets cannot be passed in")
 
-    required = (
-        f"--runtime={SANDBOX_RUNTIME}",
-        "--network=none",
-        "--read-only",
-        "--cap-drop=ALL",
-        "--security-opt=no-new-privileges",
-    )
-    for flag in required:
-        if flag not in argv:
-            raise SandboxPolicyError(f"argv is missing {flag}")
+    def one_exact(value: str) -> None:
+        if options.count(value) != 1:
+            raise SandboxPolicyError(f"argv requires exactly one {value}")
 
-    user_flags = [a for a in argv if a.startswith("--user=")]
-    if not user_flags:
-        raise SandboxPolicyError("argv must set a non-root user")
-    if any(u == "--user=0" or u == "--user=0:0" or "root" in u for u in user_flags):
-        raise SandboxPolicyError("argv must not run as root")
-    for prefix in ("--pids-limit=", "--memory=", "--cpus="):
-        if not any(a.startswith(prefix) for a in argv):
-            raise SandboxPolicyError(f"argv is missing {prefix}<value>")
+    for required in (
+        "--rm", f"--runtime={SANDBOX_RUNTIME}", "--network=none", "--read-only",
+        "--cap-drop=ALL", "--security-opt=no-new-privileges",
+        f"--user={NON_ROOT_USER}", "--entrypoint=", "--ulimit=nofile=256:256",
+        "--ulimit=core=0:0", "--workdir=/workspace",
+    ):
+        one_exact(required)
+
+    value_prefixes = ("--pids-limit=", "--memory=", "--memory-swap=", "--cpus=",
+                      "--mount=", "--tmpfs=")
+    allowed_exact = {
+        "--rm", f"--runtime={SANDBOX_RUNTIME}", "--network=none", "--read-only",
+        "--cap-drop=ALL", "--security-opt=no-new-privileges",
+        f"--user={NON_ROOT_USER}", "--entrypoint=", "--ulimit=nofile=256:256",
+        "--ulimit=core=0:0", "--workdir=/workspace",
+    }
+    for arg in options:
+        if arg not in allowed_exact and not arg.startswith(value_prefixes):
+            raise SandboxPolicyError(f"unexpected Docker option: {arg}")
+
+    def single_value(prefix: str) -> str:
+        matches = [arg[len(prefix):] for arg in options if arg.startswith(prefix)]
+        if len(matches) != 1 or not matches[0]:
+            raise SandboxPolicyError(f"argv requires exactly one {prefix}<value>")
+        return matches[0]
+
+    def bounded_number(name: str, raw: str, ceiling: float, suffix: str = "") -> float:
+        if suffix:
+            if not raw.endswith(suffix):
+                raise SandboxPolicyError(f"{name} must use {suffix} units")
+            raw = raw[:-len(suffix)]
+        if not re.fullmatch(r"[0-9]+(?:\.[0-9]+)?", raw):
+            raise SandboxPolicyError(f"{name} must be a positive numeric value")
+        value = float(raw)
+        if not math.isfinite(value) or value <= 0 or value > ceiling:
+            raise SandboxPolicyError(f"{name} exceeds its allowed positive ceiling")
+        return value
+
+    bounded_number("pids", single_value("--pids-limit="), CEILINGS["pids"])
+    memory = bounded_number("memory", single_value("--memory="), CEILINGS["memory_mb"], "m")
+    swap = bounded_number("memory-swap", single_value("--memory-swap="), CEILINGS["memory_mb"], "m")
+    if swap != memory:
+        raise SandboxPolicyError("--memory-swap must equal --memory; swap headroom is forbidden")
+    bounded_number("cpus", single_value("--cpus="), CEILINGS["cpus"])
+
+    mounts = [arg[len("--mount="):] for arg in options if arg.startswith("--mount=")]
+    if len(mounts) != 1:
+        raise SandboxPolicyError("exactly one workspace bind mount is required")
+    expected_mount = f"type=bind,src={source},dst={WORKSPACE_MOUNT},readonly"
+    if mounts[0] != expected_mount:
+        raise SandboxPolicyError("bind mount must be exactly the trusted read-only workspace")
+
+    tmpfs = [arg[len("--tmpfs="):] for arg in options if arg.startswith("--tmpfs=")]
+    if len(tmpfs) != 1:
+        raise SandboxPolicyError("exactly one bounded writable scratch tmpfs is required")
+    scratch_match = re.fullmatch(r"/scratch:rw,noexec,nosuid,nodev,size=([0-9]+)m", tmpfs[0])
+    if not scratch_match:
+        raise SandboxPolicyError("scratch tmpfs must be /scratch with rw,noexec,nosuid,nodev and a size")
+    bounded_number("scratch", scratch_match.group(1), CEILINGS["scratch_mb"])
+
     return argv
-
 
 def reviewed_ref_only(ref: str, *, allow_pr_heads: bool = False) -> str:
     """Refuse to run task code from anything but reviewed main.
