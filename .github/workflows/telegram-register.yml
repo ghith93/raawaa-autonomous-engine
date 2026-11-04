@@ -21,10 +21,15 @@ on:
         required: true
         type: string
       chat_id:
-        description: "Optional numeric chat id; skips discovery (use after a webhook has already drained the queue)"
+        description: "Optional verified positive private chat id; bypasses discovery and webhook pause"
         required: false
         default: ""
         type: string
+      replace_webhook_for_discovery:
+        description: "Explicitly pause the webhook to discover the owner; preserves pending updates"
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: read
@@ -84,9 +89,10 @@ jobs:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          CHAT_ID: ${{ inputs.chat_id }}
+          REPLACE_WEBHOOK_FOR_DISCOVERY: ${{ inputs.replace_webhook_for_discovery }}
         run: |
           set -uo pipefail
-          CHAT_ID="${{ inputs.chat_id }}"
           if [ -n "$CHAT_ID" ] && ! printf '%s' "$CHAT_ID" | grep -Eq '^-?[0-9]+(,-?[0-9]+)*$'; then
             echo "::error title=Invalid chat_id::chat_id must be numeric (or comma-separated)"
             exit 1
@@ -96,12 +102,20 @@ jobs:
             python3 scripts/telegram_bootstrap.py --url "$WORKER_URL" --env-file /tmp/telegram.env "$@"
           }
 
+          if [ -n "$CHAT_ID" ] && [ "$REPLACE_WEBHOOK_FOR_DISCOVERY" = "true" ]; then
+            echo "::error title=Conflicting inputs::Choose chat_id or replace_webhook_for_discovery, not both."
+            exit 1
+          fi
           if [ -n "$CHAT_ID" ]; then
             run_bootstrap --chat-id "$CHAT_ID" || exit 1
             exit 0
           fi
 
-          if output="$(run_bootstrap 2>&1)"; then
+          DISCOVERY_ARGS=()
+          if [ "$REPLACE_WEBHOOK_FOR_DISCOVERY" = "true" ]; then
+            DISCOVERY_ARGS=(--replace-webhook-to-discover)
+          fi
+          if output="$(run_bootstrap "${DISCOVERY_ARGS[@]}" 2>&1)"; then
             printf '%s\n' "$output" | head -n 20
             exit 0
           fi
@@ -118,13 +132,15 @@ jobs:
             2>/dev/null | jq -r 'if type == "array" then .[0].results else .results end | (.[0].chat_id // "")' 2>/dev/null || true)"
 
           if [ -z "$recovered" ]; then
-            # Nothing to discover anywhere: Telegram has no queue and the Worker has
-            # never received a message. The Worker still knows its allowlist (if one
-            # was ever installed), so the useful move is to re-arm the webhook with a
-            # fresh secret and let the next real message prove the path end to end.
-            echo "::notice title=Rearming without discovery::No chat id anywhere; rotating the secret and re-registering, leaving the allowlist as it is."
+            if [ "$REPLACE_WEBHOOK_FOR_DISCOVERY" = "true" ]; then
+              echo "::notice title=Webhook intentionally paused::Pending updates were preserved. Send /start to the correct bot, then rerun this workflow with replace_webhook_for_discovery=true."
+              exit 1
+            fi
+            # Default mode never deletes an existing webhook. If no owner id exists
+            # in receipts, re-arm without changing the current allowlist.
+            echo "::notice title=Rearming without discovery::No chat id anywhere; rotating the webhook secret and leaving the allowlist unchanged."
             run_bootstrap --rearm-only || exit 1
-            echo "::warning title=Allowlist unverified::If the Worker has no allowlist yet, it will ignore every message. Send the bot one message, then run this again."
+            echo "::warning title=Allowlist unverified::If the Worker has no correct owner id, it will ignore messages. Use the explicit discovery flow or provide the verified chat_id."
             exit 0
           fi
           echo "::notice title=Chat id recovered::from telegram_update_receipts, so the owner does not need to message the bot again."
