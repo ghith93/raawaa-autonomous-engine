@@ -21,6 +21,7 @@ from engine.tool_broker import validate_permission_matrix
 from engine.artemis_gateway import probe_artemis
 from engine.executive_intelligence import executive_status
 from engine.brain_cycle import DEFAULT_SNAPSHOT_LIMIT, build_brain_cycle
+from engine.development_cycle import build_development_cycle, render_markdown as render_development_markdown
 from engine.orchestrator import validate_and_plan
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -155,6 +156,13 @@ def build_parser() -> argparse.ArgumentParser:
     executive.add_argument("--limit", type=int, default=10)
     brain = sub.add_parser("brain-cycle", help="Run one deterministic, read-only executive brain and outcome-feedback cycle")
     brain.add_argument("--limit", type=int, default=10)
+    dev = sub.add_parser(
+        "dev-cycle",
+        help="Rank the next development actions from collected state (read-only; no merge, deploy or spend)",
+    )
+    dev.add_argument("--state", help="Path to a state document; omit to rank an empty state")
+    dev.add_argument("--limit", type=int, default=12)
+    dev.add_argument("--format", choices=["json", "markdown"], default="json")
     workflow_plan = sub.add_parser("workflow-plan", help="Validate a delegated workflow DAG without enqueuing or executing it")
     workflow_plan.add_argument("--file", required=True, help="Path to a JSON workflow proposal")
     sub.add_parser("artemis-status", help="Read-only ARTEMIS daemon/device probe; never submits a mobile task")
@@ -228,6 +236,13 @@ def main() -> int:
         # at 100 and rejects responses over 64 KB, so asking for 200 would
         # silently return 100 in production.
         print(json.dumps(build_brain_cycle(store().list_tasks(limit=DEFAULT_SNAPSHOT_LIMIT), limit=args.limit), indent=2, ensure_ascii=False))
+    elif args.command == "dev-cycle":
+        state = load_json(Path(args.state)) if args.state else {}
+        report = build_development_cycle(state, limit=args.limit)
+        if args.format == "markdown":
+            print(render_development_markdown(report), end="")
+        else:
+            print(json.dumps(report, indent=2, ensure_ascii=False))
     elif args.command == "workflow-plan":
         proposal = load_json(Path(args.file))
         roster = load_json(ROOT / "config" / "agents.json")
