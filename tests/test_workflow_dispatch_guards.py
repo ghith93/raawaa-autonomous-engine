@@ -2,6 +2,7 @@
 import unittest
 from pathlib import Path
 
+from scripts import check_workflow_dispatch_guards as check
 from scripts.check_workflow_dispatch_guards import (
     PRODUCTION_CLASS,
     job_blocks,
@@ -133,3 +134,78 @@ jobs:
 
 if __name__ == "__main__":
     unittest.main()
+
+class TriggerParsingTests(unittest.TestCase):
+    """Regression tests for the bypass the reviewer found in the merged guard.
+
+    The previous detector was the regex ``^  workflow_dispatch:``, which only
+    matched one spelling. Each case below is valid YAML that re-enables the
+    manual trigger, so each must be detected.
+    """
+
+    VARIANTS = {
+        "block mapping, two spaces": "on:\n  workflow_dispatch:\n",
+        "block mapping, four spaces": "on:\n    workflow_dispatch:\n",
+        "quoted key": "on:\n  'workflow_dispatch':\n",
+        "double-quoted key": 'on:\n  "workflow_dispatch":\n',
+        "flow mapping": "on: {workflow_dispatch: {}}\n",
+        "flow sequence": "on: [push, workflow_dispatch]\n",
+        "block sequence": "on:\n  - push\n  - workflow_dispatch\n",
+        "inline scalar": "on: workflow_dispatch\n",
+    }
+
+    def test_every_valid_form_is_detected(self):
+        for name, content in self.VARIANTS.items():
+            with self.subTest(form=name):
+                self.assertTrue(
+                    check.has_manual_dispatch(content),
+                    f"{name} should be detected as a manual dispatch trigger",
+                )
+
+    def test_production_class_rejects_every_form(self):
+        for name, content in self.VARIANTS.items():
+            with self.subTest(form=name):
+                violations = check.production_dispatch_violations("deploy-worker.yml", content)
+                self.assertTrue(violations, f"{name} must violate the production rule")
+
+    def test_nested_keys_do_not_count_as_triggers(self):
+        content = (
+            "on:\n"
+            "  push:\n"
+            "    branches:\n"
+            "      - main\n"
+            "jobs:\n"
+            "  build:\n"
+            "    runs-on: ubuntu-latest\n"
+        )
+        self.assertEqual(check.parse_triggers(content), {"push"})
+
+    def test_comment_is_not_a_trigger(self):
+        content = "on:\n  push:\n  # workflow_dispatch: removed\n"
+        self.assertFalse(check.has_manual_dispatch(content))
+
+    def test_trigger_inside_job_body_is_not_a_trigger(self):
+        content = (
+            "on:\n"
+            "  push:\n"
+            "jobs:\n"
+            "  build:\n"
+            "    steps:\n"
+            "      - run: echo workflow_dispatch\n"
+        )
+        self.assertFalse(check.has_manual_dispatch(content))
+
+    def test_missing_on_key_yields_no_triggers(self):
+        self.assertEqual(check.parse_triggers("jobs:\n  build: {}\n"), set())
+
+    def test_every_repository_workflow_declares_a_trigger(self):
+        workflow_dir = Path(__file__).resolve().parents[1] / ".github" / "workflows"
+        for path in sorted(workflow_dir.glob("*.yml")):
+            with self.subTest(workflow=path.name):
+                triggers = check.parse_triggers(path.read_text(encoding="utf-8"))
+                self.assertTrue(triggers, f"{path.name} declares no trigger the parser can see")
+
+    def test_production_deploy_workflow_has_no_dispatch(self):
+        path = Path(__file__).resolve().parents[1] / ".github" / "workflows" / "deploy-worker.yml"
+        self.assertFalse(check.has_manual_dispatch(path.read_text(encoding="utf-8")))
+
