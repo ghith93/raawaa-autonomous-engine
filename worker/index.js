@@ -286,7 +286,7 @@ export default {
       }
       try {
         const result = await env.DB.prepare(
-          "SELECT id,idempotency_key,task_type,title,payload_json,status,attempts,max_attempts,created_at,updated_at,execution_mode FROM tasks ORDER BY created_at DESC,id DESC LIMIT ?"
+          "SELECT id,idempotency_key,task_type,title,payload_json,status,attempts,max_attempts,created_at,updated_at,execution_mode,priority,depends_on FROM tasks ORDER BY created_at DESC,id DESC LIMIT ?"
         ).bind(rawLimit).all();
         return json({ tasks: result.results || [] });
       } catch {
@@ -313,29 +313,85 @@ export default {
       if (!["unknown", "dry_run", "live_inference"].includes(executionMode)) {
         return json({ error: "invalid_execution_mode" }, 400);
       }
-      const taskTypeFilter = codespaceClaim
-        ? `AND task_type IN (${CODESPACE_TASK_SQL})`
-        : `AND task_type NOT IN (${CODESPACE_TASK_SQL})`;
+      const candidateTaskFilter = codespaceClaim
+        ? `AND candidate_task.task_type IN (${CODESPACE_TASK_SQL})`
+        : `AND candidate_task.task_type NOT IN (${CODESPACE_TASK_SQL})`;
+      const candidateFilter = codespaceClaim
+        ? `AND candidate.task_type IN (${CODESPACE_TASK_SQL})`
+        : `AND candidate.task_type NOT IN (${CODESPACE_TASK_SQL})`;
+      const childTaskFilter = codespaceClaim
+        ? `AND child.task_type IN (${CODESPACE_TASK_SQL})`
+        : `AND child.task_type NOT IN (${CODESPACE_TASK_SQL})`;
       const leaseSeconds = 900;
       const now = new Date();
       const nowIso = now.toISOString();
       const expires = new Date(now.getTime() + leaseSeconds * 1000).toISOString();
       const leaseToken = crypto.randomUUID();
       try {
+        const blockUpdate = env.DB.prepare(`
+          UPDATE tasks AS child
+          SET status='blocked',
+              error=CASE
+                WHEN EXISTS (
+                  SELECT 1 FROM json_each(child.depends_on) AS dep
+                  LEFT JOIN tasks AS parent ON parent.id=dep.value
+                  WHERE parent.id IS NULL
+                ) THEN 'dependency_missing'
+                WHEN EXISTS (
+                  SELECT 1 FROM json_each(child.depends_on) AS dep
+                  JOIN tasks AS parent ON parent.id=dep.value
+                  WHERE parent.status IN ('failed','blocked')
+                ) THEN 'dependency_failed'
+                ELSE 'dependency_not_executed'
+              END,
+              updated_at=?
+          WHERE child.status='pending' ${childTaskFilter}
+            AND EXISTS (
+              SELECT 1 FROM json_each(child.depends_on) AS dep
+              LEFT JOIN tasks AS parent ON parent.id=dep.value
+              WHERE parent.id IS NULL
+                 OR parent.status IN ('failed','blocked')
+                 OR (parent.status='succeeded' AND parent.execution_mode!='live_inference')
+            )
+        `).bind(nowIso);
+        const blockAudit = env.DB.prepare(`
+          INSERT INTO audit_log(task_id,event,details_json,created_at)
+          SELECT id,'task_blocked_dependency',
+            json_object('reason',error,'depends_on',json(depends_on)),?
+          FROM tasks
+          WHERE status='blocked'
+            AND error IN ('dependency_missing','dependency_failed','dependency_not_executed')
+            AND updated_at=?
+        `).bind(nowIso, nowIso);
+        await env.DB.batch([blockUpdate, blockAudit]);
         const claim = await env.DB.prepare(`
-          UPDATE tasks SET status='running', attempts=attempts+1, execution_mode=?, updated_at=?,
-            lease_token=?, lease_expires_at=?
-          WHERE id=(SELECT id FROM tasks WHERE status='pending' ${taskTypeFilter}
-            ORDER BY created_at,id LIMIT 1)
-            AND status='pending' ${taskTypeFilter}
+          UPDATE tasks AS candidate
+          SET status='running', attempts=attempts+1, execution_mode=?, updated_at=?,
+              lease_token=?, lease_expires_at=?
+          WHERE candidate.id=(
+            SELECT candidate_task.id FROM tasks AS candidate_task
+            WHERE candidate_task.status='pending' ${candidateTaskFilter}
+              AND NOT EXISTS (
+                SELECT 1 FROM json_each(candidate_task.depends_on) AS dep
+                LEFT JOIN tasks AS parent ON parent.id=dep.value
+                WHERE parent.id IS NULL
+                   OR parent.status!='succeeded'
+                   OR parent.execution_mode!='live_inference'
+              )
+            ORDER BY candidate_task.priority DESC,candidate_task.created_at,candidate_task.id
+            LIMIT 1
+          )
+          AND candidate.status='pending' ${candidateFilter}
           RETURNING id,idempotency_key,task_type,title,payload_json,status,attempts,
-            max_attempts,created_at,updated_at,execution_mode,lease_token,lease_expires_at
+            max_attempts,created_at,updated_at,execution_mode,priority,depends_on,
+            lease_token,lease_expires_at
         `).bind(executionMode, nowIso, leaseToken, expires).first();
         if (!claim) return json({ task: null });
         await env.DB.prepare(
           "INSERT INTO audit_log(task_id,event,details_json,created_at) VALUES(?,?,?,?)"
         ).bind(claim.id, "task_claimed", JSON.stringify({
-          attempt: claim.attempts, lease_expires_at: expires, execution_mode: executionMode
+          attempt: claim.attempts, lease_expires_at: expires, execution_mode: executionMode,
+          priority: claim.priority, depends_on: JSON.parse(claim.depends_on || "[]")
         }), nowIso).run();
         return json({ task: claim, lease_token: leaseToken, lease_expires_at: expires });
       } catch {
