@@ -10,7 +10,9 @@ promise to read more carefully.
 The tests pin three things:
 * current status appears before the mechanism, so it cannot be skipped;
 * the page names the disabled state and the missing variable explicitly;
-* the activation variable stays out of committed Wrangler configuration.
+* the activation variable is declared in committed Wrangler configuration, so it
+  cannot silently drift from the code that reads it (it did exactly that once,
+  and the only symptom was a fallback that never dispatched).
 """
 
 from __future__ import annotations
@@ -21,7 +23,6 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 DOC = ROOT / "docs" / "operations" / "github-app-task-runner-watchdog.md"
 WORKER = ROOT / "worker" / "task-runner-watchdog.js"
-WRANGLER_TOMLS = (ROOT / "wrangler.toml", ROOT / "wrangler.staging.toml")
 
 
 class WatchdogDocShapeTests(unittest.TestCase):
@@ -39,12 +40,12 @@ class WatchdogDocShapeTests(unittest.TestCase):
         worker = WORKER.read_text(encoding="utf-8")
         self.assertIn('env?.GITHUB_APP_WATCHDOG_ENABLED !== "enabled"', worker)
         self.assertIn('reason: "missing_configuration"', worker)
-        self.assertIn("NOT active", self.text)
+        self.assertIn("active and verified", self.text.lower())
         self.assertIn("missing_configuration", self.text)
 
-    def test_page_states_activation_variable_is_required_and_unset(self):
+    def test_page_states_activation_variable_is_required_and_version_controlled(self):
         self.assertIn("GITHUB_APP_WATCHDOG_ENABLED", self.text)
-        self.assertIn("intentionally absent", self.text)
+        self.assertIn("declared in `wrangler.toml`", self.text)
 
     def test_page_separates_fifteen_minute_recovery_from_dispatch(self):
         self.assertIn("D1 tasks only", self.text)
@@ -52,15 +53,8 @@ class WatchdogDocShapeTests(unittest.TestCase):
 
 
 class WatchdogConfigTests(unittest.TestCase):
-    def test_activation_variable_is_not_committed_in_wrangler(self):
-        for path in WRANGLER_TOMLS:
-            with self.subTest(config=path.name):
-                text = path.read_text(encoding="utf-8")
-                self.assertNotIn(
-                    "GITHUB_APP_WATCHDOG_ENABLED",
-                    text,
-                    f"{path.name} must not activate the watchdog by default",
-                )
+    # Configuration pinning moved to tests/test_deployment_config.py, which reads
+    # the TOML as TOML instead of matching substrings.
 
     def test_five_minute_cron_expression_is_declared(self):
         text = (ROOT / "wrangler.toml").read_text(encoding="utf-8")

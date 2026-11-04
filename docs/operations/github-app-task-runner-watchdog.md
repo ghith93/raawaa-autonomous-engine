@@ -2,32 +2,42 @@
 
 ## Current status — read this before quoting the rest of the page
 
-**The five-minute fallback dispatch is NOT active.** The code is deployed and the
-cron fires, but the handler returns `disabled` before any D1 access or network
-call unless the activation variable is present in the Production environment:
+**The fallback dispatch is active and verified — evidence below, not assertion.**
 
-- Gate: `worker/task-runner-watchdog.js:25` requires `GITHUB_APP_WATCHDOG_ENABLED === "enabled"`; otherwise `:162` returns `{status: "disabled", reason: "missing_configuration"}`.
-- The variable is **intentionally absent** from `wrangler.toml` and `wrangler.staging.toml` (presence is an activation decision, not a code default).
-- Latest independent readiness evidence: `docs/operations/asset-register-latest.md:37` — `watchdog_ready=not_ready`, `watchdog_missing=GITHUB_APP_WATCHDOG_ENABLED`.
-- The **15-minute** stale-lease recovery in the same Worker *is* alive and independent: cron heartbeat `*/15 * * * *`, last recorded `2026-11-03T22:30:34.171Z`, stale leases requeued `0`, failed `0`.
+- Readiness: the authenticated `/v1/mobile/status` read in Task Runner run
+  `41774549441` (04:39:56 UTC) reported `task_runner_watchdog: ready` and
+  `missing settings: none`.
+- Dispatch: run [`41775727949`](https://github.com/ghith93/raawaa-autonomous-engine/actions/runs/41775727949)
+  was created at 04:51:42 UTC with event `workflow_dispatch` and actor
+  `raawaa-engine[bot]`, two seconds after the Worker recorded its intent at
+  `2026-11-04T04:51:40.456Z`. Nothing human or agent triggered it.
+- Coverage: the Worker deployed at 10:53:38 UTC from `c906b3e` dispatches six
+  workflows rather than one (see Coverage below).
 
-Two consequences that are easy to get wrong:
+Without the switch the handler returns `disabled` with `reason:
+missing_configuration` before any D1 access or network call; that fail-closed gate
+is unchanged and tested.
 
-1. A configured cron is not a working dispatch. `wrangler.toml:13` listing the five-minute expression proves scheduling, not activation.
+The activation value is declared in `wrangler.toml` `[vars]` as
+`GITHUB_APP_WATCHDOG_ENABLED = "enabled"`, and `tests/test_deployment_config.py`
+pins both that declaration and its absence from `wrangler.staging.toml`. It was
+dashboard-managed once; it went missing, the deploy still uploaded, and the only
+symptom was a fallback that silently never dispatched. A non-secret switch that
+decides whether a safety net is armed belongs in the reviewed diff.
+
+Two consequences that are still easy to get wrong:
+
+1. A configured cron is not a working dispatch. Listing the five-minute expression
+   in `wrangler.toml` proves scheduling, not activation; the readiness read is the
+   evidence, and it is now taken automatically after every deploy.
 2. The 15-minute recovery pass touches **D1 tasks only**. It does not ingest GitHub comments and does not recover missed issue or PR activity.
-
-Restoring the fallback requires an owner action — set the non-secret Production
-variable, deploy under the contract below, and require an authenticated
-`/v1/mobile/status` readback showing `task_runner_watchdog.ready=true` and
-`missing=[]`. Until that readback exists, cite this page only for the *mechanism*,
-never as evidence that dispatch is live.
 
 ## Purpose
 
 The Cloudflare Worker has two independent scheduled responsibilities:
 
 - Every 15 minutes: bounded stale-lease recovery in D1.
-- Every five minutes on an offset schedule: check whether GitHub's Task Runner schedule is stale and, only if necessary, dispatch the existing Task Runner workflow. **Currently inactive — see Current status above.**
+- Every five minutes on an offset schedule: check whether GitHub's Task Runner schedule is stale and, only if necessary, dispatch the existing Task Runner workflow. **Active and verified — see Current status above.**
 
 The watchdog is a fallback. It does not replace the GitHub schedule or the Python Task Runner. It skips dispatch when a Task Runner run is queued/running, when any Task Runner run on main was created within the previous 10 minutes (regardless of trigger type), or when a durable D1 dispatch intent was reserved within the previous 10 minutes.
 
@@ -39,7 +49,7 @@ The watchdog requires three Cloudflare Worker secrets and one explicit non-secre
 - GITHUB_APP_INSTALLATION_ID
 - GITHUB_APP_PRIVATE_KEY
 
-Also add the non-secret Cloudflare Worker variable GITHUB_APP_WATCHDOG_ENABLED with the exact value enabled only after verifying the GitHub App installation, repository scope, and all three secrets. This is a separate activation switch; the App secrets alone do not start the watchdog. The variable is intentionally not stored in wrangler.toml. The production deployment workflow must pass Wrangler's `--keep-vars` flag so this dashboard-managed activation switch survives code deployments. The deployment verification must fail if `task_runner_watchdog.ready` is false.
+Historically you had to add the non-secret Cloudflare Worker variable GITHUB_APP_WATCHDOG_ENABLED with the exact value enabled only after verifying the GitHub App installation, repository scope, and all three secrets. This is a separate activation switch; the App secrets alone do not start the watchdog. The value is now declared in `wrangler.toml` `[vars]`, so it travels with the reviewed deploy; a value set in the dashboard is preserved by Wrangler's `--keep-vars` flag but is no longer the source of truth. The deployment verification must fail if `task_runner_watchdog.ready` is false.
 
 The private key is never needed in ChatGPT and must never be pasted into a conversation, issue, pull request, log, or source file.
 
@@ -106,7 +116,7 @@ No GitHub Actions secret is required for this integration. No D1 migration is re
 
 The watchdog code was first deployed at 01:25 UTC from main SHA `4800d2aa3fb9dcd31c7dd0aaffe2e4d1b1b5638e` (Worker version `546a233f-5d93-4328-b71f-f3afed990b4c`). After PR #305 added the explicit `GITHUB_APP_WATCHDOG_ENABLED=enabled` opt-in, the production Worker was redeployed at 01:34 UTC from main SHA `15e0ff5c4051cd396a59e76dd9503db5448ff52a` (Worker version `b1cb1429-3914-412c-b681-20c245466269`). Deployment workflow [#41560533199](https://github.com/ghith93/raawaa-autonomous-engine/actions/runs/41560533199) completed successfully, and the public health endpoint returned `{"ok":true}`.
 
-The explicit `GITHUB_APP_WATCHDOG_ENABLED=enabled` opt-in remains an operator-managed Cloudflare Worker variable and is deliberately not committed to `wrangler.toml`. The current deployed code returns `disabled` before D1 or network access unless all three App secrets and that exact opt-in variable are present.
+At that time the `GITHUB_APP_WATCHDOG_ENABLED=enabled` opt-in was an operator-managed Cloudflare variable, deliberately kept out of `wrangler.toml`; that policy was reversed on 2026-11-04 after the dashboard value went missing and silently disarmed the fallback. It is now declared in `wrangler.toml` `[vars]`. The current deployed code returns `disabled` before D1 or network access unless all three App secrets and that exact opt-in variable are present.
 
 The authenticated status read in Task Runner run [#41562069768](https://github.com/ghith93/raawaa-autonomous-engine/actions/runs/41562069768) at 01:48 UTC reported `not_ready`; all four required settings were missing: `GITHUB_APP_ID`, `GITHUB_APP_INSTALLATION_ID`, `GITHUB_APP_PRIVATE_KEY`, and `GITHUB_APP_WATCHDOG_ENABLED`. No dispatch request or intent is recorded. The GitHub connector cannot inspect Cloudflare secret values. Do not treat the fallback as active until the App is installed with least privilege, the three secrets and explicit opt-in variable are configured, and a real `workflow_dispatch` Task Runner run plus completed bounded batch are verified.
 
@@ -146,7 +156,7 @@ This closes the one-time GitHub App setup and dispatch verification. Continue mo
 
 ## Disable or roll back
 
-Remove the watchdog Cron expression from wrangler.toml and revert the watchdog handler/import through a reviewed pull request. To disable without a code change, remove or change GITHUB_APP_WATCHDOG_ENABLED; the watchdog immediately returns disabled. Keep the 15-minute stale-lease recovery Cron intact.
+Remove the watchdog Cron expression from wrangler.toml and revert the watchdog handler/import through a reviewed pull request. To disable without a code change, set `GITHUB_APP_WATCHDOG_ENABLED` to anything other than `enabled` in the dashboard; the watchdog immediately returns disabled. To disable durably, change it in `wrangler.toml` through a reviewed pull request. Keep the 15-minute stale-lease recovery Cron intact.
 
 
 ## Deployment configuration regression — 2026-11-03 21:43 UTC
@@ -157,4 +167,4 @@ The corrective deployment contract is:
 
 - Use `wrangler deploy --config wrangler.toml --keep-vars` to preserve dashboard-managed variables while keeping secrets in Cloudflare's secret store.
 - Fail the deployment verification if `task_runner_watchdog.ready` is false; a successful Worker upload alone is not a healthy release.
-- Do not add the GitHub App private key or other secret values to Wrangler configuration. Keep the activation variable in the dashboard and preserve it with `--keep-vars`.
+- Do not add the GitHub App private key or other secret values to Wrangler configuration. The activation *switch* is not a secret and now lives in `wrangler.toml`; secrets stay in Cloudflare's secret store.
