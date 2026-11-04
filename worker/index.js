@@ -4,7 +4,7 @@ import { handlePaperLedger } from "./paper-ledger.js";
 import { handleTaskInvocation } from "./task-invocations.js";
 import { handleTelegramWebhook } from "./telegram-webhook.js";
 import { handleMobilePage, handleMobileStatus } from "./mobile-status.js";
-import { dispatchTaskRunnerIfStale } from "./task-runner-watchdog.js";
+import { dispatchDueWorkflows } from "./task-runner-watchdog.js";
 const JSON_HEADERS = { "content-type": "application/json; charset=utf-8", "cache-control": "no-store" };
 const MAX_BODY_BYTES = 32 * 1024;
 // Release remains hard-disabled until issue #440 adversarial sandbox criteria pass.
@@ -177,7 +177,9 @@ export default {
   async scheduled(controller, env) {
     const cron = typeof controller?.cron === "string" ? controller.cron : "";
     if (cron === "1,6,11,16,21,26,31,36,41,46,51,56 * * * *") {
-      await dispatchTaskRunnerIfStale({
+      // Every watched workflow, not only the task runner: a dropped GitHub
+      // schedule produces no failure notification, so silence is the symptom.
+      await dispatchDueWorkflows({
         env,
         scheduledTime: controller?.scheduledTime,
       });

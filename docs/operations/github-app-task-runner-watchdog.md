@@ -43,6 +43,43 @@ Also add the non-secret Cloudflare Worker variable GITHUB_APP_WATCHDOG_ENABLED w
 
 The private key is never needed in ChatGPT and must never be pasted into a conversation, issue, pull request, log, or source file.
 
+## Coverage — six workflows, not one
+
+The watchdog originally recovered only `task-runner.yml`. A dropped `schedule`
+event produces **no failure notification**, so every other scheduled workflow had
+exactly the same silent failure mode. The five-minute dispatch cron now covers
+all of them, each with its own staleness threshold derived from its own cadence
+plus slack (`worker/task-runner-watchdog.js`, `WATCHED_WORKFLOWS`):
+
+| Workflow | GitHub cron | Stale after |
+|---|---|---|
+| `task-runner.yml` | `2,7,… * * * *` | 10 min |
+| `maintenance.yml` | `17 */6 * * *` | 6 h 30 m |
+| `research-discovery.yml` | `31 5 * * *` | 25 h |
+| `cex-public-market-smoke.yml` | `17 7 * * *` | 25 h |
+| `v3-live-readonly-smoke.yml` | `17 4 * * *` | 25 h |
+| `groq-connection-check.yml` | `17 10 * * 1` | 7 d 12 h |
+
+Three properties matter more than the table:
+
+1. **Thresholds are cadence plus slack, never shorter.** The watchdog recovers a
+   *missed* run; it must not become a second schedule layered on a working one.
+2. **Each workflow has its own intent event.** A shared intent key would let one
+   maintenance dispatch suppress the task runner for six hours, which is a silent
+   outage disguised as a safety check.
+3. **One workflow's failure cannot stop the others.** A broken run-list read for
+   the weekly Groq check is no reason to stop recovering the queue; the failure is
+   returned *and* written to `audit_log` as `<label>_dispatch_failed`, because a
+   silently swallowed dispatch failure is the original bug wearing a new coat.
+
+`getWatchdogCoverage()` exposes the covered workflows and thresholds so the
+readiness surface can report what is actually protected rather than implying it.
+
+The one path that is still *not* covered: nothing here dispatches for a
+workflow that is missing from `WATCHED_WORKFLOWS`. Adding a workflow to
+`.github/workflows` does not add it to the fallback; that is a deliberate
+decision, made in code, by someone who reads this file.
+
 ## Create the least-privilege GitHub App
 
 1. Open https://github.com/settings/apps/new while signed in as the repository owner.

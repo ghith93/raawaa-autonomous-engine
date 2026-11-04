@@ -358,12 +358,12 @@ test("offset watchdog Cron dispatches after the primary Task Runner phase", asyn
         status: 201, headers: { "content-type": "application/json" },
       });
     }
-    if (target.includes("/actions/workflows/task-runner.yml/runs?")) {
+    if (/\/actions\/workflows\/[^/]+\/runs\?/.test(target)) {
       return new Response(JSON.stringify({ workflow_runs: [] }), {
         status: 200, headers: { "content-type": "application/json" },
       });
     }
-    if (target.endsWith("/actions/workflows/task-runner.yml/dispatches")) {
+    if (/\/actions\/workflows\/[^/]+\/dispatches$/.test(target)) {
       return new Response(null, { status: 204 });
     }
     throw new Error("unexpected_url");
@@ -382,8 +382,16 @@ test("offset watchdog Cron dispatches after the primary Task Runner phase", asyn
   } finally {
     globalThis.fetch = originalFetch;
   }
-  assert.equal(calls.length, 3);
-  assert.equal(calls[2].url.endsWith("/actions/workflows/task-runner.yml/dispatches"), true);
+  // One installation token, then a run-list read and a dispatch per watched
+  // workflow: the fallback must cover every dropped schedule, not only the
+  // task runner, and it must not re-authenticate once per workflow.
+  const tokens = calls.filter(call => call.url.endsWith("/access_tokens"));
+  const dispatches = calls.filter(call => call.url.endsWith("/dispatches"));
+  const runLists = calls.filter(call => call.url.includes("/runs?"));
+  assert.equal(tokens.length, 1);
+  assert.equal(runLists.length, 6);
+  assert.equal(dispatches.length, 6);
+  assert.ok(dispatches.some(call => call.url.endsWith("/actions/workflows/task-runner.yml/dispatches")));
   assert.ok(DB.calls.some(call => call.kind === "run" && call.values[0] === "task_runner_dispatch_intent"));
 });
 
