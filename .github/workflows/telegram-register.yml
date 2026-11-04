@@ -51,8 +51,6 @@ jobs:
     steps:
       - name: Check out reviewed main
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-        with:
-          persist-credentials: false
       - name: Set up Node.js
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
         with:
@@ -92,7 +90,10 @@ jobs:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           CHAT_ID: ${{ inputs.chat_id }}
-           if [ -n "$CHAT_ID" ] && ! printf '%s' "$CHAT_ID" | grep -Eq '^[1-9][0-9]{0,19}(,[1-9][0-9]{0,19})*$'; then
+          REPLACE_WEBHOOK_FOR_DISCOVERY: ${{ inputs.replace_webhook_for_discovery }}
+        run: |
+          set -uo pipefail
+          if [ -n "$CHAT_ID" ] && ! printf '%s' "$CHAT_ID" | grep -Eq '^[1-9][0-9]{0,19}(,[1-9][0-9]{0,19})*$'; then
             echo "::error title=Invalid chat_id::chat_id must be a positive private chat id (or comma-separated)"
             exit 1
           fi
@@ -132,9 +133,6 @@ jobs:
           fi
           echo "::error title=Bootstrap failed::Unexpected Telegram discovery error; no automatic webhook or allowlist change was attempted."
           exit 1
-
-legram_update_receipts, so the owner does not need to message the bot again."
-          run_bootstrap --chat-id "$recovered"
 
       - name: Install the three Worker secrets
         env:
