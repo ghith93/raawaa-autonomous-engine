@@ -78,7 +78,7 @@ try:
     for _ in range(80):
         try:
             children.append(subprocess.Popen(
-                [sys.executable, "-c", "import time; time.sleep(20)"],
+                ["/bin/sleep", "20"],
                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
             ))
         except OSError:
