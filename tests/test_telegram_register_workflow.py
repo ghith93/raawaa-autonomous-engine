@@ -108,17 +108,23 @@ elif "d1" in args and "execute" in args:
     print(json.dumps([{"results": [{"total": 1, "sent": 1}]}]))
 elif "secret" in args and "put" in args:
     key = args[args.index("put") + 1]
-    assert key in ("TELEGRAM_BOT_TOKEN", "TELEGRAM_WEBHOOK_SECRET")
+    assert key in ("TELEGRAM_BOT_TOKEN", "TELEGRAM_WEBHOOK_SECRET", "TELEGRAM_WEBHOOK_SECRET_STAGING", "TELEGRAM_ALLOWED_CHAT_IDS")
     value = sys.stdin.buffer.read()
     assert value
     state["events"].append("worker:secret-put:" + key)
-    state["worker_token_hash" if key == "TELEGRAM_BOT_TOKEN" else "worker_webhook_hash"] = hashlib.sha256(value).hexdigest()
+    if key in ("TELEGRAM_WEBHOOK_SECRET", "TELEGRAM_WEBHOOK_SECRET_STAGING"):
+        state["worker_webhook_hash"] = hashlib.sha256(value).hexdigest()
+    elif key == "TELEGRAM_BOT_TOKEN":
+        state["worker_token_hash"] = hashlib.sha256(value).hexdigest()
     if os.environ.get("MOCK_WRANGLER_ECHO") == "1":
         print("untrusted stdout: " + value.decode())
         print("untrusted stderr: " + value.decode(), file=sys.stderr)
     if os.environ.get("MOCK_WRANGLER_FAIL_KEY") == key:
         path.write_text(json.dumps(state))
         sys.exit(1)
+elif "secret" in args and "delete" in args:
+    key = args[args.index("delete") + 1]
+    state["events"].append("worker:secret-delete:" + key)
 else:
     raise AssertionError("Unexpected npx invocation")
 path.write_text(json.dumps(state))
@@ -167,8 +173,8 @@ def simulate(mode, **extra):
         masks = []
         for name, block, script in shell_steps():
             always = "if: always()" in block
-            repair_only = "if: inputs.mode == 'repair'" in block
-            if failed and not always or repair_only and mode != "repair":
+            repair_only = "if: inputs.mode == 'repair'" in block or "if: inputs.mode != 'diagnose'" in block
+            if failed and not always or repair_only and mode == "diagnose":
                 continue
             for filename in ("telegram.env", "telegram-diagnostic.json", "telegram-worker-secrets.json", "telegram-receipt-counts.json"):
                 script = script.replace("/tmp/" + filename, str(temp / filename))
@@ -211,14 +217,33 @@ class TelegramWorkflowOfflineIntegrationTests(unittest.TestCase):
         events = state["events"]
         self.assertLess(events.index("telegram:getWebhookInfo"), events.index("telegram:setMyCommands"))
         self.assertLess(events.index("worker:secret-put:TELEGRAM_BOT_TOKEN"), events.index("telegram:setWebhook"))
-        self.assertLess(events.index("worker:secret-put:TELEGRAM_WEBHOOK_SECRET"), events.index("telegram:setWebhook"))
+        self.assertLess(events.index("worker:secret-put:TELEGRAM_WEBHOOK_SECRET_STAGING"), events.index("telegram:setWebhook"))
         self.assertLess(events.index("telegram:setWebhook"), events.index("worker:probe"))
+        self.assertLess(events.index("worker:probe"), events.index("worker:secret-put:TELEGRAM_WEBHOOK_SECRET"))
+        self.assertLess(events.index("worker:secret-put:TELEGRAM_WEBHOOK_SECRET"), events.index("worker:secret-delete:TELEGRAM_WEBHOOK_SECRET_STAGING"))
         self.assertNotIn("worker:secret-put:TELEGRAM_ALLOWED_CHAT_IDS", events)
         self.assertEqual(state["webhook"], WEBHOOK)
         self.assertEqual([entry["command"] for entry in state["menu"]], ["start", "help", "status", "report"])
         self.assertNotIn(TOKEN, output)
         self.assertNotIn(WEBHOOK_SECRET, output)
         self.assertIn("::add-mask::[MASKED]", output)
+        self.assertFalse(private_file_left)
+
+    def test_owner_chat_id_secret_provisions_allowlist(self):
+        failed, state, output, executed, private_file_left = simulate("repair", OWNER_CHAT_ID="123456789")
+        self.assertFalse(failed, (executed, output))
+        events = state["events"]
+        self.assertIn("worker:secret-put:TELEGRAM_ALLOWED_CHAT_IDS", events)
+        self.assertIn("Verified repository secret OWNER_TELEGRAM_CHAT_ID is configured", output)
+        self.assertFalse(private_file_left)
+
+    def test_wedged_recovery_installs_primary_secret_directly(self):
+        failed, state, output, executed, private_file_left = simulate("wedged-recovery")
+        self.assertFalse(failed, (executed, output))
+        events = state["events"]
+        self.assertIn("worker:secret-put:TELEGRAM_WEBHOOK_SECRET", events)
+        self.assertNotIn("worker:secret-put:TELEGRAM_WEBHOOK_SECRET_STAGING", events)
+        self.assertIn("Wedged recovery re-keyed the webhook", output)
         self.assertFalse(private_file_left)
 
     def test_unattested_repair_stops_before_provider_calls(self):
@@ -229,7 +254,7 @@ class TelegramWorkflowOfflineIntegrationTests(unittest.TestCase):
         self.assertFalse(private_file_left)
 
     def test_wrangler_secret_output_is_suppressed_on_success_and_failure(self):
-        for fail_key in ("", "TELEGRAM_WEBHOOK_SECRET"):
+        for fail_key in ("", "TELEGRAM_WEBHOOK_SECRET_STAGING", "TELEGRAM_WEBHOOK_SECRET"):
             with self.subTest(fail_key=fail_key):
                 failed, state, output, _executed, private_file_left = simulate(
                     "repair", MOCK_WRANGLER_ECHO="1", MOCK_WRANGLER_FAIL_KEY=fail_key,
@@ -240,9 +265,12 @@ class TelegramWorkflowOfflineIntegrationTests(unittest.TestCase):
                 self.assertNotIn(TOKEN, output)
                 self.assertNotIn(WEBHOOK_SECRET, output)
                 self.assertIn("::add-mask::[MASKED]", output)
-                if fail_key:
+                if fail_key == "TELEGRAM_WEBHOOK_SECRET_STAGING":
                     self.assertIn("provider output withheld", output)
                     self.assertNotIn("telegram:setWebhook", state["events"])
+                elif fail_key == "TELEGRAM_WEBHOOK_SECRET":
+                    self.assertIn("provider output withheld", output)
+                    self.assertIn("telegram:setWebhook", state["events"])
                 self.assertFalse(private_file_left)
 
     def test_missing_allowlist_or_wrong_bot_stops_before_mutations(self):
