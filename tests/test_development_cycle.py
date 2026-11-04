@@ -3,6 +3,7 @@ import unittest
 from datetime import datetime, timedelta, timezone
 
 from engine.development_cycle import build_development_cycle, render_markdown
+from scripts.build_development_state import classify_checks
 
 
 def _iso(minutes_ago: float = 0) -> str:
@@ -249,6 +250,69 @@ class ContractTests(unittest.TestCase):
         self.assertIn("`main`", markdown)
         self.assertIn("do not authorise", markdown)
         self.assertIn("#9", markdown)
+
+
+class CheckClassificationTest(unittest.TestCase):
+    def test_a_queued_check_is_not_green(self):
+        # The exact shape that made PR #491 read as "green and mergeable" while
+        # its only check had never started.
+        self.assertEqual(classify_checks([{"status": "QUEUED", "conclusion": None}]), "pending")
+        self.assertEqual(classify_checks([{"status": "IN_PROGRESS", "conclusion": None}]), "pending")
+
+    def test_completed_conclusions_are_read_normally(self):
+        self.assertEqual(classify_checks([{"status": "COMPLETED", "conclusion": "SUCCESS"}]), "success")
+        self.assertEqual(classify_checks([{"status": "COMPLETED", "conclusion": "FAILURE"}]), "failure")
+        self.assertEqual(classify_checks([{"status": "COMPLETED", "conclusion": "TIMED_OUT"}]), "failure")
+
+    def test_an_absent_verdict_is_unknown_not_success(self):
+        self.assertEqual(classify_checks([]), "unknown")
+        self.assertEqual(classify_checks(None), "unknown")
+        self.assertEqual(classify_checks([{"status": "COMPLETED", "conclusion": "SKIPPED"}]), "unknown")
+
+
+class PendingPullRequestTest(unittest.TestCase):
+    def test_a_queued_check_ranks_as_waiting_not_mergeable(self):
+        state = {
+            "open_pull_requests": [{
+                "number": 7, "title": "queued", "created_at": _iso(30),
+                "mergeable": "MERGEABLE", "merge_state_status": "CLEAN", "checks": "pending",
+            }],
+        }
+        report = build_development_cycle(state)
+        actions = {item["target"]: item for item in report["next_actions"] + report["deferred"]}
+        self.assertEqual(actions["#7"]["action"], "await_or_unstick_checks")
+        self.assertIn("no verdict yet", actions["#7"]["reason"])
+
+
+class FreshnessTest(unittest.TestCase):
+    def test_a_report_without_a_snapshot_time_is_stale(self):
+        # Missing is not fresh: an old artifact and one with no timestamp produce
+        # the same misleading confidence unless both are called stale.
+        report = build_development_cycle({"open_issues": [], "open_pull_requests": []})
+        self.assertTrue(report["freshness"]["stale"])
+        self.assertIsNone(report["freshness"]["snapshot_age_minutes"])
+
+    def test_a_recent_snapshot_is_not_stale_and_carries_the_head(self):
+        report = build_development_cycle({
+            "generated_at": datetime.now(timezone.utc).isoformat(),
+            "signals": {"main_head_sha": "3ddbd01aabbccddeeff00112233445566778899"},
+        })
+        self.assertFalse(report["freshness"]["stale"])
+        self.assertEqual(report["freshness"]["main_head_sha"], "3ddbd01aabbccddeeff00112233445566778899")
+        self.assertLess(report["freshness"]["snapshot_age_minutes"], 1)
+
+    def test_an_old_snapshot_is_flagged_in_the_markdown(self):
+        old = datetime.now(timezone.utc) - timedelta(hours=5)
+        report = build_development_cycle({"generated_at": old.isoformat()})
+        markdown = render_markdown(report)
+        self.assertIn("Snapshot is stale", markdown)
+        self.assertIn("re-collect before acting", markdown)
+
+    def test_a_fresh_snapshot_says_so(self):
+        report = build_development_cycle({"generated_at": datetime.now(timezone.utc).isoformat()})
+        markdown = render_markdown(report)
+        self.assertNotIn("Snapshot is stale", markdown)
+        self.assertIn("Snapshot:", markdown)
 
 
 if __name__ == "__main__":
