@@ -270,6 +270,8 @@ def assert_sandbox_argv(argv: list[str], *, expected_source_dir: str) -> list[st
         memory = int(memory_raw[:-1]) if memory_raw.endswith("m") else 0
         swap = int(swap_raw[:-1]) if swap_raw.endswith("m") else 0
         cpus = float(cpus_raw)
+    except SandboxPolicyError:
+        raise
     except (TypeError, ValueError):
         raise SandboxPolicyError("resource limits must use valid numeric values") from None
     if not 1 <= pids <= CEILINGS["pids"]:
