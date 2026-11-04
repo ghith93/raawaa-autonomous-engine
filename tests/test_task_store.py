@@ -145,6 +145,8 @@ class TaskStoreTests(unittest.TestCase):
                 VALUES ('legacy','legacy-key','research_brief','Legacy','{}','succeeded',1,2,'2026-01-01','2026-01-01')""")
         migrated = TaskStore(legacy_path)
         self.assertEqual(migrated.list_tasks()[0]["execution_mode"], "unknown")
+        self.assertEqual(migrated.list_tasks()[0]["priority"], 0)
+        self.assertEqual(migrated.list_tasks()[0]["depends_on"], "[]")
 
     def test_claim_empty_queue(self):
         self.assertIsNone(self.store.claim_next())
