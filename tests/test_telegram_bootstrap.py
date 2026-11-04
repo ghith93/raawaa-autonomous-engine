@@ -412,17 +412,7 @@ class TelegramWorkflowContractTest(unittest.TestCase):
         self.assertIn("replace_webhook_for_discovery:", workflow)
         self.assertIn("CHAT_ID: ${{ inputs.chat_id }}", workflow)
         self.assertNotIn('CHAT_ID="${{ inputs.chat_id }}"', workflow)
-        self.assertIn("^[1-9][0-9]*(,[1-9][0-9]*)*$", workflow)
-class TelegramWorkflowContractTest(unittest.TestCase):
-    def test_registration_workflow_is_owner_only_and_uses_safe_inputs(self):
-        workflow = Path(".github/workflows/telegram-register.yml").read_text(encoding="utf-8")
-        self.assertIn("github.actor == 'ghith93'", workflow)
-        self.assertIn("persist-credentials: false", workflow)
-        self.assertIn("replace_webhook_for_discovery:", workflow)
-        self.assertIn("CHAT_ID: ${{ inputs.chat_id }}", workflow)
-        self.assertNotIn('CHAT_ID="${{ inputs.chat_id }}"', workflow)
-        self.assertIn("^[1-9][0-9]*(,[1-9][0-9]*)*$", workflow)
-        self.assertNotIn("SELECT chat_id FROM telegram_update_receipts", workflow)
+        self.assertIn("^[1-9][0-9]{0,19}(,[1-9][0-9]{0,19})*$", workflow)
 class NoChatFoundTest(unittest.TestCase):
     """The failure an owner actually hits has to carry the fix, not just the fact."""
 
