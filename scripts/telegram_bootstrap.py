@@ -157,12 +157,21 @@ def webhook_state(token: str) -> dict:
     }
 
 
-def register(token: str, url: str, secret: str, chat_ids: list[int]) -> dict:
+def register(
+    token: str,
+    url: str,
+    secret: str,
+    chat_ids: list[int],
+    *,
+    require_allowlist: bool = True,
+) -> dict:
     if not url.startswith("https://"):
         raise BootstrapError("the webhook URL must be https")
     if not SECRET_RE.fullmatch(secret):
         raise BootstrapError("the webhook secret must be 16-256 characters of [A-Za-z0-9_-]")
-    if not chat_ids or not all(CHAT_ID_RE.fullmatch(str(chat_id)) for chat_id in chat_ids):
+    if require_allowlist and (
+        not chat_ids or not all(CHAT_ID_RE.fullmatch(str(chat_id)) for chat_id in chat_ids)
+    ):
         raise BootstrapError("at least one numeric chat id is required")
     _call(token, "setWebhook", {
         "url": url,
@@ -251,6 +260,15 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--env-file", default=DEFAULT_ENV_FILE, help="Where to write the three values")
     parser.add_argument("--register", action="store_true", help="Actually call setWebhook (default: dry run)")
     parser.add_argument("--check", action="store_true", help="Report current webhook state and exit")
+    parser.add_argument(
+        "--rearm-only",
+        action="store_true",
+        help=(
+            "Rotate the webhook secret and re-register without touching the chat "
+            "allowlist. Use when the Worker already knows its owner but Telegram "
+            "has nothing queued to rediscover them from."
+        ),
+    )
     args = parser.parse_args(argv)
 
     try:
@@ -259,6 +277,31 @@ def main(argv: list[str] | None = None) -> int:
             state = webhook_state(token)
             print(json.dumps({"webhook": state}, indent=2))
             return 0 if state["url"] else 1
+
+        if args.rearm_only:
+            # The allowlist is already correct on the Worker; only the secret and
+            # the registration are being renewed. Requiring a discoverable chat id
+            # here would block exactly the case this exists for.
+            secret = args.secret or generate_webhook_secret()
+            if not args.url:
+                raise BootstrapError("--rearm-only needs --url https://<worker>.workers.dev")
+            env_file = Path(args.env_file)
+            write_env_file(env_file, {
+                "TELEGRAM_BOT_TOKEN": token,
+                "TELEGRAM_WEBHOOK_SECRET": secret,
+                "TELEGRAM_ALLOWED_CHAT_IDS": "",
+            })
+            summary = {
+                "mode": "rearm_only",
+                "url": args.url,
+                "secret_generated": args.secret is None,
+                "env_file": str(env_file),
+                "allowlist": "left untouched on the Worker",
+            }
+            summary["webhook"] = register(token, args.url, secret, [], require_allowlist=False)
+            summary["registered"] = True
+            print(json.dumps(summary, indent=2))
+            return 0
 
         discovered, username, updates_seen = find_private_chat_ids(token)
         chat_ids = _parse_chat_ids(args.chat_id) if args.chat_id else discovered

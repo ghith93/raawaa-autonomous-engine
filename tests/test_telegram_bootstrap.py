@@ -124,6 +124,47 @@ class RerunTest(unittest.TestCase):
                 bootstrap.find_private_chat_ids(VALID_TOKEN)
 
 
+class RearmTest(unittest.TestCase):
+    """Re-arming must work when no chat id can be discovered anywhere."""
+
+    def test_rearm_registers_without_a_chat_id_and_leaves_the_allowlist_empty(self):
+        calls = []
+
+        def fake_call(token, method, payload=None, **kwargs):
+            calls.append(method)
+            if method == "getMe":
+                return {"username": "raawaa_bot"}
+            if method == "getWebhookInfo":
+                return {"url": "https://w.example/v1/telegram/webhook", "pending_update_count": 0}
+            return True
+
+        env_file = Path(tempfile.mkdtemp()) / "telegram.env"
+        with patch.object(bootstrap, "_call", side_effect=fake_call):
+            with patch.dict(os.environ, {"TELEGRAM_BOT_TOKEN": VALID_TOKEN}):
+                with contextlib.redirect_stdout(io.StringIO()):
+                    code = bootstrap.main([
+                        "--url", "https://w.example/v1/telegram/webhook",
+                        "--env-file", str(env_file), "--rearm-only",
+                    ])
+        self.assertEqual(code, 0)
+        self.assertIn("setWebhook", calls)
+        self.assertNotIn("getUpdates", calls, "re-arm must not depend on a discoverable chat")
+        written = dict(
+            line.split("=", 1) for line in env_file.read_text().splitlines() if "=" in line
+        )
+        self.assertEqual(written["TELEGRAM_ALLOWED_CHAT_IDS"], "",
+                         "an empty value tells the workflow to leave the Worker's allowlist alone")
+        self.assertTrue(written["TELEGRAM_WEBHOOK_SECRET"])
+        self.assertEqual(oct(env_file.stat().st_mode)[-3:], "600")
+
+    def test_rearm_still_requires_a_url(self):
+        with patch.object(bootstrap, "_call", side_effect=lambda *a, **k: {"username": "b"}):
+            with patch.dict(os.environ, {"TELEGRAM_BOT_TOKEN": VALID_TOKEN}):
+                with contextlib.redirect_stderr(io.StringIO()):
+                    code = bootstrap.main(["--env-file", "/tmp/x.env", "--rearm-only"])
+        self.assertEqual(code, 2)
+
+
 class ResultShapeTest(unittest.TestCase):
     """Bot API results are not all objects; getUpdates is a list."""
 
