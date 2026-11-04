@@ -22,6 +22,7 @@ from engine.artemis_gateway import probe_artemis
 from engine.executive_intelligence import executive_status
 from engine.brain_cycle import DEFAULT_SNAPSHOT_LIMIT, build_brain_cycle
 from engine.development_cycle import build_development_cycle, render_markdown as render_development_markdown
+from engine.profile_routing import build_route_plan, render_markdown as render_route_plan
 from engine.orchestrator import validate_and_plan
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -166,6 +167,12 @@ def build_parser() -> argparse.ArgumentParser:
     workflow_plan = sub.add_parser("workflow-plan", help="Validate a delegated workflow DAG without enqueuing or executing it")
     workflow_plan.add_argument("--file", required=True, help="Path to a JSON workflow proposal")
     sub.add_parser("artemis-status", help="Read-only ARTEMIS daemon/device probe; never submits a mobile task")
+    route = sub.add_parser(
+        "route-plan",
+        help="Explain which registered provider profile routing would choose, and why the rest are excluded",
+    )
+    route.add_argument("--task-kind", default="default")
+    route.add_argument("--format", choices=["json", "markdown"], default="json")
 
     discovery = sub.add_parser(
         "free-models",
@@ -250,6 +257,12 @@ def main() -> int:
         print(json.dumps(validate_and_plan(proposal, roster, policy).as_dict(), indent=2, ensure_ascii=False))
     elif args.command == "artemis-status":
         print(json.dumps(probe_artemis(os.environ), indent=2, ensure_ascii=False))
+    elif args.command == "route-plan":
+        plan = build_route_plan(task_kind=args.task_kind)
+        if args.format == "markdown":
+            print(render_route_plan(plan), end="")
+        else:
+            print(json.dumps(plan, indent=2, ensure_ascii=False))
     elif args.command == "free-models":
         if args.provider == "all":
             result = discover_all()

@@ -23,9 +23,11 @@ Same shape as phase 1: install verified, Google account OAuth requires interacti
 
 ## Phase 3 — Model router — `partial`
 
-`engine/model_router.py` is a 30-line selection stub: it filters configured options by `enabled` and refuses to fall back to a paid model when `paid_calls_enabled` is false. It performs **no network calls** by design.
+`engine/model_router.py` is a small selection stub: it filters configured options by `enabled` and refuses to fall back to a paid model when `paid_calls_enabled` is false. It performs no network calls by design.
 
-The gap that makes this `partial`, not `shipped`: it selects from a hand-constructed list of `ModelOption` objects. It does not read the provider profile registry (`config/provider_profiles.json`), so a routed selection cannot be traced back to a registered profile with its quota, tier and terms. Multi-CLI routing — the actual phase goal — is absent.
+As of 2026-11-04 the registry gap is closed: `engine/profile_routing.py` builds the candidate set **from `config/provider_profiles.json`** rather than from a hand-written list, and reports the first eligibility rule each rejected profile failed — disabled, production use not allowed, free usage unverified, commercial use not allowed, would incur cost, verification stale, or not fully provisioned. `python -m engine.cli route-plan --format markdown` prints the answer, and a test asserts the shipped registry routes nothing while every profile is disabled.
+
+The gap that keeps this `partial`: **multi-CLI routing** — choosing between external agent CLIs — does not exist. What exists is explainable model selection over the provider registry, which is the foundation the phase needs, not the phase itself.
 
 ## Phase 4 — Execution manager — `partial`
 
