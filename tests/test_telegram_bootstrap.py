@@ -263,6 +263,24 @@ class EnvFileTest(unittest.TestCase):
             self.assertEqual(path.read_text(), "A=1\n")
 
 
+class WebhookStateTest(unittest.TestCase):
+    def test_secret_token_presence_is_unknown_not_inferred_from_tls_certificate(self):
+        for custom_certificate in (False, True):
+            with self.subTest(has_custom_certificate=custom_certificate):
+                with patch.object(bootstrap, "_call", return_value={
+                    "url": "https://worker.test/v1/telegram/webhook",
+                    "pending_update_count": 0,
+                    "last_error_message": "",
+                    "has_custom_certificate": custom_certificate,
+                }):
+                    state = bootstrap.webhook_state(VALID_TOKEN)
+                self.assertEqual(state["url"], "https://worker.test/v1/telegram/webhook")
+                self.assertIsNone(
+                    state["secret_token_set"],
+                    "getWebhookInfo does not disclose secret_token presence",
+                )
+
+
 class RegisterTest(unittest.TestCase):
     def test_registration_refuses_an_insecure_url(self):
         with self.assertRaises(bootstrap.BootstrapError):
