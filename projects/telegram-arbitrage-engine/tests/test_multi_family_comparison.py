@@ -57,9 +57,9 @@ def test_cex_against_solana_aggregator_with_full_costs_reaches_a_net_label():
         network_fee_quote="0.01", priority_fee_quote="0.005",
     )
     result = compare_legs(
-        buy=leg(price="60000", venue="binance"),
+        buy=leg(price="60000", venue="binance", max_base_quantity="1"),
         sell=leg(family="solana_aggregator", venue="jupiter", instrument="btc-mint/usdc-mint",
-                 price="60900", data_type="executable_quote"),
+                 price="60900", data_type="executable_quote", max_base_quantity="1"),
         notional_quote="600",
         costs=costs,
         now=NOW,
@@ -77,8 +77,9 @@ def test_a_solana_leg_without_network_fees_is_not_profitable():
     # The evaluator asks for network + priority fees whenever a
     # solana_aggregator leg is present; silence is not zero.
     result = compare_legs(
-        buy=leg(price="60000"),
-        sell=leg(family="solana_aggregator", venue="jupiter", instrument="mint-a/mint-b", price="60900"),
+        buy=leg(price="60000", max_base_quantity="1"),
+        sell=leg(family="solana_aggregator", venue="jupiter", instrument="mint-a/mint-b",
+                 price="60900", max_base_quantity="1"),
         notional_quote="600", costs=FULL_COSTS, now=NOW,
     )
     assert result.status == "incomplete_costs"
@@ -89,8 +90,8 @@ def test_a_solana_leg_without_network_fees_is_not_profitable():
 def test_an_evm_leg_requires_gas_and_priority_fees():
     result = compare_legs(
         buy=leg(family="evm_amm", venue="uniswap_v2_ethereum", instrument="pool-1",
-                price="60000", data_type="on_chain_state"),
-        sell=leg(price="60900"),
+                price="60000", data_type="on_chain_state", max_base_quantity="1"),
+        sell=leg(price="60900", max_base_quantity="1"),
         notional_quote="600", costs=FULL_COSTS, now=NOW,
     )
     assert result.status == "incomplete_costs"
@@ -105,9 +106,9 @@ def test_an_indicative_leg_caps_the_label_even_when_the_math_is_positive():
         network_fee_quote="0.01", priority_fee_quote="0.005",
     )
     result = compare_legs(
-        buy=leg(price="60000"),
+        buy=leg(price="60000", max_base_quantity="1"),
         sell=leg(family="solana_aggregator", venue="jupiter", instrument="mint-a/mint-b",
-                 price="60900", data_type="indicative_quote"),
+                 price="60900", data_type="indicative_quote", max_base_quantity="1"),
         notional_quote="600", costs=costs, now=NOW,
     )
     assert result.evaluation.status == "net_positive_estimate"
@@ -138,7 +139,7 @@ def test_a_leg_that_cannot_fill_the_size_is_insufficient_depth():
     # The quote covers 0.002 BTC; the request is 0.01 BTC.
     result = compare_legs(
         buy=leg(price="60000", max_base_quantity="0.002"),
-        sell=leg(price="60900", venue="bybit"),
+        sell=leg(price="60900", venue="bybit", max_base_quantity="1"),
         notional_quote="600", costs=FULL_COSTS, now=NOW,
     )
     assert result.status == "insufficient_depth"
@@ -146,17 +147,56 @@ def test_a_leg_that_cannot_fill_the_size_is_insufficient_depth():
     assert not result.is_net_profit_claim
 
 
-def test_an_undeclared_depth_is_marked_as_such_rather_than_assumed_deep():
-    result = compare_legs(
-        buy=leg(price="60000"), sell=leg(price="60900", venue="bybit"),
+def test_unknown_depth_never_becomes_a_full_fill_or_profit_candidate():
+    # Each unknown side is tested against a mathematically positive spread and
+    # fully known costs. Only two explicit depth declarations may earn a label.
+    buy_unknown = compare_legs(
+        buy=leg(price="60000"),
+        sell=leg(price="60900", venue="bybit", max_base_quantity="1"),
         notional_quote="600", costs=FULL_COSTS, now=NOW,
     )
-    assert dict(result.evidence)["depth_basis"] == "undeclared"
+    assert buy_unknown.status == "depth_unverified"
+    assert buy_unknown.buy_fill_fraction is None
+    assert buy_unknown.sell_fill_fraction == Decimal("1")
+    assert buy_unknown.evaluation.net_profit_quote is None
+    assert not buy_unknown.is_net_profit_claim
+    assert dict(buy_unknown.evidence)["buy_depth_basis"] == "undeclared"
+    assert dict(buy_unknown.evidence)["sell_depth_basis"] == "quoted"
+    assert dict(buy_unknown.evidence)["depth_basis"] == "partially_declared"
+
+    sell_unknown = compare_legs(
+        buy=leg(price="60000", max_base_quantity="1"),
+        sell=leg(price="60900", venue="bybit"),
+        notional_quote="600", costs=FULL_COSTS, now=NOW,
+    )
+    assert sell_unknown.status == "depth_unverified"
+    assert sell_unknown.buy_fill_fraction == Decimal("1")
+    assert sell_unknown.sell_fill_fraction is None
+    assert sell_unknown.evaluation.net_profit_quote is None
+    assert not sell_unknown.is_net_profit_claim
+    assert dict(sell_unknown.evidence)["depth_basis"] == "partially_declared"
+
+    both_unknown = compare_legs(
+        buy=leg(price="60000"),
+        sell=leg(price="60900", venue="bybit"),
+        notional_quote="600", costs=FULL_COSTS, now=NOW,
+    )
+    assert both_unknown.status == "depth_unverified"
+    assert both_unknown.buy_fill_fraction is None
+    assert both_unknown.sell_fill_fraction is None
+    assert both_unknown.evaluation.net_profit_quote is None
+    assert not both_unknown.is_net_profit_claim
+    assert dict(both_unknown.evidence)["depth_basis"] == "undeclared"
+
     declared = compare_legs(
         buy=leg(price="60000", max_base_quantity="1"),
         sell=leg(price="60900", venue="bybit", max_base_quantity="1"),
         notional_quote="600", costs=FULL_COSTS, now=NOW,
     )
+    assert declared.status == "net_positive_estimate"
+    assert declared.label == "net_positive_candidate"
+    assert declared.evaluation.net_profit_quote > 0
+    assert declared.is_net_profit_claim
     assert dict(declared.evidence)["depth_basis"] == "quoted"
 
 
