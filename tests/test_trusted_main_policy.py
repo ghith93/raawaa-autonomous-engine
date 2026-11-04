@@ -48,7 +48,7 @@ class TrustedMainPolicyTests(unittest.TestCase):
             ("git", "rev-parse", "--show-toplevel"): str(root),
             ("git", "branch", "--show-current"): "main",
             ("git", "rev-parse", "HEAD"): COMMIT,
-            ("git", "status", "--porcelain", "--untracked-files=all"): "",
+            ("git", "status", "--porcelain", "--untracked-files=all", "--ignored=matching"): "",
             ("git", "remote", "get-url", "origin"): "https://github.com/ghith93/raawaa-autonomous-engine.git",
         }
         values.update(overrides or {})
@@ -87,7 +87,18 @@ class TrustedMainPolicyTests(unittest.TestCase):
             result = verify_trusted_checkout(
                 root,
                 runner=self._runner(root, {
-                    ("git", "status", "--porcelain", "--untracked-files=all"): " M engine/worker.py",
+                    ("git", "status", "--porcelain", "--untracked-files=all", "--ignored=matching"): " M engine/worker.py",
+                }),
+                commit_verifier=lambda sha: self.fail("must not call GitHub"),
+            )
+        self.assertEqual(result["reason"], "working_tree_not_clean")
+
+    def test_rejects_ignored_files_in_checkout(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            result = verify_trusted_checkout(
+                root, runner=self._runner(root, {
+                    ("git", "status", "--porcelain", "--untracked-files=all", "--ignored=matching"): "!! .env.local",
                 }),
                 commit_verifier=lambda sha: self.fail("must not call GitHub"),
             )
