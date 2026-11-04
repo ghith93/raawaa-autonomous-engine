@@ -78,7 +78,7 @@ def verify_trusted_checkout(
         "root": ["git", "rev-parse", "--show-toplevel"],
         "branch": ["git", "branch", "--show-current"],
         "commit": ["git", "rev-parse", "HEAD"],
-        "status": ["git", "status", "--porcelain", "--untracked-files=all"],
+        "status": ["git", "status", "--porcelain", "--untracked-files=all", "--ignored=matching"],
         "origin": ["git", "remote", "get-url", "origin"],
     }
     results = {}
