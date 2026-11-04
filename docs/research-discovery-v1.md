@@ -1,54 +1,57 @@
-# Scheduled Open-Source Research Discovery v1
+# Scheduled Open-Source Research Discovery
 
 ## Purpose
 
-The engine now has a bounded, read-only GitHub repository discovery capability. It complements provider model-catalog discovery; it does not replace the broader research and engineering review pipeline defined in the Continuous Improvement Charter.
+The engine performs bounded, metadata-only discovery across public GitHub repositories, Crossref, arXiv, and an optional operator-hosted SearXNG endpoint. Discovery and deterministic triage do not imply endorsement, adoption, installation, execution, or trust.
 
-## What it does
+## Sources and bounds
 
-- Searches nine curated areas configured in `config/research_sources.json`: agent frameworks, coding agents, agent memory, MCP ecosystem, model routing, durable execution, agent-skill security, agent evaluation, and skill benchmarks.
-- Uses GitHub public repository Search API with an optional GITHUB_TOKEN for authenticated API rate limits, plus one daily Crossref public scholarly-metadata query without an API key.
-- Caps GitHub and Crossref responses at 1 MiB before parsing and reports invalid UTF-8 as a safe discovery failure.
-- Counts attempted source requests, including failures, in run telemetry.
-- Limits each run to the configured nine GitHub queries and at most five candidates per query; it also makes one sequential Crossref metadata request for up to ten academic candidates. The configuration is authoritative for these bounds.
-- Deduplicates repositories and records source query, discovery time, stars, last push, language, SPDX licence label, and topics.
-- Marks every result unreviewed. A licence label is metadata only, not a legal/licence review.
-- Makes no model-generation requests, repository clones, code execution, installations, writes, or permission changes.
-- Crossref returns bibliographic metadata only; abstracts are not retrieved. Licence URLs are metadata and are not treated as licence verification. One sequential list request is made per daily run to respect public-pool rate limits.
-
-## Run manually
-
-    python -m engine.cli research-discover --max-per-query 5
-
-The command writes a JSON snapshot to stdout. The scheduled GitHub Actions workflow runs daily, also runs after relevant research/Worker/migration changes reach main, and uploads the snapshot as a 30-day artifact. It uses read-only repository permissions.
-
-## Review before adoption
-
-1. Open the original repository and verify ownership/authenticity.
-2. Inspect the exact licence file and any model/data licences; do not rely on SPDX metadata alone.
-3. Check recent releases, commits, maintainers, security advisories, dependencies, and open issues.
-4. Assess data flows, secrets exposure, network access, and execution isolation.
-5. Compare with the current engine component and alternatives.
-6. Test in an isolated branch/sandbox, measure benefit/cost, then decide whether to integrate.
-
-Discovery does not imply endorsement, installation, execution, or permission to use external services.
-
-## Current limitations
-
-- GitHub and Crossref are initial sources, not a complete web/official-documentation/scientific/MCP/plugin research engine.
-- Snapshots are workflow artifacts with 30-day retention. Candidate metadata is upserted into authenticated Cloudflare D1 only when the operator explicitly enables persistence. Rediscovery updates last_seen_at and discovery_count while preserving human review_status. The authenticated review endpoint records accepted/rejected/deferred decisions. The D1 store is durable cross-run memory; artifacts remain convenient per-run snapshots. After ingestion, the persistence client performs an authenticated keys-only readback and confirms every submitted source key exists before reporting success. The persistence client retries only temporary deployment/migration/availability errors with bounded delays; authentication and validation failures stop immediately.
-- No autonomous agent reads and evaluates candidates yet. Results require engineering/security/licence review.
-- The schedule is daily and bounded, not always-on. D1 ingestion uses the existing Worker application token and accepts only normalized GitHub/Crossref metadata.
-
-Official Crossref references:
-- REST API: https://www.crossref.org/documentation/retrieve-metadata/rest-api/
-- Access and rate limits: https://www.crossref.org/documentation/retrieve-metadata/rest-api/access-and-authentication/
+- GitHub: nine curated topic queries, at most five candidates per query.
+- Crossref: one sequential public metadata request per daily scan, at most ten records.
+- arXiv: one Atom API request per daily scan, at most ten records. Only bibliographic metadata is retained; abstracts and full text are excluded.
+- SearXNG: optional single JSON request, at most ten results, skipped unless `RAAWAA_SEARXNG_BASE_URL` is explicitly configured to an operator-controlled HTTPS endpoint. JSON must be enabled in that instance's `search.formats`.
+- Each source response is bounded to 1 MiB. arXiv and configured SearXNG requests reject redirects; authenticated D1 persistence also refuses redirects. Results remain untrusted metadata.
+- The scheduled workflow records per-source request counts, result counts, freshness and failure status. It uploads bounded snapshots and deterministic triage/capability reports as 30-day artifacts.
 
 ## Persistent D1 research memory
 
-- Authenticated ingestion: POST /v1/research/candidates (batch size is capped at 25 by the Worker; the workflow sends chunks of five).
-- Authenticated listing: GET /v1/research/candidates?status=unreviewed&limit=50. Use keys_only=true for compact verification or include_metadata=true for detailed records.
-- Explicit review: POST /v1/research/candidates/review with source_key and review_status set to accepted, rejected, or deferred.
-- Re-ingestion is idempotent by normalized GitHub repository name or Crossref DOI. It updates last-seen/discovery count but does not overwrite a prior review decision.
-- Only an allowlisted metadata subset is stored. No source code, abstracts, full text, secrets, or model outputs are stored.
-- Migration 0002 is additive and applied by the existing D1 migration workflow after merge to main. Worker deployment is handled by the existing deploy workflow.
+Candidate persistence is separately gated by `RAAWAA_ENGINE_RESEARCH_PERSISTENCE=enabled`; the source code does not prove that this repository variable is enabled.
+
+- The authenticated Worker accepts normalized GitHub and Crossref records today.
+- Persistent research storage now covers GitHub, Crossref, arXiv and SearXNG: migration `0011_research_source_expansion` rebuilds `research_candidates` to widen the `source` CHECK while preserving every review decision, and the Worker normalizes arXiv identifiers and SearXNG links with strict URL validation (https only; IP literals and local hostnames rejected; nothing fetched). SearXNG itself stays inactive until an operator-owned endpoint is configured.
+- Re-ingestion is idempotent by normalized source key. It updates last-seen/discovery count without overwriting prior human review decisions.
+- The Worker stores only bounded allowlisted metadata. It does not fetch SearXNG result URLs, abstracts, or full text.
+- Authenticated listing and explicit review remain available through the existing research-candidate endpoints.
+
+## Review before adoption
+
+1. Verify the original source, maintainer identity, release history and exact revision.
+2. Inspect source code, dependency tree, security advisories and known vulnerabilities.
+3. Verify code, model, dataset and documentation licences independently.
+4. Review data flows, network access, secrets exposure and execution isolation.
+5. Compare with existing engine components and at least one alternative.
+6. Test in an isolated branch/sandbox with synthetic data, measurable acceptance criteria and rollback.
+7. Require independent security/architecture review before registry import or activation.
+
+Metadata ranking is only a manual-review aid. Stars, recency, citations and snippets are not security, quality, licence or compatibility evidence. No candidate is automatically accepted or installed.
+
+## Current limitations
+
+- SearXNG is not active: no owner-controlled endpoint is configured or queried.
+- The R&D workflow is scheduled daily, not an always-on autonomous research agent.
+- Capability-gap analysis is deterministic and repository-local; it does not inspect live account variables, D1 contents, deployed service health or model-provider consoles.
+- No external skill is currently auto-imported or executed by discovery.
+- Research source expansion does not create new spending or enable paid model routes.
+
+## Run manually
+
+```bash
+python -m engine.cli research-discover --max-per-query 5
+python scripts/triage_research_candidates.py research-candidates.json
+python scripts/analyze_capability_gaps.py research-triage.json .
+```
+
+Official references:
+- SearXNG Search API: https://docs.searxng.org/dev/search_api.html
+- Crossref REST API: https://www.crossref.org/documentation/retrieve-metadata/rest-api/
+- arXiv API: https://info.arxiv.org/help/api/user-manual.html

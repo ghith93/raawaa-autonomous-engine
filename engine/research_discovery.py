@@ -13,7 +13,7 @@ import xml.etree.ElementTree as ET
 from datetime import datetime, timezone
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode, urlsplit
-from urllib.request import Request, urlopen
+from urllib.request import HTTPRedirectHandler, Request, build_opener, urlopen
 
 API = "https://api.github.com/search/repositories"
 MAX_RESPONSE_BYTES = 1048576
@@ -36,6 +36,17 @@ DEFAULT_QUERIES = {
 
 class ResearchDiscoveryError(RuntimeError):
     """A bounded research metadata request failed safely."""
+
+
+class _RejectRedirects(HTTPRedirectHandler):
+    """Refuse redirects for fixed-host metadata and configured search endpoints."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        raise HTTPError(req.full_url, code, "redirects are disabled for fixed-host discovery requests", headers, fp)
+
+
+def _open_without_redirects(request: Request, timeout: int):
+    return build_opener(_RejectRedirects).open(request, timeout=timeout)
 
 
 def _request_json(query: str, token: str = "", timeout: int = 15) -> dict:
@@ -101,15 +112,23 @@ def _request_arxiv(query: str, max_results: int = 10, timeout: int = 20) -> dict
                       headers={"Accept": "application/atom+xml", "User-Agent": USER_AGENT},
                       method="GET")
     try:
-        with urlopen(request, timeout=timeout) as response:
+        with _open_without_redirects(request, timeout) as response:
             if response.status != 200:
                 raise ResearchDiscoveryError(f"arXiv returned HTTP {response.status}")
+            final_url = response.geturl() if callable(getattr(response, "geturl", None)) else request.full_url
+            final = urlsplit(final_url)
+            if final.scheme != "https" or final.hostname != "export.arxiv.org" or final.port not in (None, 443) or final.username or final.password:
+                raise ResearchDiscoveryError("arXiv response is outside the fixed HTTPS host")
             raw = response.read(MAX_RESPONSE_BYTES + 1)
             if len(raw) > MAX_RESPONSE_BYTES:
                 raise ResearchDiscoveryError("arXiv response exceeded the 1 MiB safety limit")
-            if b"<!DOCTYPE" in raw.upper() or b"<!ENTITY" in raw.upper():
-                raise ResearchDiscoveryError("arXiv XML declarations with DTD/entities are not accepted")
-            root = ET.fromstring(raw)
+            try:
+                xml_text = raw.decode("utf-8-sig")
+            except UnicodeDecodeError:
+                raise ResearchDiscoveryError("arXiv Atom response must be valid UTF-8") from None
+            if chr(0) in xml_text or "<!DOCTYPE" in xml_text.upper() or "<!ENTITY" in xml_text.upper():
+                raise ResearchDiscoveryError("arXiv XML declarations with DTD/entities or invalid null bytes are not accepted")
+            root = ET.fromstring(xml_text)
     except HTTPError as exc:
         raise ResearchDiscoveryError(f"arXiv returned HTTP {exc.code}") from exc
     except (URLError, TimeoutError, OSError) as exc:
@@ -230,7 +249,7 @@ def _request_searxng(query: str, base_url: str, max_results: int = 10, timeout: 
     request_url = endpoint + "/search?" + urlencode(params)
     request = Request(request_url, headers={"Accept": "application/json", "User-Agent": USER_AGENT}, method="GET")
     try:
-        with urlopen(request, timeout=timeout) as response:
+        with _open_without_redirects(request, timeout) as response:
             if response.status != 200:
                 raise ResearchDiscoveryError(f"SearXNG returned HTTP {response.status}")
             final_url = response.geturl() if callable(getattr(response, "geturl", None)) else request_url
@@ -258,8 +277,21 @@ def _normalize_searxng_result(item: dict, retrieved_at: str) -> dict | None:
     if not isinstance(title, str) or not title.strip() or not isinstance(url, str):
         return None
     parsed = urlsplit(url)
-    if (parsed.scheme not in {"http", "https"} or not parsed.hostname or parsed.username
-            or parsed.password or len(url) > 1000):
+    if (parsed.scheme != "https" or not parsed.hostname or parsed.username
+            or parsed.password or parsed.fragment or len(url) > 1000):
+        return None
+    hostname = parsed.hostname.lower()
+    if hostname == "localhost" or hostname.endswith((".local", ".internal", ".localhost")):
+        return None
+    try:
+        parsed.port
+    except ValueError:
+        return None
+    try:
+        ipaddress.ip_address(hostname)
+    except ValueError:
+        pass
+    else:
         return None
     engines = item.get("engines", [])
     if not isinstance(engines, list):

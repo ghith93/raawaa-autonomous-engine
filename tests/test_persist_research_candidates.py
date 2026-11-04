@@ -1,13 +1,27 @@
+import sqlite3
 import unittest
+from urllib.error import HTTPError
+from urllib.request import Request
+from pathlib import Path
 
 from scripts.persist_research_candidates import (
     ResearchPersistenceError,
     load_candidates,
     persist_candidates,
+    _RejectRedirects,
 )
 
 
 class ResearchPersistenceTests(unittest.TestCase):
+    def test_authenticated_d1_redirects_are_refused_before_credentials_can_be_forwarded(self):
+        handler = _RejectRedirects()
+        request = Request("https://engine.example/v1/research/candidates")
+        with self.assertRaises(HTTPError):
+            handler.redirect_request(
+                request, None, 307, "Temporary Redirect", {},
+                "https://evil.example/collect",
+            )
+
     def test_load_candidates_merges_sources_and_deduplicates(self):
         snapshot = {
             "candidates": [
@@ -22,6 +36,82 @@ class ResearchPersistenceTests(unittest.TestCase):
         candidates = load_candidates(snapshot)
         self.assertEqual(len(candidates), 2)
         self.assertEqual([item["source"] for item in candidates], ["github", "crossref"])
+
+    def test_load_candidates_includes_arxiv_and_searxng_with_deduplication(self):
+        snapshot = {
+            "candidates": [],
+            "academic_candidates": [],
+            "arxiv_candidates": [
+                {"arxiv_id": "2601.01234", "title": "Agent safety", "url": "https://arxiv.org/abs/2601.01234"},
+                {"arxiv_id": "2601.01234", "title": "Duplicate", "url": "https://arxiv.org/abs/2601.01234"},
+            ],
+            "searxng_candidates": [
+                {"url": "https://example.org/agent-security", "title": "Security"},
+                {"url": "https://example.org/agent-security", "title": "Duplicate"},
+            ],
+        }
+        candidates = load_candidates(snapshot)
+        self.assertEqual(len(candidates), 2)
+        self.assertEqual([item["source"] for item in candidates], ["arxiv", "searxng"])
+
+    def test_persistence_and_readback_cover_all_four_supported_sources(self):
+        snapshot = {
+            "candidates": [{"full_name": "org/agent"}],
+            "academic_candidates": [{"doi": "10.1234/paper", "title": "Paper"}],
+            "arxiv_candidates": [{"arxiv_id": "2601.01234", "title": "arXiv", "url": "https://arxiv.org/abs/2601.01234"}],
+            "searxng_candidates": [{"url": "https://example.org/agent", "title": "Web result"}],
+        }
+        expected = [
+            "github:org/agent", "crossref:10.1234/paper",
+            "arxiv:2601.01234", "searxng:https://example.org/agent",
+        ]
+        calls = []
+        def fake_post(base_url, token, batch, access_id, access_secret):
+            calls.append([item["source"] for item in batch])
+            return {"accepted_count": len(batch)}
+        result = persist_candidates(
+            snapshot,
+            environ={"RAAWAA_ENGINE_API_URL": "https://engine.example", "RAAWAA_ENGINE_API_TOKEN": "test-secret"},
+            request_fn=fake_post,
+            verify_fn=lambda *args: {"candidates": [{"source_key": key} for key in expected]},
+        )
+        self.assertEqual(result["sources"], ["arxiv", "crossref", "github", "searxng"])
+        self.assertEqual(result["discovered"], 4)
+        self.assertEqual(result["verified"], 4)
+        self.assertEqual(result["persisted"], 4)
+        self.assertEqual(calls, [["github", "crossref", "arxiv", "searxng"]])
+
+    def test_source_expansion_migration_preserves_existing_review_history(self):
+        root = Path(__file__).resolve().parents[1]
+        connection = sqlite3.connect(":memory:")
+        connection.execute("CREATE TABLE schema_migrations(version TEXT PRIMARY KEY)")
+        connection.executescript((root / "migrations" / "0002_research_candidates.sql").read_text(encoding="utf-8"))
+        connection.execute(
+            """INSERT INTO research_candidates(
+                source_key,source,title,url,metadata_json,review_status,review_note,
+                first_seen_at,last_seen_at,reviewed_at,discovery_count,updated_at
+            ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)""",
+            ("github:org/agent", "github", "org/agent", "https://github.com/org/agent", "{}",
+             "accepted", "reviewed before source expansion", "2026-01-01", "2026-01-02",
+             "2026-01-02", 3, "2026-01-02"),
+        )
+        connection.executescript((root / "migrations" / "0011_research_source_expansion.sql").read_text(encoding="utf-8"))
+        existing = connection.execute(
+            "SELECT source,review_status,review_note,first_seen_at,last_seen_at,reviewed_at,discovery_count FROM research_candidates WHERE source_key=?",
+            ("github:org/agent",),
+        ).fetchone()
+        self.assertEqual(existing, ("github", "accepted", "reviewed before source expansion",
+                                    "2026-01-01", "2026-01-02", "2026-01-02", 3))
+        for source in ("arxiv", "searxng"):
+            connection.execute(
+                """INSERT INTO research_candidates(
+                    source_key,source,title,url,metadata_json,first_seen_at,last_seen_at,updated_at
+                ) VALUES(?,?,?,?,?,?,?,?)""",
+                (source + ":candidate", source, "Candidate", "https://example.org/item", "{}",
+                 "2026-11-03", "2026-11-03", "2026-11-03"),
+            )
+        self.assertEqual(connection.execute("SELECT COUNT(*) FROM research_candidates").fetchone()[0], 3)
+        connection.close()
 
     def test_empty_snapshot_does_not_need_credentials_or_network(self):
         result = persist_candidates({"candidates": [], "academic_candidates": []}, environ={})

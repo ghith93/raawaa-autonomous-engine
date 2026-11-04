@@ -20,7 +20,7 @@ The official [SearXNG Search API documentation](https://docs.searxng.org/dev/sea
 - Stores bounded titles, URLs, snippets and engine names as untrusted metadata only.
 - Does not fetch result pages, execute content, install tools, or approve candidates.
 - All results remain `unreviewed`; license, source quality, security and compatibility review remain mandatory.
-- The current D1 candidate-persistence API/schema accepts only GitHub and Crossref records. arXiv and SearXNG candidate metadata therefore remains in the bounded workflow artifacts until a separately reviewed, data-preserving D1 schema/API migration is approved. Scan counts and source-freshness observations can still be recorded in the existing audit log.
+- Migration `0011_research_source_expansion` now preserves all review history while widening the `source` CHECK to arXiv and SearXNG, and the Worker normalizes both sources with strict URL validation before persisting metadata only — no abstract, no full text, no page fetch. SearXNG remains inactive until an owner-controlled endpoint is configured.
 
 ## Why deployment is not included
 
