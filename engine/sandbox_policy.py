@@ -39,6 +39,12 @@ What the contract guarantees, and why each flag is there:
     A fork bomb, a memory bomb and a busy loop all end at the same wall as an
     ordinary failure instead of taking the host with them.
 
+A canonical, symlink-free source path
+    ``--mount=type=bind`` resolves symlinks on the host, so a source directory that
+    points somewhere else would mount *that* directory read-only. Read-only still
+    reads: ``/etc/shadow`` and a runner's credential files are readable. The source
+    path must therefore already be canonical; see ``_canonical_source_dir``.
+
 No ``--env``, no ``--device``, no credential mounts, no Docker socket
     The environment is the single easiest place to leak a token, so the contract
     has no way to pass one. ``assert_sandbox_argv`` refuses vectors that try.
@@ -53,6 +59,7 @@ testable without a sandbox.
 """
 from __future__ import annotations
 
+import os
 import re
 from dataclasses import dataclass
 
@@ -117,6 +124,41 @@ def _bounded_int(name: str, value: object, minimum: int = 1) -> int:
     return value
 
 
+def _canonical_source_dir(path: object, label: str) -> str:
+    """Return ``path`` normalised, or refuse it if Docker would follow it elsewhere.
+
+    ``--mount=type=bind`` resolves symlinks on the host, not in this module. A
+    lexically innocent ``/repo/workspace`` that is a symlink to ``/`` mounts the
+    whole host root into the container under ``/workspace``. ``readonly`` does not
+    help there: ``/etc/shadow``, ``$HOME/.ssh`` and the runner's credential files
+    only have to be *readable*, and a read-only mount reads them perfectly well.
+
+    There is no way to bind-mount "the path but not what it points at", so the only
+    sound rule is that the source must already be canonical. A caller that holds a
+    symlinked path has to resolve it first and pass the real directory.
+    """
+    if not isinstance(path, str) or not path.startswith("/"):
+        raise SandboxPolicyError(f"{label} must be an absolute path")
+    if _BAD_ARG.search(path):
+        raise SandboxPolicyError(f"{label} must not contain NUL or newlines")
+    if "," in path:
+        # A comma is how a --mount value gains another option; it must never come
+        # from a path, and it must never reach the mount string.
+        raise SandboxPolicyError(f"{label} must be a specific directory without commas")
+    normalised = path.rstrip("/")
+    if normalised in ("", "/") or ".." in normalised.split("/"):
+        raise SandboxPolicyError(f"{label} must be a specific directory, not / or ..")
+    try:
+        resolved = os.path.realpath(normalised)
+    except OSError as exc:  # pragma: no cover - realpath is lenient in practice
+        raise SandboxPolicyError(f"{label} could not be resolved: {type(exc).__name__}") from None
+    if resolved != normalised:
+        raise SandboxPolicyError(
+            f"{label} must be a canonical, symlink-free path: {normalised!r} resolves to {resolved!r}"
+        )
+    return normalised
+
+
 @dataclass(frozen=True)
 class SandboxLimits:
     """Resource bounds for one task. Asking for more than ``CEILINGS`` is refused."""
@@ -164,11 +206,7 @@ class SandboxRequest:
                 raise SandboxPolicyError("every command argument must be a non-empty string")
             if _BAD_ARG.search(arg):
                 raise SandboxPolicyError("command arguments must not contain NUL or newlines")
-        if not isinstance(self.source_dir, str) or not self.source_dir.startswith("/"):
-            raise SandboxPolicyError("source_dir must be an absolute path")
-        normalised = self.source_dir.rstrip("/")
-        if normalised in ("", "/") or ".." in normalised.split("/"):
-            raise SandboxPolicyError("source_dir must be a specific directory, not / or ..")
+        _canonical_source_dir(self.source_dir, "source_dir")
         self.limits.validated()
         return self
 
@@ -214,11 +252,7 @@ def assert_sandbox_argv(argv: list[str], *, expected_source_dir: str) -> list[st
         raise SandboxPolicyError("argv must be a list of strings")
     if len(argv) < 4 or argv[0:2] != ["docker", "run"]:
         raise SandboxPolicyError("argv must begin with 'docker run' and include image and command")
-    if not isinstance(expected_source_dir, str) or not expected_source_dir.startswith("/"):
-        raise SandboxPolicyError("expected_source_dir must be an absolute trusted workspace path")
-    expected_source = expected_source_dir.rstrip("/")
-    if expected_source in ("", "/") or ".." in expected_source.split("/") or "," in expected_source:
-        raise SandboxPolicyError("expected_source_dir must be a specific directory")
+    expected_source = _canonical_source_dir(expected_source_dir, "expected_source_dir")
     image_indexes = [i for i, arg in enumerate(argv[2:], 2) if _DIGEST_IMAGE.fullmatch(arg)]
     if len(image_indexes) != 1:
         raise SandboxPolicyError("argv must contain exactly one digest-pinned image")
