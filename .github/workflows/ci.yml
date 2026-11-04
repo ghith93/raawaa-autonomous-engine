@@ -1,8 +1,12 @@
 name: Engine CI
 
 on:
+  # Every branch, not only main. An agent working branch used to be compiled for
+  # the first time when its PR opened, so a trivial YAML or import error was
+  # discovered at review instead of at push. Widening the push filter does not
+  # add production reach: every staging/deploy job is separately gated on
+  # `github.ref == 'refs/heads/main'` and skips on a branch push.
   push:
-    branches: [main]
   pull_request:
     branches: [main]
   workflow_dispatch:
