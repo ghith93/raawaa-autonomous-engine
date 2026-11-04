@@ -20,7 +20,13 @@ class OneShotDisabledTests(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertIn('disabled', result.stdout)
         self.assertLess(self.source.index('Refuse unverified one-shot live research'), self.source.index('Check out reviewed main'))
-        self.assertIn("if: always() && !(github.event_name == 'workflow_dispatch' && inputs.run_public_research_once)", self.source)
+        for name in ("Publish per-task outcomes", "Publish bounded Task Runner status"):
+            block = self.source.split("      - name: " + name + "\n", 1)[1].split("      - name:", 1)[0]
+            self.assertIn("if: always() && !(github.event_name == 'workflow_dispatch' && inputs.run_public_research_once)", block)
+        # Any future always-run step needs explicit analysis of the rejected input.
+        for block in self.source.split("      - name: ")[1:]:
+            if "if: always()" in block:
+                self.assertIn("!(github.event_name == 'workflow_dispatch' && inputs.run_public_research_once)", block)
 
     def test_no_live_route_evidence_fabrication_or_enqueue_remains(self):
         for token in ('provider_hard_stop_verified', 'provider_hard_stop_evidence', 'verified_at',
