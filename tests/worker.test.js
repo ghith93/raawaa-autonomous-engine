@@ -1132,3 +1132,39 @@ test("Codespace release gate blocks even a weak configured token", async () => {
   assert.equal(response.status, 503);
   assert.deepEqual(await response.json(), { error: "codespace_executor_disabled" });
 });
+
+test("a storage failure on claim tells the caller why D1 rejected the write", async () => {
+  // The 2026-11-04 outage surfaced as a bare "HTTP 503": the runner could not
+  // record a cause anywhere, so every later investigation started from zero.
+  const failure = new Error("D1_ERROR: too many SQL variables: SQLITE_ERROR\n  at claim");
+  const DB = {
+    prepare() { throw failure; },
+    async batch() { throw failure; },
+  };
+  const response = await worker.fetch(request("/v1/tasks/claim", {
+    method: "POST", token: TOKEN, body: { execution_mode: "dry_run" },
+  }), { DB, ENGINE_API_TOKEN: TOKEN });
+  const body = await response.json();
+
+  assert.equal(response.status, 503);
+  assert.equal(body.error, "storage_unavailable");
+  assert.ok(body.detail.includes("D1_ERROR"), body.detail);
+  assert.ok(!body.detail.includes("\n"), "detail must be one line");
+  assert.ok(body.detail.length <= 240, "detail must stay bounded");
+  assert.ok(!body.detail.toLowerCase().includes("bearer"), "no credentials in detail");
+});
+
+test("an enqueue storage failure also reports its reason", async () => {
+  const failure = new Error("D1_ERROR: database is locked");
+  const DB = {
+    prepare() { throw failure; },
+    async batch() { throw failure; },
+  };
+  const response = await worker.fetch(request("/v1/tasks/enqueue", {
+    method: "POST", token: TOKEN,
+    body: { task_type: "system_audit", title: "Storage probe", idempotency_key: "storage-probe-1" },
+  }), { DB, ENGINE_API_TOKEN: TOKEN });
+  const body = await response.json();
+  assert.equal(response.status, 503);
+  assert.ok(body.detail.includes("database is locked"), body.detail);
+});
