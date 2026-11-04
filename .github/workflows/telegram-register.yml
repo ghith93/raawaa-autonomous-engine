@@ -158,6 +158,15 @@ jobs:
           set -euo pipefail
           secret=$(grep '^TELEGRAM_WEBHOOK_SECRET=' /tmp/telegram.env | cut -d= -f2-)
           chats=$(grep '^TELEGRAM_ALLOWED_CHAT_IDS=' /tmp/telegram.env | cut -d= -f2-)
+          if [ -z "$chats" ]; then
+            # Rearm mode already called setWebhook while discovering that there was
+            # nothing to discover. Re-registering here would need a chat id we have
+            # deliberately not got, and the webhook is already pointed at us.
+            echo "::notice title=Already registered::rearm mode set the webhook without touching the allowlist"
+            python3 scripts/telegram_bootstrap.py --check --url "$WORKER_URL/v1/telegram/webhook" \
+              | tee /tmp/registration.json
+            exit 0
+          fi
           python3 scripts/telegram_bootstrap.py --register --url "$WORKER_URL/v1/telegram/webhook" \
             --secret "$secret" --chat-id "$chats" | tee /tmp/registration.json
           python3 - <<'PY'
