@@ -182,5 +182,32 @@ class MainFlowTest(unittest.TestCase):
             self.assertFalse(target.exists())
 
 
+class NoChatFoundTest(unittest.TestCase):
+    """The failure an owner actually hits has to carry the fix, not just the fact."""
+
+    def test_the_error_names_the_bot_and_links_to_it(self):
+        import contextlib, io
+        from unittest.mock import patch
+
+        from scripts import telegram_bootstrap as bootstrap
+
+        # _call() already unwraps "result", so these are the payloads it returns.
+        replies = {
+            "getMe": {"username": "raawaa_control_bot", "is_bot": True},
+            "getUpdates": {"updates": []},
+        }
+        env_file = Path(tempfile.mkdtemp()) / "telegram.env"
+        with patch.object(bootstrap, "_call", side_effect=lambda t, m, p=None, **k: replies[m]):
+            with patch.dict(os.environ, {"TELEGRAM_BOT_TOKEN": VALID_TOKEN}):
+                with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()) as err:
+                    code = bootstrap.main(["--env-file", str(env_file)])
+        self.assertEqual(code, 2)
+        message = err.getvalue()
+        self.assertIn("https://t.me/raawaa_control_bot", message)
+        self.assertIn("no private chat found", message)
+        self.assertNotIn(VALID_TOKEN, message)
+        self.assertFalse(env_file.exists(), "nothing may be written when discovery fails")
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -78,8 +78,17 @@ jobs:
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
         run: |
-          set -euo pipefail
-          python3 scripts/telegram_bootstrap.py --url "$WORKER_URL" --env-file /tmp/telegram.env
+          set -uo pipefail
+          # The script's diagnostics go to stderr, which nobody can read from a
+          # workflow run — so each line becomes an annotation, and "no private chat
+          # found for @x" arrives as a sentence carrying the bot's own link.
+          if ! output="$(python3 scripts/telegram_bootstrap.py --url "$WORKER_URL" --env-file /tmp/telegram.env 2>&1)"; then
+            printf '%s\n' "$output" | tail -n 5 | while IFS= read -r line; do
+              [ -n "$line" ] && echo "::error title=Telegram bootstrap::$line"
+            done
+            exit 1
+          fi
+          printf '%s\n' "$output" | head -n 20
       - name: Install the three Worker secrets
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}

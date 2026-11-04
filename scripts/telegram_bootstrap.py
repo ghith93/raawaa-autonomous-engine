@@ -219,9 +219,15 @@ def main(argv: list[str] | None = None) -> int:
         discovered, username = find_private_chat_ids(token)
         chat_ids = _parse_chat_ids(args.chat_id) if args.chat_id else discovered
         if not chat_ids:
+            # Name the bot. "Send your bot a message" is useless advice when the
+            # owner has two bots, or created one and messaged another: the only
+            # thing that decides this is the username behind the token we hold.
+            where = f"https://t.me/{username}" if username else "your bot"
             raise BootstrapError(
-                "no private chat found. Send your bot any message, then run this again. "
-                "If a webhook is already registered, changes are not queued — use --chat-id.",
+                f"no private chat found for @{username or 'this token'}. Open {where}, "
+                "press Start and send any message, then run this again. Telegram only "
+                "queues messages while no webhook is registered, so if one is already "
+                "set, delete it first or pass --chat-id.",
             )
         secret = args.secret or generate_webhook_secret()
         env_file = Path(args.env_file)
