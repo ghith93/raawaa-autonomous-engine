@@ -18,8 +18,13 @@ function constantTimeEqual(a, b) {
 }
 
 function configured(env) {
-  return typeof env.TELEGRAM_WEBHOOK_SECRET === "string" &&
-    /^[A-Za-z0-9_-]{16,256}$/.test(env.TELEGRAM_WEBHOOK_SECRET) &&
+  const primaryOk = typeof env.TELEGRAM_WEBHOOK_SECRET === "string" &&
+    /^[A-Za-z0-9_-]{16,256}$/.test(env.TELEGRAM_WEBHOOK_SECRET);
+  const stagingOk = env.TELEGRAM_WEBHOOK_SECRET_STAGING === undefined ||
+    env.TELEGRAM_WEBHOOK_SECRET_STAGING === "" ||
+    (typeof env.TELEGRAM_WEBHOOK_SECRET_STAGING === "string" &&
+      /^[A-Za-z0-9_-]{16,256}$/.test(env.TELEGRAM_WEBHOOK_SECRET_STAGING));
+  return primaryOk && stagingOk &&
     typeof env.TELEGRAM_BOT_TOKEN === "string" && env.TELEGRAM_BOT_TOKEN.length >= 20 &&
     typeof env.TELEGRAM_ALLOWED_CHAT_IDS === "string" &&
     env.TELEGRAM_ALLOWED_CHAT_IDS.split(",").some(value => /^-?\d{1,20}$/.test(value.trim()));
@@ -87,7 +92,11 @@ export async function handleTelegramWebhook(request, env, url) {
   if (request.method !== "POST") return json({ error: "method_not_allowed" }, 405);
   if (!configured(env)) return json({ error: "webhook_disabled" }, 503);
   const supplied = request.headers.get("x-telegram-bot-api-secret-token") || "";
-  if (!constantTimeEqual(supplied, env.TELEGRAM_WEBHOOK_SECRET)) return json({ error: "unauthorized" }, 401);
+  const primaryValid = constantTimeEqual(supplied, env.TELEGRAM_WEBHOOK_SECRET);
+  const stagingValid = typeof env.TELEGRAM_WEBHOOK_SECRET_STAGING === "string" &&
+    env.TELEGRAM_WEBHOOK_SECRET_STAGING.length >= 16 &&
+    constantTimeEqual(supplied, env.TELEGRAM_WEBHOOK_SECRET_STAGING);
+  if (!primaryValid && !stagingValid) return json({ error: "unauthorized" }, 401);
 
   let update;
   try { update = await parseUpdate(request); }
