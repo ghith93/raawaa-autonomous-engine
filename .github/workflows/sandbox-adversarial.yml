@@ -2,20 +2,15 @@ name: Sandbox adversarial proof
 
 # #440 asks for evidence that a real boundary exists around repository task code,
 # and explicitly says a green ordinary CI run is not that evidence. This is the
-# workflow that can produce it: an ephemeral VM, gVisor installed on it, and five
+# workflow that can produce it: an ephemeral VM, gVisor installed on it, and several independent
 # probes that try to escape and report what they saw.
 #
 # Manual dispatch on purpose. It pulls an image and downloads gVisor, so it is not
-# something to run on every push, and the image must be named by digest — a tag
-# would make yesterday's evidence apply to today's container.
+# something to run on every push, and the image is fixed to one reviewed digest — a caller cannot supply arbitrary code.
 
 on:
   workflow_dispatch:
     inputs:
-      image:
-        description: "Image to sandbox, pinned by digest (repo@sha256:<64 hex>)"
-        required: true
-        type: string
       confirm:
         description: "Type RUN_SANDBOX_ESCAPE_PROOF to confirm"
         required: true
@@ -36,18 +31,11 @@ jobs:
     steps:
       - name: Check out reviewed main
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
 
       - name: Set up Python
         uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7
-
-      - name: Refuse anything but a digest-pinned image
-        env:
-          IMAGE: ${{ inputs.image }}
-        run: |
-          printf '%s' "$IMAGE" | grep -Eq '^[a-z0-9][a-z0-9._/-]*@sha256:[0-9a-f]{64}$' || {
-            echo "::error::image must be pinned by digest, got: $IMAGE"
-            exit 1
-          }
 
       - name: Install pinned gVisor and register it as a Docker runtime
         env:
@@ -78,12 +66,12 @@ jobs:
 
       - name: Pull the sandbox image
         env:
-          IMAGE: ${{ inputs.image }}
+          IMAGE: "python:3.12-slim@sha256:aa943ce411423c7582288f18707ff66eddcbaeb510502d747a72aeb34f30d159"
         run: docker pull "$IMAGE"
 
       - name: Run the escape probes
         env:
-          IMAGE: ${{ inputs.image }}
+          IMAGE: "python:3.12-slim@sha256:aa943ce411423c7582288f18707ff66eddcbaeb510502d747a72aeb34f30d159"
         run: |
           RAAWAA_SANDBOX_LIVE=1 RAAWAA_SANDBOX_IMAGE="$IMAGE" \
             python3 -m unittest tests.adversarial.test_sandbox_escape -v
@@ -91,7 +79,7 @@ jobs:
       - name: Summary
         if: always()
         env:
-          IMAGE: ${{ inputs.image }}
+          IMAGE: "python:3.12-slim@sha256:aa943ce411423c7582288f18707ff66eddcbaeb510502d747a72aeb34f30d159"
         run: |
           {
             echo "### Sandbox escape proof"
