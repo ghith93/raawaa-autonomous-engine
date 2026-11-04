@@ -55,9 +55,11 @@ def verify_commit_is_on_main(commit_sha: str, opener_factory: Callable[..., Any]
         isinstance(payload, dict)
         and payload.get("status") in {"ahead", "identical"}
         and isinstance(payload.get("base_commit"), dict)
-        and payload["base_commit"].get("sha", "").lower() == commit_sha.lower()
+        and isinstance(payload["base_commit"].get("sha"), str)
+        and payload["base_commit"]["sha"].lower() == commit_sha.lower()
         and isinstance(payload.get("head_commit"), dict)
-        and bool(COMMIT_RE.fullmatch(payload["head_commit"].get("sha", "").lower()))
+        and isinstance(payload["head_commit"].get("sha"), str)
+        and bool(COMMIT_RE.fullmatch(payload["head_commit"]["sha"].lower()))
     )
 
 
