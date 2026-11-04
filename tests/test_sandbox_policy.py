@@ -235,12 +235,12 @@ class WorkflowContractTest(unittest.TestCase):
         self.assertIn('runsc=$RUNSC_VERSION', workflow)
         self.assertIn("gpg --show-keys --with-colons", workflow)
 
-    def test_summary_uses_an_environment_variable_for_untrusted_image_input(self):
+    def test_summary_uses_the_fixed_reviewed_image_digest(self):
         workflow = Path(".github/workflows/sandbox-adversarial.yml").read_text(encoding="utf-8")
         summary = workflow.split("      - name: Summary", 1)[1]
-        self.assertIn("IMAGE: ${{ inputs.image }}", summary)
-        shell = summary.split("        run: |", 1)[1]
-        self.assertNotIn("${{ inputs.image }}", shell)
+        self.assertIn('IMAGE: "python:3.12-slim@sha256:aa943ce411423c7582288f18707ff66eddcbaeb510502d747a72aeb34f30d159"', summary)
+        self.assertNotIn("inputs.image", workflow)
+        self.assertIn("persist-credentials: false", workflow)
 
 class ReviewedRefTest(unittest.TestCase):
     def test_only_reviewed_main_may_execute_task_code(self):
