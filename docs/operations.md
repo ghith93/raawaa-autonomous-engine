@@ -332,7 +332,7 @@ Required owner-side activation after review: configure a newly generated, distin
 - **Staging:** post-merge pipeline verified Staging/Production target separation, found no pending migrations, successfully deployed the isolated Staging Worker, passed remote D1 monetary/token-quota/invocation-lifecycle/redeploy-persistence tests, published sanitized telemetry, and passed authenticated mobile-status readback. All ephemeral Staging bearer/quota-admin tokens were revoked. Staging verification is not Production deployment.
 - **Production:** separate Control Worker deployment workflow [#41740887986](https://github.com/ghith93/raawaa-autonomous-engine/actions/runs/41740887986) was skipped. Production Worker and D1 were not changed by this cycle. No provider inference, paid spend, or external write was performed.
 - **Security boundary:** PR #442 remains merged as main SHA `181de234082b73ae8aa20290cbad505be07585c6`; issue #440 remains open. Codespaces executor stays hard-disabled; do not create its token or start the bridge.
-- **Core priority status:** F1 execution-mode separation and its dashboard accuracy follow-up are merged and Staging-verified. F5 (DAG priority/dependencies) is implemented in draft PR #457 with SQLite/D1 parity and local D1 integration coverage; exact-head verification is pending. F3/F4 follow after F5 is merged and Staging-verified.
+- **Core priority status:** F1 execution-mode separation/dashboard accuracy and F5 priority/dependency-aware queue are merged and Staging-verified. F3/F4 are the next core implementation tracks; keep the workflow dispatcher proposal-only until its own contract, tests, and safety review are complete.
 - **Developer tools:** Graphify is approved for a later bounded code-only evaluation (Apache-2.0; official PyPI `graphifyy`; local/offline Tree-Sitter code extraction; optional semantic docs/media extraction uses the configured model). It is not installed, executed, or a runtime dependency. Spec Kit remains deferred and optional (MIT).
 
 
@@ -345,7 +345,7 @@ Required owner-side activation after review: configure a newly generated, distin
 - `live_inference` means the live execution path was selected for the task; it does not by itself prove a provider request completed. Existing kill-switch, preflight, quota reservation, ambiguity/no-replay and zero-spend policies are unchanged.
 - Merged into `main` via PR #448, with terminal-mode validation follow-up PR #449 and status-by-mode accuracy follow-up in commit `b792357`.
 - Staging migration `0009_task_execution_mode` applied successfully; isolated Staging Worker deployment and remote monetary-ledger verification passed in run `41742923497`. Both ephemeral Staging tokens were revoked by the workflow.
-- The same run's sanitized telemetry step rejected `workflow_dispatch` because its publisher still allowed only `push`; the Staging mobile-status readback was consequently skipped. PR #456 fixes that event guard; rerun Staging verification after it merges.
+- The telemetry publisher event guard was corrected in PR #456. Post-merge main run #41746574412 successfully published sanitized telemetry and passed authenticated Staging mobile-status readback; ephemeral Staging tokens were revoked. Production Worker and D1 remain unchanged.
 - Production Worker and Production D1 remain unchanged.
 
 ## F1 dashboard accuracy follow-up — 2026-11-04
