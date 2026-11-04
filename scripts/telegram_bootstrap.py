@@ -349,7 +349,7 @@ def main(argv: list[str] | None = None) -> int:
                     "accept a brief delivery pause, or pass --chat-id with the verified id."
                 )
             raise BootstrapError(
-                f"no private human chat found for @{username or 'the supplied bot'} "
+                f"no private chat found (human sender required) for @{username or 'the supplied bot'} "
                 f"(updates_seen={updates_seen}, webhook_set={'yes' if webhook else 'no'}, "
                 f"pending_update_count={pending}). {guidance}",
             )
