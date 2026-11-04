@@ -1,6 +1,8 @@
 import tempfile
 import unittest
 import sqlite3
+from concurrent.futures import ThreadPoolExecutor
+import json
 from pathlib import Path
 
 from engine.task_store import TaskStore
@@ -20,6 +22,75 @@ class TaskStoreTests(unittest.TestCase):
         second = self.store.enqueue("research_brief", "Market scan duplicate", idempotency_key="same")
         self.assertEqual(first["id"], second["id"])
         self.assertEqual(len(self.store.list_tasks()), 1)
+
+    def test_enqueue_persists_bounded_priority_and_existing_dependencies(self):
+        parent = self.store.enqueue("research_brief", "Parent")
+        child = self.store.enqueue(
+            "code_review", "Child", priority=75, depends_on=[parent["id"]],
+        )
+        self.assertEqual(child["priority"], 75)
+        self.assertEqual(json.loads(child["depends_on"]), [parent["id"]])
+        self.assertEqual(self.store.list_tasks()[0]["priority"], 75)
+        with self.assertRaisesRegex(ValueError, "priority"):
+            self.store.enqueue("research_brief", "Bad priority", priority=101)
+        with self.assertRaisesRegex(ValueError, "depends_on"):
+            self.store.enqueue("research_brief", "Unknown dependency", depends_on=["missing-task"])
+        with self.assertRaisesRegex(ValueError, "depends_on"):
+            self.store.enqueue("research_brief", "Duplicate dependency", depends_on=[parent["id"], parent["id"]])
+
+    def test_claim_prefers_high_priority_and_concurrent_claimers_keep_order(self):
+        low = self.store.enqueue("research_brief", "Low priority", priority=1)
+        high = self.store.enqueue("research_brief", "High priority", priority=90)
+        second_store = TaskStore(self.store.db_path)
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            first = pool.submit(self.store.claim_next)
+            second = pool.submit(second_store.claim_next)
+            claims = [first.result(), second.result()]
+        self.assertEqual({claim["id"] for claim in claims}, {low["id"], high["id"]})
+        with sqlite3.connect(self.store.db_path) as db:
+            order = [row[0] for row in db.execute(
+                "SELECT task_id FROM audit_log WHERE event='task_claimed' ORDER BY id"
+            ).fetchall()]
+        self.assertEqual(order[:2], [high["id"], low["id"]])
+
+    def test_child_waits_for_live_inference_parent_even_with_higher_priority(self):
+        parent = self.store.enqueue("research_brief", "Parent", priority=0)
+        child = self.store.enqueue("code_review", "Child", priority=100, depends_on=[parent["id"]])
+        claimed_parent = self.store.claim_next(execution_mode="live_inference")
+        self.assertEqual(claimed_parent["id"], parent["id"])
+        self.assertIsNone(self.store.claim_next(), "child cannot run while parent is running")
+        self.store.finish(
+            parent["id"], "succeeded", result={"mode": "live_inference", "verified": True},
+            lease_token=claimed_parent["lease_token"],
+        )
+        claimed_child = self.store.claim_next(execution_mode="live_inference")
+        self.assertEqual(claimed_child["id"], child["id"])
+        self.assertEqual(json.loads(claimed_child["depends_on"]), [parent["id"]])
+
+    def test_dry_run_parent_success_does_not_unlock_child(self):
+        parent = self.store.enqueue("research_brief", "Simulated parent")
+        child = self.store.enqueue("code_review", "Dependent child", depends_on=[parent["id"]])
+        claim = self.store.claim_next(execution_mode="dry_run")
+        self.assertEqual(claim["id"], parent["id"])
+        self.store.finish(
+            parent["id"], "succeeded", result={"mode": "dry_run", "execution_started": False},
+            lease_token=claim["lease_token"],
+        )
+        self.assertIsNone(self.store.claim_next())
+        saved_child = next(task for task in self.store.list_tasks() if task["id"] == child["id"])
+        self.assertEqual(saved_child["status"], "blocked")
+        self.assertEqual(saved_child["error"], "dependency_not_executed")
+        self.assertIn("task_blocked_dependency", [event["event"] for event in self.store.audit_events()])
+
+    def test_failed_dependency_blocks_child(self):
+        parent = self.store.enqueue("research_brief", "Failed parent")
+        child = self.store.enqueue("code_review", "Dependent child", depends_on=[parent["id"]])
+        claim = self.store.claim_next(execution_mode="live_inference")
+        self.store.finish(parent["id"], "failed", error="provider_failed", lease_token=claim["lease_token"])
+        self.assertIsNone(self.store.claim_next())
+        saved_child = next(task for task in self.store.list_tasks() if task["id"] == child["id"])
+        self.assertEqual(saved_child["status"], "blocked")
+        self.assertEqual(saved_child["error"], "dependency_failed")
 
     def test_worker_processes_safe_task_as_dry_run(self):
         self.store.enqueue("research_brief", "Test task", {"topic": "agent frameworks"})
