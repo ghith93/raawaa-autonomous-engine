@@ -80,7 +80,7 @@ class SandboxEscapeTest(unittest.TestCase):
             source_dir=str(cls.workspace),
             limits=SandboxLimits(memory_mb=512, cpus=1.0, pids=64, wall_seconds=90, scratch_mb=32),
         ))
-        assert_sandbox_argv(cls.vector)
+        assert_sandbox_argv(cls.vector, expected_source_dir=str(cls.workspace))
         completed = subprocess.run(
             cls.vector, capture_output=True, text=True, timeout=120, check=False,
         )
