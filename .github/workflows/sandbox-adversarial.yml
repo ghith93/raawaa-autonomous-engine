@@ -1,0 +1,99 @@
+name: Sandbox adversarial proof
+
+# #440 asks for evidence that a real boundary exists around repository task code,
+# and explicitly says a green ordinary CI run is not that evidence. This is the
+# workflow that can produce it: an ephemeral VM, gVisor installed on it, and five
+# probes that try to escape and report what they saw.
+#
+# Manual dispatch on purpose. It pulls an image and downloads gVisor, so it is not
+# something to run on every push, and the image must be named by digest — a tag
+# would make yesterday's evidence apply to today's container.
+
+on:
+  workflow_dispatch:
+    inputs:
+      image:
+        description: "Image to sandbox, pinned by digest (repo@sha256:<64 hex>)"
+        required: true
+        type: string
+      confirm:
+        description: "Type RUN_SANDBOX_ESCAPE_PROOF to confirm"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: sandbox-adversarial
+  cancel-in-progress: false
+
+jobs:
+  prove:
+    if: github.ref == 'refs/heads/main' && inputs.confirm == 'RUN_SANDBOX_ESCAPE_PROOF'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Check out reviewed main
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Set up Python
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7
+
+      - name: Refuse anything but a digest-pinned image
+        env:
+          IMAGE: ${{ inputs.image }}
+        run: |
+          printf '%s' "$IMAGE" | grep -Eq '^[a-z0-9][a-z0-9._/-]*@sha256:[0-9a-f]{64}$' || {
+            echo "::error::image must be pinned by digest, got: $IMAGE"
+            exit 1
+          }
+
+      - name: Install gVisor and register it as a Docker runtime
+        # The signed apt repository is used rather than a downloaded binary so that
+        # the runtime's provenance is verified by apt, and `runsc install` writes the
+        # daemon.json entry that makes --runtime=runsc resolvable.
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends apt-transport-https ca-certificates curl gnupg
+          curl -fsSL https://gvisor.dev/archive.key | sudo gpg --dearmor -o /usr/share/keyrings/gvisor-archive-keyring.gpg
+          echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/gvisor-archive-keyring.gpg] https://storage.googleapis.com/gvisor/releases release main" \
+            | sudo tee /etc/apt/sources.list.d/gvisor.list > /dev/null
+          sudo apt-get update
+          sudo apt-get install -y runsc
+          sudo runsc install
+          sudo systemctl restart docker
+          runsc --version
+
+      - name: Prove the runtime is the one the contract asks for
+        run: |
+          docker info --format '{{json .Runtimes}}' | tee /tmp/runtimes.json
+          grep -q '"runsc"' /tmp/runtimes.json || {
+            echo "::error::runsc is not registered as a Docker runtime"
+            exit 1
+          }
+
+      - name: Pull the sandbox image
+        env:
+          IMAGE: ${{ inputs.image }}
+        run: docker pull "$IMAGE"
+
+      - name: Run the escape probes
+        env:
+          IMAGE: ${{ inputs.image }}
+        run: |
+          RAAWAA_SANDBOX_LIVE=1 RAAWAA_SANDBOX_IMAGE="$IMAGE" \
+            python3 -m unittest tests.adversarial.test_sandbox_escape -v
+
+      - name: Summary
+        if: always()
+        run: |
+          {
+            echo "### Sandbox escape proof"
+            echo ""
+            echo "- image: \`${{ inputs.image }}\`"
+            echo "- runtime: runsc (gVisor), network none, read-only rootfs, cap-drop ALL, non-root"
+            echo "- probes: parent environ, own environ, docker socket, /root/.ssh, egress, root write"
+            echo ""
+            echo "A skipped or partially run probe is reported as a failure, never as containment."
+          } >> "$GITHUB_STEP_SUMMARY"
