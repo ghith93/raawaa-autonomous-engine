@@ -234,6 +234,7 @@ Sources:
 ### API and data terms
 - Official API endpoint: `https://api.z.ai/api/paas/v4/`; official Quick Start demonstrates OpenAI SDK compatibility.
 - API customers/developers are subject to Additional Terms for API Services, which prevail over general Terms in case of inconsistency.
+- **Production-use blocker:** the same API Additional Terms prohibit use of Z.ai for “decision-making activities” (section 1.f.iv), without defining the scope on the page. Internal autonomous-agent planning, tool/provider selection, code review, and execution orchestration may fall within this restriction. Do not use GLM for those Engine roles until Z.ai confirms in writing that the intended workflow is allowed.
 - The API Additional Terms say End User Content is used only as necessary to provide API services, comply with law, enforce policies, and prevent abuse; it is not used to develop or improve services unless the customer explicitly agrees. The API DPA describes the processor relationship and Singapore as the general processing location.
 - Do not apply consumer-chat privacy terms to API usage, or vice versa. Still exclude credentials, private source, customer/order data, personal data, and Raawaa formulae from initial tests.
 - API terms restrict use of Z.ai models/outputs to develop or improve competing models, except authorized integration for specific business scenarios.
