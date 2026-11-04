@@ -237,12 +237,12 @@ Sources:
 - Official API endpoint: `https://api.z.ai/api/paas/v4/`; official Quick Start demonstrates OpenAI SDK compatibility.
 - API customers/developers are subject to Additional Terms for API Services, which prevail over general Terms in case of inconsistency.
 - **Production-use blocker:** the same API Additional Terms prohibit use of Z.ai for “decision-making activities” (section 1.f.iv), without defining the scope on the page. Internal autonomous-agent planning, tool/provider selection, code review, and execution orchestration may fall within this restriction. Do not use GLM for those Engine roles until Z.ai confirms in writing that the intended workflow is allowed.
-- The API Additional Terms say End User Content is used only as necessary to provide API services, comply with law, enforce policies, and prevent abuse; it is not used to develop or improve services unless the customer explicitly agrees. The API DPA describes the processor relationship and Singapore as the general processing location.
+- The API Additional Terms say End User Content is used only as necessary to provide API services, comply with law, enforce policies, and prevent abuse; it is not used to develop or improve services unless the customer explicitly agrees. This is not a zero-retention guarantee: operational logs, abuse/security records, backups, and legal holds need separate written retention clarification. The API DPA describes the processor relationship and Singapore as the general processing location.
 - Do not apply consumer-chat privacy terms to API usage, or vice versa. Still exclude credentials, private source, customer/order data, personal data, and Raawaa formulae from initial tests.
 - API terms restrict use of Z.ai models/outputs to develop or improve competing models, except authorized integration for specific business scenarios.
 
 ### Model and integration decision
-- First account-verification candidate: `glm-4.7-flash`; secondary text candidate `glm-4.5-flash`; vision candidate `glm-4.6v-flash`.
+- First pricing-row verification target: GLM-4.7-Flash; secondary text label GLM-4.5-Flash; vision label GLM-4.6V-Flash. These are pricing labels, not verified request-time model IDs.
 - GLM-5.3 uses a Z.AI-specific model license; GLM-5.3-Flash is listed MIT. Never infer one model's license from another.
 - All GLM routes remain disabled. No credential, billing change, API request, inference, or profile activation has been made.
 - Before activation, verify account entitlement and numeric limits in the console, inspect current API terms/DPA and license, add a pinned model-specific profile with hard-zero-cost behavior and no paid fallback, then benchmark with public synthetic prompts against the Groq Free GPT-OSS candidates.
