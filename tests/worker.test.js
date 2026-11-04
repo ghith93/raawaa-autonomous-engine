@@ -127,6 +127,17 @@ test("enqueue persists priority and validated dependency edges", async () => {
   assert.match(batch.statements[2].sql, /INSERT OR IGNORE INTO task_dependencies/);
 });
 
+test("enqueue rejects dependencies assigned to the disabled Codespace executor", async () => {
+  const DB = dbMock({ dependencyRows: [{ id: "codespace-parent", task_type: "codespace_test" }] });
+  const response = await worker.fetch(request("/v1/tasks/enqueue", {
+    method: "POST",
+    body: { task_type: "research", title: "Dependent", idempotency_key: "codespace-child",
+      depends_on: ["codespace-parent"] },
+  }), { DB, ENGINE_API_TOKEN: TOKEN });
+  assert.equal(response.status, 400);
+  assert.deepEqual(await response.json(), { error: "unsupported_dependency_executor" });
+});
+
 test("enqueue rejects out-of-range priority and unknown dependencies", async () => {
   const invalidPriority = await worker.fetch(request("/v1/tasks/enqueue", {
     method: "POST",

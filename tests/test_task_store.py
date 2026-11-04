@@ -93,6 +93,11 @@ class TaskStoreTests(unittest.TestCase):
         self.assertTrue(any(event["event"] == "task_blocked_by_dependency"
                             for event in self.store.audit_events()))
 
+    def test_enqueue_rejects_disabled_codespace_dependency_executor(self):
+        parent = self.store.enqueue("codespace_test", "Disabled parent")
+        with self.assertRaisesRegex(ValueError, "unsupported dependency executor"):
+            self.store.enqueue("research_brief", "Dependent", depends_on=[parent["id"]])
+
     def test_enqueue_validates_dependencies_and_idempotency_manifest(self):
         with self.assertRaisesRegex(ValueError, "unknown task dependency"):
             self.store.enqueue("research_brief", "Unknown", depends_on=["missing-task"])

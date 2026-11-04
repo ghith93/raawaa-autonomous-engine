@@ -352,7 +352,7 @@ export default {
               "INSERT INTO audit_log(task_id,event,details_json,created_at) SELECT id,'task_blocked_by_dependency',?,? FROM tasks WHERE id=? AND status='pending'"
             ).bind(JSON.stringify({ reason: "dependency_failed_or_blocked" }), nowIso, blockedId));
             blockedStatements.push(env.DB.prepare(
-              "UPDATE tasks SET status='blocked',error='Dependency failed or was blocked.',updated_at=? WHERE id=? AND status='pending'"
+              "UPDATE tasks SET status='blocked',error='Dependency failed or was blocked.',updated_at=?,lease_token=NULL,lease_expires_at=NULL WHERE id=? AND status='pending'"
             ).bind(nowIso, blockedId));
           }
           await env.DB.batch(blockedStatements);

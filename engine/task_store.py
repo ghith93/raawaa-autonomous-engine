@@ -121,10 +121,13 @@ class TaskStore:
                 return self._task_dict(existing)
             if deps:
                 placeholders = ",".join("?" for _ in deps)
-                found = {row["id"] for row in db.execute(
-                    f"SELECT id FROM tasks WHERE id IN ({placeholders})", deps).fetchall()}
+                found_rows = db.execute(
+                    f"SELECT id,task_type FROM tasks WHERE id IN ({placeholders})", deps).fetchall()
+                found = {row["id"] for row in found_rows}
                 if found != set(deps):
                     raise ValueError("unknown task dependency")
+                if any(row["task_type"] in {"codespace_inspect", "codespace_test"} for row in found_rows):
+                    raise ValueError("unsupported dependency executor")
             db.execute("""INSERT INTO tasks(id,idempotency_key,task_type,title,payload_json,status,
                        attempts,max_attempts,created_at,updated_at,execution_mode,priority,dependencies_json)
                        VALUES(?,?,?,?,?,'pending',0,?,?,?,'not_started',?,?)""",
@@ -163,7 +166,8 @@ class TaskStore:
             for blocked_row in blocked:
                 task_id = blocked_row["task_id"]
                 changed = db.execute("""UPDATE tasks SET status='blocked',
-                    error='Dependency failed or was blocked.',updated_at=?
+                    error='Dependency failed or was blocked.',updated_at=?,
+                    lease_token=NULL,lease_expires_at=NULL
                     WHERE id=? AND status='pending'""", (now_iso, task_id)).rowcount
                 if changed:
                     dependency_ids = [row["dependency_task_id"] for row in db.execute(
