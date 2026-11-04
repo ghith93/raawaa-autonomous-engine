@@ -31,7 +31,7 @@ function dbMock(options = {}) {
           if (sql.includes("INSERT INTO quota_cooldowns")) return { until_at: this.values[1] };
           if (sql.includes("FROM audit_log")) return null;
           if (sql.includes("SELECT 1")) return { ok: 1 };
-          if (sql.includes("UPDATE tasks SET status='running'")) {
+          if (sql.includes("UPDATE tasks") && sql.includes("SET status='running'")) {
             return sql.includes("task_type IN") ? (options.codespaceClaim || null) : (options.normalClaim || null);
           }
           if (sql.includes("SELECT id,status,attempts")) return options.currentTask || {
@@ -40,7 +40,7 @@ function dbMock(options = {}) {
             lease_expires_at: "2999-01-01T00:00:00.000Z",
           };
           if (sql.includes("WHERE idempotency_key")) {
-            return { id: insertedId || "existing-id" };
+            return options.existingTask || (insertedId ? { id: insertedId } : null);
           }
           return null;
         },
@@ -50,13 +50,18 @@ function dbMock(options = {}) {
         },
         async all() {
           calls.push({ kind: "all", sql, values: this.values });
+          if (sql.includes("SELECT id FROM tasks WHERE id IN")) {
+            return { results: options.dependencyRows || [] };
+          }
           return { results: [] };
         },
       };
     },
     async batch(statements) {
       calls.push({ kind: "batch", statements: statements.map(x => ({ sql: x.sql, values: x.values })) });
-      insertedId = statements[0].values[0];
+      if (statements[0].sql.includes("INSERT OR IGNORE INTO tasks")) {
+        insertedId = statements[0].values[0];
+      }
       return [];
     },
   };
@@ -140,7 +145,7 @@ test("claim persists and returns a validated execution mode", async () => {
   assert.equal(response.status, 200);
   const payload = await response.json();
   assert.equal(payload.task.execution_mode, "dry_run");
-  const claim = DB.calls.find(x => x.kind === "first" && x.sql.includes("UPDATE tasks SET status='running'"));
+  const claim = DB.calls.find(x => x.kind === "first" && x.sql.includes("UPDATE tasks") && x.sql.includes("SET status='running'"));
   assert.match(claim.sql, /execution_mode=\?/);
   assert.equal(claim.values[0], "dry_run");
 });
