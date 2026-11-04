@@ -147,7 +147,7 @@ class RefusalTest(unittest.TestCase):
             ("--volume=/var/run/docker.sock:/var/run/docker.sock", "Docker socket"),
             ("--env=AWS_SECRET_ACCESS_KEY=x", "environment"),
             ("-e", "environment"),
-            ("--mount=type=bind,src=/root/.ssh,dst=/root/.ssh", "read-only"),
+            ("--mount=type=bind,src=/root/.ssh,dst=/root/.ssh", "trusted workspace bind mount"),
         )
         for weakener, message in cases:
             vector = argv()
