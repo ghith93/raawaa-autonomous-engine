@@ -72,7 +72,23 @@
       ],
       "integration_id": "google_artemis",
       "note": "Registered but disabled until a supported ARTEMIS host, authorized Android device, secure endpoint, and zero-cost model route are verified."
+    },
+    {
+      "id": "nemotron_specialist",
+      "role": "independent_advisor_and_implementation_specialist",
+      "enabled": false,
+      "capabilities": [
+        "independent_architecture_review",
+        "technical_research",
+        "code_generation",
+        "bounded_implementation_proposals",
+        "test_design",
+        "independent_critique"
+      ],
+      "model_route_id": "nvidia:developer-free-endpoint:nvidia/nemotron-3.5-lightning-30b-a3b",
+      "integration_id": "nvidia_nemotron",
+      "note": "Declarative third-model candidate only. Disabled until NVIDIA endpoint eligibility, numeric quotas, hosted terms, credential presence, model/tool-call compatibility, and the existing live-inference gates are verified. No task dispatch or inference is enabled by this roster entry."
     }
   ],
-  "note": "Roster is declarative only. No agent model or external tool is invoked by this starter. Mobile tester is registered but disabled pending ARTEMIS runtime verification."
+  "note": "Roster is declarative only. No agent model or external tool is invoked by this starter. Mobile tester is registered but disabled pending ARTEMIS runtime verification. NVIDIA Nemotron is registered as a disabled third-model advisor/implementation-specialist candidate; the roster remains declarative and does not dispatch model calls."
 }

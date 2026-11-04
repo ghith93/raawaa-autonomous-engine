@@ -95,6 +95,37 @@
       "verification_note": "Groq Free plan, Qwen model visibility and account quotas were operator-confirmed. Qwen model weights are Apache-2.0 and Groq's Services Agreement permits Customer Application integration subject to model terms. Groq lists this model as Preview/evaluation-only, so production_use_allowed=false. Free-plan usage is fee-free within limits; Developer tier rates are not Free-plan charges. Keep disabled until evaluation-only task allowlisting is implemented and approved.",
       "production_use_allowed": false,
       "model_stage": "preview"
+    },
+    {
+      "id": "nvidia-free-nemotron-3-5-lightning-candidate",
+      "enabled": false,
+      "provider": "nvidia",
+      "account": "developer-free-endpoint",
+      "account_tier": "free_prototype_endpoint_unverified_limits",
+      "model": "nvidia/nemotron-3.5-lightning-30b-a3b",
+      "api_key_env": "NVIDIA_API_KEY",
+      "endpoint_url": "https://integrate.api.nvidia.com/v1",
+      "free_verified": false,
+      "commercial_use_allowed": false,
+      "production_use_allowed": false,
+      "minute_request_limit": null,
+      "minute_token_limit": null,
+      "daily_request_limit": null,
+      "daily_token_limit": null,
+      "monthly_request_limit": null,
+      "monthly_token_limit": null,
+      "per_task_request_limit": null,
+      "per_task_token_limit": null,
+      "max_output_tokens": null,
+      "input_cost_per_million_usd": null,
+      "output_cost_per_million_usd": null,
+      "pricing_source_url": "https://build.nvidia.com/nvidia/nemotron-3.5-lightning-30b-a3b",
+      "quota_source_url": "https://forums.developer.nvidia.com/t/nvidia-nim-faq/300317",
+      "terms_source_url": "https://build.nvidia.com/nvidia/nemotron-3.5-lightning-30b-a3b/modelcard",
+      "model_terms_source_url": "https://openmdw.ai/",
+      "model_stage": "candidate",
+      "priority": 30,
+      "verification_note": "Candidate only. NVIDIA marks a free prototype endpoint available and publishes an OpenAI-compatible API. NVIDIA does not publish a numeric endpoint quota on the model page; its FAQ says limits vary by model and concurrent load and directs users to the account console. The model's downloadable weights use OpenMDW-1.1, but hosted endpoint terms, account eligibility, commercial-use permissions, and finite request/token quotas have not been verified for this engine. Deliberately disabled and ineligible for routing until each condition is verified. No API request has been sent."
     }
   ]
 }
