@@ -13,7 +13,7 @@ This proposal implements the trusted-code-only fallback from issue #440. It does
 1. The workspace root must equal the repository root.
 2. The checked-out branch must be exactly `main`.
 3. The Git origin must be exactly `ghith93/raawaa-autonomous-engine` over the canonical HTTPS or SSH URL.
-4. The working tree, including untracked files, must be clean.
+4. The working tree, including tracked changes, untracked files, and ignored files, must be clean. The implementation checks `git status --porcelain --untracked-files=all --ignored=matching` and fails closed on any output.
 5. The exact 40-character HEAD SHA must be verified through GitHub's public compare API as an ancestor of or identical to canonical `main`.
 6. The same checks run again after task claim and before heartbeat or execution. If the second check fails, the task is completed as blocked without running a command.
 7. Task payloads must contain only the single `operation` field. Operations remain a fixed allowlist; user-supplied commands, refs, paths, and arbitrary arguments are rejected.
