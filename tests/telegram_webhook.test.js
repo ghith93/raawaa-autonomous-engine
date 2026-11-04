@@ -172,3 +172,71 @@ test("per-chat rate cap is enforced by the receipt insert statement", async () =
   assert.equal(response.status, 200);
   assert.match(DB.calls[0].sql, /COUNT\(\*\).*created_at/s);
 });
+
+test("dual-secret mode accepts requests authenticated with either primary or staging secret", async () => {
+  const DB = dbMock();
+  const STAGING_SECRET = "staging_webhook_secret_987654";
+  const DUAL_ENV = { ...ENV, TELEGRAM_WEBHOOK_SECRET_STAGING: STAGING_SECRET, DB };
+
+  // Primary secret still accepted
+  const resPrimary = await handleTelegramWebhook(
+    request({ update_id: 201, message: { chat: { id: 12345, type: "private" }, text: "/help" } }, { secret: SECRET }),
+    DUAL_ENV,
+    new URL("https://engine.example/v1/telegram/webhook"),
+  );
+  assert.equal(resPrimary.status, 200);
+
+  // Staging secret also accepted
+  const resStaging = await handleTelegramWebhook(
+    request({ update_id: 202, message: { chat: { id: 12345, type: "private" }, text: "/help" } }, { secret: STAGING_SECRET }),
+    DUAL_ENV,
+    new URL("https://engine.example/v1/telegram/webhook"),
+  );
+  assert.equal(resStaging.status, 200);
+});
+
+test("dual-secret mode rejects requests that match neither primary nor staging secret", async () => {
+  const DB = dbMock();
+  const STAGING_SECRET = "staging_webhook_secret_987654";
+  const DUAL_ENV = { ...ENV, TELEGRAM_WEBHOOK_SECRET_STAGING: STAGING_SECRET, DB };
+
+  for (const wrongSecret of ["wrong_secret_123456", "test_webhook_secret_123457", null, ""]) {
+    const res = await handleTelegramWebhook(
+      request({ update_id: 203 }, { secret: wrongSecret }),
+      DUAL_ENV,
+      new URL("https://engine.example/v1/telegram/webhook"),
+    );
+    assert.equal(res.status, 401);
+  }
+});
+
+test("malformed staging secret disables webhook fail-closed with 503", async () => {
+  for (const badStaging of ["short", "invalid characters with spaces!", "a".repeat(15)]) {
+    const badEnv = { ...ENV, TELEGRAM_WEBHOOK_SECRET_STAGING: badStaging };
+    const res = await handleTelegramWebhook(
+      request({ update_id: 204 }),
+      badEnv,
+      new URL("https://engine.example/v1/telegram/webhook"),
+    );
+    assert.equal(res.status, 503);
+  }
+});
+
+test("empty or undefined staging secret preserves exact single-secret behavior", async () => {
+  for (const emptyVal of [undefined, ""]) {
+    const singleEnv = { ...ENV, TELEGRAM_WEBHOOK_SECRET_STAGING: emptyVal };
+    const resGood = await handleTelegramWebhook(
+      request({ update_id: 205, message: { chat: { id: 12345, type: "private" }, text: "/help" } }, { secret: SECRET }),
+      { ...singleEnv, DB: dbMock() },
+      new URL("https://engine.example/v1/telegram/webhook"),
+    );
+    assert.equal(resGood.status, 200);
+
+    const resBad = await handleTelegramWebhook(
+      request({ update_id: 206 }, { secret: "other_secret_12345" }),
+      singleEnv,
+      new URL("https://engine.example/v1/telegram/webhook"),
+    );
+    assert.equal(resBad.status, 401);
+  }
+});
