@@ -163,7 +163,7 @@ class StagingOpsTelemetryTests(unittest.TestCase):
             )
         self.assertEqual(called, [])
 
-    def test_only_main_push_engine_ci_is_accepted(self):
+    def test_only_main_push_or_manual_engine_ci_is_accepted(self):
         for changes in (
             {"GITHUB_REF_NAME": "feature"},
             {"GITHUB_EVENT_NAME": "pull_request"},
@@ -172,6 +172,15 @@ class StagingOpsTelemetryTests(unittest.TestCase):
             with self.subTest(changes=changes):
                 with self.assertRaises(TelemetryPublishError):
                     build_telemetry_statement(valid_env(**changes), self.root, self.now)
+
+    def test_guarded_main_workflow_dispatch_is_recorded_as_manual_event(self):
+        _, params, summary = build_telemetry_statement(
+            valid_env(GITHUB_EVENT_NAME="workflow_dispatch"), self.root, self.now
+        )
+        ci = json.loads(params[1])
+        self.assertEqual(ci["event"], "workflow_dispatch")
+        self.assertEqual(ci["branch"], "main")
+        self.assertEqual(summary["conclusion"], "success")
 
     def test_writes_and_reads_back_only_staging_d1_events(self):
         clients = []
