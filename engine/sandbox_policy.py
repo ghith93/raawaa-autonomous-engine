@@ -237,6 +237,14 @@ def assert_sandbox_argv(argv: list[str], *, expected_source_dir: str) -> list[st
     if any(arg == "-e" or arg.startswith("--env") or arg.startswith("-e=") for arg in options):
         raise SandboxPolicyError("the contract has no environment path: secrets cannot be passed in")
 
+    users = [arg for arg in options if arg.startswith("--user=")]
+    if len(users) != 1:
+        raise SandboxPolicyError("argv must contain exactly one user identity")
+    if users[0] in ("--user=0", "--user=0:0", "--user=root") or "root" in users[0]:
+        raise SandboxPolicyError("argv must not run as root")
+    if users[0] != f"--user={NON_ROOT_USER}":
+        raise SandboxPolicyError(f"argv must use the approved non-root user {NON_ROOT_USER}")
+
     fixed = [
         "--rm", f"--runtime={SANDBOX_RUNTIME}", "--network=none", "--read-only",
         "--cap-drop=ALL", "--security-opt=no-new-privileges",
