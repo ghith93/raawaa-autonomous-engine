@@ -186,6 +186,7 @@ def build_docker_argv(request: SandboxRequest) -> list[str]:
         # boundary
         f"--runtime={SANDBOX_RUNTIME}",
         "--network=none",
+        "--entrypoint=",
         "--read-only",
         "--cap-drop=ALL",
         "--security-opt=no-new-privileges",
@@ -246,7 +247,7 @@ def assert_sandbox_argv(argv: list[str], *, expected_source_dir: str) -> list[st
         raise SandboxPolicyError(f"argv must use the approved non-root user {NON_ROOT_USER}")
 
     fixed = [
-        "--rm", f"--runtime={SANDBOX_RUNTIME}", "--network=none", "--read-only",
+        "--rm", f"--runtime={SANDBOX_RUNTIME}", "--network=none", "--entrypoint=", "--read-only",
         "--cap-drop=ALL", "--security-opt=no-new-privileges",
         f"--user={NON_ROOT_USER}", "--workdir=/workspace",
     ]
