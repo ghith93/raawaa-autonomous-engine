@@ -52,11 +52,24 @@ def generate_webhook_secret() -> str:
     return secrets.token_urlsafe(32)
 
 
-def _call(token: str, method: str, payload: dict | None = None, *, timeout: float = 15.0) -> dict:
+def _call(
+    token: str,
+    method: str,
+    payload: dict | None = None,
+    *,
+    timeout: float = 15.0,
+    expect: str = "dict",
+) -> object:
     """Call one Bot API method and return `result`.
 
     Token-bearing URLs are never included in error text: an exception that echoes
     the URL would leak the token into logs and backtraces.
+
+    ``expect`` exists because Bot API results are not all objects: ``getUpdates``
+    returns a **list**. Coercing every non-dict result to ``{}`` made getUpdates
+    look like "no pending updates" while Telegram was reporting seven of them — the
+    bug that cost several go-live runs. Each caller now states the shape it wants,
+    and a mismatch is an empty value of that shape rather than a silent success.
     """
     url = f"{API_ROOT}/bot{token}/{method}"
     data = None if payload is None else json.dumps(payload).encode("utf-8")
@@ -77,7 +90,12 @@ def _call(token: str, method: str, payload: dict | None = None, *, timeout: floa
         description = body.get("description") if isinstance(body, dict) else None
         safe = description if isinstance(description, str) and len(description) <= 120 else "request rejected"
         raise BootstrapError(f"{method} failed: {safe}")
-    return body.get("result") if isinstance(body.get("result"), dict) else {}
+    result = body.get("result")
+    if expect == "list":
+        return result if isinstance(result, list) else []
+    if expect == "bool":
+        return result is True
+    return result if isinstance(result, dict) else {}
 
 
 def find_private_chat_ids(token: str) -> tuple[list[int], str | None]:
@@ -87,12 +105,16 @@ def find_private_chat_ids(token: str) -> tuple[list[int], str | None]:
     the state this script runs in before registration. A webhook already set means
     the owner must send a fresh message after deleting it, or supply the id.
     """
-    me = _call(token, "getMe")
+    me = _call(token, "getMe", expect="dict")
     username = me.get("username") if isinstance(me.get("username"), str) else None
-    updates = _call(token, "getUpdates", {"timeout": 0, "limit": 100, "allowed_updates": ["message"]})
-    seen = len(updates.get("updates") or [])
+    updates = _call(
+        token, "getUpdates",
+        {"timeout": 0, "limit": 100, "allowed_updates": ["message"]},
+        expect="list",
+    )
+    seen = len(updates)
     found: list[int] = []
-    for update in updates.get("updates") or []:
+    for update in updates:
         message = update.get("message") if isinstance(update, dict) else None
         chat = message.get("chat") if isinstance(message, dict) else None
         if not isinstance(chat, dict) or chat.get("type") != "private":
@@ -105,7 +127,7 @@ def find_private_chat_ids(token: str) -> tuple[list[int], str | None]:
 
 
 def webhook_state(token: str) -> dict:
-    info = _call(token, "getWebhookInfo")
+    info = _call(token, "getWebhookInfo", expect="dict")
     return {
         "url": info.get("url") or "",
         "pending_updates": info.get("pending_update_count"),
