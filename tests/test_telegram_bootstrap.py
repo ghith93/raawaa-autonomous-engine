@@ -298,7 +298,7 @@ class RegisterTest(unittest.TestCase):
         with self.assertRaises(bootstrap.BootstrapError):
             bootstrap.register(VALID_TOKEN, "http://example.test/hook", "x" * 32, [1])
 
-    def test_setwebhook_payload_carries_the_secret_and_drops_stale_updates(self):
+    def test_setwebhook_payload_carries_the_secret_and_preserves_pending_updates(self):
         calls = []
 
         def fake_call(token, method, payload=None, *, timeout=15.0, expect="dict"):
@@ -314,7 +314,7 @@ class RegisterTest(unittest.TestCase):
         self.assertEqual(method, "setWebhook")
         self.assertEqual(payload["secret_token"], "s" * 32)
         self.assertEqual(payload["allowed_updates"], ["message"])
-        self.assertTrue(payload["drop_pending_updates"])
+        self.assertFalse(payload["drop_pending_updates"])
         self.assertTrue(state["url"].startswith("https://"))
 
 
@@ -324,7 +324,7 @@ class MainFlowTest(unittest.TestCase):
             env_file = Path(tmp) / "telegram.env"
             replies = {
                 "getMe": {"username": "raawaa_bot"},
-                "getUpdates": [{"message": {"chat": {"id": 7, "type": "private"}}}],
+                "getUpdates": [{"message": {"chat": {"id": 7, "type": "private"}, "from": {"id": 7, "is_bot": False}}}],
             }
             with patch.object(bootstrap, "_call", side_effect=lambda t, m, p=None, **k: replies[m]):
                 with patch.dict(os.environ, {"TELEGRAM_BOT_TOKEN": VALID_TOKEN}):
@@ -334,6 +334,23 @@ class MainFlowTest(unittest.TestCase):
             written = dict(line.split("=", 1) for line in env_file.read_text().splitlines())
             self.assertEqual(written["TELEGRAM_ALLOWED_CHAT_IDS"], "7")
             self.assertTrue(bootstrap.SECRET_RE.fullmatch(written["TELEGRAM_WEBHOOK_SECRET"]))
+
+    def test_explicit_chat_id_skips_getupdates_and_does_not_pause_webhook(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            env_file = Path(tmp) / "telegram.env"
+            def unexpected_call(*args, **kwargs):
+                raise AssertionError("explicit chat_id must not call Telegram discovery")
+            with patch.object(bootstrap, "_call", side_effect=unexpected_call):
+                with patch.dict(os.environ, {"TELEGRAM_BOT_TOKEN": VALID_TOKEN}):
+                    with contextlib.redirect_stdout(io.StringIO()):
+                        code = bootstrap.main(["--env-file", str(env_file), "--chat-id", "42"])
+            self.assertEqual(code, 0)
+            written = dict(line.split("=", 1) for line in env_file.read_text().splitlines())
+            self.assertEqual(written["TELEGRAM_ALLOWED_CHAT_IDS"], "42")
+
+    def test_negative_chat_id_is_rejected(self):
+        with self.assertRaisesRegex(bootstrap.BootstrapError, "not a chat id"):
+            bootstrap._parse_chat_ids(["-100123"])
 
     def test_register_without_a_url_fails_with_an_actionable_message(self):
         with tempfile.TemporaryDirectory() as tmp:
