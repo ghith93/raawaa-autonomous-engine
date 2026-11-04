@@ -693,6 +693,170 @@ try {
   });
   assertStatus(webhookDisabled, 503, "Telegram webhook must remain disabled without operator secrets");
 
+  // Priority and DAG dependency semantics use the same D1 queue contract.
+  const lowPriority = await api("/v1/tasks/enqueue", {
+    method: "POST",
+    body: {
+      task_type: "system_audit", title: "Low priority task",
+      payload: { external_writes: false }, idempotency_key: "d1-priority-low-" + randomUUID(),
+      priority: 1,
+    },
+  });
+  assertStatus(lowPriority, 201, "enqueue low-priority task");
+  const highPriority = await api("/v1/tasks/enqueue", {
+    method: "POST",
+    body: {
+      task_type: "system_audit", title: "High priority task",
+      payload: { external_writes: false }, idempotency_key: "d1-priority-high-" + randomUUID(),
+      priority: 90,
+    },
+  });
+  assertStatus(highPriority, 201, "enqueue high-priority task");
+  assert.equal(highPriority.payload.task.priority, 90);
+  assert.deepEqual(JSON.parse(highPriority.payload.task.depends_on), []);
+  const highClaim = await api("/v1/tasks/claim", {
+    method: "POST", body: { execution_mode: "live_inference" },
+  });
+  assertStatus(highClaim, 200, "claim high-priority task first");
+  assert.equal(highClaim.payload.task.id, highPriority.payload.task.id);
+  const highFinish = await api("/v1/tasks/" + highPriority.payload.task.id + "/finish", {
+    method: "POST",
+    body: { lease_token: highClaim.payload.lease_token, status: "succeeded",
+      result: { mode: "live_inference", priority_verified: true } },
+  });
+  assertStatus(highFinish, 200, "finish high-priority task");
+  const lowClaim = await api("/v1/tasks/claim", {
+    method: "POST", body: { execution_mode: "live_inference" },
+  });
+  assertStatus(lowClaim, 200, "claim remaining lower-priority task");
+  assert.equal(lowClaim.payload.task.id, lowPriority.payload.task.id);
+  const lowFinish = await api("/v1/tasks/" + lowPriority.payload.task.id + "/finish", {
+    method: "POST",
+    body: { lease_token: lowClaim.payload.lease_token, status: "succeeded",
+      result: { mode: "live_inference", priority_verified: true } },
+  });
+  assertStatus(lowFinish, 200, "finish low-priority task");
+
+  const dependencyParent = await api("/v1/tasks/enqueue", {
+    method: "POST",
+    body: {
+      task_type: "system_audit", title: "DAG parent",
+      payload: { external_writes: false }, idempotency_key: "d1-dag-parent-" + randomUUID(),
+      priority: 0,
+    },
+  });
+  assertStatus(dependencyParent, 201, "enqueue DAG parent");
+  const dependencyChild = await api("/v1/tasks/enqueue", {
+    method: "POST",
+    body: {
+      task_type: "code_review", title: "DAG child",
+      payload: { external_writes: false }, idempotency_key: "d1-dag-child-" + randomUUID(),
+      priority: 100, depends_on: [dependencyParent.payload.task.id],
+    },
+  });
+  assertStatus(dependencyChild, 201, "enqueue DAG child");
+  assert.deepEqual(JSON.parse(dependencyChild.payload.task.depends_on), [dependencyParent.payload.task.id]);
+  const independent = await api("/v1/tasks/enqueue", {
+    method: "POST",
+    body: {
+      task_type: "system_audit", title: "Independent medium priority",
+      payload: { external_writes: false }, idempotency_key: "d1-dag-independent-" + randomUUID(),
+      priority: 50,
+    },
+  });
+  assertStatus(independent, 201, "enqueue independent task");
+  const independentClaim = await api("/v1/tasks/claim", {
+    method: "POST", body: { execution_mode: "live_inference" },
+  });
+  assertStatus(independentClaim, 200, "claim independent task before blocked high-priority child");
+  assert.equal(independentClaim.payload.task.id, independent.payload.task.id);
+  const independentFinish = await api("/v1/tasks/" + independent.payload.task.id + "/finish", {
+    method: "POST",
+    body: { lease_token: independentClaim.payload.lease_token, status: "succeeded",
+      result: { mode: "live_inference" } },
+  });
+  assertStatus(independentFinish, 200, "finish independent task");
+  const parentClaim = await api("/v1/tasks/claim", {
+    method: "POST", body: { execution_mode: "live_inference" },
+  });
+  assertStatus(parentClaim, 200, "claim DAG parent before dependent child");
+  assert.equal(parentClaim.payload.task.id, dependencyParent.payload.task.id);
+  const parentFinish = await api("/v1/tasks/" + dependencyParent.payload.task.id + "/finish", {
+    method: "POST",
+    body: { lease_token: parentClaim.payload.lease_token, status: "succeeded",
+      result: { mode: "live_inference" } },
+  });
+  assertStatus(parentFinish, 200, "finish live DAG parent");
+  const childClaim = await api("/v1/tasks/claim", {
+    method: "POST", body: { execution_mode: "live_inference" },
+  });
+  assertStatus(childClaim, 200, "claim child after live parent success");
+  assert.equal(childClaim.payload.task.id, dependencyChild.payload.task.id);
+  const childFinish = await api("/v1/tasks/" + dependencyChild.payload.task.id + "/finish", {
+    method: "POST",
+    body: { lease_token: childClaim.payload.lease_token, status: "succeeded",
+      result: { mode: "live_inference" } },
+  });
+  assertStatus(childFinish, 200, "finish DAG child");
+
+  const simulatedParent = await api("/v1/tasks/enqueue", {
+    method: "POST",
+    body: {
+      task_type: "system_audit", title: "Simulated DAG parent",
+      payload: { external_writes: false }, idempotency_key: "d1-dag-sim-parent-" + randomUUID(),
+    },
+  });
+  assertStatus(simulatedParent, 201, "enqueue simulated parent");
+  const simulatedChild = await api("/v1/tasks/enqueue", {
+    method: "POST",
+    body: {
+      task_type: "code_review", title: "Child of simulated parent",
+      payload: { external_writes: false }, idempotency_key: "d1-dag-sim-child-" + randomUUID(),
+      depends_on: [simulatedParent.payload.task.id],
+    },
+  });
+  assertStatus(simulatedChild, 201, "enqueue child of simulated parent");
+  const simulatedClaim = await api("/v1/tasks/claim", {
+    method: "POST", body: { execution_mode: "dry_run" },
+  });
+  assertStatus(simulatedClaim, 200, "claim simulated parent");
+  assert.equal(simulatedClaim.payload.task.id, simulatedParent.payload.task.id);
+  const simulatedFinish = await api("/v1/tasks/" + simulatedParent.payload.task.id + "/finish", {
+    method: "POST",
+    body: { lease_token: simulatedClaim.payload.lease_token, status: "succeeded",
+      result: { mode: "dry_run", execution_started: false } },
+  });
+  assertStatus(simulatedFinish, 200, "finish simulated parent");
+  const blockedChildClaim = await api("/v1/tasks/claim", {
+    method: "POST", body: { execution_mode: "live_inference" },
+  });
+  assertStatus(blockedChildClaim, 200, "dry-run parent must not unlock dependent task");
+  assert.equal(blockedChildClaim.payload.task, null);
+  const blockedChild = (await api("/v1/tasks?limit=100")).payload.tasks
+    .find(task => task.id === simulatedChild.payload.task.id);
+  assert.equal(blockedChild.status, "blocked");
+
+  const unknownDependency = await api("/v1/tasks/enqueue", {
+    method: "POST",
+    body: {
+      task_type: "system_audit", title: "Unknown dependency",
+      payload: { external_writes: false }, idempotency_key: "d1-dag-missing-" + randomUUID(),
+      depends_on: ["missing-task-id"],
+    },
+  });
+  assertStatus(unknownDependency, 400, "reject missing dependency IDs");
+  assert.deepEqual(unknownDependency.payload, { error: "unknown_dependency" });
+  const invalidPriority = await api("/v1/tasks/enqueue", {
+    method: "POST",
+    body: {
+      task_type: "system_audit", title: "Invalid priority",
+      payload: { external_writes: false }, idempotency_key: "d1-dag-priority-" + randomUUID(),
+      priority: 101,
+    },
+  });
+  assertStatus(invalidPriority, 400, "reject out-of-range priority");
+  assert.deepEqual(invalidPriority.payload, { error: "invalid_task" });
+
   console.log(
     "Local D1 integration passed: migrations, authenticated status, task enqueue/idempotency/lease fencing, " +
     "concurrent token plus global daily/monthly/per-task monetary caps, idempotency conflict/replay, pre-I/O-only release, ambiguous reservations across restart, duplicate/conflicting settlement, quarantine, mobile monetary status and spend breakdown, append-only paper ledger/hash replay, and disabled Telegram webhook.",
