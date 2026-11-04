@@ -208,10 +208,9 @@ class RefusalTest(unittest.TestCase):
         with self.assertRaisesRegex(SandboxPolicyError, "non-root"):
             assert_sandbox_argv([a for a in argv() if not a.startswith("--user=")], expected_source_dir="/repo")
         with self.assertRaisesRegex(SandboxPolicyError, "not run as root"):
-            assert_sandbox_argv(
-                [a for a in argv() if a != f"--user={NON_ROOT_USER}"] + ["--user=root"],
-                expected_source_dir="/repo",
-            )
+            root_vector = [a for a in argv() if a != f"--user={NON_ROOT_USER}"]
+            root_vector.insert(root_vector.index(IMAGE), "--user=root")
+            assert_sandbox_argv(root_vector, expected_source_dir="/repo")
         for prefix in ("--pids-limit=", "--memory=", "--cpus="):
             with self.assertRaisesRegex(SandboxPolicyError, "missing", msg=prefix):
                 assert_sandbox_argv([a for a in argv() if not a.startswith(prefix)], expected_source_dir="/repo")
