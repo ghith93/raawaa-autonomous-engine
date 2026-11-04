@@ -187,6 +187,10 @@ class RefusalTest(unittest.TestCase):
         with self.assertRaisesRegex(SandboxPolicyError, "trusted workspace bind mount"):
             assert_sandbox_argv(argv(source_dir="/etc"), expected_source_dir="/repo")
 
+    def test_ambiguous_workspace_mount_paths_are_refused(self):
+        with self.assertRaisesRegex(SandboxPolicyError, "specific directory"):
+            assert_sandbox_argv(argv(), expected_source_dir="/repo,readonly=false")
+
     def test_duplicate_and_unrecognized_options_are_refused(self):
         for extra in ("--read-only", "--memory=512m", "--foo=bar"):
             with self.assertRaises(SandboxPolicyError, msg=extra):
