@@ -509,12 +509,19 @@ export default {
     const key = input?.idempotency_key;
     const payload = input?.payload ?? {};
     const maxAttempts = input?.max_attempts ?? 2;
+    const priority = input?.priority ?? 0;
+    const rawDependencies = input?.depends_on ?? [];
     if (!validText(taskType, 100) || !validText(title, 240) ||
         !validText(key, 200) || !payload || typeof payload !== "object" ||
         Array.isArray(payload) || !Number.isInteger(maxAttempts) ||
-        maxAttempts < 1 || maxAttempts > 5) {
+        maxAttempts < 1 || maxAttempts > 5 ||
+        !Number.isInteger(priority) || priority < -100 || priority > 100 ||
+        !Array.isArray(rawDependencies) || rawDependencies.length > 20 ||
+        rawDependencies.some(dep => typeof dep !== "string" || !/^[A-Za-z0-9_-]{1,128}$/.test(dep)) ||
+        new Set(rawDependencies).size !== rawDependencies.length) {
       return json({ error: "invalid_task" }, 400);
     }
+    const dependencies = [...rawDependencies].sort();
 
     let payloadJson;
     try {
@@ -526,18 +533,35 @@ export default {
       return json({ error: "invalid_payload" }, 400);
     }
 
-    const id = crypto.randomUUID();
     const now = new Date().toISOString();
     try {
+      const existing = await env.DB.prepare(
+        "SELECT id,idempotency_key,task_type,title,payload_json,status,attempts,max_attempts,created_at,updated_at,execution_mode,priority,depends_on FROM tasks WHERE idempotency_key=?"
+      ).bind(key).first();
+      if (existing) return json({ task: existing, created: false }, 200);
+      if (dependencies.length) {
+        const placeholders = dependencies.map(() => "?").join(",");
+        const dependencyRows = await env.DB.prepare(
+          `SELECT id FROM tasks WHERE id IN (${placeholders})`
+        ).bind(...dependencies).all();
+        const found = new Set((dependencyRows.results || []).map(row => row.id));
+        if (found.size !== dependencies.length) {
+          return json({ error: "unknown_dependency" }, 400);
+        }
+      }
+      const id = crypto.randomUUID();
       const insert = env.DB.prepare(
-        "INSERT OR IGNORE INTO tasks(id,idempotency_key,task_type,title,payload_json,status,attempts,max_attempts,created_at,updated_at,execution_mode) VALUES(?,?,?,?,?,'pending',0,?,?,?,'not_started')"
-      ).bind(id, key, taskType.trim(), title.trim(), payloadJson, maxAttempts, now, now);
+        "INSERT OR IGNORE INTO tasks(id,idempotency_key,task_type,title,payload_json,status,attempts,max_attempts,created_at,updated_at,execution_mode,priority,depends_on) VALUES(?,?,?,?,?,'pending',0,?,?,?,'not_started',?,?)"
+      ).bind(id, key, taskType.trim(), title.trim(), payloadJson, maxAttempts, now, now,
+        priority, JSON.stringify(dependencies));
       const audit = env.DB.prepare(
         "INSERT INTO audit_log(task_id,event,details_json,created_at) SELECT id,'task_enqueued',?,? FROM tasks WHERE idempotency_key=? AND changes() > 0"
-      ).bind(JSON.stringify({ task_type: taskType.trim() }), now, key);
+      ).bind(JSON.stringify({
+        task_type: taskType.trim(), priority, depends_on: dependencies,
+      }), now, key);
       await env.DB.batch([insert, audit]);
       const task = await env.DB.prepare(
-        "SELECT id,idempotency_key,task_type,title,payload_json,status,attempts,max_attempts,created_at,updated_at,execution_mode FROM tasks WHERE idempotency_key=?"
+        "SELECT id,idempotency_key,task_type,title,payload_json,status,attempts,max_attempts,created_at,updated_at,execution_mode,priority,depends_on FROM tasks WHERE idempotency_key=?"
       ).bind(key).first();
       if (!task) return json({ error: "storage_unavailable" }, 503);
       return json({ task, created: task.id === id }, task.id === id ? 201 : 200);
