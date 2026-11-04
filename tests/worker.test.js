@@ -1228,6 +1228,17 @@ test("an enqueue storage failure also reports its reason", async () => {
   assert.ok(body.detail.includes("database is locked"), body.detail);
 });
 
+test("workflow dispatch requires the bearer token", async () => {
+  // The route enqueues tasks, so it must sit behind the same guard as
+  // /v1/tasks/enqueue — an unauthenticated dispatch would be a free queue write.
+  const response = await worker.fetch(new Request("https://engine.example/v1/workflows/dispatch", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ run_id: "r", workflow_id: "w", plan_digest: "a".repeat(64), steps: [] }),
+  }), { DB: dbMock(), ENGINE_API_TOKEN: TOKEN });
+  assert.equal(response.status, 401);
+});
+
 test("schema diagnostics report every table the Worker depends on", async () => {
   const response = await worker.fetch(request("/v1/diagnostics/schema", {
     method: "GET", token: TOKEN,
@@ -1237,7 +1248,8 @@ test("schema diagnostics report every table the Worker depends on", async () => 
   assert.equal(body.ok, true);
   assert.deepEqual(body.missing, []);
   assert.ok(body.checked.includes("task_dependencies"), "task_dependencies must be probed");
-  assert.equal(body.checked.length, 6);
+  assert.ok(body.checked.includes("workflow_runs"), "workflow_runs must be probed");
+  assert.equal(body.checked.length, 7);
 });
 
 test("schema diagnostics name the table a deploy forgot to migrate", async () => {

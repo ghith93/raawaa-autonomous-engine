@@ -13,10 +13,85 @@ model inference, task execution, arbitrary operation calls, or customer-facing w
 - `POST /v1/tasks/:id/heartbeat`: extends a still-valid lease by 15 minutes.
 - `POST /v1/tasks/:id/finish`: completes a leased task as `succeeded`, `failed`, or `blocked`.
 - `POST /v1/tasks/:id/retry`: releases a leased task back to `pending` while attempts remain, otherwise marks it `failed`.
+- `POST /v1/workflows/dispatch`: enqueues every step of a validated workflow plan with its dependency edges and records the run, atomically (see below).
+- `GET /v1/workflows/:run_id`: read-only reconciliation — what a run recorded, and whether every step's task exists.
 
 All task writes use prepared statements and a D1 batch so task insertion and its audit
 event are committed together. Duplicate idempotency keys return the existing task.
 The Worker returns generic storage errors and does not leak SQL, bindings, or credentials.
+
+## Atomic workflow dispatch
+
+`POST /v1/workflows/dispatch` is the only route that enqueues more than one task per
+request, so it is the only one where a partial write is possible in principle. It is
+not possible here: the run row, every task, every dependency edge and every audit row
+are written in **one** `DB.batch`, which D1 executes as a single transaction. If any
+statement fails, nothing is enqueued and the response says so. There is no
+`dispatching` state to reconcile and no half-written plan to clean up.
+
+Request body:
+
+```json
+{
+  "workflow_id": "demo_workflow",
+  "run_id": "run-9",
+  "plan_version": 1,
+  "plan_digest": "<sha256 of the canonical plan, 64 hex chars>",
+  "steps": [
+    {"step_id": "prepare", "task_type": "system_audit", "title": "Inspect system", "payload": {}, "depends_on": []},
+    {"step_id": "verify", "task_type": "code_review", "title": "Review changes", "payload": {}, "depends_on": ["prepare"]}
+  ]
+}
+```
+
+Properties, each covered by a test:
+
+- **One transaction.** `201` with `created: true` means every step is enqueued, or the
+  request failed and nothing is.
+- **Replay is a no-op.** Task ids and idempotency keys derive deterministically from
+  `(workflow_id, run_id, plan_version, step_id)`, so repeating a dispatch returns
+  `200` with `created: false` and writes nothing.
+- **Replay must also match content.** The run row stores a `steps_digest` (SHA-256 over
+  the normalized steps). The same `run_id` and `plan_digest` with different steps is
+  `409 step_contract_conflict`; the stored digest, not a preflight read, decides.
+- **A lost response is not a failure.** A definite SQL/constraint error is a known
+  rollback (`503 dispatch_failed`, nothing enqueued). Any other error may have
+  committed, so it answers `504 dispatch_outcome_unknown` and the caller reconciles
+  with `GET /v1/workflows/:run_id` instead of retrying under a new run id.
+- **A different plan cannot reuse a run id.** Same `run_id`, different `plan_digest`
+  returns `409 run_digest_conflict` instead of quietly dispatching a second workflow
+  under an identity that already means something.
+- **No invisible dependencies.** A `depends_on` naming a step outside the plan is
+  rejected (`400 unknown_step_dependency`) rather than being accepted and leaving the
+  child blocked forever — an edge to a task that will never exist looks like a stuck
+  queue, not a bad request.
+- **Cycles are refused** (`400 cyclic_dependency`) with the offending steps named.
+- **Only known step types.** `research_brief`, `code_review`, `content_draft` and
+  `system_audit` are accepted; anything else is `400 unsupported_step_task_type`, so a
+  typo cannot become a task nothing can execute. Codespace task types are refused
+  categorically, not only while the executor release is false.
+- **Ages gracefully.** On a deployment that predates `migrations/0012_workflow_runs.sql`
+  the route — and the reconciliation route — return `404 plan_dispatch_unavailable`; it
+  never reports success for a run it could not record.
+- **Still not execution.** Tasks are enqueued as `pending` and pass through the same
+  claim, lease and policy gates as any other task. Codespace task types stay refused
+  while the executor release is false, and dispatch never sets `dispatch_authorized`
+  or `execution_started`.
+
+The idempotency key derivation exists twice — in `engine/workflow_dispatch.py` and in
+`worker/workflow-dispatch.js` — because the Python and Worker runtimes cannot share
+code. Both are pinned by the same hard-coded test vector
+(`workflow-step:730e3fe0…` for `demo-workflow`/`run-9`/v1/`prepare`), so a drift in
+either implementation fails a test instead of silently duplicating tasks on replay.
+
+Building a dispatch body is not sending one:
+`python3 -m engine.cli workflow-dispatch-body --file workflow.json --run-id run-9`
+prints the body (JSON, or `--format markdown` for a summary table) and performs no
+network I/O; the CLI holds no token.
+
+`migrations/0012_workflow_runs.sql` has **not** been applied to any environment. Until
+it is applied to a given D1 database, that deployment answers `404
+plan_dispatch_unavailable` and enqueues nothing.
 
 ## Configuration and deployment
 

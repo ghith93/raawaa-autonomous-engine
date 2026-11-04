@@ -11,7 +11,33 @@ from __future__ import annotations
 
 import json
 import subprocess
+from datetime import datetime, timezone
 from typing import Any
+
+
+def classify_checks(rollup: Any) -> str:
+    """Reduce a statusCheckRollup to one of failure/pending/success/unknown.
+
+    The order matters and is the whole point: a queued check reports no
+    conclusion, and treating that empty conclusion as success is how a pull
+    request sat in this ranking as "green and mergeable" while its only check
+    had never started.
+    """
+    checks = [check for check in (rollup or []) if isinstance(check, dict)]
+    conclusions = {
+        str(check.get("conclusion") or check.get("state") or "").lower() for check in checks
+    }
+    statuses = {str(check.get("status") or "").upper() for check in checks}
+    unfinished = bool(statuses & {"QUEUED", "IN_PROGRESS", "PENDING", "WAITING", "REQUESTED"})
+    if "failure" in conclusions or "timed_out" in conclusions:
+        return "failure"
+    if unfinished or "" in conclusions:
+        return "pending"
+    if not conclusions or conclusions <= {"skipped"}:
+        return "unknown"
+    if conclusions <= {"success", "skipped", "neutral"}:
+        return "success"
+    return "pending"
 
 
 def _gh(args: list[str]) -> Any:
@@ -80,22 +106,7 @@ def collect(repo: str | None = None) -> dict[str, Any]:
     ) or []
     open_pull_requests = []
     for pr in pulls:
-        rollup = pr.get("statusCheckRollup") or []
-        conclusions = {
-            str(check.get("conclusion") or check.get("state") or "").lower()
-            for check in rollup
-            if isinstance(check, dict)
-        }
-        if conclusions and conclusions <= {"skipped"}:
-            checks = "unknown"
-        elif "failure" in conclusions or "timed_out" in conclusions:
-            checks = "failure"
-        elif conclusions and conclusions <= {"success", "skipped", "neutral", ""}:
-            checks = "success"
-        elif not conclusions:
-            checks = "unknown"
-        else:
-            checks = "pending"
+        checks = classify_checks(pr.get("statusCheckRollup"))
         open_pull_requests.append(
             {
                 "number": pr.get("number"),
@@ -151,6 +162,10 @@ def collect(repo: str | None = None) -> dict[str, Any]:
     return {
         "collected_by": "scripts/build_development_state.py",
         "repo": repo,
+        # The collector stamps its own output. Without this, a report cannot
+        # tell a one-minute-old snapshot from a four-hour-old one, and the two
+        # read identically — which is how a stale ranking gets acted on.
+        "generated_at": datetime.now(timezone.utc).isoformat(),
         "open_pull_requests": open_pull_requests,
         "open_issues": open_issues,
         "remote_branch_count": remote_branch_count,

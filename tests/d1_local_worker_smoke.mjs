@@ -202,6 +202,86 @@ try {
   assert.ok(persistedSources.has("arxiv:2601.01234v2"));
   assert.ok(persistedSources.has("searxng:https://docs.example.org/agent-security?source=searxng"));
 
+  // --- Atomic workflow dispatch against the real D1 -------------------------
+  const dispatchBody = {
+    run_id: "smoke-run-1",
+    workflow_id: "smoke-workflow",
+    plan_digest: "a".repeat(64),
+    plan_version: 1,
+    steps: [
+      { step_id: "prepare", task_type: "system_audit", title: "workflow prepare", payload: { step: 1 } },
+      { step_id: "verify", task_type: "system_audit", title: "workflow verify", payload: { step: 2 },
+        depends_on: ["prepare"] },
+    ],
+  };
+  const dispatched = await api("/v1/workflows/dispatch", { method: "POST", body: dispatchBody });
+  assertStatus(dispatched, 201, "workflow dispatch");
+  assert.equal(dispatched.payload.run.status, "dispatched");
+  assert.equal(dispatched.payload.run.workflow_id, "smoke-workflow");
+  assert.equal(dispatched.payload.run.step_count, 2);
+  assert.deepEqual(dispatched.payload.run.entry_step_ids, ["prepare"]);
+
+  const afterDispatch = await api("/v1/tasks?limit=50");
+  assertStatus(afterDispatch, 200, "task listing after dispatch");
+  const workflowTasks = afterDispatch.payload.tasks.filter(task => task.id.startsWith("wf-smoke-run-1-"));
+  assert.equal(workflowTasks.length, 2, "both steps must be enqueued");
+  const dependent = workflowTasks.find(task => task.id === "wf-smoke-run-1-verify");
+  assert.deepEqual(JSON.parse(dependent.dependencies_json), ["wf-smoke-run-1-prepare"]);
+
+  // A replay with the same run id and digest is a no-op, not a duplicate.
+  const replayed = await api("/v1/workflows/dispatch", { method: "POST", body: dispatchBody });
+  assertStatus(replayed, 200, "workflow dispatch replay");
+  assert.equal(replayed.payload.created, false);
+  const afterReplay = await api("/v1/tasks?limit=50");
+  assert.equal(
+    afterReplay.payload.tasks.filter(task => task.id.startsWith("wf-smoke-run-1-")).length,
+    2,
+    "a replay must not duplicate steps",
+  );
+
+  // Reusing the run id for a different plan is refused rather than silently applied.
+  const conflicting = await api("/v1/workflows/dispatch", {
+    method: "POST",
+    body: { ...dispatchBody, plan_digest: "b".repeat(64) },
+  });
+  assertStatus(conflicting, 409, "workflow dispatch digest conflict");
+  assert.equal(conflicting.payload.error, "run_digest_conflict");
+
+  // Reconciliation: the run can be read back and names its tasks, without writing.
+  const reconciled = await api("/v1/workflows/smoke-run-1");
+  assertStatus(reconciled, 200, "workflow run reconciliation");
+  assert.equal(reconciled.payload.complete, true);
+  assert.deepEqual(reconciled.payload.steps.map(step => step.step_id).sort(), ["prepare", "verify"]);
+  assert.equal(reconciled.payload.run.step_count, 2);
+  assert.match(reconciled.payload.run.steps_digest, /^[0-9a-f]{64}$/);
+
+  const unknownRun = await api("/v1/workflows/never-dispatched");
+  assertStatus(unknownRun, 404, "unknown workflow run");
+
+  // A step type outside the manifest's allowlist is refused by the Worker itself.
+  const badType = await api("/v1/workflows/dispatch", {
+    method: "POST",
+    body: {
+      run_id: "smoke-run-2",
+      workflow_id: "smoke-workflow",
+      plan_digest: "d".repeat(64),
+      plan_version: 1,
+      steps: [{ step_id: "x", task_type: "not_a_real_type", title: "x" }],
+    },
+  });
+  assertStatus(badType, 400, "unsupported step task type");
+  assert.equal(badType.payload.error, "unsupported_step_task_type");
+
+  // The dependency edge is real: the dependent step must not be claimable while
+  // its parent is pending.
+  const claimAfterDispatch = await api("/v1/tasks/claim", { method: "POST", body: {} });
+  if (claimAfterDispatch.payload?.task) {
+    assert.ok(
+      !claimAfterDispatch.payload.task.id.endsWith("-verify"),
+      "a dependent step must not be claimed before its dependency completes",
+    );
+  }
+
   const taskPayload = {
     task_type: "system_audit",
     title: "Local D1 integration smoke",

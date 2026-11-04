@@ -63,6 +63,10 @@ W_AGE_PER_DAY = 0.6
 W_BLOCKED = 5
 
 OWNER_APPROVAL_KINDS = frozenset({"deploy", "provider_activation", "permissions"})
+# A snapshot older than this cannot be trusted to describe the current queue.
+# The ranking is not wrong about the data it was given — the data is old — so
+# the report says which it is instead of leaving the reader to guess.
+SNAPSHOT_STALE_MINUTES = 120
 # Umbrella and status-record issues are not work. Ranking them next to a
 # failing pipeline is how a 32 KB log came to look like a task.
 TRACKING_LABELS = frozenset({"tracking", "umbrella", "meta"})
@@ -309,6 +313,21 @@ def _pull_request_actions(
                     },
                 )
             )
+        elif checks in {"pending", "queued", "running"}:
+            # Queued is not green. A check that has not finished is not evidence
+            # of anything, and a check that will never start is a pipeline
+            # problem the CI-cadence rule reports separately.
+            actions.append(
+                _item(
+                    "pull_request",
+                    target,
+                    "await_or_unstick_checks",
+                    W_READY_PR - 2 + 2 * age_credit,
+                    f"checks are queued or running, so there is no verdict yet: {title}",
+                    gate=gate,
+                    evidence={"checks": checks, "age_days": round(age, 1)},
+                )
+            )
         else:
             actions.append(
                 _item(
@@ -435,9 +454,26 @@ def build_development_cycle(state: dict[str, Any] | None = None, *, limit: int =
 
     selected = ranked[: max(1, int(limit))]
     signals = state.get("signals") or {}
+    snapshot_at = state.get("generated_at")
+    snapshot_age_minutes = _minutes_since(snapshot_at, now)
     return {
         "schema_version": SCHEMA_VERSION,
         "generated_at": now.isoformat(),
+        "freshness": {
+            "snapshot_generated_at": snapshot_at,
+            "snapshot_age_minutes": (
+                None if snapshot_age_minutes is None else round(snapshot_age_minutes, 1)
+            ),
+            "main_head_sha": signals.get("main_head_sha"),
+            "stale": (
+                snapshot_age_minutes is None or snapshot_age_minutes > SNAPSHOT_STALE_MINUTES
+            ),
+            "stale_after_minutes": SNAPSHOT_STALE_MINUTES,
+            "note": (
+                "Ranks describe the snapshot, not live GitHub. A stale snapshot is "
+                "history: re-collect before acting on its first action."
+            ),
+        },
         "mode": MODE,
         "inputs": {
             "open_pull_requests": len(state.get("open_pull_requests") or []),
@@ -482,10 +518,26 @@ def build_development_cycle(state: dict[str, Any] | None = None, *, limit: int =
 
 def render_markdown(report: dict[str, Any]) -> str:
     """Render a report as a compact Markdown block for a run summary."""
+    freshness = report.get("freshness") or {}
+    if freshness.get("stale"):
+        age = freshness.get("snapshot_age_minutes")
+        age_text = "unknown age" if age is None else f"{age:g} min old"
+        snapshot_line = (
+            f"**Snapshot is stale** ({age_text}; threshold {freshness.get('stale_after_minutes')} min). "
+            "These ranks describe the snapshot, not live GitHub — re-collect before acting."
+        )
+    else:
+        snapshot_line = (
+            f"Snapshot: {freshness.get('snapshot_age_minutes')} min old, "
+            f"head `{(freshness.get('main_head_sha') or 'unknown')[:12]}`."
+        )
+
     lines = [
         "## Development cycle",
         "",
         f"Mode: `{report['mode']}` — read-only, no merges, no deploys, no spend.",
+        "",
+        snapshot_line,
         "",
         "| # | Kind | Target | Action | Score | Gate |",
         "|---|------|--------|--------|-------|------|",

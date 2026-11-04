@@ -387,6 +387,37 @@ class CliTests(unittest.TestCase):
             self.assertEqual(result["provider_calls"], 0)
             self.assertEqual(result["external_writes"], 0)
 
+    def test_workflow_dispatch_body_cli_matches_the_manifest_keys(self):
+        proposal = {
+            "id": "cli_plan",
+            "steps": [
+                {"id": "audit", "task_type": "system_audit", "title": "Inspect system",
+                 "acceptance_checks": ["Audit report is returned"]},
+                {"id": "review", "task_type": "code_review", "title": "Review changes",
+                 "depends_on": ["audit"], "acceptance_checks": ["Findings are recorded"]},
+            ],
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            proposal_path = Path(tmp) / "workflow.json"
+            proposal_path.write_text(json.dumps(proposal), encoding="utf-8")
+            manifest_out, body_out = io.StringIO(), io.StringIO()
+            with patch("sys.argv", ["engine", "workflow-manifest", "--file", str(proposal_path),
+                                    "--run-id", "run-1"]):
+                with contextlib.redirect_stdout(manifest_out):
+                    self.assertEqual(cli.main(), 0)
+            with patch("sys.argv", ["engine", "workflow-dispatch-body", "--file", str(proposal_path),
+                                    "--run-id", "run-1"]):
+                with contextlib.redirect_stdout(body_out):
+                    self.assertEqual(cli.main(), 0)
+            manifest = json.loads(manifest_out.getvalue())
+            body = json.loads(body_out.getvalue())
+            self.assertEqual(body["plan_digest"], manifest["plan_digest"])
+            self.assertEqual(body["workflow_id"], manifest["workflow_id"])
+            for step in manifest["steps"]:
+                self.assertEqual(body["task_keys"][step["step_id"]], step["task_idempotency_key"])
+            # Building the body is still not dispatching it.
+            self.assertNotIn("authorization", json.dumps(body).lower())
+
 
 if __name__ == "__main__":
     unittest.main()
