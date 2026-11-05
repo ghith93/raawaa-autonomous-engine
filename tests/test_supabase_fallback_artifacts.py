@@ -23,6 +23,15 @@ class SupabaseFallbackArtifactTests(unittest.TestCase):
         self.assertIn("v_outcome ?& array[", source)
         self.assertNotIn("jsonb_object_length(v_outcome)", source)
 
+    def test_audit_task_index_exists_and_no_broad_table_policies(self):
+        source = "\n".join(path.read_text(encoding="utf-8") for path in sorted(MIGRATIONS.glob("*.sql")))
+        self.assertIn("on engine_fallback.audit_log (task_id)", source)
+        # The RLS-enabled/no-policy posture is intentional (advisor INFO):
+        # anon/authenticated have no table or schema access and the
+        # service_role-only security-definer RPCs are the access boundary.
+        # Do not add broad policies merely to silence the linter.
+        self.assertNotIn("create policy", source.lower())
+
     def test_edge_function_verifies_workflow_identity_before_service_role_rpc(self):
         source = FUNCTION.read_text(encoding="utf-8")
         for required in (
