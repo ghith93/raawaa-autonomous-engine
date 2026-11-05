@@ -279,6 +279,22 @@ class RemoteTaskStore:
             raise RemoteTaskStoreError("Remote task API returned invalid recovery counts")
         return {"requeued": result["requeued"], "failed": result["failed"]}
 
-    def audit_events(self, limit: int = 100) -> list[dict[str, Any]]:
-        # The public API intentionally does not expose audit records yet.
-        raise NotImplementedError("Remote audit listing is not exposed by the control API")
+    def audit_events(self, limit: int = 100, task_id: str | None = None) -> list[dict[str, Any]]:
+        """Read bounded audit rows through the authenticated control API.
+
+        Mirrors the Worker's ``GET /v1/audit`` contract: newest first, at
+        most 100 rows, optionally filtered to one exact task id.
+        """
+        import re
+
+        limit = max(1, min(int(limit), 100))
+        query = f"limit={limit}"
+        if task_id is not None:
+            if not isinstance(task_id, str) or not re.fullmatch(r"[A-Za-z0-9_-]{1,128}", task_id):
+                raise ValueError("task_id must be 1-128 safe identifier characters")
+            query += f"&task_id={task_id}"
+        result = self._request(f"/v1/audit?{query}")
+        events = result.get("events")
+        if not isinstance(events, list):
+            raise RemoteTaskStoreError("Remote task API returned an invalid audit list")
+        return events

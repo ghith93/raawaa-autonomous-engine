@@ -51,6 +51,7 @@ function dbMock(options = {}) {
         },
         async all() {
           calls.push({ kind: "all", sql, values: this.values });
+          if (sql.includes("FROM audit_log")) return { results: options.auditRows || [] };
           if (sql.includes("FROM tasks WHERE id IN")) return { results: options.dependencyRows || [] };
           if (sql.includes("FROM task_dependencies")) return { results: options.dependencyEdges || insertedDependencies };
           if (sql.includes("WITH RECURSIVE blocked")) return { results: options.blockedTasks || [] };
@@ -91,6 +92,42 @@ test("task routes reject missing or invalid bearer token", async () => {
     DB: dbMock(), ENGINE_API_TOKEN: TOKEN,
   });
   assert.equal(response.status, 401);
+});
+
+test("audit route requires authentication and rejects writes", async () => {
+  const unauthenticated = await worker.fetch(request("/v1/audit", { token: "wrong" }), {
+    DB: dbMock(), ENGINE_API_TOKEN: TOKEN,
+  });
+  assert.equal(unauthenticated.status, 401);
+  const write = await worker.fetch(request("/v1/audit", { method: "POST", body: {} }), {
+    DB: dbMock(), ENGINE_API_TOKEN: TOKEN,
+  });
+  assert.equal(write.status, 405);
+});
+
+test("audit route returns parsed bounded events with optional exact task filter", async () => {
+  const DB = dbMock({ auditRows: [
+    { id: 9, task_id: "task-1", event: "task_succeeded", details_json: '{"status":"succeeded"}', created_at: "2026-11-05T00:00:02.000Z" },
+    { id: 8, task_id: "task-1", event: "task_claimed", details_json: "not-json", created_at: "2026-11-05T00:00:01.000Z" },
+  ] });
+  const response = await worker.fetch(request("/v1/audit?limit=5&task_id=task-1"), {
+    DB, ENGINE_API_TOKEN: TOKEN,
+  });
+  assert.equal(response.status, 200);
+  const payload = await response.json();
+  assert.deepEqual(payload.events.map(e => e.event), ["task_succeeded", "task_claimed"]);
+  assert.deepEqual(payload.events[0].details, { status: "succeeded" });
+  assert.equal(payload.events[1].details, null, "malformed legacy details stay null");
+  const query = DB.calls.find(x => x.kind === "all");
+  assert.match(query.sql, /WHERE task_id=\?/);
+  assert.deepEqual(query.values, ["task-1", 5]);
+});
+
+test("audit route validates limit and task_id", async () => {
+  const env = { DB: dbMock(), ENGINE_API_TOKEN: TOKEN };
+  assert.equal((await worker.fetch(request("/v1/audit?limit=0"), env)).status, 400);
+  assert.equal((await worker.fetch(request("/v1/audit?limit=101"), env)).status, 400);
+  assert.equal((await worker.fetch(request("/v1/audit?task_id=bad%20id"), env)).status, 400);
 });
 
 test("enqueue validates input and uses parameterized batch statements", async () => {

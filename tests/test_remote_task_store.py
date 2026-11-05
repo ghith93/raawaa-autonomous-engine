@@ -22,6 +22,30 @@ class RemoteTaskStoreTests(unittest.TestCase):
         self.store = RemoteTaskStore("https://engine.example", "secret-test-token")
 
     @patch("engine.remote_task_store.urlopen")
+    def test_audit_events_reads_bounded_task_filtered_rows(self, open_url):
+        open_url.return_value = FakeResponse({"events": [
+            {"id": 9, "task_id": "task-1", "event": "task_succeeded",
+             "details": {"status": "succeeded"}, "created_at": "2026-11-05T00:00:02.000Z"},
+        ]})
+        events = self.store.audit_events(limit=500, task_id="task-1")
+        self.assertEqual(events[0]["event"], "task_succeeded")
+        request = open_url.call_args.args[0]
+        # Limit is clamped to the Worker's 100-row bound.
+        self.assertEqual(request.full_url, "https://engine.example/v1/audit?limit=100&task_id=task-1")
+        self.assertEqual(request.get_method(), "GET")
+        self.assertEqual(request.get_header("Authorization"), "Bearer secret-test-token")
+
+    def test_audit_events_rejects_unsafe_task_id(self):
+        with self.assertRaises(ValueError):
+            self.store.audit_events(task_id="bad id")
+
+    @patch("engine.remote_task_store.urlopen")
+    def test_audit_events_rejects_malformed_payload(self, open_url):
+        open_url.return_value = FakeResponse({"events": "not-a-list"})
+        with self.assertRaises(RemoteTaskStoreError):
+            self.store.audit_events()
+
+    @patch("engine.remote_task_store.urlopen")
     def test_claim_returns_server_lease_token(self, open_url):
         open_url.return_value = FakeResponse({
             "task": {"id": "task-1", "payload_json": "{}", "status": "running"},

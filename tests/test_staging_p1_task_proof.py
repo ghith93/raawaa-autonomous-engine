@@ -66,6 +66,15 @@ class FakeStore:
             "payload_json": json.dumps({"operation": proof.OPERATION}),
         }]
 
+    def audit_events(self, limit=100, task_id=None):
+        names = ["task_enqueued", "task_claimed"]
+        if self.status == "succeeded":
+            names.append("task_succeeded")
+        return [
+            {"id": index, "task_id": task_id, "event": name, "details": {}, "created_at": "t"}
+            for index, name in enumerate(names, start=1)
+        ]
+
 
 def _processor(store, claimed, **kwargs):
     store.status = "succeeded"
@@ -125,6 +134,8 @@ class RunProofTests(unittest.TestCase):
         self.assertEqual(result["task_id"], "p1-task-1")
         self.assertEqual(result["dispatch_id"], "dispatch-1")
         self.assertEqual(result["readback_status"], "succeeded")
+        self.assertEqual(result["audit_events"],
+                         ["task_enqueued", "task_claimed", "task_succeeded"])
         self.assertTrue(result["duplicate_claim_blocked"])
         self.assertFalse(result["counts_toward_schedule_acceptance"])
         self.assertEqual(result["provider_calls"], 0)
@@ -157,6 +168,15 @@ class RunProofTests(unittest.TestCase):
 
         with self.assertRaises(proof.P1ProofError):
             self._run(VanishingStore())
+
+    def test_missing_audit_row_is_refused(self):
+        class NoClaimAuditStore(FakeStore):
+            def audit_events(self, limit=100, task_id=None):
+                return [row for row in super().audit_events(limit=limit, task_id=task_id)
+                        if row["event"] != "task_claimed"]
+
+        with self.assertRaises(proof.P1ProofError):
+            self._run(NoClaimAuditStore())
 
     def test_duplicate_claim_after_settlement_is_refused(self):
         class GreedyStore(FakeStore):

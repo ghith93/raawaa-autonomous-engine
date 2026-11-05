@@ -148,6 +148,18 @@ def run_p1_proof(
     if store.claim_supervised_probe(task_id) is not None:
         raise P1ProofError("A settled proof task accepted a duplicate claim")
 
+    # Audit read-back: the enqueue/claim/finish rows for this exact task must
+    # be independently inspectable through the remote API, not only asserted
+    # to exist inside the Worker.
+    audit_events = store.audit_events(limit=100, task_id=task_id)
+    audit_names = [
+        row.get("event") for row in audit_events
+        if isinstance(row, dict) and row.get("task_id") == task_id
+    ]
+    for required in ("task_enqueued", "task_claimed", "task_succeeded"):
+        if required not in audit_names:
+            raise P1ProofError(f"Audit read-back is missing {required} for the proof task")
+
     return {
         "task_id": task_id,
         "dispatch_id": result["dispatch_id"],
@@ -156,6 +168,7 @@ def run_p1_proof(
         "classification": "succeeded",
         "operation": OPERATION,
         "readback_status": matches[0].get("status"),
+        "audit_events": audit_names,
         "duplicate_claim_blocked": True,
         "replayed": False,
         "provider_calls": 0,

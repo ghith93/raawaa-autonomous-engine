@@ -454,6 +454,16 @@ try {
   assertStatus(taskReadback, 200, "execution mode task readback");
   const persistedTask = taskReadback.payload.tasks.find(task => task.id === enqueued.payload.task.id);
   assert.equal(persistedTask.execution_mode, "dry_run");
+  const auditReadback = await api("/v1/audit?limit=10&task_id=" + enqueued.payload.task.id);
+  assertStatus(auditReadback, 200, "audit readback for finished task");
+  const auditNames = auditReadback.payload.events.map(row => row.event);
+  for (const required of ["task_enqueued", "task_claimed", "task_succeeded"]) {
+    assert.ok(auditNames.includes(required), "audit readback includes " + required);
+  }
+  assert.ok(auditReadback.payload.events.every(row => row.task_id === enqueued.payload.task.id),
+    "audit task filter is exact");
+  const auditUnauthenticated = await api("/v1/audit", { token: null });
+  assertStatus(auditUnauthenticated, 401, "audit readback requires authentication");
   status = await api("/v1/mobile/status");
   assertStatus(status, 200, "mobile execution-mode aggregate");
   assert.equal(status.payload.execution_modes.counts.dry_run, dryRunBefore + 1);

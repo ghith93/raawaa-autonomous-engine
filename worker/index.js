@@ -310,7 +310,8 @@ export default {
     if (telegramResponse) return telegramResponse;
 
 
-    if (url.pathname !== "/v1/tasks" && url.pathname !== "/v1/tasks/enqueue" &&
+    if (url.pathname !== "/v1/tasks" && url.pathname !== "/v1/audit" &&
+        url.pathname !== "/v1/tasks/enqueue" &&
         url.pathname !== "/v1/tasks/claim" && url.pathname !== "/v1/codespace/status" &&
         url.pathname !== "/v1/codespace/tasks/claim" &&
         !/^\/v1\/codespace\/tasks\/[A-Za-z0-9-]+\/(heartbeat|finish)$/.test(url.pathname) &&
@@ -417,6 +418,40 @@ export default {
           return { ...task, depends_on: dependsOn };
         });
         return json({ tasks });
+      } catch {
+        return json({ error: "storage_unavailable" }, 503);
+      }
+    }
+
+    // Authenticated, bounded read-back of the audit ledger. The task list
+    // already exposes payload/result JSON to the same bearer, so returning
+    // parsed audit details here adds no new sensitivity class; it makes
+    // claim/finish/recovery evidence independently inspectable (P1 gap).
+    if (url.pathname === "/v1/audit") {
+      if (request.method !== "GET") return json({ error: "method_not_allowed" }, 405);
+      const rawLimit = Number(url.searchParams.get("limit") || 50);
+      if (!Number.isInteger(rawLimit) || rawLimit < 1 || rawLimit > 100) {
+        return json({ error: "invalid_limit" }, 400);
+      }
+      const taskId = url.searchParams.get("task_id");
+      if (taskId !== null && !/^[A-Za-z0-9_-]{1,128}$/.test(taskId)) {
+        return json({ error: "invalid_task_id" }, 400);
+      }
+      try {
+        const statement = taskId === null
+          ? env.DB.prepare(
+              "SELECT id,task_id,event,details_json,created_at FROM audit_log ORDER BY id DESC LIMIT ?"
+            ).bind(rawLimit)
+          : env.DB.prepare(
+              "SELECT id,task_id,event,details_json,created_at FROM audit_log WHERE task_id=? ORDER BY id DESC LIMIT ?"
+            ).bind(taskId, rawLimit);
+        const result = await statement.all();
+        const events = (result.results || []).map(row => {
+          let details = null;
+          try { details = JSON.parse(row.details_json); } catch { /* malformed legacy rows stay null */ }
+          return { id: row.id, task_id: row.task_id, event: row.event, details, created_at: row.created_at };
+        });
+        return json({ events });
       } catch {
         return json({ error: "storage_unavailable" }, 503);
       }
