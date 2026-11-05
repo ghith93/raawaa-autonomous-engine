@@ -106,20 +106,40 @@ billing reconciliation, operator-owned privacy decision where needed, D1
 isolation, current evidence and containment remain gates. Unknown = disabled.
 No claim that a free allowance alone proves the account-wide $15 hard ceiling.
 
-## Mutation ownership gaps after generic recovery quarantine
+## Mutation ownership and direct-writer inventory
 
-Local `TaskStore.heartbeat`, `finish`, and `retry_or_fail` and Worker
-`/v1/tasks/{id}/heartbeat`, `/finish`, `/retry` and `/invocations` are now
-namespace-guarded in this draft, including SQL predicates, and tested only on
-local Wrangler/D1. The Worker Codespace equivalents remain release-gated.
-Local `TaskStore` heartbeat/finish/retry still rely on lease ownership alone. The generic local pilot currently uses
-`TaskStore.finish` with its own lease, so rejecting every such mutation requires
-a separately designed targeted completion API; knowledge of a lease token alone
-is not evidence that cross-executor ownership is enforced. Workflow dispatch,
-GitHub ingestion, watchdog and any direct SQL producer/mutator must be audited.
-No specialized stale recovery/reconciliation exists: expired pilot rows stay
-quarantined, with no automatic requeue or inference retry. This is not a complete
-shared-queue isolation proof.
+Generic local heartbeat, finish and retry now reject reserved keys, including
+conditional SQL predicates. No targeted local completion, heartbeat or recovery
+is implemented: local pilot rows cannot complete through a supported API. Terminal
+replay tests seed synthetic terminal state, not a working completion lifecycle.
+Worker generic heartbeat/finish/retry and invocation paths are guarded in this
+draft, with local Wrangler/D1 tests; Codespace execution remains release-gated.
+These do not prove remote isolation or privilege separation.
+
+Repository search on 2026-11-05 identified the following task writers and readers:
+
+- `TaskStore.enqueue`, `RemoteTaskStore.enqueue`, CLI enqueue and GitHub comment
+  ingestion through `/v1/tasks/enqueue`; the draft rejects reserved keys in the
+  two generic store implementations. `engine.worker` recovers then claims via
+  those stores. `codespace_bridge` uses its separately gated Worker route.
+- Worker workflow dispatch directly inserts tasks but derives keys with the
+  literal `workflow-step:` prefix (`worker/workflow-dispatch.js`); collision
+  with `research-pilot:` is impossible under that implementation. Other
+  dependency references to pilot rows still need design and testing.
+- `scripts/verify_staging_monetary_ledger.py` uses privileged direct D1 SQL for
+  isolated generated staging fixture insertion/deletion. Its authority can
+  bypass application namespace protections; it is not a security boundary.
+  All external/manual SQL holders likewise remain trusted and not enumerable
+  from a source-code scan. `run_groq_free_inference_smoke.py` uses remote enqueue.
+- Local `TaskStore.list_tasks`/`audit_events` and authenticated Worker
+  `GET /v1/tasks` expose pilot records to readers with generic access. The
+  payload policy permits public research only but is heuristic and does not
+  prove confidentiality. Do not use this shared queue for private payloads or
+  infer per-principal read isolation. CLI and remote list paths inherit this.
+
+This source search is not proof about outside writers, triggers, deployed versions,
+or all administrative credentials. Specialized stale reconciliation remains
+unimplemented; expired pilots stay quarantined and are not retried.
 
 ### Owner plan confirmation
 

@@ -212,7 +212,7 @@ class TaskStore:
         with self._connect() as db:
             db.execute("BEGIN IMMEDIATE")
             changed = db.execute("""UPDATE tasks SET updated_at=?,lease_expires_at=?
-                WHERE id=? AND status='running' AND lease_token=? AND lease_expires_at>=?""",
+                WHERE id=? AND status='running' AND substr(idempotency_key,1,15) <> 'research-pilot:' AND lease_token=? AND lease_expires_at>=?""",
                 (now.isoformat(), expires, task_id, lease_token, now.isoformat())).rowcount
             if changed != 1:
                 raise ValueError("lease lost or expired")
@@ -220,6 +220,8 @@ class TaskStore:
         return expires
 
     def _assert_lease(self, row, lease_token: str | None):
+        if row["idempotency_key"].startswith("research-pilot:"):
+            raise ValueError("reserved task namespace")
         if row["status"] != "running":
             raise ValueError("only running tasks can be modified")
         if not lease_token or row["lease_token"] != lease_token:
@@ -249,7 +251,7 @@ class TaskStore:
                 raise ValueError("invalid execution_mode")
             changed = db.execute("""UPDATE tasks SET status=?,result_json=?,error=?,execution_mode=?,updated_at=?,
                 lease_token=NULL,lease_expires_at=NULL
-                WHERE id=? AND status='running' AND lease_token=?""",
+                WHERE id=? AND status='running' AND substr(idempotency_key,1,15) <> 'research-pilot:' AND lease_token=?""",
                 (status, json.dumps(result, sort_keys=True) if result is not None else None,
                  error, mode, now, task_id, lease_token)).rowcount
             if changed != 1:
@@ -266,7 +268,7 @@ class TaskStore:
             self._assert_lease(row, lease_token)
             status = "pending" if row["attempts"] < row["max_attempts"] else "failed"
             db.execute("""UPDATE tasks SET status=?,error=?,updated_at=?,lease_token=NULL,
-                lease_expires_at=NULL WHERE id=? AND status='running' AND lease_token=?""",
+                lease_expires_at=NULL WHERE id=? AND status='running' AND substr(idempotency_key,1,15) <> 'research-pilot:' AND lease_token=?""",
                 (status, error, utc_now(), task_id, lease_token))
             self._audit(db, task_id, "task_retry_scheduled" if status == "pending" else "task_failed",
                         {"attempt": row["attempts"], "max_attempts": row["max_attempts"], "error": error})

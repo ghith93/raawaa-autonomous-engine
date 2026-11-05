@@ -91,7 +91,9 @@ class LocalPilotTests(unittest.TestCase):
         task_id, _ = admit_local(self.store, **ARGS)
         lease = claim_local(self.store, task_id=task_id, **ARGS)
         self.assertEqual(admit_local(self.store, **ARGS), (task_id, False))
-        self.store.finish(task_id, 'blocked', lease_token=lease['lease_token'])
+        # Seed a terminal row solely to exercise replay; pilot completion is not implemented.
+        with self.store._connect() as db:
+            db.execute("UPDATE tasks SET status='blocked',lease_token=NULL,lease_expires_at=NULL WHERE id=?", (task_id,))
         self.assertEqual(admit_local(self.store, **ARGS), (task_id, False))
         self.assertIsNone(claim_local(self.store, task_id=task_id, **ARGS))
 
@@ -144,7 +146,7 @@ class LocalPilotTests(unittest.TestCase):
         lease = claim_local(self.store, task_id=task_id, **ARGS)
         with self.store._connect() as db:
             db.execute("UPDATE tasks SET lease_expires_at='2000-01-01T00:00:00+00:00' WHERE id=?", (task_id,))
-        with self.assertRaisesRegex(ValueError, 'lease expired'):
+        with self.assertRaisesRegex(ValueError, 'reserved task namespace'):
             self.store.finish(task_id, 'succeeded', result={'mode': 'dry_run'}, lease_token=lease['lease_token'])
         ordinary = self.store.enqueue('system_audit', 'Ordinary')
         ordinary_lease = self.store.claim_next(execution_mode='dry_run')
@@ -176,9 +178,18 @@ class LocalPilotTests(unittest.TestCase):
             claim_local(self.store, task_id=task_id, **dict(ARGS, title='different'))
         self.assertIsNone(claim_local(self.store, task_id=task_id, **dict(ARGS, key='research-pilot:other')))
         lease = claim_local(self.store, task_id=task_id, **ARGS)
-        with self.assertRaisesRegex(ValueError, 'lease ownership lost'):
-            self.store.finish(task_id, 'succeeded', lease_token='wrong')
-        self.store.finish(task_id, 'blocked', lease_token=lease['lease_token'])
+        with self.store._connect() as db:
+            before = tuple(db.execute('SELECT * FROM tasks WHERE id=?', (task_id,)).fetchone())
+            events_before = [tuple(row) for row in db.execute('SELECT * FROM audit_log WHERE task_id=?', (task_id,))]
+        for token in (lease['lease_token'], 'wrong'):
+            for operation in (lambda: self.store.heartbeat(task_id, token),
+                              lambda: self.store.finish(task_id, 'succeeded', lease_token=token),
+                              lambda: self.store.retry_or_fail(task_id, 'synthetic', lease_token=token)):
+                with self.assertRaises(ValueError):
+                    operation()
+        with self.store._connect() as db:
+            self.assertEqual(before, tuple(db.execute('SELECT * FROM tasks WHERE id=?', (task_id,)).fetchone()))
+            self.assertEqual(events_before, [tuple(row) for row in db.execute('SELECT * FROM audit_log WHERE task_id=?', (task_id,))])
         self.assertIsNone(claim_local(self.store, task_id=task_id, **ARGS))
 
 
