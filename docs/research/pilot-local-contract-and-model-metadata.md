@@ -46,3 +46,24 @@ metadata before any use.
 Any later benchmark must use identical public Arabic/English fixtures and measure
 factuality/citation discipline, structured JSON, tool-schema adherence, wall
 time, peak RSS and download/build size. SmolLM2 is an English baseline only.
+
+## Synthetic bilingual scoring scaffold (2026-11-05)
+
+`scripts/evaluate_research_fixtures.py` provides six hand-authored paired
+Arabic/English extraction, unknown-answer and instruction-in-source fixtures.
+It accepts **supplied output text only**, checks a bounded strict JSON shape,
+exact synthetic answers and exact source labels, and returns no raw output.
+No model, download, network, workflow or runner is connected to this scaffold.
+Its tiny fixed corpus is visible to candidates, is not representative, and does
+not measure actual model performance, general factuality, privacy, semantic
+citation correctness, or prompt-injection safety. Exact matching also penalizes
+valid paraphrases; the output format explicitly requires the listed exact value.
+Any future blinded held-out evaluation needs a separately reviewed protocol,
+paired prompts and decoding settings, error rates, resource measurements, and
+independent adjudication before selecting a model.
+
+The current `QuotaAwareLiveGateway` rotates after HTTP 429 or certain classified
+403 errors and assumes zero monetary cost for those outcomes. This existing
+behavior does not meet the pilot's strict single-route requirement and has not
+been proven correct for Workers AI error modes. Do not connect the scaffold or
+Cloudflare backup to this gateway without addressing and testing these semantics.
