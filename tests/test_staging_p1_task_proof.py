@@ -170,6 +170,19 @@ class RunProofTests(unittest.TestCase):
             self._run(GreedyStore())
 
 
+class StepSummaryTests(unittest.TestCase):
+    def test_failure_is_mirrored_to_step_summary(self):
+        import os
+        import tempfile
+        from unittest.mock import patch
+
+        with tempfile.TemporaryDirectory() as tmp:
+            summary = Path(tmp) / "summary.md"
+            with patch.dict(os.environ, {"GITHUB_STEP_SUMMARY": str(summary)}, clear=True):
+                self.assertEqual(proof.main(), 1)
+            self.assertIn("Staging P1 task proof FAILED", summary.read_text(encoding="utf-8"))
+
+
 class WorkflowShapeTests(unittest.TestCase):
     def test_workflow_is_manual_only_and_revokes_token(self):
         text = Path(".github/workflows/staging-p1-task-proof.yml").read_text(encoding="utf-8")

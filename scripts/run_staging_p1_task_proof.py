@@ -128,7 +128,14 @@ def run_p1_proof(
             or result.get("operation") != OPERATION
             or not isinstance(result.get("dispatch_id"), str)
             or result.get("replayed") is not False):
-        raise P1ProofError("The supervised task did not produce a fresh successful read-only result")
+        # Surface only the processor's own bounded status fields so the
+        # failure is diagnosable from the workflow summary without logs.
+        fields = result if isinstance(result, dict) else {}
+        raise P1ProofError(
+            "The supervised task did not produce a fresh successful read-only result "
+            f"(status={fields.get('status')}, classification={fields.get('classification')}, "
+            f"reason={fields.get('reason')})"
+        )
 
     # Durable read-back: the terminal row must be visible through the list API,
     # and the settled task must refuse a second claim (no duplicate execution).
@@ -165,6 +172,22 @@ def _safe_failure_detail(exc: Exception) -> str | None:
     return detail or None
 
 
+def _write_step_summary(line: str) -> None:
+    """Mirror the bounded outcome into the Actions step summary.
+
+    Step logs are not always retrievable by automation; the summary carries
+    the same redacted, length-bounded line so failures stay diagnosable.
+    """
+    summary_path = os.environ.get("GITHUB_STEP_SUMMARY", "")
+    if not summary_path:
+        return
+    try:
+        with open(summary_path, "a", encoding="utf-8") as handle:
+            handle.write(line + "\n")
+    except OSError:
+        pass
+
+
 def main() -> int:
     try:
         result = run_p1_proof()
@@ -172,8 +195,10 @@ def main() -> int:
         detail = _safe_failure_detail(exc)
         suffix = f": {detail}" if detail else ""
         print(f"Staging P1 task proof failed: {type(exc).__name__}{suffix}", file=sys.stderr)
+        _write_step_summary(f"Staging P1 task proof FAILED: {type(exc).__name__}{suffix}")
         return 1
     print(json.dumps(result, sort_keys=True))
+    _write_step_summary("Staging P1 task proof: " + json.dumps(result, sort_keys=True))
     return 0
 
 
