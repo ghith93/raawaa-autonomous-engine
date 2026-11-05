@@ -25,6 +25,7 @@ class ScheduledStagingProbeWorkflowTests(unittest.TestCase):
         self.assertIn("d1-staging-worker-verification", self.source)
         self.assertIn("secret delete ENGINE_API_TOKEN --config wrangler.staging.toml", self.source)
         self.assertIn("always() && steps.install_staging_token.outcome != 'skipped'", self.source)
+        self.assertIn("Wait for the ephemeral Staging token to propagate", self.source)
         self.assertIn("RAAWAA_ENGINE_PROCESS_SUPERVISOR: enabled", self.source)
         self.assertIn("RAAWAA_ENGINE_LIVE_INFERENCE: disabled", self.source)
         self.assertIn("id-token: write", self.source)
