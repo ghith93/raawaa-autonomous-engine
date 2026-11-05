@@ -273,22 +273,12 @@ def run_scheduled_probe(
     env = dict(os.environ if environ is None else environ)
     token, idempotency_key = validate_environment(env)
     fallback_store = None
+    # Always "not_checked": the fallback `/health` RPC (`engine_fallback_ping`)
+    # performs a persistent heartbeat write on every call, so the scheduled
+    # path never performs a standby check — even if a stale
+    # RAAWAA_ENGINE_FALLBACK_STANDBY_CHECK variable is present, it is ignored.
+    # The fallback store is created solely when the Cloudflare primary fails.
     fallback_standby = "not_checked"
-
-    # The scheduled workflow deliberately does NOT enable the standby check:
-    # the fallback `/health` RPC (`engine_fallback_ping`) performs a persistent
-    # heartbeat write on every call, so invoking it daily from the schedule
-    # would be an unreported external mutation. The standby branch below is
-    # retained only for explicit manual diagnostics; the fallback store is
-    # otherwise created solely when the Cloudflare primary actually fails.
-    if env.get("RAAWAA_ENGINE_FALLBACK_STANDBY_CHECK", "").strip().lower() == "enabled":
-        try:
-            fallback_store = _make_fallback_store(env, fallback_store_factory, oidc_token_factory)
-            fallback_store._request("/health", "POST", {})
-            fallback_standby = "ready"
-        except Exception as exc:
-            fallback_store = None
-            fallback_standby = "unavailable"
 
     primary_failure: str | None = None
     if token:
@@ -342,11 +332,6 @@ def main() -> int:
             file=sys.stderr,
         )
         return 1
-    if result.get("fallback_standby") == "unavailable":
-        print(
-            "::warning::Supabase Free fallback heartbeat failed; Cloudflare primary result remains independent.",
-            file=sys.stderr,
-        )
     print(json.dumps(result, sort_keys=True))
     return 0
 
