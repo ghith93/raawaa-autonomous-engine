@@ -24,9 +24,13 @@ class ScheduledStagingProbeWorkflowTests(unittest.TestCase):
         self.assertNotIn("https://raawaa-autonomous-engine-control.ghith-shikhkhaled.workers.dev", self.source)
         self.assertIn("d1-staging-worker-verification", self.source)
         self.assertIn("secret delete ENGINE_API_TOKEN --config wrangler.staging.toml", self.source)
-        self.assertIn("always() && steps.install_staging_token.outcome == 'success'", self.source)
+        self.assertIn("always() && steps.install_staging_token.outcome != 'skipped'", self.source)
         self.assertIn("RAAWAA_ENGINE_PROCESS_SUPERVISOR: enabled", self.source)
         self.assertIn("RAAWAA_ENGINE_LIVE_INFERENCE: disabled", self.source)
+        self.assertIn("id-token: write", self.source)
+        self.assertIn("RAAWAA_ENGINE_FALLBACK_STANDBY_CHECK: enabled", self.source)
+        self.assertIn("steps.cloudflare_credentials.outputs.available == 'true'", self.source)
+        self.assertIn("continue-on-error: true", self.source)
 
     def test_workflow_never_receives_provider_or_production_secrets(self):
         for secret in ("GROQ_API_KEY", "GEMINI_API_KEY", "OPENAI_API_KEY"):

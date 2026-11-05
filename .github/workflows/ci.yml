@@ -43,6 +43,8 @@ jobs:
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
         with:
           node-version: "22"
+      - name: Type-check Supabase fallback Edge Function
+        run: npx --yes deno@2.9.6 check supabase/functions/engine-fallback/index.ts
       - name: Run Cloudflare Worker unit tests
         run: npm run test:worker
       - name: Run Cloudflare Workflows spike unit tests

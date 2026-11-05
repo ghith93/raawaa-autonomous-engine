@@ -1,8 +1,9 @@
 """Run one exact, read-only supervised task on the Staging queue from Cron only.
 
-This is deliberately not the general queue worker: it enqueues and claims only
-its own idempotent supervised_probe task, so an unrelated Staging queue row is
-never admitted or recovered by this probe.
+The primary is the isolated Cloudflare Staging queue. A narrowly scoped,
+GitHub-OIDC-authenticated Supabase Free queue is used only when Cloudflare is
+unavailable or the Staging token could not be installed. Neither backend can
+claim an unrelated task; the fallback is not a general-purpose engine queue.
 """
 from __future__ import annotations
 
@@ -17,8 +18,15 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+from engine.github_oidc import GithubOidcError, request_github_oidc_token
 from engine.redaction import redact
 from engine.remote_task_store import RemoteTaskStore, RemoteTaskStoreError
+from engine.supabase_fallback_task_store import (
+    SUPABASE_FALLBACK_PUBLISHABLE_KEY,
+    SUPABASE_FALLBACK_URL,
+    SUPABASE_OIDC_AUDIENCE,
+    SupabaseFallbackTaskStore,
+)
 from engine.supervised_task import complete_supervised_task
 
 STAGING_API_URL = "https://raawaa-autonomous-engine-staging.ghith-shikhkhaled.workers.dev"
@@ -36,18 +44,18 @@ class ScheduledProbeError(RuntimeError):
 def _payload(task: Mapping[str, Any]) -> dict[str, Any]:
     raw = task.get("payload_json")
     if not isinstance(raw, str):
-        raise ScheduledProbeError("Staging queue returned an invalid probe payload")
+        raise ScheduledProbeError("Queue returned an invalid probe payload")
     try:
         payload = json.loads(raw)
     except (TypeError, ValueError):
-        raise ScheduledProbeError("Staging queue returned invalid probe JSON") from None
+        raise ScheduledProbeError("Queue returned invalid probe JSON") from None
     if payload != {"operation": OPERATION}:
-        raise ScheduledProbeError("Staging queue returned an unexpected probe operation")
+        raise ScheduledProbeError("Queue returned an unexpected probe operation")
     return payload
 
 
 def validate_environment(environ: Mapping[str, str]) -> tuple[str, str]:
-    """Require the reviewed Staging target and a real main-branch Cron event."""
+    """Require a reviewed Staging target and a real main-branch Cron event."""
     if environ.get("GITHUB_EVENT_NAME") != "schedule":
         raise ScheduledProbeError("This probe runs only from a GitHub schedule event")
     if environ.get("GITHUB_REF") != "refs/heads/main":
@@ -64,23 +72,38 @@ def validate_environment(environ: Mapping[str, str]) -> tuple[str, str]:
         raise ScheduledProbeError("Live inference must be explicitly disabled for this probe")
     if any(environ.get(name, "") for name in ("GROQ_API_KEY", "GEMINI_API_KEY", "OPENAI_API_KEY")):
         raise ScheduledProbeError("Provider credentials must not be present in this process")
+    token_installed = environ.get("RAAWAA_ENGINE_STAGING_TOKEN_INSTALLED", "true").strip().lower()
+    if token_installed not in {"true", "false"}:
+        raise ScheduledProbeError("Staging token installation status is invalid")
     token = environ.get("RAAWAA_ENGINE_API_TOKEN", "")
-    if len(token) < 32:
+    if token_installed == "true" and len(token) < 32:
         raise ScheduledProbeError("A temporary Staging-only API token is required")
-    return token, IDEMPOTENCY_PREFIX + run_id
+    return token if token_installed == "true" else "", IDEMPOTENCY_PREFIX + run_id
 
 
-def run_scheduled_probe(
-    environ: Mapping[str, str] | None = None,
-    *,
-    store_factory: Callable[..., Any] = RemoteTaskStore,
-    processor: Callable[..., dict[str, Any]] = complete_supervised_task,
-) -> dict[str, Any]:
-    env = dict(os.environ if environ is None else environ)
-    token, idempotency_key = validate_environment(env)
-    store = store_factory(
-        STAGING_API_URL, token, timeout=30, reject_redirects=True,
+def _make_fallback_store(
+    environ: Mapping[str, str],
+    factory: Callable[..., Any],
+    oidc_token_factory: Callable[..., str],
+) -> Any:
+    oidc_token = oidc_token_factory(environ, audience=SUPABASE_OIDC_AUDIENCE)
+    return factory(
+        SUPABASE_FALLBACK_URL,
+        SUPABASE_FALLBACK_PUBLISHABLE_KEY,
+        oidc_token,
+        timeout=15,
     )
+
+
+def _run_on_store(
+    store: Any,
+    environ: Mapping[str, str],
+    idempotency_key: str,
+    *,
+    backend: str,
+    fallback_standby: str,
+    processor: Callable[..., dict[str, Any]],
+) -> dict[str, Any]:
     task = store.enqueue(
         TASK_TYPE,
         TITLE,
@@ -90,13 +113,13 @@ def run_scheduled_probe(
         priority=100,
     )
     if not isinstance(task, dict):
-        raise ScheduledProbeError("Staging queue omitted the enqueued task")
+        raise ScheduledProbeError("Queue omitted the enqueued task")
     task_id = task.get("id")
     if not isinstance(task_id, str) or not re.fullmatch(r"[A-Za-z0-9_-]{1,128}", task_id):
-        raise ScheduledProbeError("Staging queue returned an invalid task id")
+        raise ScheduledProbeError("Queue returned an invalid task id")
     if (task.get("task_type") != TASK_TYPE or task.get("title") != TITLE
             or task.get("idempotency_key") != idempotency_key):
-        raise ScheduledProbeError("Staging queue returned a task outside the reviewed probe envelope")
+        raise ScheduledProbeError("Queue returned a task outside the reviewed probe envelope")
     _payload(task)
 
     # A workflow rerun with the same run_id must not launch a second process.
@@ -108,20 +131,22 @@ def run_scheduled_probe(
             "replayed": True,
             "provider_calls": 0,
             "external_writes": 0,
+            "backend": backend,
+            "fallback_standby": fallback_standby,
         }
     if task.get("status") != "pending":
-        raise ScheduledProbeError("The idempotent Staging probe task is not pending")
+        raise ScheduledProbeError("The idempotent probe task is not pending")
 
     claimed = store.claim_supervised_probe(task_id)
     if claimed is None:
-        raise ScheduledProbeError("The exact Staging probe task was not claimable")
+        raise ScheduledProbeError("The exact probe task was not claimable")
     if (claimed.get("id") != task_id or claimed.get("task_type") != TASK_TYPE
             or claimed.get("status") != "running" or claimed.get("execution_mode") != "dry_run"):
-        raise ScheduledProbeError("The exact Staging probe claim failed its task/mode checks")
+        raise ScheduledProbeError("The exact probe claim failed its task/mode checks")
     _payload(claimed)
 
     result = processor(
-        store, claimed, environ=env, lease_timeout_seconds=LEASE_TIMEOUT_SECONDS,
+        store, claimed, environ=dict(environ), lease_timeout_seconds=LEASE_TIMEOUT_SECONDS,
     )
     if (not isinstance(result, dict) or result.get("id") != task_id
             or result.get("status") != "succeeded"
@@ -129,7 +154,7 @@ def run_scheduled_probe(
             or result.get("operation") != OPERATION
             or not isinstance(result.get("dispatch_id"), str)
             or result.get("replayed") is not False):
-        raise ScheduledProbeError("The supervised Staging task did not produce a fresh successful read-only result")
+        raise ScheduledProbeError("The supervised task did not produce a fresh successful read-only result")
     return {
         "task_id": task_id,
         "status": "succeeded",
@@ -139,15 +164,87 @@ def run_scheduled_probe(
         "replayed": False,
         "provider_calls": 0,
         "external_writes": 0,
+        "backend": backend,
+        "fallback_standby": fallback_standby,
     }
 
 
 def _safe_failure_detail(exc: Exception) -> str | None:
     """Expose only bounded, redacted messages from known safe domain errors."""
-    if not isinstance(exc, (ScheduledProbeError, RemoteTaskStoreError)):
+    if not isinstance(exc, (ScheduledProbeError, RemoteTaskStoreError, GithubOidcError)):
         return None
     detail = " ".join(redact(str(exc)).split())[:320]
     return detail or None
+
+
+def _fallback_eligible(exc: RemoteTaskStoreError) -> bool:
+    return exc.retryable or exc.status_code == 1027
+
+
+def run_scheduled_probe(
+    environ: Mapping[str, str] | None = None,
+    *,
+    store_factory: Callable[..., Any] = RemoteTaskStore,
+    fallback_store_factory: Callable[..., Any] = SupabaseFallbackTaskStore,
+    oidc_token_factory: Callable[..., str] = request_github_oidc_token,
+    processor: Callable[..., dict[str, Any]] = complete_supervised_task,
+) -> dict[str, Any]:
+    env = dict(os.environ if environ is None else environ)
+    token, idempotency_key = validate_environment(env)
+    fallback_store = None
+    fallback_standby = "not_checked"
+
+    # A daily signed heartbeat keeps a Free project from being marked inactive.
+    # Failure is non-fatal to Cloudflare; the fallback is attempted again only
+    # if the primary fails, and the project may still be paused or unavailable.
+    if env.get("RAAWAA_ENGINE_FALLBACK_STANDBY_CHECK", "").strip().lower() == "enabled":
+        try:
+            fallback_store = _make_fallback_store(env, fallback_store_factory, oidc_token_factory)
+            fallback_store._request("/health", "POST", {})
+            fallback_standby = "ready"
+        except Exception as exc:
+            fallback_store = None
+            fallback_standby = "unavailable"
+
+    primary_failure: str | None = None
+    if token:
+        primary_store = store_factory(
+            STAGING_API_URL, token, timeout=30, reject_redirects=True,
+        )
+        try:
+            return _run_on_store(
+                primary_store, env, idempotency_key,
+                backend="cloudflare_staging", fallback_standby=fallback_standby,
+                processor=processor,
+            )
+        except RemoteTaskStoreError as exc:
+            if not _fallback_eligible(exc):
+                raise
+            primary_failure = _safe_failure_detail(exc) or "Cloudflare Staging API unavailable"
+    else:
+        primary_failure = "Cloudflare Staging token installation unavailable; primary queue skipped"
+
+    if fallback_store is None:
+        try:
+            fallback_store = _make_fallback_store(env, fallback_store_factory, oidc_token_factory)
+        except Exception as exc:
+            detail = _safe_failure_detail(exc) or "Supabase fallback identity unavailable"
+            prior = primary_failure or "Cloudflare Staging API unavailable"
+            raise ScheduledProbeError(f"{prior}; Supabase fallback unavailable: {detail}") from None
+
+    try:
+        result = _run_on_store(
+            fallback_store, env, idempotency_key,
+            backend="supabase_free_fallback", fallback_standby=fallback_standby,
+            processor=processor,
+        )
+        result["fallback_standby"] = "ready"
+    except Exception as exc:
+        detail = _safe_failure_detail(exc) or "Supabase fallback operation failed"
+        primary = primary_failure or "Cloudflare Staging API unavailable"
+        raise ScheduledProbeError(f"{primary}; Supabase fallback failed: {detail}") from None
+    result["cloudflare_primary_failure"] = primary_failure
+    return result
 
 
 def main() -> int:
@@ -161,6 +258,11 @@ def main() -> int:
             file=sys.stderr,
         )
         return 1
+    if result.get("fallback_standby") == "unavailable":
+        print(
+            "::warning::Supabase Free fallback heartbeat failed; Cloudflare primary result remains independent.",
+            file=sys.stderr,
+        )
     print(json.dumps(result, sort_keys=True))
     return 0
 
