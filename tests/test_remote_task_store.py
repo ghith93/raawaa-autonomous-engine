@@ -38,6 +38,41 @@ class RemoteTaskStoreTests(unittest.TestCase):
         self.assertIsNone(request.get_header("Cf-access-client-id"))
 
     @patch("engine.remote_task_store.urlopen")
+    def test_claim_supervised_probe_targets_one_dry_run_task(self, open_url):
+        open_url.return_value = FakeResponse({
+            "task": {"id": "probe-123", "task_type": "supervised_probe",
+                     "status": "running", "execution_mode": "dry_run"},
+            "lease_token": "lease-123",
+        })
+        task = self.store.claim_supervised_probe("probe-123")
+        self.assertEqual(task["lease_token"], "lease-123")
+        request = open_url.call_args.args[0]
+        self.assertEqual(request.full_url,
+                         "https://engine.example/v1/tasks/probe-123/claim-supervised-probe")
+        self.assertEqual(request.get_method(), "POST")
+        self.assertEqual(json.loads(request.data), {})
+
+    def test_claim_supervised_probe_rejects_unsafe_task_ids_before_network(self):
+        for task_id in ("", "../tasks", "has space", "x" * 129, None):
+            with self.subTest(task_id=task_id), self.assertRaises(ValueError):
+                self.store.claim_supervised_probe(task_id)
+
+    @patch("engine.remote_task_store.urlopen")
+    def test_claim_supervised_probe_fails_closed_on_wrong_task(self, open_url):
+        open_url.return_value = FakeResponse({
+            "task": {"id": "other", "task_type": "system_audit",
+                     "status": "running", "execution_mode": "dry_run"},
+            "lease_token": "lease-123",
+        })
+        with self.assertRaisesRegex(RemoteTaskStoreError, "invalid supervised-probe lease"):
+            self.store.claim_supervised_probe("probe-123")
+
+    @patch("engine.remote_task_store.urlopen")
+    def test_empty_supervised_probe_claim_returns_none(self, open_url):
+        open_url.return_value = FakeResponse({"task": None})
+        self.assertIsNone(self.store.claim_supervised_probe("probe-123"))
+
+    @patch("engine.remote_task_store.urlopen")
     def test_enqueue_sends_priority_and_dependencies(self, open_url):
         open_url.return_value = FakeResponse({"task": {"id": "child"}})
         task = self.store.enqueue(

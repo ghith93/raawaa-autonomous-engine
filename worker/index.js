@@ -326,6 +326,7 @@ export default {
         !/^\/v1\/workflows\/[A-Za-z][A-Za-z0-9_-]{0,127}$/.test(url.pathname) &&
         !/^\/v1\/tasks\/[A-Za-z0-9_-]+\/invocations$/.test(url.pathname) &&
         !/^\/v1\/tasks\/[A-Za-z0-9_-]+\/process-dispatches$/.test(url.pathname) &&
+        !/^\/v1\/tasks\/[A-Za-z0-9_-]{1,128}\/claim-supervised-probe$/.test(url.pathname) &&
         url.pathname !== "/v1/research/candidates/review" &&
         !/^\/v1\/tasks\/[A-Za-z0-9_-]+\/(heartbeat|finish|retry)$/.test(url.pathname)) {
       return json({ error: "not_found" }, 404);
@@ -495,6 +496,48 @@ export default {
           "INSERT INTO audit_log(task_id,event,details_json,created_at) VALUES(?,?,?,?)"
         ).bind(claim.id, "task_claimed", JSON.stringify({
           attempt: claim.attempts, lease_expires_at: expires, execution_mode: executionMode
+        }), nowIso).run();
+        return json({ task: claim, lease_token: leaseToken, lease_expires_at: expires });
+      } catch (error) {
+        return json({ error: "storage_unavailable", detail: storageDetail(error) }, 503);
+      }
+    }
+
+    const supervisedProbeClaim = url.pathname.match(
+      /^\/v1\/tasks\/([A-Za-z0-9_-]{1,128})\/claim-supervised-probe$/
+    );
+    if (supervisedProbeClaim) {
+      if (request.method !== "POST") return json({ error: "method_not_allowed" }, 405);
+      const taskId = supervisedProbeClaim[1];
+      const now = new Date();
+      const nowIso = now.toISOString();
+      const leaseSeconds = 120;
+      const expires = new Date(now.getTime() + leaseSeconds * 1000).toISOString();
+      const leaseToken = crypto.randomUUID();
+      try {
+        // This narrow claim is for one exact supervised_probe row only. Unlike
+        // the general queue claim it never sweeps or mutates unrelated tasks.
+        const claim = await env.DB.prepare(`
+          UPDATE tasks SET status='running', attempts=attempts+1, execution_mode='dry_run',
+            updated_at=?, lease_token=?, lease_expires_at=?
+          WHERE id=? AND status='pending' AND task_type='supervised_probe'
+            AND attempts < max_attempts
+            AND NOT EXISTS (
+              SELECT 1 FROM task_dependencies d
+              JOIN tasks dependency ON dependency.id=d.dependency_task_id
+              WHERE d.task_id=tasks.id
+                AND (dependency.status <> 'succeeded' OR dependency.execution_mode <> 'dry_run')
+            )
+          RETURNING id,idempotency_key,task_type,title,payload_json,status,attempts,
+            max_attempts,created_at,updated_at,execution_mode,priority,dependencies_json,
+            lease_token,lease_expires_at
+        `).bind(nowIso, leaseToken, expires, taskId).first();
+        if (!claim) return json({ task: null });
+        await env.DB.prepare(
+          "INSERT INTO audit_log(task_id,event,details_json,created_at) VALUES(?,?,?,?)"
+        ).bind(claim.id, "task_claimed", JSON.stringify({
+          attempt: claim.attempts, lease_expires_at: expires,
+          execution_mode: "dry_run", claim_scope: "supervised_probe_id",
         }), nowIso).run();
         return json({ task: claim, lease_token: leaseToken, lease_expires_at: expires });
       } catch (error) {

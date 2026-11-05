@@ -173,6 +173,30 @@ class RemoteTaskStore:
         task["lease_token"] = result["lease_token"]
         return task
 
+    def claim_supervised_probe(self, task_id: str) -> dict[str, Any] | None:
+        """Claim only this exact, pending ``supervised_probe`` row in dry-run mode.
+
+        The Worker route deliberately avoids the general queue's unrelated-task
+        dependency sweep. It returns no lease for any other task type or state.
+        """
+        import re
+
+        if not isinstance(task_id, str) or not re.fullmatch(r"[A-Za-z0-9_-]{1,128}", task_id):
+            raise ValueError("task_id must be 1-128 safe identifier characters")
+        result = self._request(
+            f"/v1/tasks/{task_id}/claim-supervised-probe", "POST", {}
+        )
+        task = result.get("task")
+        if task is None:
+            return None
+        lease_token = result.get("lease_token")
+        if (not isinstance(task, dict) or not isinstance(lease_token, str) or not lease_token
+                or task.get("id") != task_id or task.get("task_type") != "supervised_probe"
+                or task.get("status") != "running" or task.get("execution_mode") != "dry_run"):
+            raise RemoteTaskStoreError("Remote task API returned an invalid supervised-probe lease")
+        task["lease_token"] = lease_token
+        return task
+
     def heartbeat(self, task_id: str, lease_token: str,
                   lease_timeout_seconds: int = 900) -> str:
         if not 1 <= int(lease_timeout_seconds) <= 900:

@@ -387,6 +387,85 @@ try {
   });
   assertStatus(staleLease, 409, "finished task must reject stale lease");
 
+  // A narrowly scoped supervised claim targets one exact safe task and must
+  // not sweep or claim unrelated D1 queue rows.
+  const failedDependency = await api("/v1/tasks/enqueue", {
+    method: "POST", body: { task_type: "system_audit", title: "Specific-claim failed dependency",
+      payload: {}, idempotency_key: "d1-specific-claim-parent-" + randomUUID(),
+      priority: 100, max_attempts: 1 },
+  });
+  assertStatus(failedDependency, 201, "enqueue specific-claim dependency fixture");
+  const failedDependencyClaim = await api("/v1/tasks/claim", {
+    method: "POST", body: { execution_mode: "dry_run" },
+  });
+  assert.equal(failedDependencyClaim.payload.task.id, failedDependency.payload.task.id);
+  assertStatus(await api("/v1/tasks/" + failedDependency.payload.task.id + "/finish", {
+    method: "POST", body: { lease_token: failedDependencyClaim.payload.lease_token,
+      status: "failed", error: "specific-claim test fixture" },
+  }), 200, "mark specific-claim dependency failed");
+  const untouchedDependent = await api("/v1/tasks/enqueue", {
+    method: "POST", body: { task_type: "system_audit", title: "Must not be swept by specific claim",
+      payload: {}, idempotency_key: "d1-specific-claim-dependent-" + randomUUID(),
+      priority: 100, max_attempts: 1, depends_on: [failedDependency.payload.task.id] },
+  });
+  assertStatus(untouchedDependent, 201, "enqueue untouched dependent fixture");
+  const unrelatedPending = await api("/v1/tasks/enqueue", {
+    method: "POST", body: { task_type: "system_audit", title: "Must not be claimed by specific claim",
+      payload: {}, idempotency_key: "d1-specific-claim-unrelated-" + randomUUID(),
+      priority: 100, max_attempts: 1 },
+  });
+  assertStatus(unrelatedPending, 201, "enqueue unrelated pending fixture");
+  const specificProbe = await api("/v1/tasks/enqueue", {
+    method: "POST", body: { task_type: "supervised_probe", title: "Exact supervised claim",
+      payload: { operation: "python_platform_probe" },
+      idempotency_key: "d1-specific-claim-probe-" + randomUUID(), priority: 1, max_attempts: 1 },
+  });
+  assertStatus(specificProbe, 201, "enqueue exact supervised probe");
+  const wrongMethodClaim = await api("/v1/tasks/" + specificProbe.payload.task.id +
+    "/claim-supervised-probe", { method: "GET" });
+  assertStatus(wrongMethodClaim, 405, "specific supervised claim is POST-only");
+  const wrongTypeClaim = await api("/v1/tasks/" + unrelatedPending.payload.task.id +
+    "/claim-supervised-probe", { method: "POST" });
+  assertStatus(wrongTypeClaim, 200, "specific supervised route refuses another task type");
+  assert.equal(wrongTypeClaim.payload.task, null);
+  const unauthenticatedSpecificClaim = await api("/v1/tasks/" + specificProbe.payload.task.id +
+    "/claim-supervised-probe", { method: "POST", token: null });
+  assertStatus(unauthenticatedSpecificClaim, 401, "specific supervised claim requires bearer auth");
+  const specificClaim = await api("/v1/tasks/" + specificProbe.payload.task.id +
+    "/claim-supervised-probe", { method: "POST" });
+  assertStatus(specificClaim, 200, "claim only the exact supervised probe");
+  assert.equal(specificClaim.payload.task.id, specificProbe.payload.task.id);
+  assert.equal(specificClaim.payload.task.status, "running");
+  assert.equal(specificClaim.payload.task.execution_mode, "dry_run");
+  assert.equal(typeof specificClaim.payload.lease_token, "string");
+  const supervisedLeaseMs = Date.parse(specificClaim.payload.lease_expires_at) - Date.now();
+  assert.ok(supervisedLeaseMs > 0 && supervisedLeaseMs <= 120_000,
+    "specific supervised lease is short and bounded to two minutes");
+  const duplicateSpecificClaim = await api("/v1/tasks/" + specificProbe.payload.task.id +
+    "/claim-supervised-probe", { method: "POST" });
+  assertStatus(duplicateSpecificClaim, 200, "exact supervised task can only be claimed once");
+  assert.equal(duplicateSpecificClaim.payload.task, null);
+  const specificReadback = await api("/v1/tasks?limit=100");
+  assertStatus(specificReadback, 200, "specific claim isolation readback");
+  const rowsAfterSpecificClaim = new Map(specificReadback.payload.tasks.map(task => [task.id, task]));
+  assert.equal(rowsAfterSpecificClaim.get(unrelatedPending.payload.task.id).status, "pending",
+    "specific claim did not take an unrelated higher-priority task");
+  assert.equal(rowsAfterSpecificClaim.get(untouchedDependent.payload.task.id).status, "pending",
+    "specific claim did not mutate unrelated failed-dependency rows");
+  assertStatus(await api("/v1/tasks/" + specificProbe.payload.task.id + "/finish", {
+    method: "POST", body: { lease_token: specificClaim.payload.lease_token,
+      status: "succeeded", result: { local_specific_claim_test: true } },
+  }), 200, "finish exact supervised claim fixture");
+  const drainUnrelated = await api("/v1/tasks/claim", {
+    method: "POST", body: { execution_mode: "dry_run" },
+  });
+  assert.equal(drainUnrelated.payload.task.id, unrelatedPending.payload.task.id,
+    "general queue can still claim unrelated tasks after exact-claim proof");
+  assertStatus(await api("/v1/tasks/" + unrelatedPending.payload.task.id + "/finish", {
+    method: "POST", body: { lease_token: drainUnrelated.payload.lease_token,
+      status: "succeeded", result: { mode: "dry_run" } },
+  }), 200, "finish unrelated claim fixture");
+
   // Priority and dependency eligibility are enforced by the real local D1 queue.
   const parentTask = await api("/v1/tasks/enqueue", {
     method: "POST",
@@ -1138,11 +1217,11 @@ try {
   status = await api("/v1/mobile/status");
   assertStatus(status, 200, "mobile status after D1 writes");
   assert.equal(status.payload.paper_events.find(row => row.event_type === "candidate_detected")?.count, 1);
-  assert.equal(status.payload.tasks.find(row => row.status === "succeeded")?.count, 10,
-    "workflow, dependency, and two supervised-process tasks should be durably succeeded");
-  assert.equal(status.payload.tasks.find(row => row.status === "failed")?.count, 1,
-    "the failed dependency root remains visibly failed");
-  assert.equal(status.payload.tasks.find(row => row.status === "blocked")?.count, 6,
+  assert.equal(status.payload.tasks.find(row => row.status === "succeeded")?.count, 12,
+    "workflow, dependency, supervised-process, and exact-claim fixtures should be durably succeeded");
+  assert.equal(status.payload.tasks.find(row => row.status === "failed")?.count, 2,
+    "failed dependency roots remain visibly failed");
+  assert.equal(status.payload.tasks.find(row => row.status === "blocked")?.count, 7,
     "failed dependencies and no-replay supervised tasks remain blocked");
   assert.equal(status.payload.monetary_ledger.available, true);
   assert.equal(status.payload.monetary_ledger.pending_count, 1);
