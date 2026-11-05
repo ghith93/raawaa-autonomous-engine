@@ -240,16 +240,16 @@ async function reviewResearchCandidate(request, env) {
 async function recoverStaleTasks(env) {
   const nowIso = new Date().toISOString();
   const stale = await env.DB.prepare(
-    "SELECT id,attempts,max_attempts,lease_token FROM tasks WHERE status='running' AND (lease_expires_at IS NULL OR lease_expires_at < ?) ORDER BY updated_at,id LIMIT 100"
+    "SELECT id,attempts,max_attempts,lease_token FROM tasks WHERE status='running' AND substr(idempotency_key,1,15) <> 'research-pilot:' AND (lease_expires_at IS NULL OR lease_expires_at < ?) ORDER BY updated_at,id LIMIT 100"
   ).bind(nowIso).all();
   const statements = [];
   for (const task of stale.results || []) {
     const status = task.attempts < task.max_attempts ? "pending" : "failed";
     statements.push(env.DB.prepare(
-      "UPDATE tasks SET status=?,error=?,updated_at=?,lease_token=NULL,lease_expires_at=NULL WHERE id=? AND status='running' AND lease_token IS ? AND (lease_expires_at IS NULL OR lease_expires_at < ?)"
+      "UPDATE tasks SET status=?,error=?,updated_at=?,lease_token=NULL,lease_expires_at=NULL WHERE id=? AND status='running' AND substr(idempotency_key,1,15) <> 'research-pilot:' AND lease_token IS ? AND (lease_expires_at IS NULL OR lease_expires_at < ?)"
     ).bind(status, "Recovered expired worker lease.", nowIso, task.id, task.lease_token, nowIso));
     statements.push(env.DB.prepare(
-      "INSERT INTO audit_log(task_id,event,details_json,created_at) SELECT id,'task_lease_recovered',?,? FROM tasks WHERE id=? AND status=? AND updated_at=?"
+      "INSERT INTO audit_log(task_id,event,details_json,created_at) SELECT id,'task_lease_recovered',?,? FROM tasks WHERE id=? AND status=? AND updated_at=? AND substr(idempotency_key,1,15) <> 'research-pilot:'"
     ).bind(JSON.stringify({ new_status: status, attempt: task.attempts, max_attempts: task.max_attempts }), nowIso, task.id, status, nowIso));
   }
   if (statements.length) await env.DB.batch(statements);

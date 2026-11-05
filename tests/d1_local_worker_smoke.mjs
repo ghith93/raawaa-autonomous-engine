@@ -974,6 +974,23 @@ try {
     assert.equal(row?.status, "pending", `generic claim and dependency blocking must not mutate ${id}`);
     assert.equal(row.attempts, 0);
   }
+  executeLocalSql(`
+    INSERT INTO tasks(id,idempotency_key,task_type,title,payload_json,status,attempts,max_attempts,created_at,updated_at,lease_token,lease_expires_at)
+      VALUES ('pilot-local-expired','research-pilot:expired','research_brief','pilot expired','{}','running',1,1,'2000-01-01','2000-01-01','pilot-token','2000-01-01'),
+             ('ordinary-local-expired','ordinary-expired','research_brief','ordinary expired','{}','running',1,2,'2000-01-01','2000-01-01','ordinary-token','2000-01-01');
+  `);
+  const recovery = await api("/v1/tasks/recover", { method: "POST", body: {} });
+  assertStatus(recovery, 200, "generic recovery");
+  assert.deepEqual(recovery.payload, { requeued: 1, failed: 0 });
+  // SQL raises on any failed assertion, including changes to the pilot audit log.
+  executeLocalSql(`
+    SELECT CASE WHEN
+      (SELECT count(*) FROM tasks WHERE id='pilot-local-expired' AND status='running' AND attempts=1 AND lease_token='pilot-token' AND lease_expires_at='2000-01-01')=1
+      AND (SELECT count(*) FROM audit_log WHERE task_id='pilot-local-expired')=0
+      AND (SELECT count(*) FROM tasks WHERE id='ordinary-local-expired' AND status='pending' AND lease_token IS NULL)=1
+      AND (SELECT count(*) FROM audit_log WHERE task_id='ordinary-local-expired' AND event='task_lease_recovered')=1
+      THEN 1 ELSE json('invalid-assertion') END;
+  `);
   const disabledCodespacePilot = await api("/v1/codespace/tasks/claim", {
     method: "POST", token: CODESPACE_TOKEN, body: { execution_mode: "dry_run" },
   });

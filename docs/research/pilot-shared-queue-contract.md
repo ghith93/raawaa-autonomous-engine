@@ -4,13 +4,15 @@
 
 - Local `engine.worker.run_once` → `TaskStore.claim_next`; prototype now
   quarantines `research-pilot:` keys in generic claim, dependency blocking, and
-  rejects them at generic local enqueue. `recover_stale` can still terminally fail
-  expired one-attempt pilots. SQLite locking and tests do not prove remote D1.
+  rejects them at generic local enqueue. This draft also excludes them from
+  generic `recover_stale`; expired pilots remain quarantined, not requeued.
+  SQLite locking and tests do not prove remote D1.
 - Remote `engine.worker.run_once` → `RemoteTaskStore.claim_next` → Worker
   `POST /v1/tasks/claim`. Main a72c48f does not exclude pilot identities. This
   draft adds exclusion to claim and recursive dependency blocking, and rejects
-  generic enqueue; it is tested only against local Wrangler/D1, not deployed or
-  proved against remote D1. Other mutation paths remain to be inventoried.
+  generic enqueue and generic stale recovery (also called by Worker cron); it is
+  tested only against local Wrangler/D1, not deployed or proved against remote
+  D1. Other mutation paths remain to be inventoried.
 - Codespace bridge → `POST /v1/codespace/tasks/claim` selects Codespace types;
   release remains hard-disabled; the shared claim SQL includes the exclusion,
   but its active Codespace branch has not been exercised. Re-check every
@@ -103,3 +105,18 @@ transmitting anything. Account-specific Workers Free evidence, usage and
 billing reconciliation, operator-owned privacy decision where needed, D1
 isolation, current evidence and containment remain gates. Unknown = disabled.
 No claim that a free allowance alone proves the account-wide $15 hard ceiling.
+
+## Mutation ownership gaps after generic recovery quarantine
+
+Local `TaskStore.heartbeat`, `finish`, and `retry_or_fail` and Worker
+`/v1/tasks/{id}/heartbeat`, `/finish`, and `/retry` use a lease but do not
+exclude reserved keys. The Worker Codespace equivalents remain release-gated;
+`/v1/tasks/{id}/invocations` and `worker/task-invocations.js` also require review
+of pilot identity, lease and ownership. The generic local pilot currently uses
+`TaskStore.finish` with its own lease, so rejecting every such mutation requires
+a separately designed targeted completion API; knowledge of a lease token alone
+is not evidence that cross-executor ownership is enforced. Workflow dispatch,
+GitHub ingestion, watchdog and any direct SQL producer/mutator must be audited.
+No specialized stale recovery/reconciliation exists: expired pilot rows stay
+quarantined, with no automatic requeue or inference retry. This is not a complete
+shared-queue isolation proof.

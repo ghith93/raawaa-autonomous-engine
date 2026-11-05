@@ -281,6 +281,7 @@ class TaskStore:
         with self._connect() as db:
             db.execute("BEGIN IMMEDIATE")
             rows = db.execute("""SELECT * FROM tasks WHERE status='running'
+                AND substr(idempotency_key,1,15) <> 'research-pilot:'
                 AND (lease_expires_at IS NULL OR lease_expires_at < ?) ORDER BY updated_at,id""",
                 (now,)).fetchall()
             for row in rows:

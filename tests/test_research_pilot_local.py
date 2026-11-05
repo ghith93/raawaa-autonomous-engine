@@ -146,7 +146,17 @@ class LocalPilotTests(unittest.TestCase):
             db.execute("UPDATE tasks SET lease_expires_at='2000-01-01T00:00:00+00:00' WHERE id=?", (task_id,))
         with self.assertRaisesRegex(ValueError, 'lease expired'):
             self.store.finish(task_id, 'succeeded', result={'mode': 'dry_run'}, lease_token=lease['lease_token'])
-        self.assertEqual(self.store.recover_stale(), {'requeued': 0, 'failed': 1})
+        ordinary = self.store.enqueue('system_audit', 'Ordinary')
+        ordinary_lease = self.store.claim_next(execution_mode='dry_run')
+        self.assertEqual(ordinary_lease['id'], ordinary['id'])
+        with self.store._connect() as db:
+            db.execute("UPDATE tasks SET lease_expires_at='2000-01-01T00:00:00+00:00' WHERE id=?", (ordinary['id'],))
+            before = tuple(db.execute('SELECT status,attempts,lease_token,lease_expires_at FROM tasks WHERE id=?', (task_id,)).fetchone())
+            audit_before = db.execute('SELECT count(*) FROM audit_log WHERE task_id=?', (task_id,)).fetchone()[0]
+        self.assertEqual(self.store.recover_stale(), {'requeued': 1, 'failed': 0})
+        with self.store._connect() as db:
+            self.assertEqual(before, tuple(db.execute('SELECT status,attempts,lease_token,lease_expires_at FROM tasks WHERE id=?', (task_id,)).fetchone()))
+            self.assertEqual(audit_before, db.execute('SELECT count(*) FROM audit_log WHERE task_id=?', (task_id,)).fetchone()[0])
         self.assertIsNone(claim_local(self.store, task_id=task_id, **ARGS))
 
     def test_payload_and_policy_rejected_without_echo_or_write(self):
