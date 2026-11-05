@@ -12,9 +12,9 @@ class ScheduledStagingProbeWorkflowTests(unittest.TestCase):
     def setUp(self):
         self.source = WORKFLOW.read_text(encoding="utf-8")
 
-    def test_schedule_is_weekly_and_not_manually_dispatchable(self):
+    def test_schedule_is_daily_and_not_manually_dispatchable(self):
         self.assertIn("schedule:", self.source)
-        self.assertIn('cron: "37 3 * * 4"', self.source)
+        self.assertIn('cron: "47 3 * * *"', self.source)
         self.assertNotIn("workflow_dispatch:", self.source)
         self.assertIn("github.event_name == 'schedule'", self.source)
         self.assertIn("github.ref == 'refs/heads/main'", self.source)
