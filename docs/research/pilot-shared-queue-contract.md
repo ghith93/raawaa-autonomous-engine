@@ -184,3 +184,20 @@ that a binding was durably created, recorded with a policy version, or survives
 restart. Read-only preflight cannot inspect per-task invocation binding; an
 eligible preflight result is not authorization to dispatch. Durable route
 binding and replay/settlement/lease-loss tests remain required before wiring.
+
+### Neuron quote versus billing evidence
+
+Cloudflare's [published model pricing](https://developers.cloudflare.com/workers-ai/platform/pricing/)
+listed Gemma 4 26B at 9,091 input and 27,273 output neurons per million tokens
+on 2026-11-05. The pure `quote_neurons_rounded_up` helper performs integer
+arithmetic over caller-supplied counts/rates and rounds the sum upward; for
+1,000 input + 1,000 output tokens those published figures give 37 whole neurons.
+This is illustrative, not a provider-measured usage or a guaranteed upper
+bound: published figures can be rounded or change, input token estimates can be
+wrong, and additional billing components may apply. Do not use it as evidence
+of account entitlement, actual cost or a safety gate. Cloudflare documents
+[usage as optional](https://developers.cloudflare.com/api/resources/ai/methods/run/);
+missing usage must not be treated as zero. The existing gateway checks zero
+unit prices and accounts tokens rather than Neurons; do not falsely configure
+Cloudflare's paid unit price as zero to force admission. Durable account-wide
+Neuron reservations and verified billing-route semantics remain unimplemented.

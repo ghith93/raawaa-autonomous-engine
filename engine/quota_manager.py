@@ -41,6 +41,24 @@ def _valid_https_url(value: str | None) -> bool:
         return False
 
 
+def quote_neurons_rounded_up(input_tokens: int, output_tokens: int,
+                              input_neurons_per_million: int,
+                              output_neurons_per_million: int) -> int:
+    """Arithmetic quote only, not a quota reservation or billing upper bound.
+
+    Rates must be caller-supplied whole neurons per million tokens from a
+    separately verified source. Provider rates may be rounded, change, or omit
+    billing components; token estimates may be wrong. Never use this alone to
+    authorize inference, settle a ledger, or assert zero charge.
+    """
+    values = (input_tokens, output_tokens, input_neurons_per_million,
+              output_neurons_per_million)
+    if any(type(value) is not int or value < 0 or value > 10**12 for value in values):
+        raise ValueError("neuron quote inputs must be bounded non-negative integers")
+    numerator = input_tokens * input_neurons_per_million + output_tokens * output_neurons_per_million
+    return (numerator + 999_999) // 1_000_000
+
+
 @dataclass(frozen=True)
 class QuotaProfile:
     provider: str

@@ -4,7 +4,27 @@ import unittest
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 
-from engine.quota_manager import QuotaLedger, QuotaManager, QuotaProfile
+from engine.quota_manager import QuotaLedger, QuotaManager, QuotaProfile, quote_neurons_rounded_up
+
+
+class NeuronQuoteTests(unittest.TestCase):
+    def test_integer_arithmetic_and_round_up(self):
+        self.assertEqual(quote_neurons_rounded_up(0, 0, 9091, 27273), 0)
+        self.assertEqual(quote_neurons_rounded_up(1, 0, 9091, 27273), 1)
+        self.assertEqual(quote_neurons_rounded_up(1_000_000, 1_000_000, 9091, 27273), 36364)
+        self.assertEqual(quote_neurons_rounded_up(1000, 1000, 9091, 27273), 37)
+        self.assertEqual(quote_neurons_rounded_up(1, 0, 1_000_000, 0), 1)
+
+    def test_invalid_and_unbounded_numbers_fail_closed(self):
+        for invalid in (-1, True, 1.0, None, "1", 10**12 + 1):
+            for index in range(4):
+                args = [1, 1, 1, 1]
+                args[index] = invalid
+                with self.subTest(invalid=invalid, index=index), self.assertRaises(ValueError):
+                    quote_neurons_rounded_up(*args)
+
+    def test_zero_rates_are_an_arithmetic_input_not_eligibility(self):
+        self.assertEqual(quote_neurons_rounded_up(100, 50, 0, 0), 0)
 
 
 class QuotaManagerTests(unittest.TestCase):
