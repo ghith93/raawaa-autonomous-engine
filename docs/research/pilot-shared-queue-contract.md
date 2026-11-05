@@ -151,3 +151,23 @@ and the account catalog GET showed its slug, not inference entitlement. Use
 standard Workers AI billing only, never AI Gateway unified billing or prepaid
 credits; neither an AI binding nor an actual route is yet implemented/enabled.
 Pre-dispatch gates and D1 isolation remain unresolved, regardless of plan.
+
+## Opt-in pinned-route gateway experiment
+
+`QuotaAwareLiveGateway(..., pinned_route_id=..., invocation_store=...)` now
+filters both preflight and generate to exactly one matching profile. It requires
+an invocation-store object and quarantines provider errors, including 429/403,
+as ambiguous rather than assuming zero charge or opening a new route. Existing
+un-pinned gateway behavior is unchanged, and `build_live_gateway` does **not**
+activate the mode. Fake-adapter tests prove local control flow only; the
+constructor cannot prove the supplied store is durable. No Cloudflare adapter,
+AI binding, Neuron ledger or runtime wiring has been added. The selected model
+is not exempt from pricing, eligibility, public-data and account gates.
+
+A durable store's server-side replay fencing, audit/ledger failure ordering,
+crash between reservation and provider dispatch, lease expiry between start and
+external call, lost settlement response, cross-process concurrency, and
+account-wide Neuron/cost reconciliation must be demonstrated before use. A
+pinned route and local UUID cannot guarantee exactly-once external inference.
+The existing task-invocation endpoint excludes pilot tasks in this draft, so it
+cannot currently serve as the pilot's specialized invocation protocol.

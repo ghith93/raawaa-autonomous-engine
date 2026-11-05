@@ -19,9 +19,17 @@ class QuotaAwareLiveGateway:
                  network_calls_enabled: bool = False, cooldown_seconds: int = 900,
                  environ=None, daily_budget_usd: float = 0.0,
                  monthly_budget_usd: float = 0.0, per_task_budget_usd: float = 0.0,
-                 invocation_store=None):
+                 invocation_store=None, pinned_route_id: str | None = None):
         if cooldown_seconds < 1:
             raise ValueError("cooldown_seconds must be positive")
+        if pinned_route_id is not None:
+            if not isinstance(pinned_route_id, str) or not pinned_route_id.strip() or pinned_route_id != pinned_route_id.strip():
+                raise ValueError("pinned route must be a non-empty exact route ID")
+            if invocation_store is None:
+                raise ValueError("pinned route requires a durable invocation store")
+            if sum(p.route_id == pinned_route_id for p in quota_manager.profiles) != 1:
+                raise ValueError("pinned route must match exactly one profile")
+        self.pinned_route_id = pinned_route_id
         self.quota_manager = quota_manager
         self.adapters = adapters
         self.usage_ledger = usage_ledger
@@ -37,6 +45,14 @@ class QuotaAwareLiveGateway:
         self.per_task_budget_usd = per_task_budget_usd
         # Validate configured caps before the gateway can make any provider request.
         self.usage_ledger.budget_status(daily_budget_usd, monthly_budget_usd)
+
+    def _candidate_profiles(self):
+        profiles = sorted(self.quota_manager.profiles, key=lambda p: (p.priority, p.provider, p.account, p.model))
+        if self.pinned_route_id is None:
+            return profiles
+        selected = [p for p in profiles if p.route_id == self.pinned_route_id]
+        # Fail closed if mutable configuration becomes absent or ambiguous.
+        return selected if len(selected) == 1 else []
 
     def _live_enabled(self) -> bool:
         return (
@@ -71,12 +87,7 @@ class QuotaAwareLiveGateway:
             return {"eligible": False, "reason": "monetary_budget_exhausted"}
 
         estimated_tokens = estimated_input_tokens + max_output_tokens
-        candidates = sorted(
-            self.quota_manager.profiles,
-            key=lambda profile: (
-                profile.priority, profile.provider, profile.account, profile.model
-            ),
-        )
+        candidates = self._candidate_profiles()
         for profile in candidates:
             if (profile.max_output_tokens is None
                     or max_output_tokens > profile.max_output_tokens):
@@ -137,12 +148,7 @@ class QuotaAwareLiveGateway:
         estimated_input_tokens = max(1, len(request.prompt.encode("utf-8")))
         estimated_tokens = estimated_input_tokens + request.max_output_tokens
 
-        candidates = sorted(
-            self.quota_manager.profiles,
-            key=lambda profile: (
-                profile.priority, profile.provider, profile.account, profile.model
-            ),
-        )
+        candidates = self._candidate_profiles()
         last_error = None
         for profile in candidates:
             if (profile.max_output_tokens is None
@@ -268,6 +274,14 @@ class QuotaAwareLiveGateway:
                 # transport failure, or malformed response. Retain the full token
                 # reservation conservatively; request count is already consumed.
                 self.quota_manager.ledger.settle(reservation_id, estimated_tokens)
+                if self.pinned_route_id is not None:
+                    # Even a 429/403 is not assumed free or retry-safe for an
+                    # arbitrary provider. Preserve reservations and fence replay.
+                    self.usage_ledger.mark_ambiguous(monetary_reservation_id)
+                    self.invocation_store.mark_ambiguous(request.task_id, request.lease_token, request.invocation_id)
+                    self._audit("provider_failure_stopped", request, profile,
+                                reason="strict_route_ambiguous", http_status=exc.status_code or 0)
+                    raise ProviderUnavailable("Pinned provider outcome is ambiguous; no route rotation.") from exc
                 if exc.status_code == 429:
                     # A 429 is after provider I/O began, so it is settled at zero rather
                     # than released. Release is reserved strictly for pre-I/O failures.

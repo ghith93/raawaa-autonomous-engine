@@ -733,5 +733,67 @@ class QuotaAwareGatewayTests(unittest.TestCase):
         self.assertEqual(adapter.calls, 0)
 
 
+    def test_pinned_route_requires_one_profile_and_durable_store(self):
+        first = self.profile()
+        manager = QuotaManager([first], self.quota)
+        with self.assertRaisesRegex(ValueError, "durable invocation store"):
+            QuotaAwareLiveGateway(manager, {}, self.usage, pinned_route_id=first.route_id)
+        for route in ("", " missing ", "other"):
+            with self.subTest(route=route), self.assertRaises(ValueError):
+                QuotaAwareLiveGateway(manager, {}, self.usage, invocation_store=FakeInvocationStore(), pinned_route_id=route)
+        duplicates = QuotaManager([first, first], self.quota)
+        with self.assertRaisesRegex(ValueError, "exactly one"):
+            QuotaAwareLiveGateway(duplicates, {}, self.usage, invocation_store=FakeInvocationStore(), pinned_route_id=first.route_id)
+
+    def test_pinned_route_does_not_fallback_if_unavailable(self):
+        first = self.profile(daily_token_limit=None)
+        second = self.profile(provider="cerebras", account="backup", priority=20)
+        backup = FakeAdapter("cerebras")
+        store = FakeInvocationStore()
+        gateway = QuotaAwareLiveGateway(
+            QuotaManager([first, second], self.quota), {"cerebras": backup}, self.usage, True,
+            environ={"RAAWAA_ENGINE_LIVE_INFERENCE": "enabled"}, invocation_store=store,
+            pinned_route_id=first.route_id)
+        self.assertFalse(gateway.preflight_capacity(max_output_tokens=20)["eligible"])
+        request = GenerationRequest("research", "public", 20, task_id="task-1", step_key="step", lease_token="lease")
+        with self.assertRaises(ProviderUnavailable):
+            gateway.generate(request)
+        self.assertEqual(backup.calls, 0)
+        self.assertNotIn("start", [call[0] for call in store.calls])
+
+    def test_pinned_route_treats_provider_errors_as_ambiguous_no_fallback(self):
+        for status in (429, 403, 500, None):
+            with self.subTest(status=status), tempfile.TemporaryDirectory() as temp:
+                quota = QuotaLedger(Path(temp) / "quota.db")
+                usage = UsageLedger(Path(temp) / "usage.db")
+                first = self.profile()
+                second = self.profile(provider="cerebras", account="backup", priority=20)
+                selected = FakeAdapter("groq", LiveAdapterError("untrusted secret message", status_code=status, error_code="permissions_error"))
+                backup = FakeAdapter("cerebras")
+                store = FakeInvocationStore()
+                gateway = QuotaAwareLiveGateway(
+                    QuotaManager([first, second], quota), {"groq": selected, "cerebras": backup}, usage, True,
+                    environ={"RAAWAA_ENGINE_LIVE_INFERENCE": "enabled"}, invocation_store=store,
+                    pinned_route_id=first.route_id)
+                self.assertEqual(gateway.preflight_capacity(max_output_tokens=20)["route_id"], first.route_id)
+                request = GenerationRequest("research", "public", 20, task_id="task-1", step_key="step", lease_token="lease")
+                with self.assertRaisesRegex(ProviderUnavailable, "ambiguous"):
+                    gateway.generate(request)
+                self.assertEqual(selected.calls, 1)
+                self.assertEqual(backup.calls, 0)
+                self.assertEqual([c[0] for c in store.calls], ["prepare", "start", "ambiguous"])
+                self.assertEqual(usage.totals()["pending_reservations"], 1)
+                self.assertNotIn("untrusted secret message", str(quota.audit_events()))
+
+    def test_pinned_route_rechecks_dynamic_profile_ambiguity(self):
+        first = self.profile()
+        manager = QuotaManager([first], self.quota)
+        gateway = QuotaAwareLiveGateway(manager, {"groq": FakeAdapter("groq")}, self.usage, True,
+            environ={"RAAWAA_ENGINE_LIVE_INFERENCE": "enabled"}, invocation_store=FakeInvocationStore(),
+            pinned_route_id=first.route_id)
+        manager.profiles.append(first)
+        self.assertFalse(gateway.preflight_capacity(max_output_tokens=20)["eligible"])
+
+
 if __name__ == "__main__":
     unittest.main()
