@@ -1,6 +1,6 @@
 # Raawaa Autonomous Engine — GitHub Actions Workflow Catalog
 
-**Verified list source:** Activepieces GitHub `trigger_workflow_dispatch` workflow selector for repository `ghith93/raawaa-autonomous-engine`, checked 2026-11-03 21:50 UTC. This is the workflow list exposed by the connected GitHub integration, not proof that every workflow has been run or is safe to run.
+**Manual-dispatch list source:** Activepieces GitHub `trigger_workflow_dispatch` workflow selector for repository `ghith93/raawaa-autonomous-engine`, checked 2026-11-03 21:50 UTC. The catalog also records scheduled-only repository workflows that intentionally do not appear in that selector. Listing a workflow is not proof that it has run or is safe to run.
 
 ## Catalog
 
@@ -27,7 +27,8 @@
 | Multi-chain V2 venue deployment smoke | `multichain-venue-smoke.yml` | **Potential external deployment** | Treat as write-capable until code proves otherwise; do not run as a generic health check. |
 | One-shot OpenRouter Nemotron Free smoke | `openrouter-nemotron-free-smoke.yml` | **One-shot provider inference** | Verify account eligibility, hard quota, cost, paid fallback disabled and exact model before use. |
 | Scheduled Open-Source Research Discovery | `research-discovery.yml` | Scheduled public research | Existing research scheduler; do not create a duplicate. |
-| Scheduled D1 Task Runner | `task-runner.yml` | Bounded queue consumer | Existing task runner; manual/scheduled. One-shot public research is an explicit manual input. |
+| Scheduled D1 Task Runner | `task-runner.yml` | Bounded queue consumer | Existing task runner; production control Worker only. Live inference remains disabled by default; inspect the queue and policy before dispatch. |
+| Staging scheduled supervised process probe | `staging-supervised-process-probe.yml` | **Scheduled Staging-only read-only process task** | Weekly Thursday 03:37 UTC; no manual dispatch; enqueues and claims only its own `supervised_probe` ID, uses a temporary Staging token, and must never target Production. Schedule proof remains pending until a run with event `schedule` succeeds. |
 | Telegram Arbitrage Engine CI | `telegram-arbitrage-engine.yml` | Test/CI | Inspect for external Telegram calls before running; CI name alone does not prove no side effects. |
 | V3 read-only live pool smoke | `v3-live-readonly-smoke.yml` | Read-only on-chain data | Read-only pool data only; no transactions. |
 | Dependabot Updates | `dynamic/dependabot/dependabot-updates` | Dependency maintenance | Dynamic workflow ID; inspect generated PRs and exact changes before merge. |
