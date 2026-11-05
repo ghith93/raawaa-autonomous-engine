@@ -125,10 +125,12 @@ jobs:
                   status = str(error.code)
               except (URLError, TimeoutError, OSError):
                   status = "request_failed"
+              print(f"::notice::Staging token poll attempt {attempt}: HTTP {status}", flush=True)
               if status == "200":
                   print(f"Staging token honored after {attempt} attempt(s).")
                   break
               if time.monotonic() >= deadline:
+                  print(f"::error::Staging token was not honored within 90s (last status: {status}).", flush=True)
                   raise SystemExit(f"Staging token was not honored within 90s (last status: {status}).")
               time.sleep(5)
           PY

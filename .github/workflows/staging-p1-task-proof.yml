@@ -106,10 +106,12 @@ jobs:
                   status = str(error.code)
               except (URLError, TimeoutError, OSError):
                   status = "request_failed"
+              print(f"::notice::Staging token poll attempt {attempt}: HTTP {status}", flush=True)
               if status == "200":
                   print(f"Staging token honored after {attempt} attempt(s).")
                   break
               if time.monotonic() >= deadline:
+                  print(f"::error::Staging token was not honored within 90s (last status: {status}).", flush=True)
                   raise SystemExit(f"Staging token was not honored within 90s (last status: {status}).")
               time.sleep(5)
           PY
@@ -131,7 +133,8 @@ jobs:
         run: |
           # Annotations are retrievable through the GitHub API when step logs
           # and artifacts are not; the outcome line is already bounded/redacted.
-          outcome="$(head -c 900 p1-proof-output.txt | tr '\n' ' ')"
+          outcome="$(head -c 900 p1-proof-output.txt 2>/dev/null | tr '\n' ' ')"
+          [ -n "$outcome" ] || outcome="no outcome file (proof step did not run)"
           echo "::notice title=Staging P1 task proof outcome::${outcome}"
       - name: Upload bounded proof outcome
         if: ${{ always() }}
