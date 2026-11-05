@@ -1,8 +1,12 @@
-"""Validate the repository's strict monthly cost envelope.
+"""Validate the repository's strict zero-spend cost envelope.
 
-The $15 ceiling is an all-in ceiling. Only $12 is currently allocatable to
-model usage; infrastructure overages are disabled and the remaining $3 is
-unallocated reserve, not permission to spend.
+The owner-mandated ceiling is USD 0: every monetary cap in the active policy
+must be exactly zero, paid model calls and paid fallback are disabled, and
+only verified zero-cost routes may ever be selected. Any non-zero cap is a
+policy violation, not an allocation. (Historical note: a USD 15 all-in
+envelope with a USD 12 model allocation applied until 2026-11-05; it is
+superseded and must not be reintroduced without a new explicit owner
+spend approval.)
 """
 from __future__ import annotations
 
@@ -55,8 +59,8 @@ def validate_budget_policy(policy: dict[str, Any]) -> list[str]:
     daily = envelope["daily_model_hard_cap_usd"]
     task = envelope["per_task_model_hard_cap_usd"]
 
-    if total != 15.0:
-        errors.append("monthly_total_hard_cap_usd must remain exactly 15.00 USD")
+    if total != 0:
+        errors.append("monthly_total_hard_cap_usd must remain exactly 0.00 USD (zero-spend mandate)")
     if model_cap > total or infra_cap > total or reserve > total:
         errors.append("budget allocations cannot exceed the all-in monthly hard cap")
     if round(model_cap + infra_cap + reserve, 2) != round(total, 2):
@@ -69,6 +73,8 @@ def validate_budget_policy(policy: dict[str, Any]) -> list[str]:
         errors.append("daily_budget_usd must equal the daily model cap and not exceed the monthly model cap")
     if policy["per_task_budget_usd"] != task or task > daily:
         errors.append("per_task_budget_usd must equal the per-task cap and not exceed the daily model cap")
+    if model.get("paid_fallback_monthly_cap_usd") != 0:
+        errors.append("paid_fallback_monthly_cap_usd must remain exactly 0.00 USD (zero-spend mandate)")
     if model.get("strategy") != "hybrid":
         errors.append("model strategy must be hybrid")
     if model.get("prefer_free_first") is not True:

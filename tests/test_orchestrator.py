@@ -127,12 +127,12 @@ class OrchestratorTests(unittest.TestCase):
             validate_and_plan(wf, ROSTER)
 
     def test_paid_estimate_blocked_by_current_policy(self):
+        # Under the zero-spend policy any positive estimate exceeds the
+        # per-task cap of USD 0 and is rejected at validation time.
         wf = self.workflow()
         wf["steps"][0]["estimated_model_cost_usd"] = 0.05
-        plan = validate_and_plan(wf, ROSTER).as_dict()
-        self.assertIn("paid_model_calls_disabled", plan["dispatch_blockers"])
-        self.assertIn("safe_dry_run_mode", plan["dispatch_blockers"])
-        self.assertFalse(plan["dispatch_authorized"])
+        with self.assertRaisesRegex(WorkflowValidationError, "per-task model budget"):
+            validate_and_plan(wf, ROSTER)
 
     def test_high_risk_requires_human_review(self):
         wf = self.workflow()

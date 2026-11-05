@@ -1,8 +1,8 @@
 {
   "mode": "safe_dry_run",
-  "daily_budget_usd": 0.4,
-  "monthly_budget_usd": 12,
-  "per_task_budget_usd": 0.2,
+  "daily_budget_usd": 0,
+  "monthly_budget_usd": 0,
+  "per_task_budget_usd": 0,
   "allow_paid_model_calls": false,
   "allow_external_writes": false,
   "model_policy": {
@@ -15,7 +15,7 @@
     "paid_fallback_enabled": false,
     "paid_fallback_requires_provider_hard_cap": true,
     "paid_fallback_requires_prepaid_or_provider_enforced_cap": true,
-    "paid_fallback_monthly_cap_usd": 12,
+    "paid_fallback_monthly_cap_usd": 0,
     "no_automatic_plan_upgrade": true,
     "no_trial_or_promotional_credit_as_permanent_capacity": true,
     "provider_hard_stop_verified": false,
@@ -23,12 +23,12 @@
   },
   "budget_envelope": {
     "currency": "USD",
-    "monthly_total_hard_cap_usd": 15,
-    "model_monthly_hard_cap_usd": 12,
+    "monthly_total_hard_cap_usd": 0,
+    "model_monthly_hard_cap_usd": 0,
     "infrastructure_monthly_hard_cap_usd": 0,
-    "unallocated_reserve_usd": 3,
-    "daily_model_hard_cap_usd": 0.4,
-    "per_task_model_hard_cap_usd": 0.2,
+    "unallocated_reserve_usd": 0,
+    "daily_model_hard_cap_usd": 0,
+    "per_task_model_hard_cap_usd": 0,
     "cloudflare": {
       "plan": "free_only",
       "paid_overages_allowed": false

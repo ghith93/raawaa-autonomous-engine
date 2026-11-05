@@ -216,15 +216,17 @@ class LiveRuntimeFactoryTests(unittest.TestCase):
         )
         self.assertIsNone(gateway)
 
-    def test_nonzero_budget_caps_are_accepted_for_verified_free_routes(self):
+    def test_zero_budget_caps_are_accepted_for_verified_free_routes(self):
+        # Zero-spend caps must not block genuinely free (zero-cost) routes:
+        # the gateway builds and every cap stays exactly USD 0.
         gateway = build_live_gateway(
             self.db_path, self.policy_path, self.registry_path,
             environ={"RAAWAA_ENGINE_LIVE_INFERENCE": "enabled", "GROQ_API_KEY": "test-key"},
         )
         self.assertIsNotNone(gateway)
-        self.assertEqual(gateway.daily_budget_usd, 0.4)
-        self.assertEqual(gateway.monthly_budget_usd, 12.0)
-        self.assertEqual(gateway.per_task_budget_usd, 0.2)
+        self.assertEqual(gateway.daily_budget_usd, 0)
+        self.assertEqual(gateway.monthly_budget_usd, 0)
+        self.assertEqual(gateway.per_task_budget_usd, 0)
 
     def test_budget_policy_mismatch_blocks_gateway(self):
         self.policy["per_task_budget_usd"] = 0.21
