@@ -33,7 +33,9 @@ class ScheduledStagingProbeWorkflowTests(unittest.TestCase):
         self.assertIn("RAAWAA_ENGINE_PROCESS_SUPERVISOR: enabled", self.source)
         self.assertIn("RAAWAA_ENGINE_LIVE_INFERENCE: disabled", self.source)
         self.assertIn("id-token: write", self.source)
-        self.assertIn("RAAWAA_ENGINE_FALLBACK_STANDBY_CHECK: enabled", self.source)
+        # The standby heartbeat RPC performs a persistent write; the
+        # scheduled workflow must never enable it.
+        self.assertNotIn("RAAWAA_ENGINE_FALLBACK_STANDBY_CHECK", self.source)
         self.assertIn("steps.cloudflare_credentials.outputs.available == 'true'", self.source)
         self.assertIn("continue-on-error: true", self.source)
 
