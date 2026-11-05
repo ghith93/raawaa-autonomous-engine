@@ -16,6 +16,11 @@ from typing import Any
 class RemoteTaskStoreError(RuntimeError):
     """Remote task API failure with a safe, non-secret message."""
 
+    def __init__(self, message: str, *, status_code: int | None = None, retryable: bool = False):
+        super().__init__(message)
+        self.status_code = status_code
+        self.retryable = bool(retryable)
+
 
 class _RejectRedirects(HTTPRedirectHandler):
     def redirect_request(self, req, fp, code, msg, headers, newurl):
@@ -98,7 +103,7 @@ class RemoteTaskStore:
         except HTTPError as exc:
             # Do not include response bodies, request headers, or credentials in errors.
             if exc.code == 401:
-                raise RemoteTaskStoreError("Remote task API authentication failed") from None
+                raise RemoteTaskStoreError("Remote task API authentication failed", status_code=401) from None
             if exc.code == 403:
                 metadata = []
                 ray_id = exc.headers.get("CF-Ray") if exc.headers else None
@@ -109,21 +114,31 @@ class RemoteTaskStore:
                     metadata.append(f"cf-mitigated {mitigated}")
                 detail = f" (response metadata: {', '.join(metadata)})" if metadata else ""
                 raise RemoteTaskStoreError(
-                    f"Remote task API returned HTTP 403; inspect edge/access policy{detail}"
+                    f"Remote task API returned HTTP 403; inspect edge/access policy{detail}",
+                    status_code=403,
                 ) from None
             if exc.code == 409:
-                raise RemoteTaskStoreError("Remote task lease was lost") from None
+                raise RemoteTaskStoreError("Remote task lease was lost", status_code=409) from None
             if exc.code == 404:
-                raise RemoteTaskStoreError("Remote task was not found") from None
+                raise RemoteTaskStoreError("Remote task was not found", status_code=404) from None
             if exc.code == 429:
-                raise RemoteTaskStoreError("Remote task API rate limit reached; retry in a later run") from None
-            if 500 <= exc.code <= 599 or exc.code == 408:
                 raise RemoteTaskStoreError(
-                    f"Remote task API temporarily unavailable (HTTP {exc.code}){_error_detail(exc)}"
+                    "Remote task API rate limit reached; retry in a later run",
+                    status_code=429,
+                    retryable=True,
                 ) from None
-            raise RemoteTaskStoreError(f"Remote task API returned HTTP {exc.code}") from None
+            if 500 <= exc.code <= 599 or exc.code == 408 or exc.code == 1027:
+                raise RemoteTaskStoreError(
+                    f"Remote task API temporarily unavailable (HTTP {exc.code}){_error_detail(exc)}",
+                    status_code=exc.code,
+                    retryable=True,
+                ) from None
+            raise RemoteTaskStoreError(f"Remote task API returned HTTP {exc.code}", status_code=exc.code) from None
         except (URLError, TimeoutError, OSError, json.JSONDecodeError, UnicodeDecodeError):
-            raise RemoteTaskStoreError("Remote task API is unavailable or returned invalid JSON") from None
+            raise RemoteTaskStoreError(
+                "Remote task API is unavailable or returned invalid JSON",
+                retryable=True,
+            ) from None
 
     def enqueue(self, task_type: str, title: str, payload: dict[str, Any] | None = None,
                 idempotency_key: str | None = None, max_attempts: int = 2,

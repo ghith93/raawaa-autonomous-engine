@@ -19,6 +19,11 @@ class FakeStore:
         self.claimed_id = None
         self.status = "pending"
         self.payload = {"operation": probe.OPERATION}
+        self.requests = []
+
+    def _request(self, path, method="POST", payload=None):
+        self.requests.append((path, method, payload))
+        return {"ok": True}
 
     def enqueue(self, task_type, title, payload, **kwargs):
         self.enqueued = (task_type, title, payload, kwargs)
@@ -138,7 +143,97 @@ class StagingScheduledProbeTests(unittest.TestCase):
             "replayed": False,
             "provider_calls": 0,
             "external_writes": 0,
+            "backend": "cloudflare_staging",
+            "fallback_standby": "not_checked",
         })
+
+    def test_uses_pinned_supabase_fallback_for_retryable_cloudflare_failure(self):
+        primary = Mock()
+        primary.enqueue.side_effect = RemoteTaskStoreError(
+            "Remote task API temporarily unavailable (HTTP 503)",
+            status_code=503, retryable=True,
+        )
+        primary_factory = Mock(return_value=primary)
+        fallback = FakeStore()
+        fallback_factory = Mock(return_value=fallback)
+        oidc_factory = Mock(return_value="a" * 100 + ".b.c")
+        processor = Mock(return_value={
+            "id": "probe-123", "status": "succeeded", "classification": "succeeded",
+            "operation": probe.OPERATION, "dispatch_id": "d" * 32, "replayed": False,
+        })
+
+        result = probe.run_scheduled_probe(
+            cron_environment(), store_factory=primary_factory,
+            fallback_store_factory=fallback_factory,
+            oidc_token_factory=oidc_factory, processor=processor,
+        )
+
+        primary_factory.assert_called_once()
+        oidc_factory.assert_called_once_with(
+            cron_environment(), audience=probe.SUPABASE_OIDC_AUDIENCE,
+        )
+        fallback_factory.assert_called_once_with(
+            probe.SUPABASE_FALLBACK_URL,
+            probe.SUPABASE_FALLBACK_PUBLISHABLE_KEY,
+            "a" * 100 + ".b.c",
+            timeout=15,
+        )
+        self.assertEqual(fallback.enqueued[0], probe.TASK_TYPE)
+        self.assertEqual(fallback.enqueued[2], {"operation": probe.OPERATION})
+        self.assertEqual(result["backend"], "supabase_free_fallback")
+        self.assertEqual(result["fallback_standby"], "ready")
+        self.assertIn("HTTP 503", result["cloudflare_primary_failure"])
+        self.assertEqual(result["external_writes"], 0)
+        self.assertEqual(result["provider_calls"], 0)
+
+    def test_missing_cloudflare_token_skips_primary_and_can_use_fallback(self):
+        fallback = FakeStore()
+        processor = Mock(return_value={
+            "id": "probe-123", "status": "succeeded", "classification": "succeeded",
+            "operation": probe.OPERATION, "dispatch_id": "d" * 32, "replayed": False,
+        })
+        primary_factory = Mock()
+        result = probe.run_scheduled_probe(
+            cron_environment(RAAWAA_ENGINE_STAGING_TOKEN_INSTALLED="false"),
+            store_factory=primary_factory,
+            fallback_store_factory=lambda *args, **kwargs: fallback,
+            oidc_token_factory=lambda *args, **kwargs: "a" * 100 + ".b.c",
+            processor=processor,
+        )
+        primary_factory.assert_not_called()
+        self.assertEqual(result["backend"], "supabase_free_fallback")
+        self.assertIn("token installation unavailable", result["cloudflare_primary_failure"])
+
+    def test_non_retryable_cloudflare_auth_error_does_not_fail_over(self):
+        primary = Mock()
+        primary.enqueue.side_effect = RemoteTaskStoreError(
+            "Remote task API authentication failed", status_code=401,
+        )
+        fallback_factory = Mock()
+        with self.assertRaisesRegex(RemoteTaskStoreError, "authentication failed"):
+            probe.run_scheduled_probe(
+                cron_environment(), store_factory=lambda *args, **kwargs: primary,
+                fallback_store_factory=fallback_factory,
+                oidc_token_factory=Mock(),
+            )
+        fallback_factory.assert_not_called()
+
+    def test_daily_standby_heartbeat_is_nonfatal_to_healthy_primary(self):
+        primary = FakeStore()
+        fallback = FakeStore()
+        result = probe.run_scheduled_probe(
+            cron_environment(RAAWAA_ENGINE_FALLBACK_STANDBY_CHECK="enabled"),
+            store_factory=lambda *args, **kwargs: primary,
+            fallback_store_factory=lambda *args, **kwargs: fallback,
+            oidc_token_factory=lambda *args, **kwargs: "a" * 100 + ".b.c",
+            processor=lambda *args, **kwargs: {
+                "id": "probe-123", "status": "succeeded", "classification": "succeeded",
+                "operation": probe.OPERATION, "dispatch_id": "d" * 32, "replayed": False,
+            },
+        )
+        self.assertEqual(fallback.requests, [("/health", "POST", {})])
+        self.assertEqual(result["backend"], "cloudflare_staging")
+        self.assertEqual(result["fallback_standby"], "ready")
 
     def test_rejects_wrong_task_payload_without_claim_or_execution(self):
         store = FakeStore()

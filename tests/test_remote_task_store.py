@@ -164,6 +164,8 @@ class RemoteTaskStoreTests(unittest.TestCase):
         self.assertIn("CF-Ray abc123-IAD", message)
         self.assertIn("cf-mitigated challenge", message)
         self.assertNotIn("secret-test-token", message)
+        self.assertEqual(caught.exception.status_code, 403)
+        self.assertFalse(caught.exception.retryable)
 
     def test_rate_limit_has_safe_retry_later_error(self):
         from urllib.error import HTTPError
@@ -173,14 +175,28 @@ class RemoteTaskStoreTests(unittest.TestCase):
             with self.assertRaisesRegex(RemoteTaskStoreError, "rate limit") as caught:
                 self.store.list_tasks()
             self.assertNotIn("secret-test-token", str(caught.exception))
+            self.assertEqual(caught.exception.status_code, 429)
+            self.assertTrue(caught.exception.retryable)
 
     def test_server_error_is_classified_as_temporary(self):
         from urllib.error import HTTPError
         with patch("engine.remote_task_store.urlopen",
                    side_effect=HTTPError("https://engine.example/v1/tasks", 503,
                                          "unavailable", {}, None)):
-            with self.assertRaisesRegex(RemoteTaskStoreError, "temporarily unavailable"):
+            with self.assertRaisesRegex(RemoteTaskStoreError, "temporarily unavailable") as caught:
                 self.store.list_tasks()
+        self.assertEqual(caught.exception.status_code, 503)
+        self.assertTrue(caught.exception.retryable)
+
+    def test_cloudflare_quota_1027_is_retryable(self):
+        from urllib.error import HTTPError
+        with patch("engine.remote_task_store.urlopen",
+                   side_effect=HTTPError("https://engine.example/v1/tasks", 1027,
+                                         "quota exceeded", {}, None)):
+            with self.assertRaises(RemoteTaskStoreError) as caught:
+                self.store.list_tasks()
+        self.assertEqual(caught.exception.status_code, 1027)
+        self.assertTrue(caught.exception.retryable)
 
     def test_server_error_carries_the_worker_reason(self):
         """A 503 without its reason is undiagnosable; the body must survive."""
@@ -236,6 +252,8 @@ class RemoteTaskStoreTests(unittest.TestCase):
             with self.assertRaisesRegex(RemoteTaskStoreError, "unavailable") as caught:
                 self.store.list_tasks()
             self.assertNotIn("socket detail", str(caught.exception))
+            self.assertTrue(caught.exception.retryable)
+            self.assertIsNone(caught.exception.status_code)
 
     def test_rejects_invalid_remote_lease_timeout(self):
         with self.assertRaises(ValueError):
