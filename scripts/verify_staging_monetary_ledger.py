@@ -8,6 +8,7 @@ from __future__ import annotations
 import concurrent.futures
 import json
 import os
+import re
 import subprocess
 import urllib.error
 import urllib.request
@@ -807,4 +808,14 @@ if __name__ == "__main__":
             cleanup_test_reservations()
         except Exception:
             pass
-        raise SystemExit(str(exc)) from None
+        message = " ".join(str(exc).split())[:500]
+        for secret_name in (
+            "RAAWAA_ENGINE_STAGING_API_TOKEN", "RAAWAA_ENGINE_STAGING_QUOTA_ADMIN_TOKEN",
+            "CLOUDFLARE_API_TOKEN", "CLOUDFLARE_ACCOUNT_ID",
+        ):
+            secret = os.environ.get(secret_name, "")
+            if secret:
+                message = message.replace(secret, "[redacted]")
+        message = re.sub(r"(?i)(bearer\s+)[A-Za-z0-9._~-]+", r"\1[redacted]", message)
+        print(f"::error title=Staging verification::{message}", flush=True)
+        raise SystemExit(message) from None
