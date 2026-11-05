@@ -139,13 +139,34 @@ jobs:
               time.sleep(5)
           PY
       - name: Enqueue, claim, and execute exactly one read-only supervised task
+        shell: bash
         env:
           RAAWAA_ENGINE_API_URL: https://raawaa-autonomous-engine-staging.ghith-shikhkhaled.workers.dev
           RAAWAA_ENGINE_PROCESS_SUPERVISOR: enabled
           RAAWAA_ENGINE_LIVE_INFERENCE: disabled
           RAAWAA_ENGINE_STAGING_TOKEN_INSTALLED: ${{ steps.install_staging_token.outcome == 'success' && 'true' || 'false' }}
           RAAWAA_ENGINE_FALLBACK_STANDBY_CHECK: enabled
-        run: python scripts/run_staging_scheduled_process_probe.py
+        run: |
+          set -o pipefail
+          # The bounded outcome line is captured for the annotation/artifact
+          # steps below because step logs are not always retrievable by
+          # automation; the script output is already redacted and bounded.
+          python scripts/run_staging_scheduled_process_probe.py 2>&1 | tee probe-output.txt
+      - name: Surface bounded probe outcome as an annotation
+        if: ${{ always() }}
+        shell: bash
+        run: |
+          outcome="$(head -c 900 probe-output.txt 2>/dev/null | tr '\n' ' ')"
+          [ -n "$outcome" ] || outcome="no outcome file (probe step did not run)"
+          echo "::notice title=Scheduled Staging probe outcome::${outcome}"
+      - name: Upload bounded probe outcome
+        if: ${{ always() }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: staging-scheduled-probe-${{ github.run_id }}
+          path: probe-output.txt
+          if-no-files-found: warn
+          retention-days: 14
       - name: Revoke temporary Staging bearer token
         if: ${{ always() && steps.install_staging_token.outcome != 'skipped' }}
         env:
