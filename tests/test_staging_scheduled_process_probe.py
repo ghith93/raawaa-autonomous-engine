@@ -23,6 +23,11 @@ class FakeStore:
         self.payload = {"operation": probe.OPERATION}
         self.requests = []
         self.recovery_result = {"status": "pending", "recovered": True}
+        self.previous_tasks = []
+        self.recovered_ids = []
+
+    def list_tasks(self, limit=50):
+        return list(self.previous_tasks)
 
     def _request(self, path, method="POST", payload=None):
         self.requests.append((path, method, payload))
@@ -42,6 +47,9 @@ class FakeStore:
 
     def recover_supervised_probe(self, task_id):
         self.requests.append((f"/v1/tasks/{task_id}/recover-supervised-probe", "POST", {}))
+        self.recovered_ids.append(task_id)
+        if task_id != "probe-123":
+            return {"status": "failed", "recovered": True}
         if self.status == "running":
             self.status = self.recovery_result.get("status", "failed")
         return self.recovery_result
@@ -187,11 +195,47 @@ class StagingScheduledProbeTests(unittest.TestCase):
             "dispatch_id": "d" * 64,
             "replayed": False,
             "recovered": False,
+            "previous_slot": {
+                "status": "absent",
+                "idempotency_key": probe.IDEMPOTENCY_PREFIX + "20261104",
+            },
             "provider_calls": 0,
             "external_writes": 0,
             "backend": "cloudflare_staging",
             "fallback_standby": "not_checked",
         })
+
+    def test_previous_slot_running_task_is_dispositioned_by_exact_recovery(self):
+        store = FakeStore()
+        store.previous_tasks = [{
+            "id": "probe-yesterday",
+            "task_type": probe.TASK_TYPE,
+            "title": probe.TITLE,
+            "idempotency_key": probe.IDEMPOTENCY_PREFIX + "20261104",
+            "payload_json": json.dumps({"operation": probe.OPERATION}),
+            "status": "running",
+        }]
+        processor = Mock(return_value={
+            "id": "probe-123", "status": "succeeded", "classification": "succeeded",
+            "operation": probe.OPERATION, "dispatch_id": "d" * 32, "replayed": False,
+        })
+        slot_key = probe.IDEMPOTENCY_PREFIX + "20261105"
+        with patch.object(probe, "_daily_slot_idempotency_key", return_value=slot_key):
+            result = probe.run_scheduled_probe(
+                cron_environment(), store_factory=lambda *args, **kwargs: store,
+                processor=processor,
+            )
+        self.assertEqual(store.recovered_ids, ["probe-yesterday"])
+        self.assertEqual(result["previous_slot"]["status"], "recovery_applied")
+        self.assertEqual(result["previous_slot"]["task_status"], "failed")
+        self.assertEqual(store.enqueued_keys, [slot_key])
+        self.assertEqual(store.claimed_id, "probe-123")
+
+    def test_previous_slot_key_rolls_over_month_and_year_boundaries(self):
+        self.assertEqual(
+            probe._previous_slot_key(probe.IDEMPOTENCY_PREFIX + "20270101"),
+            probe.IDEMPOTENCY_PREFIX + "20261231",
+        )
 
     def test_exact_cloudflare_recovery_reuses_the_daily_task_before_claim(self):
         store = FakeStore()
@@ -243,6 +287,7 @@ class StagingScheduledProbeTests(unittest.TestCase):
 
     def test_uses_pinned_supabase_fallback_for_retryable_cloudflare_failure(self):
         primary = Mock()
+        primary.list_tasks.return_value = []
         primary.enqueue.side_effect = RemoteTaskStoreError(
             "Remote task API temporarily unavailable (HTTP 503)",
             status_code=503, retryable=True,
@@ -300,6 +345,7 @@ class StagingScheduledProbeTests(unittest.TestCase):
 
     def test_non_retryable_cloudflare_auth_error_does_not_fail_over(self):
         primary = Mock()
+        primary.list_tasks.return_value = []
         primary.enqueue.side_effect = RemoteTaskStoreError(
             "Remote task API authentication failed", status_code=401,
         )

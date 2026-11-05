@@ -1055,7 +1055,11 @@ try {
     signal: AbortSignal.timeout(10_000),
   });
   assert.equal(lostRecoveryResponse.status, 200, "first recovery request reaches the Worker");
-  await lostRecoveryResponse.text(); // intentionally discard the successful response to simulate a lost reply
+  // Client-discarded successful response: this approximates a lost reply at
+  // the client (the Worker committed and the client received the response,
+  // then discarded its body). It is NOT a transport-level dropped response;
+  // no claim of a commit-then-drop network fault is made here.
+  await lostRecoveryResponse.text();
   const recoveredProbe = await api(recoveryPath, { method: "POST", body: {} });
   assertStatus(recoveredProbe, 200, "retry after a lost recovery response");
   assert.deepEqual(recoveredProbe.payload, {
@@ -1153,6 +1157,102 @@ try {
   assert.equal(duplicateDailyEnqueue.payload.created, false);
   assert.equal(duplicateDailyEnqueue.payload.task.id, crashTaskId);
   assert.equal(readFileSync(crashMarkerPath, "utf8").trim().split(/\\s+/).length, 1);
+
+  // Exact production envelope (max_attempts=1): after a child start and worker
+  // death, recovery must terminally fail the task, quarantine the dispatch as
+  // ambiguous, and never start a second child — without raising the retry budget.
+  const exactSlot = new Date(Date.now() - 86_400_000).toISOString().slice(0, 10).replaceAll("-", "");
+  const exactKey = "staging-cron-supervised-probe:" + exactSlot;
+  const exactTask = await api("/v1/tasks/enqueue", {
+    method: "POST",
+    body: {
+      task_type: "supervised_probe",
+      title: "Scheduled Staging read-only process probe",
+      payload: { operation: "python_platform_probe" },
+      idempotency_key: exactKey,
+      max_attempts: 1,
+      priority: 100,
+    },
+  });
+  assertStatus(exactTask, 201, "enqueue exact one-attempt production envelope fixture");
+  const exactTaskId = exactTask.payload.task.id;
+  const exactMarkerPath = join(root, "exact-child-starts.txt");
+  const exactWorker = launchCrashFixture("start", exactMarkerPath);
+  await waitForMarker(exactWorker, exactMarkerPath);
+  const exactChildPid = Number(readFileSync(exactMarkerPath, "utf8").trim().split(/\s+/)[0]);
+  assert.ok(Number.isInteger(exactChildPid) && exactChildPid > 1);
+  crashChildPids.add(exactChildPid);
+  exactWorker.kill("SIGKILL");
+  await waitForExit(exactWorker);
+  try { process.kill(exactChildPid, "SIGKILL"); } catch { /* fixture child already exited */ }
+  await delay(100);
+  crashChildPids.delete(exactChildPid);
+  executeLocalSql(
+    "UPDATE tasks SET lease_expires_at='2000-01-01T00:00:00.000Z' " +
+    "WHERE id='" + exactTaskId + "' AND idempotency_key='" + exactKey + "' AND status='running'",
+  );
+  const exactRecovery = await api(
+    "/v1/tasks/" + exactTaskId + "/recover-supervised-probe", { method: "POST", body: {} },
+  );
+  assertStatus(exactRecovery, 200, "recover exact one-attempt envelope after the crash");
+  assert.deepEqual(exactRecovery.payload, {
+    status: "failed", recovered: true, replay: false, attempts: 1,
+    max_attempts: 1, dispatch_status: "ambiguous",
+  });
+  const exactDispatch = queryLocalSql(
+    "SELECT status FROM task_process_dispatches WHERE task_id='" + exactTaskId + "'",
+  );
+  assert.equal(exactDispatch[0].status, "ambiguous");
+  assert.equal(readFileSync(exactMarkerPath, "utf8").trim().split(/\s+/).length, 1,
+    "the one-attempt recovery must not start a second child");
+
+  // Concurrent recovery race on a real local D1 row: two simultaneous
+  // recoveries of one expired lease produce exactly one transition and one
+  // audit event; the loser is a deterministic replay, never a second lease.
+  const raceSlot = new Date(Date.now() - 2 * 86_400_000).toISOString().slice(0, 10).replaceAll("-", "");
+  const raceKey = "staging-cron-supervised-probe:" + raceSlot;
+  const raceTask = await api("/v1/tasks/enqueue", {
+    method: "POST",
+    body: {
+      task_type: "supervised_probe",
+      title: "Scheduled Staging read-only process probe",
+      payload: { operation: "python_platform_probe" },
+      idempotency_key: raceKey,
+      max_attempts: 2,
+      priority: 100,
+    },
+  });
+  assertStatus(raceTask, 201, "enqueue concurrent-recovery race fixture");
+  const raceTaskId = raceTask.payload.task.id;
+  const raceClaim = await api(
+    "/v1/tasks/" + raceTaskId + "/claim-supervised-probe", { method: "POST", body: {} },
+  );
+  assertStatus(raceClaim, 200, "claim concurrent-recovery race fixture");
+  executeLocalSql(
+    "UPDATE tasks SET lease_expires_at='2000-01-01T00:00:00.000Z' " +
+    "WHERE id='" + raceTaskId + "' AND status='running'",
+  );
+  const racePath = BASE + "/v1/tasks/" + raceTaskId + "/recover-supervised-probe";
+  const raceHeaders = { authorization: "Bearer " + TOKEN, "content-type": "application/json" };
+  const [raceFirst, raceSecond] = await Promise.all([
+    fetch(racePath, { method: "POST", headers: raceHeaders, body: "{}", signal: AbortSignal.timeout(10_000) }),
+    fetch(racePath, { method: "POST", headers: raceHeaders, body: "{}", signal: AbortSignal.timeout(10_000) }),
+  ]);
+  const raceBodies = [await raceFirst.json(), await raceSecond.json()];
+  assert.equal(raceBodies.filter(body => body.recovered === true).length, 1,
+    "exactly one concurrent recovery transitions the task");
+  assert.equal(raceBodies.filter(body => body.recovered === false).length, 1,
+    "the losing concurrent recovery is a deterministic replay/lease_lost");
+  const raceAudits = queryLocalSql(
+    "SELECT COUNT(*) AS count FROM audit_log WHERE task_id='" + raceTaskId +
+      "' AND event='supervised_probe_lease_recovered'",
+  )[0].count;
+  assert.equal(raceAudits, 1, "concurrent recovery writes exactly one audit event");
+  const raceRows = queryLocalSql(
+    "SELECT status,lease_token FROM tasks WHERE id='" + raceTaskId + "'",
+  );
+  assert.equal(raceRows[0].status, "pending");
+  assert.equal(raceRows[0].lease_token, null, "recovery clears the lease; no second lease is issued");
 
   const quotaBase = {
     action: "reserve",
@@ -1455,7 +1555,7 @@ try {
   assert.equal(status.payload.paper_events.find(row => row.event_type === "candidate_detected")?.count, 1);
   assert.equal(status.payload.tasks.find(row => row.status === "succeeded")?.count, 12,
     "workflow, dependency, supervised-process, and exact-claim fixtures should be durably succeeded");
-  assert.equal(status.payload.tasks.find(row => row.status === "failed")?.count, 2,
+  assert.equal(status.payload.tasks.find(row => row.status === "failed")?.count, 3,
     "failed dependency roots remain visibly failed");
   assert.equal(status.payload.tasks.find(row => row.status === "blocked")?.count, 8,
     "failed dependencies and no-replay supervised tasks remain blocked");
@@ -1477,7 +1577,8 @@ try {
   console.log(
     "Local D1 integration passed: migrations, authenticated status, task enqueue/idempotency/lease fencing, " +
     "process-dispatch prepare/start/settle and ambiguity, concurrent claims, stale-lease fencing and restart no-replay, " +
-    "exact daily-probe recovery with interrupted-child fault injection and no second child start, Python remote adapter, " +
+    "exact daily-probe recovery with interrupted-child fault injection and no second child start, " +
+    "exact one-attempt production-envelope crash recovery and concurrent-recovery race, Python remote adapter, " +
     "monetary/quota and paper ledgers, and disabled Telegram webhook.",
   );
 } catch (error) {

@@ -228,21 +228,56 @@ function recoveryDb(overrides = {}) {
     lease_expires_at: "2000-01-01T00:00:00.000Z",
     ...overrides.current,
   };
+  const state = {
+    taskStatus: current.status,
+    dispatchStatus: overrides.dispatch?.status ?? "in_flight",
+    auditCount: 0,
+    taskTransitions: 0,
+    updatedAt: null,
+  };
   return {
-    calls,
+    calls, state,
+    async batch(statements) {
+      calls.push({ kind: "batch", statements: statements.map(x => ({ sql: x.sql, values: x.values })) });
+      return statements.map(stmt => {
+        if (stmt.sql.includes("UPDATE task_process_dispatches")) {
+          const changes = state.dispatchStatus === "in_flight" && state.taskStatus === "running" &&
+            current.attempts >= current.max_attempts ? 1 : 0;
+          if (changes) state.dispatchStatus = "ambiguous";
+          return { meta: { changes } };
+        }
+        if (stmt.sql.includes("UPDATE tasks SET status=?")) {
+          const changes = state.taskStatus === "running" ? 1 : 0;
+          if (changes) {
+            state.taskStatus = stmt.values[0]; state.updatedAt = stmt.values[2];
+            state.taskTransitions += 1;
+          }
+          return { meta: { changes } };
+        }
+        if (stmt.sql.includes("INSERT INTO audit_log")) {
+          // The audit insert is gated on the pre-transition running row.
+          const changes = state.taskStatus === "running" ? 1 : 0;
+          if (changes) state.auditCount += 1;
+          return { meta: { changes } };
+        }
+        return { meta: { changes: 0 } };
+      });
+    },
     prepare(sql) {
       return {
         sql, values: [],
         bind(...values) { this.values = values; return this; },
         async first() {
           calls.push({ kind: "first", sql, values: this.values });
-          if (sql.includes("FROM tasks WHERE id=?") && sql.includes("idempotency_key")) return current;
-          if (sql.includes("FROM task_process_dispatches")) return overrides.dispatch ?? { status: "in_flight" };
-          if (sql.includes("UPDATE task_process_dispatches")) return overrides.quarantined ?? { status: "ambiguous" };
-          if (sql.includes("UPDATE tasks SET status=?")) return overrides.updated ?? {
-            id: "probe-123", status: "pending", attempts: 1, max_attempts: 2,
-          };
-          if (sql.includes("SELECT status,attempts,max_attempts")) return overrides.latest ?? null;
+          if (sql.includes("FROM tasks WHERE id=?") && sql.includes("idempotency_key")) {
+            return { ...current, status: state.taskStatus };
+          }
+          if (sql.includes("FROM task_process_dispatches")) return { status: state.dispatchStatus };
+          if (sql.includes("SELECT status,attempts,max_attempts")) {
+            return overrides.latest ?? {
+              status: state.taskStatus, attempts: current.attempts, max_attempts: current.max_attempts,
+            };
+          }
           return null;
         },
         async run() {
@@ -280,14 +315,36 @@ test("exact supervised-probe recovery requeues only an expired exact task and pr
     status: "pending", recovered: true, replay: false, attempts: 1,
     max_attempts: 2, dispatch_status: "in_flight",
   });
-  const update = DB.calls.find(call => call.kind === "first" && call.sql.includes("UPDATE tasks SET status=?"));
+  const batch = DB.calls.find(call => call.kind === "batch");
+  assert.ok(batch, "recovery transition must be one atomic D1 batch");
+  assert.equal(batch.statements.length, 3);
+  const update = batch.statements.find(stmt => stmt.sql.includes("UPDATE tasks SET status=?"));
   assert.ok(update.sql.includes("WHERE id=?"));
   assert.ok(update.sql.includes("AND lease_token=?"));
   assert.ok(update.sql.includes("AND lease_expires_at<?"));
   assert.equal(update.values[0], "pending");
   assert.equal(update.values[3], "probe-123");
-  assert.ok(DB.calls.some(call => call.kind === "run" &&
-    call.values[1] === "supervised_probe_lease_recovered"));
+  const audit = batch.statements.find(stmt => stmt.sql.includes("INSERT INTO audit_log"));
+  assert.equal(audit.values[0], "supervised_probe_lease_recovered");
+  assert.equal(DB.state.taskTransitions, 1);
+  assert.equal(DB.state.auditCount, 1);
+  assert.equal(DB.state.dispatchStatus, "in_flight", "requeue preserves the in-flight dispatch");
+});
+
+test("concurrent exact recovery yields one transition and one replay without a second lease", async () => {
+  const DB = recoveryDb();
+  const path = "/v1/tasks/probe-123/recover-supervised-probe";
+  const [first, second] = await Promise.all([
+    worker.fetch(request(path, { method: "POST", body: {} }), { DB, ENGINE_API_TOKEN: TOKEN }),
+    worker.fetch(request(path, { method: "POST", body: {} }), { DB, ENGINE_API_TOKEN: TOKEN }),
+  ]);
+  const bodies = [await first.json(), await second.json()];
+  const recovered = bodies.filter(body => body.recovered === true);
+  const replays = bodies.filter(body => body.recovered === false && body.replay === true);
+  assert.equal(recovered.length, 1, "exactly one concurrent caller transitions the task");
+  assert.equal(replays.length, 1, "the other caller gets a deterministic replay");
+  assert.equal(DB.state.taskTransitions, 1);
+  assert.equal(DB.state.auditCount, 1, "concurrent recovery writes exactly one audit event");
 });
 
 test("exact recovery rejects a different task envelope and a non-expired lease without writes", async () => {
@@ -316,11 +373,16 @@ test("exact recovery fails the normal one-attempt probe without enabling a retry
   assert.equal(result.status, "failed");
   assert.equal(result.recovered, true);
   assert.equal(result.dispatch_status, "ambiguous");
-  const dispatchQuarantine = DB.calls.find(call => call.kind === "first" &&
-    call.sql.includes("UPDATE task_process_dispatches"));
+  const batch = DB.calls.find(call => call.kind === "batch");
+  assert.ok(batch, "exhausted recovery must be one atomic D1 batch");
+  const dispatchQuarantine = batch.statements.find(stmt =>
+    stmt.sql.includes("UPDATE task_process_dispatches"));
   assert.ok(dispatchQuarantine.sql.includes("status='in_flight'"));
-  const update = DB.calls.find(call => call.kind === "first" && call.sql.includes("UPDATE tasks SET status=?"));
+  assert.ok(dispatchQuarantine.sql.includes("attempts>=max_attempts"));
+  const update = batch.statements.find(stmt => stmt.sql.includes("UPDATE tasks SET status=?"));
   assert.equal(update.values[0], "failed");
+  assert.equal(DB.state.dispatchStatus, "ambiguous");
+  assert.equal(DB.state.auditCount, 1);
 });
 
 test("claim endpoint is authenticated and returns an empty queue safely", async () => {

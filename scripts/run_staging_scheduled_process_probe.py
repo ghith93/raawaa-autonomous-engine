@@ -11,7 +11,7 @@ import json
 import os
 import re
 import sys
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Callable, Mapping
 
@@ -46,6 +46,63 @@ def _daily_slot_idempotency_key(now: datetime | None = None) -> str:
     """Deduplicate schedule events by the UTC calendar slot, not run ID."""
     instant = now or datetime.now(timezone.utc)
     return IDEMPOTENCY_PREFIX + instant.astimezone(timezone.utc).strftime("%Y%m%d")
+
+
+def _previous_slot_key(idempotency_key: str) -> str:
+    """Return the exact previous UTC daily-slot key for ``idempotency_key``."""
+    raw = idempotency_key.removeprefix(IDEMPOTENCY_PREFIX)
+    day = datetime.strptime(raw, "%Y%m%d").replace(tzinfo=timezone.utc)
+    return IDEMPOTENCY_PREFIX + (day - timedelta(days=1)).strftime("%Y%m%d")
+
+
+def _reconcile_previous_slot(store: Any, idempotency_key: str, *, backend: str) -> dict[str, Any]:
+    """Disposition yesterday's exact slot without creating or sweeping tasks.
+
+    A new UTC day creates a new task; it must not silently abandon a prior
+    slot left ``running`` by a crashed runner. This narrowly scoped check
+    looks up only the previous day's exact probe key (never enqueues it),
+    and — on the Cloudflare ledger only — routes a still-running row through
+    the same exact-task expired-lease recovery as today's slot. Its outcome
+    is returned for monitoring; the row is exposed by task ID and terminal
+    status rather than being hidden or broadly swept.
+    """
+    previous_key = _previous_slot_key(idempotency_key)
+    if backend != "cloudflare_staging":
+        return {"status": "skipped_cross_ledger", "idempotency_key": previous_key}
+    matches = [
+        task for task in store.list_tasks(100)
+        if isinstance(task, dict)
+        and task.get("idempotency_key") == previous_key
+        and task.get("task_type") == TASK_TYPE
+        and task.get("title") == TITLE
+    ]
+    if not matches:
+        return {"status": "absent", "idempotency_key": previous_key}
+    if len(matches) != 1:
+        raise ScheduledProbeError("Previous-slot probe lookup returned multiple exact tasks")
+    previous = matches[0]
+    previous_id = previous.get("id")
+    if not isinstance(previous_id, str) or not re.fullmatch(r"[A-Za-z0-9_-]{1,128}", previous_id):
+        raise ScheduledProbeError("Previous-slot probe returned an invalid task id")
+    _payload(previous)
+    if previous.get("status") != "running":
+        return {
+            "status": "already_dispositioned",
+            "idempotency_key": previous_key,
+            "task_id": previous_id,
+            "task_status": previous.get("status"),
+        }
+    recovery = store.recover_supervised_probe(previous_id)
+    if not isinstance(recovery, dict) or recovery.get("status") not in {"pending", "failed", "blocked"}:
+        status = recovery.get("status") if isinstance(recovery, dict) else "invalid"
+        raise ScheduledProbeError(f"Previous-slot probe is not dispositioned (status={status})")
+    return {
+        "status": "recovery_applied",
+        "idempotency_key": previous_key,
+        "task_id": previous_id,
+        "task_status": recovery.get("status"),
+        "recovered": bool(recovery.get("recovered")),
+    }
 
 
 def _payload(task: Mapping[str, Any]) -> dict[str, Any]:
@@ -111,6 +168,7 @@ def _run_on_store(
     fallback_standby: str,
     processor: Callable[..., dict[str, Any]],
 ) -> dict[str, Any]:
+    previous_slot = _reconcile_previous_slot(store, idempotency_key, backend=backend)
     task = store.enqueue(
         TASK_TYPE,
         TITLE,
@@ -138,6 +196,7 @@ def _run_on_store(
             "classification": "already_settled",
             "replayed": True,
             "recovered": False,
+            "previous_slot": previous_slot,
             "provider_calls": 0,
             "external_writes": 0,
             "backend": backend,
@@ -183,6 +242,7 @@ def _run_on_store(
         "dispatch_id": result["dispatch_id"],
         "replayed": False,
         "recovered": recovered,
+        "previous_slot": previous_slot,
         "provider_calls": 0,
         "external_writes": 0,
         "backend": backend,
