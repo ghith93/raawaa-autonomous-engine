@@ -1,16 +1,14 @@
 # Durable and unattended execution — options, decision, and what is proven
 
-**Status:** local SQLite crash recovery and local D1 lifecycle tests pass. PR
-#540 merged the process-scoped D1 ledger/Worker route/Python adapter. Its guarded
-post-merge Staging migration and Worker deployment succeeded, but the remote
-verification step failed before its process test ran: direct script execution
-placed `scripts/` rather than the repository root on `sys.path`, so importing
-`engine` failed. This was reproduced locally; the follow-up adds a root-path
-bootstrap and regression test. Successful remote process-dispatch behavior
-remains unproven pending a fresh guarded Staging run. No Production deployment
-or D1 write occurred. The
-initial model-invocation reuse proposal is rejected by the compatibility review
-below.
+**Status:** local SQLite crash recovery, local D1 lifecycle tests, and one
+isolated Staging process-dispatch lifecycle run pass. PR #540 merged the
+process-scoped D1 ledger/Worker route/Python adapter; PR #542 fixed the Staging
+verifier's direct-script import path. Main CI run #41959216358 applied the
+Staging migration, deployed the isolated Worker, and verified a real read-only
+`python_platform_probe`, durable settlement, and replay without a second child
+start. This was a push-triggered CI test, not a Cron-triggered unattended run.
+No Production deployment or D1 write occurred. The initial model-invocation
+reuse proposal is rejected by the compatibility review below.
 **Tasks:** `CHATGPT-ENGINE-RUNTIME-003` (issue #464). **Spend:** USD 0.
 **Supersedes:** nothing. **Depends on:** `docs/process-supervisor.md`.
 
@@ -25,12 +23,15 @@ That switch remains off. A GitHub-hosted runner's filesystem is destroyed when
 the job ends, so a local `process_dispatches` row could not survive across runs;
 the new adapter instead writes to the remote D1 table. Local D1 emulation passes.
 The post-merge pipeline applied the migration and deployed the isolated Staging
-Worker, but its remote verification step failed; it did not provide a successful
-remote process-lifecycle proof. Production was not contacted.
+Worker; the fixed guarded verifier now provides successful remote process proof
+for its bounded read-only fixture, without enabling scheduled execution. The
+production schedule and Worker were not contacted by this verifier.
 
-The gap is therefore precise: **does the D1-backed identity/outcome lifecycle
-remain safe across actual remote leases, worker termination, and scheduled
-recovery?**
+The remaining gap is therefore precise: **does the D1-backed identity/outcome
+lifecycle remain safe across worker termination and scheduled recovery?** The
+bounded remote lease, settlement, and settled-replay path now has isolated
+Staging evidence; those other recovery modes do not.
+
 
 ## Measured facts about what already exists
 
@@ -168,7 +169,7 @@ This is local D1 emulation evidence, not Cloudflare Staging or production D1
 concurrency. The Python adapter unit tests simulate a lost response after start
 and confirm a subsequent lease quarantines rather than starts again.
 
-### Revised implementation (local proof; Staging verification pending)
+### Revised implementation (local and isolated Staging proof; unattended execution pending)
 
 PR #540 adds `migrations/0013_task_process_dispatches.sql`,
 `worker/task-process-dispatches.js`, and `engine/remote_process_dispatch_ledger.py`.
@@ -192,40 +193,43 @@ reconciliation is intentionally unsupported: ambiguous work is non-replayable
 and operator recovery tooling remains future work. The adapter is integrated
 only for `RemoteTaskStore`; no local `db_path` is fabricated.
 `tasks.execution_mode` remains an inference label, not process execution mode.
-The guarded post-merge Staging verifier is configured to exercise one
-lease-fenced `python_platform_probe` against isolated Staging D1, check durable
-settlement and same-outcome replay without a second child start, then remove
-only its own fixture rows. Runs #41957449242 and #41958480499 applied the
-migration and deployed the isolated Worker, but the verifier step failed before
-it reached the Staging API: direct script invocation omitted the repository
-root from `sys.path`, producing `ModuleNotFoundError: engine`. This was
-reproduced locally and fixed by bootstrapping the repository root before the
-engine imports, with a no-credentials direct-invocation regression test. The
-fixed verifier has not yet run on Staging, so remote dispatch behavior remains
-unproven. This is not a Cron-triggered or unattended execution proof.
+The guarded post-merge Staging verifier exercises one lease-fenced
+`python_platform_probe` against isolated Staging D1, checks durable settlement
+and same-outcome replay without a second child start, then removes only its own
+fixture rows. Runs #41957449242 and #41958480499 applied the migration and
+deployed the isolated Worker, but the verifier failed before its Staging API
+calls because direct script invocation omitted the repository root from
+`sys.path` (`ModuleNotFoundError: engine`). PR #542 fixed this by bootstrapping
+the root before engine imports and adding a no-credentials direct-invocation
+regression test. The fix passed main run #41959216358 at commit
+`976906d082d497ee26f6394275c2403ceb88f22f`: the verifier step and all dependent
+Staging telemetry and authenticated mobile readback steps succeeded. Thus the
+bounded remote dispatch/settlement/replay path is now verified on isolated
+Staging D1. This was a push-triggered CI test, not a Cron-triggered or
+unattended execution proof.
 
 Local checks passed: 66 focused supervisor/adapter tests, 206 Worker tests,
 1,040 Python tests (7 live-sandbox skips), and the local D1 integration smoke
-including a real local child. Exact-head PR CI passed on `637923a0b92902e1cd21e7075f8111cce4c4db60` (run #41957158167). The scheduled supervisor switch remains off; no
-Production deployment, Production D1 write, provider inference, or paid spend
-occurred. Staging migration and Worker deployment did occur; remote verification
-remains blocked on failure diagnosis.
+including a real local child. The original exact-head CI passed on
+`637923a0b92902e1cd21e7075f8111cce4c4db60` (run #41957158167); PR #542's CI and
+post-merge main run #41959216358 passed. The scheduled supervisor switch
+remains off; no Production deployment, Production D1 write, provider inference,
+or paid spend occurred. Staging migration and isolated Worker deployment did
+occur, and the verifier's temporary fixture and credentials were cleaned up.
 
 ## What is still not proven
 
-1. **No successful isolated Staging D1 process proof yet.** Migration
-   `0013_task_process_dispatches` was applied and the isolated Staging Worker was
-   deployed in run #41957449242, but the remote verifier failed. No passing
-   process-dispatch lifecycle evidence is available yet.
-2. **No unattended schedule.** Nothing enqueues `supervised_probe`; the
-   production five-minute runner switch is off. No Staging-specific scheduled
-   runner has been added.
-3. **No remote crash proof.** Local tests cover Worker restart boundaries and
+1. **No Cron-triggered/unattended process run.** The verified Staging test was
+   launched by a main-branch push workflow and created its own bounded fixture;
+   it was not claimed by the five-minute task-runner schedule. Nothing enqueues
+   `supervised_probe` on a schedule, and the production supervisor switch stays
+   off.
+2. **No remote crash proof.** Local tests cover Worker restart boundaries and
    simulated start-response loss, but no real runner was killed against Staging
    D1 between each transition.
-4. **No operator tooling** for an orphaned/ambiguous process dispatch or safe
+3. **No operator tooling** for an orphaned/ambiguous process dispatch or safe
    human resolution.
-5. Still not a sandbox, still no network isolation, still no `setsid` escape
+4. Still not a sandbox, still no network isolation, still no `setsid` escape
    defence.
 
 ## Rollback
