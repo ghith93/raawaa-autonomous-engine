@@ -99,7 +99,11 @@ jobs:
               attempt += 1
               status = "request_failed"
               try:
-                  request = Request(url, headers={"Authorization": "Bearer " + token}, method="GET")
+                  request = Request(url, headers={
+                      "Authorization": "Bearer " + token,
+                      "Accept": "application/json",
+                      "User-Agent": "RaawaaAutonomousEngine/1.0 (+https://github.com/ghith93/raawaa-autonomous-engine)",
+                  }, method="GET")
                   with urlopen(request, timeout=10) as response:
                       status = str(response.status)
               except HTTPError as error:

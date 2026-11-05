@@ -208,6 +208,9 @@ class WorkflowShapeTests(unittest.TestCase):
         self.assertNotIn("cron:", text)
         self.assertIn("scripts/run_staging_p1_task_proof.py", text)
         self.assertIn("Wait for the ephemeral Staging token to propagate", text)
+        # The propagation poll must use the engine User-Agent: the edge
+        # rejects urllib's default agent with 403 even for valid tokens.
+        self.assertIn('"User-Agent": "RaawaaAutonomousEngine/1.0', text)
         self.assertIn("::notice title=Staging P1 task proof outcome::", text)
         self.assertIn("actions/upload-artifact@", text)
         self.assertIn("p1-proof-output.txt", text)
