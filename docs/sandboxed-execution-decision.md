@@ -22,6 +22,23 @@ unreviewed-ref acceptance criteria. Do not dispatch the live workflow until its
 exact changes and provenance have been independently reviewed and a verified
 immutable image digest and zero-cost runner eligibility are established.
 
+### Image and runner research (2026-11-05 UTC)
+
+- Docker Hub's [official Python `3.12-slim` tag metadata](https://hub.docker.com/v2/repositories/library/python/tags/3.12-slim)
+  reported Linux/amd64 image manifest digest
+  `sha256:05a994d2344eb364cc186910f4fc8786a38215f39f00d0acc25bff33a08f4177`;
+  the separate multi-platform index digest was
+  `sha256:4840d514c583a4d3d8cad3940e68dee6f0f6f3635c12fcd0a3d74c21a5b93a54`.
+  These are timestamped tag observations, not evidence of a successful pull or
+  content execution; revalidate the chosen digest and provenance before use.
+  Docker's [registry API](https://docs.docker.com/reference/api/registry/latest/)
+  describes fetching the target platform manifest from a multi-platform index.
+- GitHub's [runner reference](https://docs.github.com/en/actions/reference/runners/github-hosted-runners)
+  identifies `ubuntu-24.04` as a standard public-repository runner and says
+  standard runner use on public repositories is free. The repository API
+  reported this repository public on 2026-11-05. This does not verify billing
+  for other services, artifacts, or future changes in repository visibility.
+
 ## The finding that forced the decision
 
 The Codespaces bridge launches repository-controlled commands as a child process of
