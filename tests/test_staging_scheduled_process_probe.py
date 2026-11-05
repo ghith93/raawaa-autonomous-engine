@@ -358,22 +358,25 @@ class StagingScheduledProbeTests(unittest.TestCase):
             )
         fallback_factory.assert_not_called()
 
-    def test_daily_standby_heartbeat_is_nonfatal_to_healthy_primary(self):
+    def test_standby_variable_is_ignored_and_never_pings_fallback(self):
+        # Defense in depth: the standby /health RPC persistently writes a
+        # heartbeat row, so even a stale enabling variable must not cause a
+        # standby call on the scheduled path.
         primary = FakeStore()
-        fallback = FakeStore()
+        fallback_factory = Mock()
         result = probe.run_scheduled_probe(
             cron_environment(RAAWAA_ENGINE_FALLBACK_STANDBY_CHECK="enabled"),
             store_factory=lambda *args, **kwargs: primary,
-            fallback_store_factory=lambda *args, **kwargs: fallback,
-            oidc_token_factory=lambda *args, **kwargs: "a" * 100 + ".b.c",
+            fallback_store_factory=fallback_factory,
+            oidc_token_factory=Mock(),
             processor=lambda *args, **kwargs: {
                 "id": "probe-123", "status": "succeeded", "classification": "succeeded",
                 "operation": probe.OPERATION, "dispatch_id": "d" * 32, "replayed": False,
             },
         )
-        self.assertEqual(fallback.requests, [("/health", "POST", {})])
+        fallback_factory.assert_not_called()
         self.assertEqual(result["backend"], "cloudflare_staging")
-        self.assertEqual(result["fallback_standby"], "ready")
+        self.assertEqual(result["fallback_standby"], "not_checked")
 
     def test_scheduled_env_without_standby_never_calls_fallback_health(self):
         # Regression: the scheduled workflow no longer enables the standby
