@@ -92,7 +92,7 @@ jobs:
           # fail authentication. Poll the authenticated list endpoint until
           # the token is honored (bounded), instead of racing propagation.
           url = "https://raawaa-autonomous-engine-staging.ghith-shikhkhaled.workers.dev/v1/tasks?limit=1"
-          token = [SECURITY_DATA]"RAAWAA_ENGINE_STAGING_API_TOKEN", "")
+          token = os.environ["RAAWAA_ENGINE_STAGING_API_TOKEN"]
           deadline = time.monotonic() + 90
           attempt = 0
           while True:
