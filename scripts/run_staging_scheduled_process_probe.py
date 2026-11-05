@@ -36,6 +36,7 @@ OPERATION = "python_platform_probe"
 TITLE = "Scheduled Staging read-only process probe"
 IDEMPOTENCY_PREFIX = "staging-cron-supervised-probe:"
 LEASE_TIMEOUT_SECONDS = 120
+PREVIOUS_SLOT_LIST_LIMIT = 100
 
 
 class ScheduledProbeError(RuntimeError):
@@ -69,29 +70,36 @@ def _reconcile_previous_slot(store: Any, idempotency_key: str, *, backend: str) 
     previous_key = _previous_slot_key(idempotency_key)
     if backend != "cloudflare_staging":
         return {"status": "skipped_cross_ledger", "idempotency_key": previous_key}
+    # The API returns only the newest 100 tasks, not an exact key query. A
+    # full page without a match is inconclusive: an older row may be hidden.
+    tasks = store.list_tasks(PREVIOUS_SLOT_LIST_LIMIT)
     matches = [
-        task for task in store.list_tasks(100)
-        if isinstance(task, dict)
-        and task.get("idempotency_key") == previous_key
-        and task.get("task_type") == TASK_TYPE
-        and task.get("title") == TITLE
+        task for task in tasks
+        if isinstance(task, dict) and task.get("idempotency_key") == previous_key
     ]
     if not matches:
+        if len(tasks) >= PREVIOUS_SLOT_LIST_LIMIT:
+            raise ScheduledProbeError("Previous-slot lookup is inconclusive: task list reached its limit")
         return {"status": "absent", "idempotency_key": previous_key}
     if len(matches) != 1:
         raise ScheduledProbeError("Previous-slot probe lookup returned multiple exact tasks")
     previous = matches[0]
+    if previous.get("task_type") != TASK_TYPE or previous.get("title") != TITLE:
+        raise ScheduledProbeError("Previous-slot key belongs to an unexpected task")
     previous_id = previous.get("id")
     if not isinstance(previous_id, str) or not re.fullmatch(r"[A-Za-z0-9_-]{1,128}", previous_id):
         raise ScheduledProbeError("Previous-slot probe returned an invalid task id")
     _payload(previous)
-    if previous.get("status") != "running":
+    previous_status = previous.get("status")
+    if previous_status in {"succeeded", "failed", "blocked", "pending"}:
         return {
-            "status": "already_dispositioned",
+            "status": "pending_unresolved" if previous_status == "pending" else "already_dispositioned",
             "idempotency_key": previous_key,
             "task_id": previous_id,
-            "task_status": previous.get("status"),
+            "task_status": previous_status,
         }
+    if previous_status != "running":
+        raise ScheduledProbeError("Previous-slot probe returned an invalid task status")
     recovery = store.recover_supervised_probe(previous_id)
     if not isinstance(recovery, dict) or recovery.get("status") not in {"pending", "failed", "blocked"}:
         status = recovery.get("status") if isinstance(recovery, dict) else "invalid"
