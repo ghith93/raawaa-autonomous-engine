@@ -190,6 +190,7 @@ class WorkflowShapeTests(unittest.TestCase):
         self.assertNotIn("schedule:", text)
         self.assertNotIn("cron:", text)
         self.assertIn("scripts/run_staging_p1_task_proof.py", text)
+        self.assertIn("Wait for the ephemeral Staging token to propagate", text)
         self.assertIn("::notice title=Staging P1 task proof outcome::", text)
         self.assertIn("actions/upload-artifact@", text)
         self.assertIn("p1-proof-output.txt", text)

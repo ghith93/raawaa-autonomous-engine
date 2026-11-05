@@ -79,6 +79,40 @@ jobs:
         run: |
           test -n "$RAAWAA_ENGINE_STAGING_API_TOKEN" || { echo "Missing ephemeral Staging token"; exit 1; }
           printf '%s' "$RAAWAA_ENGINE_STAGING_API_TOKEN" | npx --yes wrangler@4.156.1 secret put ENGINE_API_TOKEN --config wrangler.staging.toml
+      - name: Wait for the ephemeral Staging token to propagate
+        run: |
+          python - <<'PY'
+          import os
+          import time
+          from urllib.error import HTTPError, URLError
+          from urllib.request import Request, urlopen
+
+          # `wrangler secret put` rolls out a new Worker version; calls made in
+          # the first seconds can still hit a version without the secret and
+          # fail authentication. Poll the authenticated list endpoint until
+          # the token is honored (bounded), instead of racing propagation.
+          url = "https://raawaa-autonomous-engine-staging.ghith-shikhkhaled.workers.dev/v1/tasks?limit=1"
+          token = [SECURITY_DATA]"RAAWAA_ENGINE_STAGING_API_TOKEN", "")
+          deadline = time.monotonic() + 90
+          attempt = 0
+          while True:
+              attempt += 1
+              status = "request_failed"
+              try:
+                  request = Request(url, headers={"Authorization": "Bearer " + token}, method="GET")
+                  with urlopen(request, timeout=10) as response:
+                      status = str(response.status)
+              except HTTPError as error:
+                  status = str(error.code)
+              except (URLError, TimeoutError, OSError):
+                  status = "request_failed"
+              if status == "200":
+                  print(f"Staging token honored after {attempt} attempt(s).")
+                  break
+              if time.monotonic() >= deadline:
+                  raise SystemExit(f"Staging token was not honored within 90s (last status: {status}).")
+              time.sleep(5)
+          PY
       - name: Enqueue, claim, execute, and read back exactly one harmless task
         shell: bash
         env:
