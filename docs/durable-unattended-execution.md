@@ -1,10 +1,12 @@
 # Durable and unattended execution — options, decision, and what is proven
 
-**Status:** local SQLite crash recovery is proven, and a process-scoped remote
-D1 ledger/Worker route/Python adapter is implemented and locally tested on PR
-#540. It has not been deployed or verified against Staging D1; nothing was
-written to production D1. The initial model-invocation reuse proposal is rejected
-by the compatibility review below.
+**Status:** local SQLite crash recovery and local D1 lifecycle tests pass. PR
+#540 merged the process-scoped D1 ledger/Worker route/Python adapter. Its guarded
+post-merge Staging migration and Worker deployment succeeded, but the remote
+verification step failed; successful remote process-dispatch behavior remains
+unproven pending diagnosis. No Production deployment or D1 write occurred. The
+initial model-invocation reuse proposal is rejected by the compatibility review
+below.
 **Tasks:** `CHATGPT-ENGINE-RUNTIME-003` (issue #464). **Spend:** USD 0.
 **Supersedes:** nothing. **Depends on:** `docs/process-supervisor.md`.
 
@@ -17,8 +19,10 @@ separate D1-backed process ledger, but the only scheduled consumer —
 **production** control Worker and does not set `RAAWAA_ENGINE_PROCESS_SUPERVISOR`.
 That switch remains off. A GitHub-hosted runner's filesystem is destroyed when
 the job ends, so a local `process_dispatches` row could not survive across runs;
-the new adapter instead writes to the remote D1 table. This implementation has
-only been exercised against the local D1 emulation, not Staging or production.
+the new adapter instead writes to the remote D1 table. Local D1 emulation passes.
+The post-merge pipeline applied the migration and deployed the isolated Staging
+Worker, but its remote verification step failed; it did not provide a successful
+remote process-lifecycle proof. Production was not contacted.
 
 The gap is therefore precise: **does the D1-backed identity/outcome lifecycle
 remain safe across actual remote leases, worker termination, and scheduled
@@ -160,7 +164,7 @@ This is local D1 emulation evidence, not Cloudflare Staging or production D1
 concurrency. The Python adapter unit tests simulate a lost response after start
 and confirm a subsequent lease quarantines rather than starts again.
 
-### Revised implementation (local only; Staging verification pending)
+### Revised implementation (local proof; Staging verification pending)
 
 PR #540 adds `migrations/0013_task_process_dispatches.sql`,
 `worker/task-process-dispatches.js`, and `engine/remote_process_dispatch_ledger.py`.
@@ -184,23 +188,28 @@ reconciliation is intentionally unsupported: ambiguous work is non-replayable
 and operator recovery tooling remains future work. The adapter is integrated
 only for `RemoteTaskStore`; no local `db_path` is fabricated.
 `tasks.execution_mode` remains an inference label, not process execution mode.
-The guarded post-merge Staging verifier also exercises one temporary,
-lease-fenced `python_platform_probe` against isolated Staging D1, checks durable
-settlement and same-outcome replay without a second child start, then removes
-only its own fixture rows. This is a bounded Staging verification run, not a
-Cron-triggered or unattended execution proof; it has not run yet.
+The guarded post-merge Staging verifier is configured to exercise one
+lease-fenced `python_platform_probe` against isolated Staging D1, check durable
+settlement and same-outcome replay without a second child start, then remove
+only its own fixture rows. Run #41957449242 applied the migration and deployed
+the isolated Worker, but the verifier step failed. Available GitHub job metadata
+does not reveal the failing check or whether the probe reached child launch;
+remote dispatch behavior is therefore unknown, not passed. This is not a
+Cron-triggered or unattended execution proof.
 
-Local checks currently pass: 66 focused supervisor/adapter tests, 206 Worker
-tests, and the local D1 integration smoke including a real local child. Exact PR
-CI and isolated Staging verification are still pending. The scheduled supervisor
-switch remains off; no Staging deployment, production deployment, production
-D1 write, inference, or spend occurred.
+Local checks passed: 66 focused supervisor/adapter tests, 206 Worker tests,
+1,040 Python tests (7 live-sandbox skips), and the local D1 integration smoke
+including a real local child. Exact-head PR CI passed on `637923a0b92902e1cd21e7075f8111cce4c4db60` (run #41957158167). The scheduled supervisor switch remains off; no
+Production deployment, Production D1 write, provider inference, or paid spend
+occurred. Staging migration and Worker deployment did occur; remote verification
+remains blocked on failure diagnosis.
 
 ## What is still not proven
 
-1. **No isolated Staging D1 proof yet.** The adapter is implemented on PR #540
-   and tested with local D1 emulation; it has not been deployed to or exercised
-   against isolated Staging D1.
+1. **No successful isolated Staging D1 process proof yet.** Migration
+   `0013_task_process_dispatches` was applied and the isolated Staging Worker was
+   deployed in run #41957449242, but the remote verifier failed. No passing
+   process-dispatch lifecycle evidence is available yet.
 2. **No unattended schedule.** Nothing enqueues `supervised_probe`; the
    production five-minute runner switch is off. No Staging-specific scheduled
    runner has been added.
@@ -214,6 +223,9 @@ D1 write, inference, or spend occurred.
 
 ## Rollback
 
-Nothing was enabled. The crash test is a test; the fixture is test-only. Revert
-the commit and the state returns to the previous increment. No deployment, no
-migration, no secret, no permission, no production D1 write.
+The scheduled supervisor was not enabled. The Staging migration was applied
+and the isolated Worker deployed by the guarded CI pipeline; ephemeral Staging
+API and quota-admin tokens were revoked. No Production deployment, Production
+migration, or Production D1 write occurred. A code rollback alone would not undo
+the Staging migration; retain the additive table unless a separately reviewed
+Staging rollback is required.
