@@ -160,6 +160,7 @@ jobs:
           # Provider credentials are scoped to the bounded worker process only.
           # The gateway still fails closed unless repository policy, provider
           # verification, quota evidence, and the operator switch all permit use.
+          RAAWAA_ENGINE_LIVE_INFERENCE: disabled
           RAAWAA_ENGINE_API_URL: https://raawaa-autonomous-engine-control.ghith-shikhkhaled.workers.dev
           RAAWAA_ENGINE_API_TOKEN: ${{ secrets.ENGINE_API_TOKEN }}
           RAAWAA_ENGINE_QUOTA_ADMIN_TOKEN: ${{ secrets.ENGINE_QUOTA_ADMIN_TOKEN }}

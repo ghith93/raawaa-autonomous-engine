@@ -27,7 +27,15 @@ def write_fixture(root: Path, *, staging_id="231dd948-04a0-49e3-ad73-444f77d6947
         "model_policy": {"paid_fallback_enabled": False},
     }), encoding="utf-8")
     (root / ".github" / "workflows" / "task-runner.yml").write_text(
-        """      - name: Process bounded D1 task batch
+        """      - name: Refuse unverified one-shot live research
+        if: github.event_name == 'workflow_dispatch' && inputs.run_public_research_once
+        run: |
+          echo '::error::One-shot live research is disabled: account tier, provider-side zero-cost controls, and safe task isolation must be independently verified before re-enabling.'
+          exit 1
+      - name: Check out reviewed main
+        uses: actions/checkout@example
+      - name: Process bounded D1 task batch
+        env:
           RAAWAA_ENGINE_LIVE_INFERENCE: disabled
       - name: Publish bounded Task Runner status
 """,
@@ -126,6 +134,36 @@ class StagingOpsTelemetryTests(unittest.TestCase):
         self.assertEqual(summary["kill_switch"], "engaged")
         self.assertNotIn("not-a-real-token", json.dumps(params))
         self.assertNotIn("account-placeholder", json.dumps(params))
+
+    def test_current_repository_workflow_is_compatible_with_telemetry(self):
+        root = Path(__file__).resolve().parents[1]
+        _, params, summary = build_telemetry_statement(valid_env(), root, self.now)
+        self.assertEqual(json.loads(params[4])["status"], "engaged")
+        self.assertEqual(summary["kill_switch"], "engaged")
+
+    def test_gate_must_be_explicit_literal_in_batch_step(self):
+        workflow = self.root / ".github" / "workflows" / "task-runner.yml"
+        original = workflow.read_text()
+        for replacement in ("enabled", "${{ inputs.mode }}", "", "'enabled'"):
+            with self.subTest(replacement=replacement):
+                workflow.write_text(original.replace("RAAWAA_ENGINE_LIVE_INFERENCE: disabled", "RAAWAA_ENGINE_LIVE_INFERENCE: " + replacement))
+                with self.assertRaisesRegex(TelemetryPublishError, "live-inference gate"):
+                    build_telemetry_statement(valid_env(), self.root, self.now)
+        workflow.write_text(original.replace("          RAAWAA_ENGINE_LIVE_INFERENCE: disabled", "          # RAAWAA_ENGINE_LIVE_INFERENCE: disabled"))
+        with self.assertRaisesRegex(TelemetryPublishError, "live-inference gate"):
+            build_telemetry_statement(valid_env(), self.root, self.now)
+
+    def test_missing_or_weak_one_shot_guard_rejected(self):
+        workflow = self.root / ".github" / "workflows" / "task-runner.yml"
+        original = workflow.read_text()
+        for changed in (original.replace("          exit 1", "          exit 0"),
+                        original.replace("&& inputs.run_public_research_once", "&& false"),
+                        original.replace("Refuse unverified one-shot live research", "Other guard"),
+                        original.replace("        run: |\n", "        continue-on-error: true\n        run: |\n", 1)):
+            with self.subTest(changed=changed):
+                workflow.write_text(changed)
+                with self.assertRaisesRegex(TelemetryPublishError, "refusal guard"):
+                    build_telemetry_statement(valid_env(), self.root, self.now)
 
     def test_ci_failure_is_persisted_as_failure_not_success(self):
         _, params, summary = build_telemetry_statement(
