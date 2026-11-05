@@ -17,7 +17,8 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from engine.remote_task_store import RemoteTaskStore
+from engine.redaction import redact
+from engine.remote_task_store import RemoteTaskStore, RemoteTaskStoreError
 from engine.supervised_task import complete_supervised_task
 
 STAGING_API_URL = "https://raawaa-autonomous-engine-staging.ghith-shikhkhaled.workers.dev"
@@ -141,11 +142,24 @@ def run_scheduled_probe(
     }
 
 
+def _safe_failure_detail(exc: Exception) -> str | None:
+    """Expose only bounded, redacted messages from known safe domain errors."""
+    if not isinstance(exc, (ScheduledProbeError, RemoteTaskStoreError)):
+        return None
+    detail = " ".join(redact(str(exc)).split())[:320]
+    return detail or None
+
+
 def main() -> int:
     try:
         result = run_scheduled_probe()
-    except Exception as exc:  # Fail closed; never print exception messages that could contain request data.
-        print(f"Scheduled Staging process probe failed: {type(exc).__name__}", file=sys.stderr)
+    except Exception as exc:  # Fail closed; unexpected exception messages may contain request data.
+        detail = _safe_failure_detail(exc)
+        suffix = f": {detail}" if detail else ""
+        print(
+            f"Scheduled Staging process probe failed: {type(exc).__name__}{suffix}",
+            file=sys.stderr,
+        )
         return 1
     print(json.dumps(result, sort_keys=True))
     return 0
