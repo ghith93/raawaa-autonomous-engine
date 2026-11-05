@@ -184,6 +184,11 @@ reconciliation is intentionally unsupported: ambiguous work is non-replayable
 and operator recovery tooling remains future work. The adapter is integrated
 only for `RemoteTaskStore`; no local `db_path` is fabricated.
 `tasks.execution_mode` remains an inference label, not process execution mode.
+The guarded post-merge Staging verifier also exercises one temporary,
+lease-fenced `python_platform_probe` against isolated Staging D1, checks durable
+settlement and same-outcome replay without a second child start, then removes
+only its own fixture rows. This is a bounded Staging verification run, not a
+Cron-triggered or unattended execution proof; it has not run yet.
 
 Local checks currently pass: 66 focused supervisor/adapter tests, 206 Worker
 tests, and the local D1 integration smoke including a real local child. Exact PR
