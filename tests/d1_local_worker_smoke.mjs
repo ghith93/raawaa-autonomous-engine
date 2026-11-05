@@ -1582,14 +1582,14 @@ try {
     method: "POST",
     body: { update_id: 1 },
   });
-  assertStatus(webhookDisabled, 503, "Telegram webhook must remain disabled without operator secrets");
+  assertStatus(webhookDisabled, 404, "Retired Telegram webhook must not exist");
 
   console.log(
     "Local D1 integration passed: migrations, authenticated status, task enqueue/idempotency/lease fencing, " +
     "process-dispatch prepare/start/settle and ambiguity, concurrent claims, stale-lease fencing and restart no-replay, " +
     "exact daily-probe recovery with interrupted-child fault injection and no second child start, " +
     "exact one-attempt production-envelope crash recovery and concurrent-recovery race, Python remote adapter, " +
-    "monetary/quota and paper ledgers, and disabled Telegram webhook.",
+    "monetary/quota and paper ledgers, and removed Telegram webhook.",
   );
 } catch (error) {
   throw new Error(String(error?.stack || error) + "\nWrangler logs:\n" + logs);

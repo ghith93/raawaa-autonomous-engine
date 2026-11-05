@@ -51,7 +51,7 @@ h2{font-size:16px;margin:0 0 10px}.rows{display:grid;gap:8px}.item{display:flex;
 <section class="panel"><h2>Durable task-step invocations · D1</h2><div id="taskInvocations" class="rows"></div><p class="muted">Aggregate lifecycle counts only. Prompts, task IDs, request IDs and lease tokens are never exposed.</p></section>
 <section class="panel"><h2>Latest market snapshot</h2><div id="snapshot" class="muted">—</div></section>
 <section class="panel"><h2>Latest explicit research scan</h2><div id="lastScan" class="rows"></div></section>
-<section class="panel"><h2>Research source freshness</h2><div id="sourceFreshness" class="rows"></div></section><section class="panel"><h2>Latest paper event</h2><div id="latest" class="muted">—</div></section><section class="panel"><h2>Telegram control readiness</h2><div id="telegramSchema" class="rows"></div><p class="muted">Schema presence only; webhook activation still requires operator-managed secrets and Telegram configuration.</p></section><section class="panel"><h2>Worker Cron heartbeat</h2><div id="workerCron" class="rows"></div></section><section class="panel"><h2>Task Runner watchdog</h2><div id="watchdog" class="rows"></div><p class="muted">Readiness only; secret values are never returned. Dispatch history is read from the D1 audit ledger.</p></section><section class="panel"><h2>GitHub CI health · Staging snapshot</h2><div id="ci" class="rows"></div></section>
+<section class="panel"><h2>Research source freshness</h2><div id="sourceFreshness" class="rows"></div></section><section class="panel"><h2>Latest paper event</h2><div id="latest" class="muted">—</div></section><section class="panel"><h2>Worker Cron heartbeat</h2><div id="workerCron" class="rows"></div></section><section class="panel"><h2>Task Runner watchdog</h2><div id="watchdog" class="rows"></div><p class="muted">Readiness only; secret values are never returned. Dispatch history is read from the D1 audit ledger.</p></section><section class="panel"><h2>GitHub CI health · Staging snapshot</h2><div id="ci" class="rows"></div></section>
 <section class="panel"><h2>Default Task Runner inference gate</h2><div id="killSwitch" class="rows"></div><p class="muted">This reports the committed default Task Runner policy, not one-off Staging smoke workflows.</p></section>
 <section class="panel"><h2>Not yet connected to this status feed</h2><div id="gaps" class="rows"></div></section>
 <button id="refresh">Refresh</button><button class="secondary" id="disconnect">Disconnect</button>
@@ -132,7 +132,6 @@ async function load() {
   rows("sourceFreshness",freshness.sources?Object.entries(freshness.sources).map(([source,value])=>[source.toUpperCase(),value.status+" · "+value.age_seconds+"s old · "+value.item_count+" items"]):[],data.unavailable_metrics?.source_freshness||freshness.status||"Unknown");
   $("snapshot").textContent=data.latest_market_snapshot?data.latest_market_snapshot.candidate_id+" · chain "+(data.latest_market_snapshot.chain_id??"—")+" · block "+(data.latest_market_snapshot.block_number??"—")+" · "+data.latest_market_snapshot.occurred_at:"No market snapshot recorded";
   $("latest").textContent=data.latest_paper_event?data.latest_paper_event.event_type+" · "+data.latest_paper_event.candidate_id+" · "+data.latest_paper_event.occurred_at:"No paper event recorded";
-  rows("telegramSchema",[[ "Webhook receipt schema", data.telegram_webhook_schema?.status || "Unknown" ]],"Schema status unavailable");
   const cron=data.worker_cron;
   rows("workerCron",cron?[
     ["Last invocation",cron.last_seen_at],
@@ -192,7 +191,7 @@ export async function handleMobileStatus(request, env, url) {
   try {
     const [tasks, migrations, workerCron, watchdogEvents, ciHealthRow, killSwitchRow, scanRows, sourceRows] = await Promise.all([
       env.DB.prepare("SELECT status,COUNT(*) AS count FROM tasks GROUP BY status").all(),
-      env.DB.prepare("SELECT version FROM schema_migrations WHERE version IN ('0003_durable_quota_ledger','0004_paper_event_ledger','0005_telegram_webhook_receipts','0006_monetary_budget_ledger','0007_task_model_invocations','0009_task_execution_mode')").all(),
+      env.DB.prepare("SELECT version FROM schema_migrations WHERE version IN ('0003_durable_quota_ledger','0004_paper_event_ledger','0006_monetary_budget_ledger','0007_task_model_invocations','0009_task_execution_mode')").all(),
       env.DB.prepare("SELECT created_at,details_json FROM audit_log WHERE task_id IS NULL AND event='worker_cron_tick' ORDER BY created_at DESC LIMIT 1").first(),
       env.DB.prepare("SELECT event,created_at,details_json FROM audit_log WHERE task_id IS NULL AND event IN ('task_runner_dispatch_requested','task_runner_dispatch_intent') ORDER BY created_at DESC LIMIT 2").all(),
       env.DB.prepare("SELECT created_at,details_json FROM audit_log WHERE task_id IS NULL AND event='ci_health_snapshot' ORDER BY created_at DESC LIMIT 1").first(),
@@ -469,12 +468,6 @@ export async function handleMobileStatus(request, env, url) {
       provider_usage: {
         requests: (usage.results || []).reduce((sum, row) => sum + (Number(row.requests) || 0), 0),
         tokens: (usage.results || []).reduce((sum, row) => sum + (Number(row.tokens) || 0), 0),
-      },
-      telegram_webhook_schema: {
-        available: applied.has("0005_telegram_webhook_receipts"),
-        status: applied.has("0005_telegram_webhook_receipts")
-          ? "Migration 0005 applied; webhook activation remains separately gated"
-          : "Migration 0005 is not applied to this database",
       },
       worker_cron: workerCronStatus.value,
       ci_health: ciHealth,
