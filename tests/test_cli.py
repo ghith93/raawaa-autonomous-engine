@@ -38,11 +38,63 @@ class CliTests(unittest.TestCase):
             ["research-discover"],
             ["quota-status"],
             ["artemis-status"],
+            ["supervisor-operations"],
+            ["run-operation", "--operation", "git_head_revision", "--task-id", "t"],
         ]
         for command in commands:
             with self.subTest(command=command):
                 self.assertEqual(parser.parse_args(command).command, command[0])
 
+
+    def test_supervisor_operation_dry_run_starts_nothing_and_touches_no_database(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            database = Path(tmp) / "engine.db"
+            output = io.StringIO()
+            with patch.dict(os.environ, {"RAAWAA_ENGINE_DB": str(database)}, clear=False):
+                with patch("sys.argv", ["engine", "run-operation",
+                                        "--operation", "git_head_revision",
+                                        "--task-id", "cli-dry-run"]):
+                    with contextlib.redirect_stdout(output):
+                        self.assertEqual(cli.main(), 0)
+            result = json.loads(output.getvalue())
+            self.assertEqual(result["status"], "dry_run")
+            self.assertTrue(result["argv"][0].startswith("/"))
+            self.assertIn("child_environment_variables", result)
+            self.assertNotIn("HOME", json.dumps(result["argv"]))
+            self.assertFalse(database.exists(), "a dry run must not create the dispatch ledger")
+
+    def test_supervisor_operation_refuses_an_unknown_operation(self):
+        output = io.StringIO()
+        with patch("sys.argv", ["engine", "run-operation",
+                                "--operation", "run_anything",
+                                "--task-id", "cli-refused"]):
+            with contextlib.redirect_stdout(output):
+                self.assertEqual(cli.main(), 1)
+        result = json.loads(output.getvalue())
+        self.assertEqual(result["status"], "refused")
+        self.assertIn("not allowlisted", result["reason"])
+
+    def test_supervisor_operation_confirm_executes_once_and_replays(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            database = Path(tmp) / "engine.db"
+            argv = ["engine", "run-operation", "--operation", "git_head_revision",
+                    "--task-id", "cli-confirmed", "--confirm"]
+            outputs = []
+            with patch.dict(os.environ, {"RAAWAA_ENGINE_DB": str(database)}, clear=False):
+                for _ in range(2):
+                    output = io.StringIO()
+                    with patch("sys.argv", argv):
+                        with contextlib.redirect_stdout(output):
+                            self.assertEqual(cli.main(), 0)
+                    outputs.append(json.loads(output.getvalue()))
+            self.assertEqual(outputs[0]["classification"], "succeeded")
+            self.assertFalse(outputs[0]["replayed"])
+            self.assertTrue(outputs[1]["replayed"])
+            self.assertEqual(outputs[0]["dispatch_id"], outputs[1]["dispatch_id"])
+            self.assertNotIn("environment", outputs[0])
+            self.assertNotIn("env", outputs[0])
+            self.assertNotIn("ENGINE_API_TOKEN", json.dumps(outputs[0]))
+            self.assertNotIn(os.environ.get("PATH", "/usr/bin"), json.dumps(outputs[0]))
 
     def test_artemis_status_is_offline_when_no_endpoint_is_configured(self):
         output = io.StringIO()
