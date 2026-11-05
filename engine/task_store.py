@@ -91,6 +91,8 @@ class TaskStore:
                 priority: int | None = None, depends_on: list[str] | None = None) -> dict[str, Any]:
         if not task_type.strip() or not title.strip():
             raise ValueError("task_type and title are required")
+        if isinstance(idempotency_key, str) and idempotency_key.startswith("research-pilot:"):
+            raise ValueError("reserved task idempotency namespace")
         if max_attempts < 1 or max_attempts > 5:
             raise ValueError("max_attempts must be between 1 and 5")
         priority_supplied = priority is not None
@@ -155,12 +157,12 @@ class TaskStore:
                 SELECT child.id FROM tasks child
                 JOIN task_dependencies d ON d.task_id=child.id
                 JOIN tasks dependency ON dependency.id=d.dependency_task_id
-                WHERE child.status='pending' AND dependency.status IN ('failed','blocked')
+                WHERE child.status='pending' AND substr(child.idempotency_key,1,15) <> 'research-pilot:' AND dependency.status IN ('failed','blocked')
                 UNION
                 SELECT child.id FROM tasks child
                 JOIN task_dependencies d ON d.task_id=child.id
                 JOIN blocked b ON b.task_id=d.dependency_task_id
-                WHERE child.status='pending'
+                WHERE child.status='pending' AND substr(child.idempotency_key,1,15) <> 'research-pilot:'
             )
             SELECT task_id FROM blocked ORDER BY task_id LIMIT 50""").fetchall()
             for blocked_row in blocked:
@@ -178,6 +180,7 @@ class TaskStore:
                     })
             row = db.execute("""SELECT task.* FROM tasks task
                 WHERE task.status='pending'
+                AND substr(task.idempotency_key,1,15) <> 'research-pilot:'
                 AND NOT EXISTS (
                     SELECT 1 FROM task_dependencies d
                     JOIN tasks dependency ON dependency.id=d.dependency_task_id

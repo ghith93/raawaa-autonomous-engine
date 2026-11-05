@@ -6,6 +6,8 @@ It intentionally offers no provider dispatch and never selects a generic task.
 from __future__ import annotations
 
 import json
+import sqlite3
+from contextlib import contextmanager
 import re
 import uuid
 from datetime import datetime, timedelta, timezone
@@ -20,6 +22,21 @@ class PilotContractError(ValueError):
     """Sanitized contract violation: never include payloads or credentials."""
 
 
+@contextmanager
+def _transaction(store):
+    db = None
+    try:
+        db = store._connect()
+        with db:
+            db.execute("BEGIN IMMEDIATE")
+            yield db
+    except sqlite3.Error:
+        raise PilotContractError("local storage unavailable") from None
+    finally:
+        if db is not None:
+            db.close()
+
+
 def _validate(key, title, payload, policy):
     if not isinstance(key, str) or not _KEY.fullmatch(key):
         raise PilotContractError("invalid pilot idempotency key")
@@ -32,14 +49,20 @@ def _validate(key, title, payload, policy):
         raise PilotContractError("public research payload rejected") from None
 
 
+def _valid_lifecycle(row):
+    if row["status"] == "pending":
+        return row["execution_mode"] == "not_started" and row["attempts"] == 0
+    return (row["status"] in {"running", "succeeded", "failed", "blocked"}
+            and row["execution_mode"] == "dry_run" and row["attempts"] == 1)
+
+
 def admit_local(store: TaskStore, *, key: str, title: str, payload: dict, policy: dict):
     """Atomically create/replay one local task bound to all supplied task fields."""
     if type(store) is not TaskStore:
         raise PilotContractError("only local SQLite TaskStore is supported")
     encoded = _validate(key, title, payload, policy)
     now = datetime.now(timezone.utc).isoformat()
-    with store._connect() as db:
-        db.execute("BEGIN IMMEDIATE")
+    with _transaction(store) as db:
         row = db.execute("SELECT * FROM tasks WHERE idempotency_key=?", (key,)).fetchone()
         if row is not None:
             try:
@@ -50,6 +73,7 @@ def admit_local(store: TaskStore, *, key: str, title: str, payload: dict, policy
             if (row["task_type"] != "research_brief" or row["title"] != title
                     or old_payload != encoded or row["max_attempts"] != 1
                     or row["priority"] != 50 or row["dependencies_json"] != "[]"
+                    or not _valid_lifecycle(row)
                     or db.execute("SELECT 1 FROM task_dependencies WHERE task_id=? LIMIT 1", (row["id"],)).fetchone()):
                 raise PilotContractError("pilot identity conflict")
             return row["id"], False
@@ -70,8 +94,7 @@ def claim_local(store: TaskStore, *, task_id: str, key: str, title: str,
     encoded = _validate(key, title, payload, policy)
     if not isinstance(task_id, str) or not task_id or type(lease_seconds) is not int or not 1 <= lease_seconds <= 900:
         raise PilotContractError("invalid pilot claim")
-    with store._connect() as db:
-        db.execute("BEGIN IMMEDIATE")
+    with _transaction(store) as db:
         row = db.execute("SELECT * FROM tasks WHERE id=? AND idempotency_key=?", (task_id, key)).fetchone()
         if row is None:
             return None
@@ -82,10 +105,13 @@ def claim_local(store: TaskStore, *, task_id: str, key: str, title: str,
             raise PilotContractError("pilot identity conflict") from None
         if (row["task_type"] != "research_brief" or row["title"] != title or old_payload != encoded
                 or row["max_attempts"] != 1 or row["priority"] != 50 or row["dependencies_json"] != "[]"
+                or not _valid_lifecycle(row)
                 or db.execute("SELECT 1 FROM task_dependencies WHERE task_id=? LIMIT 1", (task_id,)).fetchone()):
             raise PilotContractError("pilot identity conflict")
         if row["status"] != "pending" or row["attempts"] != 0:
             return None
+        if row["execution_mode"] != "not_started":
+            raise PilotContractError("pilot identity conflict")
         now = datetime.now(timezone.utc)
         token = str(uuid.uuid4())
         expiry = (now + timedelta(seconds=lease_seconds)).isoformat()

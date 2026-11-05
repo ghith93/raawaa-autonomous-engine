@@ -9,9 +9,11 @@ exact task ID and matching identity, and an expired lease is fenced by TaskStore
 Tests use threads and separate SQLite connections; they are **not remote D1
 concurrency evidence**.
 
-**Important limitation:** the existing generic `claim_next` can still claim a
-pilot-shaped row; the prototype does not reserve the global queue or isolate a
-live runner from other consumers. It is not safe to connect to a shared queue as
+**Important limitation:** the local generic `TaskStore.claim_next` now excludes
+`research-pilot:` identities, and the generic local enqueue reserves that
+namespace; this is verified by an actual SQLite generic-claim test. The remote
+D1 generic claim still does not exclude those rows. The prototype does not reserve
+the global queue or isolate a live runner from other consumers. It is not safe to connect to a shared queue as
 is. A real implementation needs atomic admission/ownership and targeted claims
 at the D1 boundary, interoperation with all producers/consumers, documented D1
 transaction semantics, fault tests and staging evidence. No evidence freshness,

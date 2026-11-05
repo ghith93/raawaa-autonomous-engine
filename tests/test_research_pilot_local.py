@@ -1,6 +1,8 @@
 """Local SQLite concurrency tests only; no remote D1 or model inference."""
 from concurrent.futures import ThreadPoolExecutor
 import json
+import sqlite3
+from unittest.mock import patch
 from pathlib import Path
 import tempfile
 import unittest
@@ -44,6 +46,80 @@ class LocalPilotTests(unittest.TestCase):
         self.assertEqual(rows[task_id]['execution_mode'], 'dry_run')
         self.assertEqual(rows[task_id]['attempts'], 1)
         self.assertIsNone(claim_local(self.store, task_id=unrelated['id'], **ARGS))
+
+    def test_actual_generic_claim_quarantines_local_pilot(self):
+        task_id, _ = admit_local(self.store, **ARGS)
+        ordinary = self.store.enqueue('system_audit', 'Ordinary')
+        claimed = self.store.claim_next(execution_mode='dry_run')
+        self.assertEqual(claimed['id'], ordinary['id'])
+        self.assertIsNone(self.store.claim_next(execution_mode='dry_run'))
+        self.assertIsNotNone(claim_local(self.store, task_id=task_id, **ARGS))
+        with self.assertRaisesRegex(ValueError, 'reserved'):
+            self.store.enqueue('system_audit', 'Bypass', idempotency_key='research-pilot:other')
+
+    def test_generic_dependency_blocking_does_not_mutate_quarantined_row(self):
+        dependency = self.store.enqueue('system_audit', 'Failed dependency')
+        task_id, _ = admit_local(self.store, **ARGS)
+        with self.store._connect() as db:
+            db.execute("UPDATE tasks SET status='failed' WHERE id=?", (dependency['id'],))
+            db.execute('INSERT INTO task_dependencies(task_id, dependency_task_id) VALUES (?,?)', (task_id, dependency['id']))
+        self.assertIsNone(self.store.claim_next(execution_mode='dry_run'))
+        tasks = {task['id']: task for task in self.store.list_tasks()}
+        self.assertEqual(tasks[task_id]['status'], 'pending')
+        with self.assertRaisesRegex(PilotContractError, 'identity conflict'):
+            claim_local(self.store, task_id=task_id, **ARGS)
+
+    def test_terminal_replay_is_never_fresh(self):
+        task_id, _ = admit_local(self.store, **ARGS)
+        lease = claim_local(self.store, task_id=task_id, **ARGS)
+        self.assertEqual(admit_local(self.store, **ARGS), (task_id, False))
+        self.store.finish(task_id, 'blocked', lease_token=lease['lease_token'])
+        self.assertEqual(admit_local(self.store, **ARGS), (task_id, False))
+        self.assertIsNone(claim_local(self.store, task_id=task_id, **ARGS))
+
+    def test_changed_persisted_identity_and_malformed_state_fail_closed(self):
+        for column, value in [('task_type', 'system_audit'), ('title', 'changed'),
+                              ('payload_json', '{'), ('max_attempts', 2), ('priority', 99),
+                              ('dependencies_json', 'null')]:
+            with self.subTest(column=column):
+                key = 'research-pilot:' + column.replace('_', '-')
+                args = dict(ARGS, key=key)
+                task_id, _ = admit_local(self.store, **args)
+                with self.store._connect() as db:
+                    db.execute('UPDATE tasks SET ' + column + '=? WHERE id=?', (value, task_id))
+                with self.assertRaisesRegex(PilotContractError, 'identity conflict'):
+                    admit_local(self.store, **args)
+                with self.assertRaisesRegex(PilotContractError, 'identity conflict'):
+                    claim_local(self.store, task_id=task_id, **args)
+        task_id, _ = admit_local(self.store, **dict(ARGS, key='research-pilot:bad-mode'))
+        with self.store._connect() as db:
+            db.execute("UPDATE tasks SET execution_mode='live_inference' WHERE id=?", (task_id,))
+        with self.assertRaisesRegex(PilotContractError, 'identity conflict'):
+            claim_local(self.store, task_id=task_id, **dict(ARGS, key='research-pilot:bad-mode'))
+
+    def test_audit_failure_rolls_back_admission_and_claim(self):
+        with patch.object(self.store, '_audit', side_effect=sqlite3.IntegrityError('sensitive error')):
+            with self.assertRaisesRegex(PilotContractError, '^local storage unavailable$'):
+                admit_local(self.store, **ARGS)
+        self.assertEqual(self.store.list_tasks(), [])
+        task_id, _ = admit_local(self.store, **ARGS)
+        with patch.object(self.store, '_audit', side_effect=sqlite3.IntegrityError('sensitive error')):
+            with self.assertRaisesRegex(PilotContractError, '^local storage unavailable$'):
+                claim_local(self.store, task_id=task_id, **ARGS)
+        self.assertEqual(self.store.list_tasks()[0]['status'], 'pending')
+        self.assertIsNotNone(claim_local(self.store, task_id=task_id, **ARGS))
+
+    def test_busy_database_is_sanitized_and_writes_nothing(self):
+        with self.store._connect() as held:
+            held.execute('BEGIN IMMEDIATE')
+            def short_connect():
+                db = sqlite3.connect(self.store.db_path, timeout=0.01)
+                db.row_factory = sqlite3.Row
+                return db
+            with patch.object(self.store, '_connect', side_effect=short_connect):
+                with self.assertRaisesRegex(PilotContractError, '^local storage unavailable$'):
+                    admit_local(self.store, **ARGS)
+        self.assertEqual(self.store.list_tasks(), [])
 
     def test_stale_lease_cannot_finish_and_recovery_never_requeues(self):
         task_id, _ = admit_local(self.store, **ARGS)
