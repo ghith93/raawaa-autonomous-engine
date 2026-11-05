@@ -109,10 +109,10 @@ No claim that a free allowance alone proves the account-wide $15 hard ceiling.
 ## Mutation ownership gaps after generic recovery quarantine
 
 Local `TaskStore.heartbeat`, `finish`, and `retry_or_fail` and Worker
-`/v1/tasks/{id}/heartbeat`, `/finish`, and `/retry` use a lease but do not
-exclude reserved keys. The Worker Codespace equivalents remain release-gated;
-`/v1/tasks/{id}/invocations` and `worker/task-invocations.js` also require review
-of pilot identity, lease and ownership. The generic local pilot currently uses
+`/v1/tasks/{id}/heartbeat`, `/finish`, `/retry` and `/invocations` are now
+namespace-guarded in this draft, including SQL predicates, and tested only on
+local Wrangler/D1. The Worker Codespace equivalents remain release-gated.
+Local `TaskStore` heartbeat/finish/retry still rely on lease ownership alone. The generic local pilot currently uses
 `TaskStore.finish` with its own lease, so rejecting every such mutation requires
 a separately designed targeted completion API; knowledge of a lease token alone
 is not evidence that cross-executor ownership is enforced. Workflow dispatch,
@@ -120,3 +120,14 @@ GitHub ingestion, watchdog and any direct SQL producer/mutator must be audited.
 No specialized stale recovery/reconciliation exists: expired pilot rows stay
 quarantined, with no automatic requeue or inference retry. This is not a complete
 shared-queue isolation proof.
+
+### Owner plan confirmation
+
+On 2026-11-05 the owner reported the Workers dashboard plan as **Free**. This
+is operator attestation, not a direct machine readback; account identity, exact
+AI billing route, remaining allowance, and other charges remain unverified.
+Cloudflare [lists Gemma 4 26B as Free-plan eligible](https://developers.cloudflare.com/changelog/post/2026-07-28-models-require-workers-paid/),
+and the account catalog GET showed its slug, not inference entitlement. Use
+standard Workers AI billing only, never AI Gateway unified billing or prepaid
+credits; neither an AI binding nor an actual route is yet implemented/enabled.
+Pre-dispatch gates and D1 isolation remain unresolved, regardless of plan.

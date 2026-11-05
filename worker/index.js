@@ -512,9 +512,12 @@ export default {
       const nowIso = new Date().toISOString();
       try {
         const current = await env.DB.prepare(
-          "SELECT id,status,attempts,max_attempts,task_type,execution_mode,lease_token,lease_expires_at FROM tasks WHERE id=?"
+          "SELECT id,status,attempts,max_attempts,task_type,execution_mode,lease_token,lease_expires_at,idempotency_key FROM tasks WHERE id=?"
         ).bind(taskId).first();
         if (!current) return json({ error: "task_not_found" }, 404);
+        if (typeof current.idempotency_key === "string" && current.idempotency_key.startsWith("research-pilot:")) {
+          return json({ error: "reserved_task" }, 403);
+        }
         if (CODESPACE_TASK_TYPES.has(current.task_type) !== codespaceAction) {
           return json({ error: "executor_mismatch" }, 403);
         }
@@ -527,7 +530,7 @@ export default {
           const seconds = 900;
           const expires = new Date(Date.now() + seconds * 1000).toISOString();
           const result = await env.DB.prepare(
-            "UPDATE tasks SET updated_at=?,lease_expires_at=? WHERE id=? AND status='running' AND lease_token=? AND lease_expires_at>=?"
+            "UPDATE tasks SET updated_at=?,lease_expires_at=? WHERE id=? AND status='running' AND substr(idempotency_key,1,15) <> 'research-pilot:' AND lease_token=? AND lease_expires_at>=?"
           ).bind(nowIso, expires, taskId, leaseToken, nowIso).run();
           if (!result.meta?.changes) return json({ error: "lease_lost" }, 409);
           await env.DB.prepare(
@@ -576,7 +579,7 @@ export default {
           }
         }
         const update = await env.DB.prepare(
-          "UPDATE tasks SET status=?,result_json=?,error=?,execution_mode=?,updated_at=?,lease_token=NULL,lease_expires_at=NULL WHERE id=? AND status='running' AND lease_token=? AND lease_expires_at>=?"
+          "UPDATE tasks SET status=?,result_json=?,error=?,execution_mode=?,updated_at=?,lease_token=NULL,lease_expires_at=NULL WHERE id=? AND status='running' AND substr(idempotency_key,1,15) <> 'research-pilot:' AND lease_token=? AND lease_expires_at>=?"
         ).bind(status, resultJson, error, executionMode, nowIso, taskId, leaseToken, nowIso).run();
         if (!update.meta?.changes) return json({ error: "lease_lost" }, 409);
         await env.DB.prepare(

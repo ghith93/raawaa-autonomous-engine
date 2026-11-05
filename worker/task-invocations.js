@@ -17,7 +17,7 @@ async function readBody(request) {
 }
 async function leaseOwned(db, taskId, leaseToken, now) {
   const task = await db.prepare(
-    "SELECT id,status,lease_token,lease_expires_at FROM tasks WHERE id=?"
+    "SELECT id,status,lease_token,lease_expires_at FROM tasks WHERE id=? AND substr(idempotency_key,1,15) <> 'research-pilot:'"
   ).bind(taskId).first();
   return Boolean(task && task.status === "running" &&
     task.lease_token === leaseToken && task.lease_expires_at && task.lease_expires_at >= now);
@@ -50,7 +50,7 @@ export async function handleTaskInvocation(request, env, url) {
       const requestId = crypto.randomUUID();
       await env.DB.prepare(
         "INSERT OR IGNORE INTO task_model_invocations(invocation_id,task_id,step_key,task_kind,request_id,status,created_at,updated_at) " +
-        "SELECT ?,?,?,?,?, 'prepared',?,? WHERE EXISTS (SELECT 1 FROM tasks WHERE id=? AND status='running' AND lease_token=? AND lease_expires_at>=?)"
+        "SELECT ?,?,?,?,?, 'prepared',?,? WHERE EXISTS (SELECT 1 FROM tasks WHERE id=? AND status='running' AND substr(idempotency_key,1,15) <> 'research-pilot:' AND lease_token=? AND lease_expires_at>=?)"
       ).bind(invocationId,taskId,input.step_key.trim(),input.task_kind.trim(),requestId,now,now,taskId,leaseToken,now).run();
       const row = await env.DB.prepare(
         "SELECT invocation_id,task_id,step_key,task_kind,request_id,status,last_route_id FROM task_model_invocations WHERE task_id=? AND step_key=?"
@@ -73,13 +73,13 @@ export async function handleTaskInvocation(request, env, url) {
         env.DB.prepare(
           "INSERT INTO task_model_invocation_attempts(invocation_id,route_id,status,created_at,updated_at) " +
           "SELECT ?,?,'in_flight',?,? WHERE EXISTS (SELECT 1 FROM task_model_invocations WHERE invocation_id=? AND task_id=? AND status='prepared') " +
-          "AND EXISTS (SELECT 1 FROM tasks WHERE id=? AND status='running' AND lease_token=? AND lease_expires_at>=?)"
+          "AND EXISTS (SELECT 1 FROM tasks WHERE id=? AND status='running' AND substr(idempotency_key,1,15) <> 'research-pilot:' AND lease_token=? AND lease_expires_at>=?)"
         ).bind(invocation.invocation_id,input.route_id,now,now,invocation.invocation_id,taskId,taskId,leaseToken,now),
         env.DB.prepare(
           "UPDATE task_model_invocations SET status='in_flight',last_route_id=?,started_at=?,updated_at=? " +
           "WHERE invocation_id=? AND task_id=? AND status='prepared' " +
           "AND EXISTS (SELECT 1 FROM task_model_invocation_attempts WHERE invocation_id=? AND route_id=? AND status='in_flight' AND created_at=?) " +
-          "AND EXISTS (SELECT 1 FROM tasks WHERE id=? AND status='running' AND lease_token=? AND lease_expires_at>=?)"
+          "AND EXISTS (SELECT 1 FROM tasks WHERE id=? AND status='running' AND substr(idempotency_key,1,15) <> 'research-pilot:' AND lease_token=? AND lease_expires_at>=?)"
         ).bind(input.route_id,now,now,invocation.invocation_id,taskId,invocation.invocation_id,input.route_id,now,taskId,leaseToken,now),
       ]);
       if (batch?.[0]?.meta?.changes !== 1 || batch?.[1]?.meta?.changes !== 1)
@@ -103,13 +103,13 @@ export async function handleTaskInvocation(request, env, url) {
         env.DB.prepare(
           "UPDATE task_model_invocation_attempts SET status='rejected',rejection_code=?,updated_at=? " +
           "WHERE invocation_id=? AND route_id=? AND status='in_flight' " +
-          "AND EXISTS (SELECT 1 FROM tasks WHERE id=? AND status='running' AND lease_token=? AND lease_expires_at>=?)"
+          "AND EXISTS (SELECT 1 FROM tasks WHERE id=? AND status='running' AND substr(idempotency_key,1,15) <> 'research-pilot:' AND lease_token=? AND lease_expires_at>=?)"
         ).bind(input.rejection_code,now,invocation.invocation_id,input.route_id,taskId,leaseToken,now),
         env.DB.prepare(
           "UPDATE task_model_invocations SET status='prepared',last_route_id=NULL,updated_at=? " +
           "WHERE invocation_id=? AND status='in_flight' AND last_route_id=? " +
           "AND EXISTS (SELECT 1 FROM task_model_invocation_attempts WHERE invocation_id=? AND route_id=? AND status='rejected') " +
-          "AND EXISTS (SELECT 1 FROM tasks WHERE id=? AND status='running' AND lease_token=? AND lease_expires_at>=?)"
+          "AND EXISTS (SELECT 1 FROM tasks WHERE id=? AND status='running' AND substr(idempotency_key,1,15) <> 'research-pilot:' AND lease_token=? AND lease_expires_at>=?)"
         ).bind(now,invocation.invocation_id,input.route_id,invocation.invocation_id,input.route_id,taskId,leaseToken,now),
       ]);
       if (batch?.[0]?.meta?.changes !== 1 || batch?.[1]?.meta?.changes !== 1)
@@ -130,12 +130,12 @@ export async function handleTaskInvocation(request, env, url) {
       const batch = await env.DB.batch([
         env.DB.prepare(
           "UPDATE task_model_invocation_attempts SET status=?,updated_at=? WHERE invocation_id=? AND route_id=? AND status='in_flight' " +
-          "AND EXISTS (SELECT 1 FROM tasks WHERE id=? AND status='running' AND lease_token=? AND lease_expires_at>=?)"
+          "AND EXISTS (SELECT 1 FROM tasks WHERE id=? AND status='running' AND substr(idempotency_key,1,15) <> 'research-pilot:' AND lease_token=? AND lease_expires_at>=?)"
         ).bind(terminal,now,invocation.invocation_id,invocation.last_route_id,taskId,leaseToken,now),
         env.DB.prepare(
           "UPDATE task_model_invocations SET status=?,settled_at=?,updated_at=? WHERE invocation_id=? AND task_id=? AND status='in_flight' " +
           "AND EXISTS (SELECT 1 FROM task_model_invocation_attempts WHERE invocation_id=? AND route_id=? AND status=?) " +
-          "AND EXISTS (SELECT 1 FROM tasks WHERE id=? AND status='running' AND lease_token=? AND lease_expires_at>=?)"
+          "AND EXISTS (SELECT 1 FROM tasks WHERE id=? AND status='running' AND substr(idempotency_key,1,15) <> 'research-pilot:' AND lease_token=? AND lease_expires_at>=?)"
         ).bind(terminal,terminal === "settled" ? now : null,now,invocation.invocation_id,taskId,invocation.invocation_id,invocation.last_route_id,terminal,taskId,leaseToken,now),
       ]);
       if (batch?.[0]?.meta?.changes !== 1 || batch?.[1]?.meta?.changes !== 1)

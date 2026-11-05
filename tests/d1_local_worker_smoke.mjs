@@ -991,6 +991,28 @@ try {
       AND (SELECT count(*) FROM audit_log WHERE task_id='ordinary-local-expired' AND event='task_lease_recovered')=1
       THEN 1 ELSE json('invalid-assertion') END;
   `);
+  executeLocalSql(`
+    INSERT INTO tasks(id,idempotency_key,task_type,title,payload_json,status,attempts,max_attempts,created_at,updated_at,lease_token,lease_expires_at)
+      VALUES ('pilot-local-owned','research-pilot:owned','research_brief','pilot owned','{}','running',1,1,'2000-01-01','2000-01-01','pilot-valid-token','2099-01-01T00:00:00.000Z');
+  `);
+  for (const action of ["heartbeat", "finish", "retry"]) {
+    const attempt = await api(`/v1/tasks/pilot-local-owned/${action}`, {
+      method: "POST", body: { lease_token: "pilot-valid-token", status: "succeeded" },
+    });
+    assertStatus(attempt, 403, `generic ${action} rejects a pilot even with a valid lease`);
+    assert.equal(attempt.payload.error, "reserved_task");
+  }
+  const pilotInvocation = await api("/v1/tasks/pilot-local-owned/invocations", {
+    method: "POST", body: { action: "prepare", lease_token: "pilot-valid-token", step_key: "test", task_kind: "research" },
+  });
+  assertStatus(pilotInvocation, 409, "generic invocation rejects pilot lease");
+  executeLocalSql(`
+    SELECT CASE WHEN
+      (SELECT count(*) FROM tasks WHERE id='pilot-local-owned' AND status='running' AND attempts=1 AND lease_token='pilot-valid-token' AND lease_expires_at='2099-01-01T00:00:00.000Z')=1
+      AND (SELECT count(*) FROM audit_log WHERE task_id='pilot-local-owned')=0
+      AND (SELECT count(*) FROM task_model_invocations WHERE task_id='pilot-local-owned')=0
+      THEN 1 ELSE json('invalid-assertion') END;
+  `);
   const disabledCodespacePilot = await api("/v1/codespace/tasks/claim", {
     method: "POST", token: CODESPACE_TOKEN, body: { execution_mode: "dry_run" },
   });
