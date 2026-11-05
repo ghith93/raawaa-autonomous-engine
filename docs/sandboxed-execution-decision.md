@@ -21,6 +21,11 @@ inconclusive and the proof fails. Sensitive paths are reported as `missing`,
 `inaccessible`, or `present` using `lstat`, rather than treating a permission
 denial as absence. Missing or inaccessible paths are not evidence that no host
 credential mounts exist elsewhere; that broader property remains unproven.
+The root-filesystem probe requires read-only filesystem flags on `/` and
+`/var/tmp`, a normally world-writable/traversable `/var/tmp` directory, and an
+actual `EROFS` from an exclusive create attempt. `EACCES`, a missing directory,
+or an absent flag is inconclusive and fails; this is not proof that other
+mounts are immutable.
 
 **Release posture unchanged:** #427 was already merged but its Codespaces
 executor release gate remains false. #440 remains open; this proof still does

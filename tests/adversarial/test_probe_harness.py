@@ -16,6 +16,7 @@ The first item is the false-test this file exists for: ``open()`` failing for an
 reason produces ``denied:<Error>``, so a wrong canary path used to satisfy the
 "file outside the mount is unreadable" assertion while proving nothing.
 """
+import errno
 import importlib
 import json
 from unittest.mock import MagicMock, patch
@@ -54,7 +55,10 @@ def _good_output(**overrides):
         "host_canary": "denied:FileNotFoundError",
         "secret_marker_present": False,
         "network": "denied:OSError",
-        "root_write": "denied:OSError",
+        "root_readonly": True,
+        "var_tmp_readonly": True,
+        "var_tmp_world_writable": True,
+        "root_write_errno": errno.EROFS,
         "path:/var/run/docker.sock": "missing",
         "path:/root/.ssh": "inaccessible",
     }
@@ -120,6 +124,21 @@ class FalseTestGuardTest(unittest.TestCase):
         with patch.object(probe.socket, "create_connection", side_effect=TimeoutError):
             with self.assertRaisesRegex(AssertionError, "positive control failed"):
                 probe._require_host_network_control()
+
+    def test_root_readonly_proof_rejects_permissions_or_missing_observations(self):
+        probe._assert_root_read_only(_good_output())
+        for key, value in (("root_readonly", False), ("var_tmp_readonly", False),
+                           ("var_tmp_world_writable", False), ("root_write_errno", errno.EACCES),
+                           ("root_write_errno", errno.ENOENT), ("root_write_errno", 0),
+                           ("root_write_errno", None), ("root_write_errno", True)):
+            with self.subTest(key=key, value=value):
+                with self.assertRaisesRegex(AssertionError, "inconclusive"):
+                    probe._assert_root_read_only(_good_output(**{key: value}))
+        for key in ("root_readonly", "var_tmp_readonly", "var_tmp_world_writable", "root_write_errno"):
+            broken = _good_output()
+            del broken[key]
+            with self.assertRaises(AssertionError):
+                probe._assert_probe_usable(broken)
 
     def test_a_probe_that_exits_non_zero_produces_no_output(self):
         completed = _completed(stdout='{"control": "raawaa-autonomous-engine"}', returncode=1)
@@ -216,8 +235,14 @@ class ProbeProgramTest(unittest.TestCase):
         # Only a synthetic marker is supplied, never real environment contents.
         program = probe._probe_program("/no-such-host-canary", control_path=str(Path(__file__).resolve()))
         wrapper = """
-import builtins, socket
+import builtins, errno, os, socket
 _original_open = builtins.open
+_original_os_open = os.open
+def safe_os_open(path, *args, **kwargs):
+    if isinstance(path, str) and path.startswith('/var/tmp/raawaa-rootfs-proof-'):
+        raise OSError(errno.EROFS, 'disabled by offline test')
+    return _original_os_open(path, *args, **kwargs)
+os.open = safe_os_open
 def safe_open(path, *args, **kwargs):
     if path == '/escaped':
         raise OSError('disabled by offline test')
@@ -243,11 +268,55 @@ exec(PROGRAM)
                 else:
                     probe._assert_secret_not_in_environ(output)
 
+    def test_generated_probe_distinguishes_erofs_from_permission_denial(self):
+        program = probe._probe_program("/no-such-host-canary", control_path=str(Path(__file__).resolve().parents[2] / "README.md"))
+        wrapper_template = """
+import errno, os, socket, stat, types
+_original_lstat = os.lstat
+_original_open = os.open
+def fake_lstat(path, *args, **kwargs):
+    if path == '/var/tmp':
+        return types.SimpleNamespace(st_mode=stat.S_IFDIR | 0o1777)
+    return _original_lstat(path, *args, **kwargs)
+def fake_statvfs(path):
+    return types.SimpleNamespace(f_flag=os.ST_RDONLY)
+def fake_open(path, *args, **kwargs):
+    if isinstance(path, str) and path.startswith('/var/tmp/raawaa-rootfs-proof-'):
+        raise OSError(WRITE_ERRNO, 'synthetic failure')
+    return _original_open(path, *args, **kwargs)
+def no_network(*args, **kwargs):
+    raise OSError('disabled by offline test')
+os.lstat = fake_lstat
+os.statvfs = fake_statvfs
+os.open = fake_open
+socket.create_connection = no_network
+exec(PROGRAM)
+"""
+        for code in (errno.EROFS, errno.EACCES):
+            with self.subTest(errno=code):
+                wrapper = wrapper_template.replace("WRITE_ERRNO", str(code)).replace("PROGRAM", repr(program))
+                completed = subprocess.run([sys.executable, "-I", "-c", wrapper], env={},
+                                           capture_output=True, text=True, timeout=10, check=True)
+                output = json.loads(completed.stdout)
+                probe._assert_probe_usable(output)
+                self.assertEqual(output["root_write_errno"], code)
+                if code == errno.EROFS:
+                    probe._assert_root_read_only(output)
+                else:
+                    with self.assertRaisesRegex(AssertionError, "inconclusive"):
+                        probe._assert_root_read_only(output)
+
     def test_generated_probe_distinguishes_permission_denied_from_missing(self):
         program = probe._probe_program("/no-such-host-canary", control_path=str(Path(__file__).resolve()))
         wrapper = """
-import builtins, os, socket
+import builtins, errno, os, socket
 _original_open = builtins.open
+_original_os_open = os.open
+def safe_os_open(path, *args, **kwargs):
+    if isinstance(path, str) and path.startswith('/var/tmp/raawaa-rootfs-proof-'):
+        raise OSError(errno.EROFS, 'disabled by offline test')
+    return _original_os_open(path, *args, **kwargs)
+os.open = safe_os_open
 _original_lstat = os.lstat
 def safe_open(path, *args, **kwargs):
     if path == '/escaped':

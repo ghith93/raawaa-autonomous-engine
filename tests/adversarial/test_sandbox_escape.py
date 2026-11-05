@@ -59,7 +59,10 @@ REQUIRED_KEYS = (
     "host_canary",
     "secret_marker_present",
     "network",
-    "root_write",
+    "root_readonly",
+    "var_tmp_readonly",
+    "var_tmp_world_writable",
+    "root_write_errno",
     "path:/var/run/docker.sock",
     "path:/root/.ssh",
 )
@@ -68,7 +71,7 @@ REQUIRED_KEYS = (
 # is reported as an error string, so the assertion below can tell "denied" from
 # "never ran".
 PROBE_TEMPLATE = r"""
-import json, os, socket
+import json, os, socket, stat
 
 
 def read(path):
@@ -107,12 +110,31 @@ try:
     result["network"] = "connected"
 except OSError as exc:
     result["network"] = "denied:" + type(exc).__name__
+# /var/tmp is not one of the contract's writable tmpfs mounts. Test a
+# directory writable by an unprivileged user if the root mount were writable;
+# permission-denied or a missing path must never stand in for read-only.
 try:
-    with open("/escaped", "w") as handle:
-        handle.write("x")
-    result["root_write"] = "succeeded"
-except OSError as exc:
-    result["root_write"] = "denied:" + type(exc).__name__
+    result["root_readonly"] = bool(os.statvfs("/").f_flag & os.ST_RDONLY)
+    result["var_tmp_readonly"] = bool(os.statvfs("/var/tmp").f_flag & os.ST_RDONLY)
+    mode = os.lstat("/var/tmp").st_mode
+    result["var_tmp_world_writable"] = stat.S_ISDIR(mode) and mode & 0o003 == 0o003
+    target = "/var/tmp/raawaa-rootfs-proof-" + str(os.getpid())
+    try:
+        fd = os.open(target, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+    except OSError as exc:
+        result["root_write_errno"] = exc.errno
+    else:
+        os.close(fd)
+        try:
+            os.unlink(target)
+        finally:
+            result["root_write_errno"] = 0
+except OSError:
+    # Missing or inaccessible prerequisites make the result inconclusive.
+    result.setdefault("root_readonly", None)
+    result.setdefault("var_tmp_readonly", None)
+    result.setdefault("var_tmp_world_writable", None)
+    result.setdefault("root_write_errno", None)
 print(json.dumps(result))
 """
 
@@ -218,8 +240,11 @@ def _assert_probe_usable(output):
     missing = [key for key in REQUIRED_KEYS if key not in output]
     if missing:
         raise AssertionError(f"probe output is missing {missing}; a missing key must not read as containment")
-    if type(output["secret_marker_present"]) is not bool:
-        raise AssertionError("probe output secret_marker_present must be a boolean")
+    for key in ("secret_marker_present", "root_readonly", "var_tmp_readonly", "var_tmp_world_writable"):
+        if type(output[key]) is not bool:
+            raise AssertionError(f"probe output {key} must be a boolean")
+    if type(output["root_write_errno"]) is not int:
+        raise AssertionError("probe output root_write_errno must be an integer")
     for key in ("path:/var/run/docker.sock", "path:/root/.ssh"):
         if output[key] not in ("present", "missing", "inaccessible"):
             raise AssertionError(f"probe output {key} is not a recognised path state")
@@ -249,6 +274,18 @@ def _assert_paths_not_accessible(output):
         state = output.get("path:" + path)
         if state not in ("missing", "inaccessible"):
             raise AssertionError(f"sensitive path is present or unobservable: {path} ({state!r})")
+
+
+def _assert_root_read_only(output):
+    """Require EROFS on a normally writable location, not mere EACCES."""
+    import errno
+
+    if (output.get("root_readonly") is not True
+            or output.get("var_tmp_readonly") is not True
+            or output.get("var_tmp_world_writable") is not True
+            or type(output.get("root_write_errno")) is not int
+            or output["root_write_errno"] != errno.EROFS):
+        raise AssertionError("root read-only proof is inconclusive or failed")
 
 
 def _require_host_network_control():
@@ -342,10 +379,7 @@ class SandboxEscapeTest(unittest.TestCase):
 
     def test_the_root_filesystem_cannot_be_written(self):
         output = self._observed()
-        self.assertTrue(
-            str(output.get("root_write", "")).startswith("denied"),
-            output.get("root_write"),
-        )
+        _assert_root_read_only(output)
 
 
 if __name__ == "__main__":
