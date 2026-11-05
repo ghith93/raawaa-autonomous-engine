@@ -1,6 +1,7 @@
 import os
 import tempfile
 import unittest
+from unittest.mock import patch
 from pathlib import Path
 
 from engine.live_adapters import LiveAdapterError
@@ -49,6 +50,26 @@ class FakeInvocationStore:
 
     def settle(self, task_id, lease_token, invocation_id):
         self.calls.append(("settle", task_id, lease_token, invocation_id))
+
+
+class StatefulFakeInvocationStore(FakeInvocationStore):
+    """Models replay fencing in memory only; not a D1 or persistence proof."""
+    def prepare(self, task_id, lease_token, step_key, task_kind):
+        if self.prepared["status"] != "prepared":
+            raise RuntimeError("invocation is not replayable")
+        return super().prepare(task_id, lease_token, step_key, task_kind)
+
+    def start(self, task_id, lease_token, invocation_id, route_id):
+        super().start(task_id, lease_token, invocation_id, route_id)
+        self.prepared["status"] = "in_flight"
+
+    def mark_ambiguous(self, task_id, lease_token, invocation_id):
+        super().mark_ambiguous(task_id, lease_token, invocation_id)
+        self.prepared["status"] = "ambiguous"
+
+    def settle(self, task_id, lease_token, invocation_id):
+        super().settle(task_id, lease_token, invocation_id)
+        self.prepared["status"] = "settled"
 
 
 class QuotaAwareGatewayTests(unittest.TestCase):
@@ -822,6 +843,49 @@ class QuotaAwareGatewayTests(unittest.TestCase):
                     gateway.generate(request)
                 self.assertEqual(adapter.calls, 0)
         self.assertNotIn("start", [call[0] for call in store.calls])
+
+    def test_pinned_route_post_dispatch_errors_are_not_replayed_with_stateful_fake(self):
+        for failure in (LiveAdapterError("synthetic timeout"), RuntimeError("synthetic crash")):
+            with self.subTest(kind=type(failure).__name__), tempfile.TemporaryDirectory() as temp:
+                quota = QuotaLedger(Path(temp) / "quota.db")
+                usage = UsageLedger(Path(temp) / "usage.db")
+                profile = self.profile()
+                adapter = FakeAdapter("groq", failure)
+                store = StatefulFakeInvocationStore()
+                store.prepared["pinned_route_id"] = profile.route_id
+                gateway = QuotaAwareLiveGateway(QuotaManager([profile], quota), {profile.route_id: adapter},
+                    usage, True, environ={"RAAWAA_ENGINE_LIVE_INFERENCE": "enabled"},
+                    invocation_store=store, pinned_route_id=profile.route_id)
+                request = GenerationRequest("research", "public", 20, task_id="task-1", step_key="step", lease_token="lease")
+                with self.assertRaises(ProviderUnavailable):
+                    gateway.generate(request)
+                self.assertEqual(store.prepared["status"], "ambiguous")
+                with self.assertRaises(ProviderUnavailable):
+                    gateway.generate(request)
+                self.assertEqual(adapter.calls, 1)
+                self.assertEqual(usage.totals()["pending_reservations"], 1)
+
+    def test_pinned_route_settlement_failure_leaves_fake_invocation_fenced(self):
+        for ledger_name in ("monetary", "quota", "invocation"):
+            with self.subTest(ledger=ledger_name), tempfile.TemporaryDirectory() as temp:
+                quota = QuotaLedger(Path(temp) / "quota.db")
+                usage = UsageLedger(Path(temp) / "usage.db")
+                profile = self.profile()
+                adapter = FakeAdapter("groq")
+                store = StatefulFakeInvocationStore()
+                store.prepared["pinned_route_id"] = profile.route_id
+                gateway = QuotaAwareLiveGateway(QuotaManager([profile], quota), {profile.route_id: adapter},
+                    usage, True, environ={"RAAWAA_ENGINE_LIVE_INFERENCE": "enabled"},
+                    invocation_store=store, pinned_route_id=profile.route_id)
+                request = GenerationRequest("research", "public", 20, task_id="task-1", step_key="step", lease_token="lease")
+                target = {"monetary": usage, "quota": quota, "invocation": store}[ledger_name]
+                with patch.object(target, "settle", side_effect=RuntimeError("synthetic settlement failure")):
+                    with self.assertRaises(RuntimeError):
+                        gateway.generate(request)
+                self.assertEqual(store.prepared["status"], "in_flight")
+                with self.assertRaises(ProviderUnavailable):
+                    gateway.generate(request)
+                self.assertEqual(adapter.calls, 1)
 
     def test_pinned_route_rechecks_dynamic_profile_ambiguity(self):
         first = self.profile()
