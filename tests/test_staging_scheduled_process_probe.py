@@ -2,7 +2,11 @@ from __future__ import annotations
 
 import json
 import unittest
-from unittest.mock import Mock
+from contextlib import redirect_stderr
+from io import StringIO
+from unittest.mock import Mock, patch
+
+from engine.remote_task_store import RemoteTaskStoreError
 
 from scripts import run_staging_scheduled_process_probe as probe
 
@@ -175,6 +179,35 @@ class StagingScheduledProbeTests(unittest.TestCase):
             probe.run_scheduled_probe(cron_environment(),
                                       store_factory=FakeStore,
                                       processor=processor)
+
+    def test_main_logs_bounded_redacted_remote_error_reason(self):
+        output = StringIO()
+        secret = "supersecretvalue123456789"
+        error = RemoteTaskStoreError(
+            "Remote task API temporarily unavailable (HTTP 503): "
+            f"storage_unavailable | D1_ERROR: no such table: task_dependencies ENGINE_API_TOKEN={secret}"
+        )
+        with patch.object(probe, "run_scheduled_probe", side_effect=error):
+            with redirect_stderr(output):
+                result = probe.main()
+        self.assertEqual(result, 1)
+        self.assertIn("RemoteTaskStoreError", output.getvalue())
+        self.assertIn("HTTP 503", output.getvalue())
+        self.assertIn("no such table: task_dependencies", output.getvalue())
+        self.assertIn("[redacted]", output.getvalue())
+        self.assertNotIn(secret, output.getvalue())
+        self.assertLessEqual(len(output.getvalue()), 400)
+
+    def test_main_hides_untrusted_unexpected_exception_text(self):
+        output = StringIO()
+        with patch.object(
+            probe, "run_scheduled_probe", side_effect=RuntimeError("untrusted response body")
+        ):
+            with redirect_stderr(output):
+                result = probe.main()
+        self.assertEqual(result, 1)
+        self.assertIn("RuntimeError", output.getvalue())
+        self.assertNotIn("untrusted response body", output.getvalue())
 
 
 if __name__ == "__main__":
