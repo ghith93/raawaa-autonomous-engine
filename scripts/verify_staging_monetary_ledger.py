@@ -581,12 +581,12 @@ def verify_process_dispatch_lifecycle(run_tag: str) -> None:
         retry_safe=True,
     )
 
-    store = RemoteTaskStore(BASE_URL, TOKEN, timeout=30, reject_redirects=True)
-    supervisor = ProcessSupervisor(
-        default_registry(), RemoteProcessDispatchLedger(store)
-    )
-    fence = lambda: store.heartbeat(task_id, lease_token, lease_timeout_seconds=900)
     try:
+        store = RemoteTaskStore(BASE_URL, TOKEN, timeout=30, reject_redirects=True)
+        supervisor = ProcessSupervisor(
+            default_registry(), RemoteProcessDispatchLedger(store)
+        )
+        fence = lambda: store.heartbeat(task_id, lease_token, lease_timeout_seconds=900)
         first = supervisor.run_operation(
             "python_platform_probe", {}, task_id=task_id, lease_token=lease_token,
             fence_before=fence, fence_after=fence,
@@ -792,7 +792,7 @@ def run() -> None:
             "Mobile status does not report the D1 token quota ledger as available")
 
     cleanup_test_reservations()
-    print("Staging D1 verification passed: token quota concurrency/settlement, durable multi-step invocation identities, lease fencing, explicit 429 route rotation, blocked ambiguous/settled replay, global daily/monthly/task monetary caps, operator-policy tamper rejection, idempotency, pre-I/O release, ambiguous settlement, over-estimate quarantine, Worker redeploy persistence, and aggregate-only authenticated mobile status. No model provider was called.")
+    print("Staging D1 verification passed: token quota concurrency/settlement, durable multi-step invocation identities, process-dispatch child settlement/replay, lease fencing, explicit 429 route rotation, blocked ambiguous/settled replay, global daily/monthly/task monetary caps, operator-policy tamper rejection, idempotency, pre-I/O release, ambiguous settlement, over-estimate quarantine, Worker redeploy persistence, and aggregate-only authenticated mobile status. No model provider was called.")
 
 
 if __name__ == "__main__":
