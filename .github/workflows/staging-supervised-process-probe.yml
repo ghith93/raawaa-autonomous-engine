@@ -2,9 +2,9 @@ name: Staging scheduled supervised process probe
 
 on:
   schedule:
-    # A weekly, read-only queue task verifies the actual scheduled Staging path.
+    # One daily read-only queue task verifies the actual scheduled Staging path.
     # This workflow intentionally has no workflow_dispatch trigger.
-    - cron: "37 3 * * 4"
+    - cron: "47 3 * * *"
 
 permissions:
   contents: read
