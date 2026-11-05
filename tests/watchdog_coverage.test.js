@@ -98,7 +98,7 @@ test("coverage names every watched workflow with a cadence-derived threshold", a
   assert.equal(byWorkflow["maintenance.yml"], 6 * 60 + 30);
   assert.equal(byWorkflow["research-discovery.yml"], 25 * 60);
   assert.equal(byWorkflow["groq-connection-check.yml"], 7 * 24 * 60 + 12 * 60);
-  assert.equal(Object.keys(byWorkflow).length, 6);
+  assert.equal(Object.keys(byWorkflow).length, 4);
 });
 
 test("intent events are unique, so one workflow cannot suppress another", async () => {
@@ -127,7 +127,7 @@ test("a stale schedule is recovered for every watched workflow", async () => {
   const result = await module.dispatchDueWorkflows({ env: envWith(DB), fetchImpl, nowMs: NOW });
 
   assert.equal(result.status, "dispatched");
-  assert.equal(result.dispatched, 6);
+  assert.equal(result.dispatched, 4);
   assert.equal(result.failed, 0);
   const dispatched = calls.filter(call => call.url.endsWith("/dispatches")).map(call => call.url);
   for (const target of module.WATCHED_WORKFLOWS) {
@@ -155,7 +155,7 @@ test("a workflow with a recent run is left alone, not dispatched twice", async (
   const maintenance = result.results.find(item => item.workflow === "maintenance.yml");
   assert.equal(maintenance.status, "skipped");
   assert.equal(maintenance.reason, "recent_run");
-  assert.equal(result.dispatched, 5);
+  assert.equal(result.dispatched, 3);
 });
 
 test("an active run suppresses dispatch even when older than the threshold", async () => {
@@ -178,7 +178,7 @@ test("a broken run-list read does not stop the other workflows", async () => {
   const groq = result.results.find(item => item.workflow === "groq-connection-check.yml");
   assert.equal(groq.status, "failed");
   assert.ok(!groq.error.includes("PRIVATE"), "provider detail must not leak into the result");
-  assert.equal(result.dispatched, 5);
+  assert.equal(result.dispatched, 3);
   assert.equal(result.failed, 1);
   assert.equal(result.status, "dispatched");
   assert.ok(DB.events.includes("groq_check_dispatch_failed"), "failure must be recorded, not silent");
@@ -202,7 +202,7 @@ test("an existing intent stops a second dispatch of the same workflow", async ()
   const result = await module.dispatchDueWorkflows({ env: envWith(DB), fetchImpl, nowMs: NOW });
   const maintenance = result.results.find(item => item.workflow === "maintenance.yml");
   assert.equal(maintenance.reason, "recent_dispatch_intent");
-  assert.equal(result.dispatched, 5);
+  assert.equal(result.dispatched, 3);
 });
 
 test("without the opt-in switch nothing is dispatched and no network is touched", async () => {

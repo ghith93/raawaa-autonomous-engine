@@ -52,22 +52,6 @@ export const WATCHED_WORKFLOWS = Object.freeze([
     requestedEvent: "research_discovery_dispatch_requested",
   },
   {
-    workflow: "cex-public-market-smoke.yml",
-    label: "cex_smoke",
-    // Cron 17 7 * * *; daily, plus an hour of slack.
-    staleAfterMs: 25 * HOUR,
-    intentEvent: "cex_smoke_dispatch_intent",
-    requestedEvent: "cex_smoke_dispatch_requested",
-  },
-  {
-    workflow: "v3-live-readonly-smoke.yml",
-    label: "v3_smoke",
-    // Cron 17 4 * * *; daily, plus an hour of slack.
-    staleAfterMs: 25 * HOUR,
-    intentEvent: "v3_smoke_dispatch_intent",
-    requestedEvent: "v3_smoke_dispatch_requested",
-  },
-  {
     workflow: "groq-connection-check.yml",
     label: "groq_check",
     // Cron 17 10 * * 1; weekly, plus twelve hours of slack.

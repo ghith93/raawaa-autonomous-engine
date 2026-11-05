@@ -701,8 +701,8 @@ test("offset watchdog Cron dispatches after the primary Task Runner phase", asyn
   const dispatches = calls.filter(call => call.url.endsWith("/dispatches"));
   const runLists = calls.filter(call => call.url.includes("/runs?"));
   assert.equal(tokens.length, 1);
-  assert.equal(runLists.length, 6);
-  assert.equal(dispatches.length, 6);
+  assert.equal(runLists.length, 4);
+  assert.equal(dispatches.length, 4);
   assert.ok(dispatches.some(call => call.url.endsWith("/actions/workflows/task-runner.yml/dispatches")));
   assert.ok(DB.calls.some(call => call.kind === "run" && call.values[0] === "task_runner_dispatch_intent"));
 });
