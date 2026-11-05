@@ -15,6 +15,13 @@ newline-free command argument: the independent argv validator rejects literal
 newlines, so the old raw template could not start. Checkout token persistence is
 disabled for the proof job. These are harness changes, not live sandbox evidence.
 
+The sandbox egress probe additionally requires a successful TCP connection from
+the host runner to the same address; if that control fails, the observation is
+inconclusive and the proof fails. Sensitive paths are reported as `missing`,
+`inaccessible`, or `present` using `lstat`, rather than treating a permission
+denial as absence. Missing or inaccessible paths are not evidence that no host
+credential mounts exist elsewhere; that broader property remains unproven.
+
 **Release posture unchanged:** #427 was already merged but its Codespaces
 executor release gate remains false. #440 remains open; this proof still does
 not verify all resource-exhaustion, descendant-cleanup, lease-revocation, and
@@ -31,6 +38,11 @@ immutable image digest and zero-cost runner eligibility are established.
   `sha256:4840d514c583a4d3d8cad3940e68dee6f0f6f3635c12fcd0a3d74c21a5b93a54`.
   These are timestamped tag observations, not evidence of a successful pull or
   content execution; revalidate the chosen digest and provenance before use.
+  The proof workflow and runner share a strict allowlist for the amd64 image
+  `docker.io/library/python@sha256:05a994d2344eb364cc186910f4fc8786a38215f39f00d0acc25bff33a08f4177`;
+  other image names, tags, registries, digests and the multi-platform index are
+  rejected. Updating this fixed identity requires a reviewed change and fresh
+  verification; pinning does not by itself establish provenance or containment.
   Docker's [registry API](https://docs.docker.com/reference/api/registry/latest/)
   describes fetching the target platform manifest from a multi-platform index.
 - GitHub's [runner reference](https://docs.github.com/en/actions/reference/runners/github-hosted-runners)

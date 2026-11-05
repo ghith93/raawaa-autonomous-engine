@@ -34,6 +34,7 @@ import base64
 import json
 import os
 import shutil
+import socket
 import subprocess
 import tempfile
 import unittest
@@ -59,8 +60,8 @@ REQUIRED_KEYS = (
     "secret_marker_present",
     "network",
     "root_write",
-    "exists:/var/run/docker.sock",
-    "exists:/root/.ssh",
+    "path:/var/run/docker.sock",
+    "path:/root/.ssh",
 )
 
 # Each probe prints a single JSON object. Anything the probe could not even attempt
@@ -86,8 +87,20 @@ result["host_canary"] = read(__HOST_CANARY_PATH__)
 # Report a boolean only; never print environment names or values. Checking
 # values, not just names, makes a synthetic inherited secret observable.
 result["secret_marker_present"] = any(__SECRET_MARKER__ in value for value in os.environ.values())
-for path in ("/var/run/docker.sock", "/root/.ssh", "/home", "/etc/shadow"):
-    result["exists:" + path] = os.path.exists(path)
+def path_state(path):
+    # exists() collapses PermissionError into False: that is not absence.
+    try:
+        os.lstat(path)
+        return "present"
+    except FileNotFoundError:
+        return "missing"
+    except PermissionError:
+        return "inaccessible"
+    except OSError as exc:
+        return "error:" + type(exc).__name__
+
+for path in ("/var/run/docker.sock", "/root/.ssh"):
+    result["path:" + path] = path_state(path)
 try:
     sock = socket.create_connection(("1.1.1.1", 80), timeout=3)
     sock.close()
@@ -205,9 +218,11 @@ def _assert_probe_usable(output):
     missing = [key for key in REQUIRED_KEYS if key not in output]
     if missing:
         raise AssertionError(f"probe output is missing {missing}; a missing key must not read as containment")
-    for key in ("secret_marker_present", "exists:/var/run/docker.sock", "exists:/root/.ssh"):
-        if type(output[key]) is not bool:
-            raise AssertionError(f"probe output {key} must be a boolean")
+    if type(output["secret_marker_present"]) is not bool:
+        raise AssertionError("probe output secret_marker_present must be a boolean")
+    for key in ("path:/var/run/docker.sock", "path:/root/.ssh"):
+        if output[key] not in ("present", "missing", "inaccessible"):
+            raise AssertionError(f"probe output {key} is not a recognised path state")
     control = str(output["control"])
     if control.startswith("denied:"):
         raise AssertionError(
@@ -226,6 +241,25 @@ def _assert_secret_not_in_environ(output):
         raise AssertionError("probe must explicitly report secret_marker_present as a boolean")
     if output["secret_marker_present"]:
         raise AssertionError("synthetic host secret was present in the sandbox environment")
+
+
+def _assert_paths_not_accessible(output):
+    """Missing and permission-denied are distinct; neither proves host mounts absent."""
+    for path in ("/var/run/docker.sock", "/root/.ssh"):
+        state = output.get("path:" + path)
+        if state not in ("missing", "inaccessible"):
+            raise AssertionError(f"sensitive path is present or unobservable: {path} ({state!r})")
+
+
+def _require_host_network_control():
+    """Prove the host can reach the same address before interpreting denial."""
+    try:
+        with socket.create_connection(("1.1.1.1", 80), timeout=3):
+            pass
+    except OSError as exc:
+        raise AssertionError(
+            f"host network positive control failed ({type(exc).__name__}); egress result is inconclusive"
+        ) from None
 
 
 @unittest.skipUnless(_sandbox_available(), "no live sandbox: set RAAWAA_SANDBOX_LIVE=1 and RAAWAA_SANDBOX_IMAGE")
@@ -296,15 +330,15 @@ class SandboxEscapeTest(unittest.TestCase):
 
     def test_the_public_network_is_unreachable(self):
         output = self._observed()
+        _require_host_network_control()
         self.assertTrue(
             str(output.get("network", "")).startswith("denied"),
             output.get("network"),
         )
 
-    def test_credentials_and_the_docker_socket_are_absent(self):
+    def test_credentials_and_the_docker_socket_are_not_accessible(self):
         output = self._observed()
-        for path in ("/var/run/docker.sock", "/root/.ssh"):
-            self.assertFalse(output["exists:" + path], path)
+        _assert_paths_not_accessible(output)
 
     def test_the_root_filesystem_cannot_be_written(self):
         output = self._observed()

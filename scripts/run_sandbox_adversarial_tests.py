@@ -7,7 +7,6 @@ being mistaken for live proof.
 from __future__ import annotations
 
 import os
-import re
 import shutil
 import sys
 import unittest
@@ -23,10 +22,15 @@ EXPECTED_METHODS = frozenset({
     "test_a_host_created_file_outside_the_workspace_is_not_readable",
     "test_synthetic_environment_canary_detection",
     "test_the_public_network_is_unreachable",
-    "test_credentials_and_the_docker_socket_are_absent",
+    "test_credentials_and_the_docker_socket_are_not_accessible",
     "test_the_root_filesystem_cannot_be_written",
 })
-IMAGE_PATTERN = re.compile(r"[a-z0-9][a-z0-9._/-]*@sha256:[0-9a-f]{64}\Z")
+# Exact linux/amd64 manifest observed in Docker Hub's official Python metadata.
+# Changing this identity requires a reviewed provenance update and fresh proof.
+APPROVED_IMAGE = (
+    "docker.io/library/python@sha256:"
+    "05a994d2344eb364cc186910f4fc8786a38215f39f00d0acc25bff33a08f4177"
+)
 
 
 def _test_ids(suite: unittest.TestSuite) -> list[str]:
@@ -54,11 +58,21 @@ def run_checked(suite: unittest.TestSuite, expected_ids: Iterable[str], *, strea
     return True
 
 
-def main() -> int:
+def main(argv: list[str] | None = None) -> int:
+    args = sys.argv[1:] if argv is None else argv
     image = os.environ.get("RAAWAA_SANDBOX_IMAGE", "")
-    if (os.environ.get("RAAWAA_SANDBOX_LIVE") != "1"
-            or not IMAGE_PATTERN.fullmatch(image) or shutil.which("docker") is None):
-        print("Sandbox proof refused: live opt-in, digest-pinned image, and docker are required.", file=sys.stderr)
+    if image != APPROVED_IMAGE:
+        print("Sandbox proof refused: image is not the approved immutable manifest.", file=sys.stderr)
+        return 1
+    # The workflow uses the same allowlist before installing or pulling anything.
+    if args == ["--check-image"]:
+        print("Approved sandbox image identity verified.")
+        return 0
+    if args:
+        print("Sandbox proof refused: unexpected command arguments.", file=sys.stderr)
+        return 1
+    if os.environ.get("RAAWAA_SANDBOX_LIVE") != "1" or shutil.which("docker") is None:
+        print("Sandbox proof refused: live opt-in and docker are required.", file=sys.stderr)
         return 1
     from tests.adversarial.test_sandbox_escape import SandboxEscapeTest
 

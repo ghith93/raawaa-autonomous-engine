@@ -73,6 +73,8 @@ class SandboxWorkflowInjectionTest(unittest.TestCase):
         self.assertIn("tr -d '\\r\\n'", self.text)
 
     def test_live_workflow_uses_fail_closed_runner_and_no_persisted_checkout_token(self):
+        self.assertIn("python3 scripts/run_sandbox_adversarial_tests.py --check-image", self.text)
+        self.assertIn("RAAWAA_SANDBOX_IMAGE: ${{ inputs.image }}", self.text)
         self.assertIn("python3 scripts/run_sandbox_adversarial_tests.py", self.text)
         self.assertNotIn("python3 -m unittest tests.adversarial.test_sandbox_escape", self.text)
         self.assertIn("persist-credentials: false", self.text)

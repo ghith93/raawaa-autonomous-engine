@@ -57,14 +57,32 @@ class SandboxAdversarialRunnerTests(unittest.TestCase):
         suite = unittest.TestSuite([self.Passing("test_one"), self.Passing("test_one")])
         self.assertFalse(runner.run_checked(suite, {self.Passing("test_one").id()}, stream=io.StringIO()))
 
+    def test_only_exact_approved_image_passes_identity_preflight(self):
+        approved = runner.APPROVED_IMAGE
+        alternatives = (
+            "python:3.12-slim", "library/python@sha256:" + "a" * 64,
+            approved.replace("docker.io", "registry.example"),
+            approved.replace("library/python", "library/ubuntu"),
+            approved.replace("05a994", "15a994"),
+            approved + "\n", approved + ":tag", "",
+            "docker.io/library/python@sha256:4840d514c583a4d3d8cad3940e68dee6f0f6f3635c12fcd0a3d74c21a5b93a54",
+        )
+        for image in (approved, *alternatives):
+            with self.subTest(image=image), patch.dict(os.environ, {"RAAWAA_SANDBOX_IMAGE": image}, clear=True):
+                with patch("sys.stderr", new=io.StringIO()), patch("sys.stdout", new=io.StringIO()):
+                    self.assertEqual(runner.main(["--check-image"]), 0 if image == approved else 1)
+        with patch.dict(os.environ, {"RAAWAA_SANDBOX_IMAGE": approved}, clear=True):
+            with patch("sys.stderr", new=io.StringIO()):
+                self.assertEqual(runner.main(["--unknown"]), 1)
+
     def test_preflight_refuses_no_opt_in_invalid_image_or_missing_docker(self):
-        image = "library/python@sha256:" + "a" * 64
+        image = runner.APPROVED_IMAGE
         for env, docker in (({}, "/usr/bin/docker"),
                             ({"RAAWAA_SANDBOX_LIVE": "1", "RAAWAA_SANDBOX_IMAGE": "python:latest"}, "/usr/bin/docker"),
                             ({"RAAWAA_SANDBOX_LIVE": "1", "RAAWAA_SANDBOX_IMAGE": image}, None)):
             with self.subTest(env=env), patch.dict(os.environ, env, clear=True), patch.object(runner.shutil, "which", return_value=docker):
                 with patch("sys.stderr", new=io.StringIO()):
-                    self.assertEqual(runner.main(), 1)
+                    self.assertEqual(runner.main([]), 1)
 
 
 if __name__ == "__main__":

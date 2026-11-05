@@ -18,6 +18,7 @@ reason produces ``denied:<Error>``, so a wrong canary path used to satisfy the
 """
 import importlib
 import json
+from unittest.mock import MagicMock, patch
 import os
 import shutil
 import subprocess
@@ -54,8 +55,8 @@ def _good_output(**overrides):
         "secret_marker_present": False,
         "network": "denied:OSError",
         "root_write": "denied:OSError",
-        "exists:/var/run/docker.sock": False,
-        "exists:/root/.ssh": False,
+        "path:/var/run/docker.sock": "missing",
+        "path:/root/.ssh": "inaccessible",
     }
     output.update(overrides)
     return output
@@ -94,6 +95,31 @@ class FalseTestGuardTest(unittest.TestCase):
         with self.assertRaisesRegex(AssertionError, "explicitly report"):
             probe._assert_secret_not_in_environ({})
         probe._assert_secret_not_in_environ(_good_output(secret_marker_present=False))
+
+    def test_sensitive_path_states_never_confuse_missing_and_permission_denied(self):
+        good = _good_output()
+        probe._assert_paths_not_accessible(good)
+        for state in ("present", "error:OSError", None, False):
+            output = _good_output(**{"path:/root/.ssh": state})
+            with self.subTest(state=state):
+                with self.assertRaises(AssertionError):
+                    probe._assert_paths_not_accessible(output)
+                if state != "present":
+                    with self.assertRaises(AssertionError):
+                        probe._assert_probe_usable(output)
+        with self.assertRaises(AssertionError):
+            probe._assert_paths_not_accessible({})
+
+    def test_host_egress_positive_control_must_connect(self):
+        connection = MagicMock()
+        with patch.object(probe.socket, "create_connection", return_value=connection) as connect:
+            probe._require_host_network_control()
+        connect.assert_called_once_with(("1.1.1.1", 80), timeout=3)
+        connection.__enter__.assert_called_once()
+        connection.__exit__.assert_called_once()
+        with patch.object(probe.socket, "create_connection", side_effect=TimeoutError):
+            with self.assertRaisesRegex(AssertionError, "positive control failed"):
+                probe._require_host_network_control()
 
     def test_a_probe_that_exits_non_zero_produces_no_output(self):
         completed = _completed(stdout='{"control": "raawaa-autonomous-engine"}', returncode=1)
@@ -216,6 +242,36 @@ exec(PROGRAM)
                         probe._assert_secret_not_in_environ(output)
                 else:
                     probe._assert_secret_not_in_environ(output)
+
+    def test_generated_probe_distinguishes_permission_denied_from_missing(self):
+        program = probe._probe_program("/no-such-host-canary", control_path=str(Path(__file__).resolve()))
+        wrapper = """
+import builtins, os, socket
+_original_open = builtins.open
+_original_lstat = os.lstat
+def safe_open(path, *args, **kwargs):
+    if path == '/escaped':
+        raise OSError('disabled by offline test')
+    return _original_open(path, *args, **kwargs)
+def stub_lstat(path, *args, **kwargs):
+    if path == '/var/run/docker.sock':
+        raise PermissionError('synthetic permission denial')
+    if path == '/root/.ssh':
+        raise FileNotFoundError('synthetic absent path')
+    return _original_lstat(path, *args, **kwargs)
+def no_network(*args, **kwargs):
+    raise OSError('disabled by offline test')
+builtins.open = safe_open
+os.lstat = stub_lstat
+socket.create_connection = no_network
+exec(PROGRAM)
+""".replace("PROGRAM", repr(program))
+        completed = subprocess.run([sys.executable, "-I", "-c", wrapper], env={},
+                                   capture_output=True, text=True, timeout=10, check=True)
+        output = json.loads(completed.stdout)
+        self.assertEqual(output["path:/var/run/docker.sock"], "inaccessible")
+        self.assertEqual(output["path:/root/.ssh"], "missing")
+        probe._assert_paths_not_accessible(output)
 
     def test_the_probe_actually_reads_something_it_must_see(self):
         # The control path must be inside the mounted workspace, or it proves
