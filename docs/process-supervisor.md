@@ -1,9 +1,11 @@
 # Bounded process supervisor
 
-**Status:** implemented and locally tested (real child processes, 43 unit tests).
-**Not deployed, not wired into the worker, and not an OS sandbox.** Task:
-`CHATGPT-ENGINE-RUNTIME-001`. Cost of the whole increment: **USD 0** — no
-provider, no network call, no deployment, no production write.
+**Status:** implemented, locally tested (real child processes) and reachable
+from a real task, **off by default**. Not deployed and not an OS sandbox.
+Tasks: `CHATGPT-ENGINE-RUNTIME-001` (supervisor) and
+`CHATGPT-ENGINE-RUNTIME-002` (task-lifecycle integration). Cost of both
+increments: **USD 0** — no provider, no network call, no deployment, no
+production write, no permission or secret change.
 
 ## The gap this closes
 
@@ -79,6 +81,56 @@ classification, exit_code, output_truncated, detail, created_at, updated_at
   recorded classification and exit code with no stdout: claiming the output
   would mean inventing it.
 
+## Task-lifecycle integration
+
+`engine/supervised_task.py` connects the supervisor to the queue that already
+exists, so the chain is real rather than a diagram:
+`enqueue → claim (lease) → fence → supervise → classify → result → audit`.
+It adds no second lifecycle: the task row, lease, retries, audit log and
+idempotency key all remain `TaskStore`'s.
+
+**The switch.** `RAAWAA_ENGINE_PROCESS_SUPERVISOR=enabled` is required for the
+handler to do anything. Anything else — including unset — blocks the task with
+`process_supervisor_disabled` before a dispatch is recorded or a process exists.
+Turning the feature off is therefore always safe, everywhere, without a code
+change.
+
+**The worker allowlist is narrower than the registry.** A task payload may name
+only `git_head_revision` or `python_platform_probe`. Both are parameter-free,
+read-only, local and free. The payload must be exactly `{"operation": "…"}`;
+a `parameters`, `executable` or `command` key is refused outright rather than
+ignored, because those are the exact shapes a caller would use to widen what
+the child receives.
+
+**How a classification becomes a task status:**
+
+| Supervisor classification | Task status | Why |
+|---|---|---|
+| `succeeded` | `succeeded` + bounded result | the outcome is recorded and replay-safe |
+| `failed`, `timed_out` | `failed` | a re-dispatch would replay the recorded failure under the same identity, not retry the work |
+| `refused` | `blocked` | nothing ran; the request itself is wrong |
+| `ambiguous` | `blocked` | it ran and cannot be attributed — never `succeeded` |
+| `cancelled` / lost lease | **nothing written** | the task stays `running` and `recover_stale()` owns it; writing after the lease is gone would race the worker that owns it now |
+
+`tasks.execution_mode` keeps its existing meaning — inference. A supervised
+read-only probe performs none, so the row stays `dry_run` and the result carries
+`"execution": "supervised_process:v1"`. Conflating the two would quietly widen
+what `live_inference` has always meant.
+
+**Running one:**
+
+```bash
+python -m engine.cli enqueue --type supervised_probe --title "Commit probe" \
+  --payload '{"operation":"git_head_revision"}' --key commit-probe-1
+RAAWAA_ENGINE_PROCESS_SUPERVISOR=enabled python -m engine.cli run-once
+```
+
+Local evidence (`python -m unittest tests.test_supervised_task`): a real task
+runs and records the commit, with `task_enqueued/task_claimed/task_heartbeat/
+task_succeeded` in the audit log and one settled dispatch row; a timeout and an
+interrupted dispatch both land as terminal non-success states; and a lease lost
+mid-execution writes nothing at all and is requeued by `recover_stale()`.
+
 ## Verification
 
 Local, with real processes (`python -m unittest tests.test_process_supervisor`):
@@ -138,7 +190,11 @@ revert:
 2. The `process_dispatches` table is created **lazily**, only when a supervisor
    with a SQLite ledger is instantiated. Reverting leaves any local table behind
    as dead data in a local development database; nothing reads it.
-3. No secret, permission, ruleset, workflow, queue, or D1 state was touched, so
+3. `RAAWAA_ENGINE_PROCESS_SUPERVISOR` is unset in every environment, so no
+   scheduler, workflow or deployment can reach the supervised task type even
+   before a revert. Deleting the worker's two-line branch is sufficient to
+   remove the capability entirely.
+4. No secret, permission, ruleset, workflow, queue, or D1 state was touched, so
    there is nothing to un-grant and no container to drain.
 
 ## Remaining limits, stated rather than hidden
@@ -151,10 +207,10 @@ revert:
 3. **Escaping the group is possible.** A descendant that calls `setsid` leaves
    the process group; the supervisor cannot see it. `PR_SET_CHILD_SUBREAPER` or
    a cgroup would be needed, and neither is implemented.
-4. **Not wired into the worker yet.** No task type calls the supervisor. That is
-   the next increment: `enqueue → claim → supervise → result → audit`, with
-   timeout, cancellation, duplicate delivery, worker restart and lease loss
-   exercised through the real task lifecycle.
+4. **One task type, off by default.** `supervised_probe` exists and is proven
+   end to end, but nothing schedules it automatically and the switch defaults to
+   off. A scheduler that enqueues it, and the evaluator stage that judges its
+   output, are the next increments.
 5. **`/proc` is Linux-specific.** Elsewhere the group scan returns nothing and
    cleanup falls back to `killpg`; descendant *counting* is then unavailable.
 6. **One operation per call, one supervisor per call site.** There is no pool
