@@ -52,6 +52,29 @@ class RemoteTaskStoreTests(unittest.TestCase):
         self.assertEqual(request.get_method(), "POST")
         self.assertEqual(json.loads(request.data), {})
 
+    @patch("engine.remote_task_store.urlopen")
+    def test_recover_supervised_probe_targets_only_the_exact_task_route(self, open_url):
+        open_url.return_value = FakeResponse({"status": "pending", "recovered": True})
+        result = self.store.recover_supervised_probe("probe-123")
+        self.assertEqual(result, {"status": "pending", "recovered": True})
+        request = open_url.call_args.args[0]
+        self.assertEqual(request.full_url,
+                         "https://engine.example/v1/tasks/probe-123/recover-supervised-probe")
+        self.assertEqual(request.get_method(), "POST")
+        self.assertEqual(json.loads(request.data), {})
+
+    def test_recover_supervised_probe_rejects_unsafe_task_ids_before_network(self):
+        for task_id in ("", "../tasks", "has space", "x" * 129, None):
+            with self.subTest(task_id=task_id), self.assertRaises(ValueError):
+                self.store.recover_supervised_probe(task_id)
+
+    @patch("engine.remote_task_store.urlopen")
+    def test_recover_supervised_probe_rejects_invalid_response(self, open_url):
+        for result in ({"status": "running"}, {"status": "pending", "recovered": "yes"}):
+            open_url.return_value = FakeResponse(result)
+            with self.subTest(result=result), self.assertRaises(RemoteTaskStoreError):
+                self.store.recover_supervised_probe("probe-123")
+
     def test_claim_supervised_probe_rejects_unsafe_task_ids_before_network(self):
         for task_id in ("", "../tasks", "has space", "x" * 129, None):
             with self.subTest(task_id=task_id), self.assertRaises(ValueError):

@@ -212,6 +212,27 @@ class RemoteTaskStore:
         task["lease_token"] = lease_token
         return task
 
+    def recover_supervised_probe(self, task_id: str) -> dict[str, Any]:
+        """Recover only one expired, exact ``supervised_probe`` lease.
+
+        The Worker preserves its process-dispatch row; a replacement lease
+        quarantines ``in_flight`` before launch, or exhausted recovery marks it
+        ambiguous without issuing another lease.
+        """
+        import re
+
+        if not isinstance(task_id, str) or not re.fullmatch(r"[A-Za-z0-9_-]{1,128}", task_id):
+            raise ValueError("task_id must be 1-128 safe identifier characters")
+        result = self._request(
+            f"/v1/tasks/{task_id}/recover-supervised-probe", "POST", {}
+        )
+        status = result.get("status")
+        if status not in {"pending", "failed", "succeeded", "blocked"}:
+            raise RemoteTaskStoreError("Remote task API returned an invalid supervised-probe recovery")
+        if type(result.get("recovered")) is not bool:
+            raise RemoteTaskStoreError("Remote task API omitted supervised-probe recovery status")
+        return result
+
     def heartbeat(self, task_id: str, lease_token: str,
                   lease_timeout_seconds: int = 900) -> str:
         if not 1 <= int(lease_timeout_seconds) <= 900:

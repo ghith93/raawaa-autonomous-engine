@@ -327,6 +327,7 @@ export default {
         !/^\/v1\/tasks\/[A-Za-z0-9_-]+\/invocations$/.test(url.pathname) &&
         !/^\/v1\/tasks\/[A-Za-z0-9_-]+\/process-dispatches$/.test(url.pathname) &&
         !/^\/v1\/tasks\/[A-Za-z0-9_-]{1,128}\/claim-supervised-probe$/.test(url.pathname) &&
+        !/^\/v1\/tasks\/[A-Za-z0-9_-]{1,128}\/recover-supervised-probe$/.test(url.pathname) &&
         url.pathname !== "/v1/research/candidates/review" &&
         !/^\/v1\/tasks\/[A-Za-z0-9_-]+\/(heartbeat|finish|retry)$/.test(url.pathname)) {
       return json({ error: "not_found" }, 404);
@@ -540,6 +541,134 @@ export default {
           execution_mode: "dry_run", claim_scope: "supervised_probe_id",
         }), nowIso).run();
         return json({ task: claim, lease_token: leaseToken, lease_expires_at: expires });
+      } catch (error) {
+        return json({ error: "storage_unavailable", detail: storageDetail(error) }, 503);
+      }
+    }
+
+    const supervisedProbeRecovery = url.pathname.match(
+      /^\/v1\/tasks\/([A-Za-z0-9_-]{1,128})\/recover-supervised-probe$/
+    );
+    if (supervisedProbeRecovery) {
+      if (request.method !== "POST") return json({ error: "method_not_allowed" }, 405);
+      let recoveryInput;
+      try { recoveryInput = await readJson(request); }
+      catch (error) {
+        return json({ error: error.message === "body_too_large" ? "body_too_large" : "invalid_json" }, 400);
+      }
+      if (!recoveryInput || typeof recoveryInput !== "object" || Array.isArray(recoveryInput) ||
+          Object.keys(recoveryInput).length !== 0) {
+        return json({ error: "invalid_recovery_request" }, 400);
+      }
+      const taskId = supervisedProbeRecovery[1];
+      const nowIso = new Date().toISOString();
+      try {
+        const current = await env.DB.prepare(
+          "SELECT id,idempotency_key,task_type,title,payload_json,status,attempts,max_attempts," +
+          "execution_mode,priority,dependencies_json,result_json,lease_token,lease_expires_at " +
+          "FROM tasks WHERE id=?"
+        ).bind(taskId).first();
+        if (!current) return json({ error: "task_not_found" }, 404);
+        let probePayload;
+        try { probePayload = JSON.parse(current.payload_json); }
+        catch { probePayload = null; }
+        const exactTask = current.task_type === "supervised_probe" &&
+          current.title === "Scheduled Staging read-only process probe" &&
+          current.idempotency_key &&
+          /^staging-cron-supervised-probe:[0-9]{8}$/.test(current.idempotency_key) &&
+          probePayload && typeof probePayload === "object" && !Array.isArray(probePayload) &&
+          Object.keys(probePayload).length === 1 && probePayload.operation === "python_platform_probe" &&
+          current.execution_mode === "dry_run" && current.priority === 100 &&
+          (current.dependencies_json === "[]" || current.dependencies_json === undefined) &&
+          Number.isInteger(current.attempts) && Number.isInteger(current.max_attempts) &&
+          current.attempts >= 1 && current.max_attempts >= 1 && current.max_attempts <= 2 &&
+          current.attempts <= current.max_attempts && current.result_json == null;
+        if (!exactTask) return json({ error: "probe_envelope_rejected" }, 403);
+        if (current.status === "pending" && current.attempts < current.max_attempts) {
+          return json({ status: "pending", recovered: false, replay: true,
+            attempts: current.attempts, max_attempts: current.max_attempts });
+        }
+        if (["succeeded", "failed", "blocked"].includes(current.status)) {
+          return json({ status: current.status, recovered: false, replay: true,
+            attempts: current.attempts, max_attempts: current.max_attempts });
+        }
+        if (current.status !== "running" || typeof current.lease_token !== "string" ||
+            !current.lease_token || typeof current.lease_expires_at !== "string" ||
+            !Number.isFinite(Date.parse(current.lease_expires_at)) || current.lease_expires_at >= nowIso) {
+          return json({ error: "lease_not_expired_or_invalid" }, 409);
+        }
+
+        const dispatch = await env.DB.prepare(
+          "SELECT status FROM task_process_dispatches WHERE task_id=? AND step_key='supervised_process:v1'"
+        ).bind(taskId).first();
+        const nextStatus = current.attempts < current.max_attempts ? "pending" : "failed";
+        const initialDispatchStatus = dispatch?.status ?? "absent";
+        const expectedDispatchStatus = nextStatus === "failed" && initialDispatchStatus === "in_flight"
+          ? "ambiguous" : initialDispatchStatus;
+        // Atomic transition: the exhausted-dispatch quarantine, the task
+        // lease/status transition, and the audit row commit or roll back
+        // together in one D1 batch. The quarantine is gated on the same
+        // expired-lease predicate as the task update, and the audit insert
+        // only fires when the task row now carries this transition's
+        // status+timestamp, so a concurrent recovery cannot create a second
+        // transition or audit event and an interrupted Worker cannot leave a
+        // half-transitioned task/dispatch/audit triple behind.
+        // Statement order inside the batch matters: the audit insert is
+        // gated on the pre-transition (running, expired-lease) row, so a
+        // concurrent second batch — which observes the already-transitioned
+        // row — inserts no audit even within the same millisecond.
+        const batch = await env.DB.batch([
+          env.DB.prepare(
+            "INSERT INTO audit_log(task_id,event,details_json,created_at) " +
+            "SELECT id,?,?,? FROM tasks WHERE id=? AND status='running' " +
+            "AND task_type='supervised_probe' AND idempotency_key=? " +
+            "AND lease_token=? AND lease_expires_at=? AND lease_expires_at<?"
+          ).bind("supervised_probe_lease_recovered", JSON.stringify({
+            new_status: nextStatus,
+            attempt: current.attempts,
+            max_attempts: current.max_attempts,
+            dispatch_status: expectedDispatchStatus,
+            recovery_scope: "exact_supervised_probe_id",
+          }), nowIso, taskId, current.idempotency_key,
+            current.lease_token, current.lease_expires_at, nowIso),
+          env.DB.prepare(
+            "UPDATE task_process_dispatches SET status='ambiguous',detail=?,updated_at=? " +
+            "WHERE task_id=? AND step_key='supervised_process:v1' AND status='in_flight' " +
+            "AND EXISTS (SELECT 1 FROM tasks WHERE id=? AND status='running' AND lease_token=? " +
+            "AND lease_expires_at=? AND lease_expires_at<? AND attempts>=max_attempts)"
+          ).bind("lease_expired_attempt_budget_exhausted", nowIso, taskId, taskId,
+            current.lease_token, current.lease_expires_at, nowIso),
+          env.DB.prepare(
+            "UPDATE tasks SET status=?,error=?,updated_at=?,lease_token=NULL,lease_expires_at=NULL " +
+            "WHERE id=? AND status='running' AND task_type='supervised_probe' AND idempotency_key=? " +
+            "AND lease_token=? AND lease_expires_at=? AND lease_expires_at<?"
+          ).bind(nextStatus, "Recovered expired supervised probe lease.", nowIso, taskId,
+            current.idempotency_key, current.lease_token, current.lease_expires_at, nowIso),
+        ]);
+        if (batch?.[2]?.meta?.changes !== 1) {
+          const latest = await env.DB.prepare(
+            "SELECT status,attempts,max_attempts FROM tasks WHERE id=?"
+          ).bind(taskId).first();
+          if (latest?.status === "pending" && latest.attempts < latest.max_attempts) {
+            return json({ status: "pending", recovered: false, replay: true,
+              attempts: latest.attempts, max_attempts: latest.max_attempts });
+          }
+          return json({ error: "lease_lost" }, 409);
+        }
+        if (batch?.[0]?.meta?.changes !== 1) {
+          return json({ error: "recovery_audit_failed" }, 503);
+        }
+        const latestDispatch = await env.DB.prepare(
+          "SELECT status FROM task_process_dispatches WHERE task_id=? AND step_key='supervised_process:v1'"
+        ).bind(taskId).first();
+        const dispatchStatus = latestDispatch?.status ?? "absent";
+        if (nextStatus === "failed" && initialDispatchStatus === "in_flight" &&
+            dispatchStatus === "in_flight") {
+          return json({ error: "dispatch_quarantine_failed" }, 503);
+        }
+        return json({ status: nextStatus, recovered: true, replay: false,
+          attempts: current.attempts, max_attempts: current.max_attempts,
+          dispatch_status: dispatchStatus });
       } catch (error) {
         return json({ error: "storage_unavailable", detail: storageDetail(error) }, 503);
       }

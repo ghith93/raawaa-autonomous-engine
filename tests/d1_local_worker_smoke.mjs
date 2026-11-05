@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { spawn, spawnSync } from "node:child_process";
-import { mkdtempSync, mkdirSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
@@ -71,6 +71,24 @@ function executeLocalSql(sql) {
       (result.error ? "\n" + result.error.message : ""),
     );
   }
+}
+
+function queryLocalSql(sql) {
+  const result = spawnSync("npx", [
+    ...WRANGLER, "d1", "execute", "raawaa-autonomous-e",
+    "--local", "--json", "--command", sql, "--config", "wrangler.toml",
+    "--persist-to", stateDir,
+  ], {
+    cwd: process.cwd(), env: safeEnvironment(), encoding: "utf8",
+    timeout: 30_000, maxBuffer: 1024 * 1024,
+  });
+  if (result.error || result.status !== 0) {
+    throw new Error("Local-only D1 read failed.\n" + (result.stdout || "") + "\n" +
+      (result.stderr || "") + (result.error ? "\n" + result.error.message : ""));
+  }
+  const parsed = JSON.parse(result.stdout);
+  const resultSets = Array.isArray(parsed) ? parsed : [parsed];
+  return resultSets.flatMap(item => Array.isArray(item?.results) ? item.results : []);
 }
 
 async function api(path, { method = "GET", body, token = TOKEN } = {}) {
@@ -162,8 +180,67 @@ async function stopWorker(child) {
   }
 }
 
+function launchCrashFixture(mode, markerPath, extraArgs = []) {
+  const child = spawn("python3", [
+    "tests/fixtures/remote_process_crash_worker.py", mode, markerPath, ...extraArgs,
+  ], {
+    cwd: process.cwd(),
+    env: {
+      ...safeEnvironment(),
+      RAAWAA_LOCAL_WORKER_URL: BASE,
+      RAAWAA_LOCAL_WORKER_TOKEN: TOKEN,
+      PYTHONDONTWRITEBYTECODE: "1",
+    },
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  let output = "";
+  child.stdout.setEncoding("utf8");
+  child.stderr.setEncoding("utf8");
+  child.stdout.on("data", chunk => { output = (output + chunk).slice(-8000); });
+  child.stderr.on("data", chunk => { output = (output + chunk).slice(-8000); });
+  child.fixtureOutput = () => output;
+  return child;
+}
+
+async function waitForMarker(child, markerPath, timeoutMs = 15_000) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (existsSync(markerPath) && readFileSync(markerPath, "utf8").trim()) return;
+    if (child.exitCode !== null) {
+      throw new Error("Crash fixture exited before its child started:\n" + child.fixtureOutput());
+    }
+    await delay(50);
+  }
+  throw new Error("Trusted crash fixture child did not start:\n" + child.fixtureOutput());
+}
+
+async function waitForExit(child, timeoutMs = 10_000) {
+  if (child.exitCode !== null || child.signalCode !== null) return;
+  let timer;
+  const exit = new Promise(resolve => child.once("close", () => resolve(true)));
+  if (child.exitCode !== null || child.signalCode !== null) return;
+  const timeout = new Promise(resolve => { timer = setTimeout(() => resolve(false), timeoutMs); });
+  const exited = await Promise.race([exit, timeout]);
+  clearTimeout(timer);
+  if (!exited) {
+    child.kill("SIGKILL");
+    await Promise.race([exit, delay(3000)]);
+    throw new Error("Crash fixture failed to exit before timeout:\\n" + child.fixtureOutput());
+  }
+}
+
+function killCrashChildren(pids) {
+  for (const pid of pids) {
+    if (Number.isInteger(pid) && pid > 1 && pid !== process.pid) {
+      try { process.kill(pid, "SIGKILL"); } catch { /* already exited */ }
+    }
+  }
+}
+
 let server = null;
 let logs = "";
+let crashMarkerPath = null;
+const crashChildPids = new Set();
 
 try {
   runMigrations();
@@ -918,6 +995,265 @@ try {
   assert.equal(pythonDispatchResult.replayed, false);
   assert.match(pythonDispatchResult.dispatch_id, /^[0-9a-f]{32}$/);
 
+  // Deterministic child-process fault injection across the real local D1 Worker:
+  // start one trusted fixture child, kill its worker before settle, expire only
+  // that task lease, recover the exact daily probe, then prove the next owner
+  // quarantines the durable in-flight dispatch without starting another child.
+  const crashSlot = new Date().toISOString().slice(0, 10).replaceAll("-", "");
+  const crashKey = "staging-cron-supervised-probe:" + crashSlot;
+  const crashTask = await api("/v1/tasks/enqueue", {
+    method: "POST",
+    body: {
+      task_type: "supervised_probe",
+      title: "Scheduled Staging read-only process probe",
+      payload: { operation: "python_platform_probe" },
+      idempotency_key: crashKey,
+      max_attempts: 2,
+      priority: 100,
+    },
+  });
+  assertStatus(crashTask, 201, "enqueue bounded daily crash-recovery fixture");
+  const crashTaskId = crashTask.payload.task.id;
+  crashMarkerPath = join(root, "remote-child-starts.txt");
+  const firstCrashWorker = launchCrashFixture("start", crashMarkerPath);
+  await waitForMarker(firstCrashWorker, crashMarkerPath);
+  const firstChildPid = Number(readFileSync(crashMarkerPath, "utf8").trim().split(/\\s+/)[0]);
+  assert.ok(Number.isInteger(firstChildPid) && firstChildPid > 1);
+  crashChildPids.add(firstChildPid);
+  const firstLeaseRows = queryLocalSql(
+    "SELECT lease_token FROM tasks WHERE id='" + crashTaskId + "'",
+  );
+  assert.equal(firstLeaseRows.length, 1);
+  const oldCrashLease = firstLeaseRows[0].lease_token;
+  assert.equal(typeof oldCrashLease, "string");
+  const firstDispatchRows = queryLocalSql(
+    "SELECT task_id,status,dispatch_id FROM task_process_dispatches WHERE task_id='" + crashTaskId + "'",
+  );
+  assert.equal(firstDispatchRows.length, 1);
+  assert.equal(firstDispatchRows[0].status, "in_flight");
+  assert.equal(firstDispatchRows[0].task_id, crashTaskId);
+  let crashTasks = await api("/v1/tasks?limit=100");
+  assertStatus(crashTasks, 200, "read task before injected crash");
+  let crashTaskRow = crashTasks.payload.tasks.find(task => task.id === crashTaskId);
+  assert.equal(crashTaskRow.status, "running");
+  assert.equal(crashTaskRow.attempts, 1);
+  firstCrashWorker.kill("SIGKILL");
+  await waitForExit(firstCrashWorker);
+  try { process.kill(firstChildPid, "SIGKILL"); } catch { /* fixture child already exited */ }
+  await delay(100);
+  crashChildPids.delete(firstChildPid);
+
+  executeLocalSql(
+    "UPDATE tasks SET lease_expires_at='2000-01-01T00:00:00.000Z' " +
+    "WHERE id='" + crashTaskId + "' AND idempotency_key='" + crashKey + "' AND status='running'",
+  );
+  const recoveryPath = "/v1/tasks/" + crashTaskId + "/recover-supervised-probe";
+  const lostRecoveryResponse = await fetch(BASE + recoveryPath, {
+    method: "POST",
+    headers: { authorization: "Bearer " + TOKEN, "content-type": "application/json" },
+    body: "{}",
+    signal: AbortSignal.timeout(10_000),
+  });
+  assert.equal(lostRecoveryResponse.status, 200, "first recovery request reaches the Worker");
+  // Client-discarded successful response: this approximates a lost reply at
+  // the client (the Worker committed and the client received the response,
+  // then discarded its body). It is NOT a transport-level dropped response;
+  // no claim of a commit-then-drop network fault is made here.
+  await lostRecoveryResponse.text();
+  const recoveredProbe = await api(recoveryPath, { method: "POST", body: {} });
+  assertStatus(recoveredProbe, 200, "retry after a lost recovery response");
+  assert.deepEqual(recoveredProbe.payload, {
+    status: "pending", recovered: false, replay: true, attempts: 1,
+    max_attempts: 2,
+  });
+  crashTasks = await api("/v1/tasks?limit=100");
+  crashTaskRow = crashTasks.payload.tasks.find(task => task.id === crashTaskId);
+  assert.equal(crashTaskRow.status, "pending");
+  assert.equal(crashTaskRow.attempts, 1);
+  const retainedDispatch = queryLocalSql(
+    "SELECT task_id,status,dispatch_id FROM task_process_dispatches WHERE task_id='" + crashTaskId + "'",
+  );
+  assert.equal(retainedDispatch.length, 1, "recovery preserves exactly one dispatch row");
+  assert.equal(retainedDispatch[0].status, "in_flight");
+  assert.equal(retainedDispatch[0].dispatch_id, firstDispatchRows[0].dispatch_id);
+
+  const auditBeforeReplay = queryLocalSql(
+    "SELECT COUNT(*) AS count FROM audit_log WHERE task_id='" + crashTaskId +
+      "' AND event='supervised_probe_lease_recovered'",
+  )[0].count;
+  const duplicateRecovery = await api(
+    "/v1/tasks/" + crashTaskId + "/recover-supervised-probe", { method: "POST", body: {} },
+  );
+  assertStatus(duplicateRecovery, 200, "duplicate recovery is idempotent");
+  assert.equal(duplicateRecovery.payload.recovered, false);
+  assert.equal(duplicateRecovery.payload.replay, true);
+  const auditAfterReplay = queryLocalSql(
+    "SELECT COUNT(*) AS count FROM audit_log WHERE task_id='" + crashTaskId +
+      "' AND event='supervised_probe_lease_recovered'",
+  )[0].count;
+  assert.equal(auditAfterReplay, auditBeforeReplay, "duplicate recovery adds no second recovery audit");
+
+  const crashProcessPath = "/v1/tasks/" + crashTaskId + "/process-dispatches";
+  const oldLeaseHeartbeat = await api("/v1/tasks/" + crashTaskId + "/heartbeat", {
+    method: "POST", body: { lease_token: oldCrashLease },
+  });
+  assertStatus(oldLeaseHeartbeat, 409, "recovered task rejects stale heartbeat");
+  const oldLeaseFinish = await api("/v1/tasks/" + crashTaskId + "/finish", {
+    method: "POST", body: { lease_token: oldCrashLease, status: "succeeded", result: { stale: true } },
+  });
+  assertStatus(oldLeaseFinish, 409, "recovered task rejects stale finish/overwrite");
+  const processRows = queryLocalSql(
+    "SELECT dispatch_id,operation_fingerprint,lease_fingerprint,status FROM task_process_dispatches " +
+      "WHERE task_id='" + crashTaskId + "'",
+  );
+  const crashIdentity = processRows[0];
+  const crashStaleSettle = await api(crashProcessPath, { method: "POST", body: {
+    action: "settle", lease_token: oldCrashLease, dispatch_id: crashIdentity.dispatch_id,
+    outcome: processOutcome,
+  } });
+  assertStatus(crashStaleSettle, 409, "lost lease cannot settle the original child result");
+
+  const claimFixture = launchCrashFixture("claim", crashMarkerPath, [crashTaskId]);
+  await waitForExit(claimFixture, 10_000);
+  assert.equal(claimFixture.exitCode, 0,
+    "new owner claims only the recovered exact task: " + claimFixture.fixtureOutput());
+  const recoveredClaim = JSON.parse(claimFixture.fixtureOutput().trim());
+  assert.equal(recoveredClaim.task_id, crashTaskId);
+  assert.equal(recoveredClaim.attempts, 2);
+  assert.notEqual(recoveredClaim.lease_token, oldCrashLease);
+  const staleOwnerOverwrite = await api("/v1/tasks/" + crashTaskId + "/finish", {
+    method: "POST", body: { lease_token: oldCrashLease, status: "failed", error: "stale overwrite" },
+  });
+  assertStatus(staleOwnerOverwrite, 409, "stale owner cannot overwrite the new owner's task");
+
+  const resumedWorker = launchCrashFixture("resume", crashMarkerPath,
+    [crashTaskId, recoveredClaim.lease_token]);
+  await waitForExit(resumedWorker, 15_000);
+  assert.equal(resumedWorker.exitCode, 0,
+    "replacement worker quarantines the ambiguous dispatch: " + resumedWorker.fixtureOutput());
+  const resumedSummary = JSON.parse(resumedWorker.fixtureOutput().trim().split("\\n").at(-1));
+  assert.equal(resumedSummary.status, "blocked");
+  assert.equal(resumedSummary.classification, "ambiguous");
+  const childStartPids = readFileSync(crashMarkerPath, "utf8").trim().split(/\\s+/).map(Number);
+  for (const pid of childStartPids.slice(1)) crashChildPids.add(pid);
+  assert.equal(childStartPids.length, 1, "the recovery path must not start a second child");
+  const quarantinedDispatch = queryLocalSql(
+    "SELECT status FROM task_process_dispatches WHERE task_id='" + crashTaskId + "'",
+  );
+  assert.equal(quarantinedDispatch[0].status, "ambiguous");
+
+  const duplicateDailyEnqueue = await api("/v1/tasks/enqueue", {
+    method: "POST",
+    body: {
+      task_type: "supervised_probe",
+      title: "Scheduled Staging read-only process probe",
+      payload: { operation: "python_platform_probe" },
+      idempotency_key: crashKey,
+      max_attempts: 2,
+      priority: 100,
+    },
+  });
+  assertStatus(duplicateDailyEnqueue, 200, "same UTC daily schedule slot is idempotent");
+  assert.equal(duplicateDailyEnqueue.payload.created, false);
+  assert.equal(duplicateDailyEnqueue.payload.task.id, crashTaskId);
+  assert.equal(readFileSync(crashMarkerPath, "utf8").trim().split(/\\s+/).length, 1);
+
+  // Exact production envelope (max_attempts=1): after a child start and worker
+  // death, recovery must terminally fail the task, quarantine the dispatch as
+  // ambiguous, and never start a second child — without raising the retry budget.
+  const exactSlot = new Date(Date.now() - 86_400_000).toISOString().slice(0, 10).replaceAll("-", "");
+  const exactKey = "staging-cron-supervised-probe:" + exactSlot;
+  const exactTask = await api("/v1/tasks/enqueue", {
+    method: "POST",
+    body: {
+      task_type: "supervised_probe",
+      title: "Scheduled Staging read-only process probe",
+      payload: { operation: "python_platform_probe" },
+      idempotency_key: exactKey,
+      max_attempts: 1,
+      priority: 100,
+    },
+  });
+  assertStatus(exactTask, 201, "enqueue exact one-attempt production envelope fixture");
+  const exactTaskId = exactTask.payload.task.id;
+  const exactMarkerPath = join(root, "exact-child-starts.txt");
+  const exactWorker = launchCrashFixture("start", exactMarkerPath);
+  await waitForMarker(exactWorker, exactMarkerPath);
+  const exactChildPid = Number(readFileSync(exactMarkerPath, "utf8").trim().split(/\s+/)[0]);
+  assert.ok(Number.isInteger(exactChildPid) && exactChildPid > 1);
+  crashChildPids.add(exactChildPid);
+  exactWorker.kill("SIGKILL");
+  await waitForExit(exactWorker);
+  try { process.kill(exactChildPid, "SIGKILL"); } catch { /* fixture child already exited */ }
+  await delay(100);
+  crashChildPids.delete(exactChildPid);
+  executeLocalSql(
+    "UPDATE tasks SET lease_expires_at='2000-01-01T00:00:00.000Z' " +
+    "WHERE id='" + exactTaskId + "' AND idempotency_key='" + exactKey + "' AND status='running'",
+  );
+  const exactRecovery = await api(
+    "/v1/tasks/" + exactTaskId + "/recover-supervised-probe", { method: "POST", body: {} },
+  );
+  assertStatus(exactRecovery, 200, "recover exact one-attempt envelope after the crash");
+  assert.deepEqual(exactRecovery.payload, {
+    status: "failed", recovered: true, replay: false, attempts: 1,
+    max_attempts: 1, dispatch_status: "ambiguous",
+  });
+  const exactDispatch = queryLocalSql(
+    "SELECT status FROM task_process_dispatches WHERE task_id='" + exactTaskId + "'",
+  );
+  assert.equal(exactDispatch[0].status, "ambiguous");
+  assert.equal(readFileSync(exactMarkerPath, "utf8").trim().split(/\s+/).length, 1,
+    "the one-attempt recovery must not start a second child");
+
+  // Concurrent recovery race on a real local D1 row: two simultaneous
+  // recoveries of one expired lease produce exactly one transition and one
+  // audit event; the loser is a deterministic replay, never a second lease.
+  const raceSlot = new Date(Date.now() - 2 * 86_400_000).toISOString().slice(0, 10).replaceAll("-", "");
+  const raceKey = "staging-cron-supervised-probe:" + raceSlot;
+  const raceTask = await api("/v1/tasks/enqueue", {
+    method: "POST",
+    body: {
+      task_type: "supervised_probe",
+      title: "Scheduled Staging read-only process probe",
+      payload: { operation: "python_platform_probe" },
+      idempotency_key: raceKey,
+      max_attempts: 2,
+      priority: 100,
+    },
+  });
+  assertStatus(raceTask, 201, "enqueue concurrent-recovery race fixture");
+  const raceTaskId = raceTask.payload.task.id;
+  const raceClaim = await api(
+    "/v1/tasks/" + raceTaskId + "/claim-supervised-probe", { method: "POST", body: {} },
+  );
+  assertStatus(raceClaim, 200, "claim concurrent-recovery race fixture");
+  executeLocalSql(
+    "UPDATE tasks SET lease_expires_at='2000-01-01T00:00:00.000Z' " +
+    "WHERE id='" + raceTaskId + "' AND status='running'",
+  );
+  const racePath = BASE + "/v1/tasks/" + raceTaskId + "/recover-supervised-probe";
+  const raceHeaders = { authorization: "Bearer " + TOKEN, "content-type": "application/json" };
+  const [raceFirst, raceSecond] = await Promise.all([
+    fetch(racePath, { method: "POST", headers: raceHeaders, body: "{}", signal: AbortSignal.timeout(10_000) }),
+    fetch(racePath, { method: "POST", headers: raceHeaders, body: "{}", signal: AbortSignal.timeout(10_000) }),
+  ]);
+  const raceBodies = [await raceFirst.json(), await raceSecond.json()];
+  assert.equal(raceBodies.filter(body => body.recovered === true).length, 1,
+    "exactly one concurrent recovery transitions the task");
+  assert.equal(raceBodies.filter(body => body.recovered === false).length, 1,
+    "the losing concurrent recovery is a deterministic replay/lease_lost");
+  const raceAudits = queryLocalSql(
+    "SELECT COUNT(*) AS count FROM audit_log WHERE task_id='" + raceTaskId +
+      "' AND event='supervised_probe_lease_recovered'",
+  )[0].count;
+  assert.equal(raceAudits, 1, "concurrent recovery writes exactly one audit event");
+  const raceRows = queryLocalSql(
+    "SELECT status,lease_token FROM tasks WHERE id='" + raceTaskId + "'",
+  );
+  assert.equal(raceRows[0].status, "pending");
+  assert.equal(raceRows[0].lease_token, null, "recovery clears the lease; no second lease is issued");
+
   const quotaBase = {
     action: "reserve",
     route_id: "d1-local:concurrency",
@@ -1219,9 +1555,9 @@ try {
   assert.equal(status.payload.paper_events.find(row => row.event_type === "candidate_detected")?.count, 1);
   assert.equal(status.payload.tasks.find(row => row.status === "succeeded")?.count, 12,
     "workflow, dependency, supervised-process, and exact-claim fixtures should be durably succeeded");
-  assert.equal(status.payload.tasks.find(row => row.status === "failed")?.count, 2,
+  assert.equal(status.payload.tasks.find(row => row.status === "failed")?.count, 3,
     "failed dependency roots remain visibly failed");
-  assert.equal(status.payload.tasks.find(row => row.status === "blocked")?.count, 7,
+  assert.equal(status.payload.tasks.find(row => row.status === "blocked")?.count, 8,
     "failed dependencies and no-replay supervised tasks remain blocked");
   assert.equal(status.payload.monetary_ledger.available, true);
   assert.equal(status.payload.monetary_ledger.pending_count, 1);
@@ -1240,11 +1576,15 @@ try {
 
   console.log(
     "Local D1 integration passed: migrations, authenticated status, task enqueue/idempotency/lease fencing, " +
-    "process-dispatch prepare/start/settle and ambiguity, concurrent claims, stale-lease fencing and restart no-replay, Python remote adapter with a real local child, monetary/quota and paper ledgers, and disabled Telegram webhook.",
+    "process-dispatch prepare/start/settle and ambiguity, concurrent claims, stale-lease fencing and restart no-replay, " +
+    "exact daily-probe recovery with interrupted-child fault injection and no second child start, " +
+    "exact one-attempt production-envelope crash recovery and concurrent-recovery race, Python remote adapter, " +
+    "monetary/quota and paper ledgers, and disabled Telegram webhook.",
   );
 } catch (error) {
   throw new Error(String(error?.stack || error) + "\nWrangler logs:\n" + logs);
 } finally {
   await stopWorker(server);
+  killCrashChildren(crashChildPids);
   rmSync(root, { recursive: true, force: true });
 }

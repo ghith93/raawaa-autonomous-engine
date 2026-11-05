@@ -217,6 +217,42 @@ remains off; no Production deployment, Production D1 write, provider inference,
 or paid spend occurred. Staging migration and isolated Worker deployment did
 occur, and the verifier's temporary fixture and credentials were cleaned up.
 
+## Runtime-004 scheduled-probe recovery semantics
+
+The Staging scheduled probe (`staging-supervised-process-probe.yml`, daily
+03:47 UTC, schedule-only) enqueues one exact `supervised_probe` per UTC day
+under `staging-cron-supervised-probe:YYYYMMDD` with `max_attempts=1`. Its
+recovery contract is deliberately narrow:
+
+- **Atomic transition.** `POST /v1/tasks/{id}/recover-supervised-probe`
+  applies the audit insert, the exhausted-dispatch quarantine, and the task
+  lease/status transition as one D1 `batch()` — they commit or roll back
+  together. The audit insert is gated on the pre-transition (running,
+  expired-lease) row, so two concurrent recoveries of the same expired lease
+  produce exactly one transition and one `supervised_probe_lease_recovered`
+  audit event; the loser receives a deterministic replay/`lease_lost`, never
+  a second lease (proven against real local D1 in
+  `tests/d1_local_worker_smoke.mjs`).
+- **Exact production envelope.** With `max_attempts=1`, an interrupted
+  in-flight dispatch is quarantined as `ambiguous` and the task terminally
+  `failed`; the retry budget is never silently raised and no second child
+  starts. The `max_attempts=2` requeue path is exercised separately. Both
+  envelopes are covered by fault injection that kills a real fixture worker
+  after the child-start marker.
+- **Response-loss wording.** The local drill's "lost reply" is a
+  *client-discarded successful response* (the Worker committed; the client
+  dropped the body before acting on it). It is not a transport-level
+  commit-then-drop proof, and no such claim is made.
+- **Previous-slot disposition.** Each run first looks up only the previous
+  UTC day's exact probe key (never enqueues it). If that row is still
+  `running`, it is routed through the same exact-task recovery on the
+  Cloudflare ledger and reported in the run output as `previous_slot`
+  (task ID + terminal status) for monitoring. The Supabase fallback never
+  recovers across ledgers. No broad stale-task sweep was added.
+- **Not yet proven:** two distinct real `event=schedule` successes with
+  separate durable task/dispatch IDs and temporary-token revocation remain
+  the post-merge acceptance gate. Local D1 and CI evidence do not count.
+
 ## What is still not proven
 
 1. **No Cron-triggered/unattended process run.** The verified Staging test was
