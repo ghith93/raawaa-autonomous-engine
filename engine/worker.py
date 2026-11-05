@@ -10,6 +10,7 @@ from engine.agent_runtime import build_task_contract, load_agent_roster
 from engine.lease_heartbeat import LeaseHeartbeat, LeaseHeartbeatLost
 from engine.provider import GenerationRequest
 from engine.task_store import TaskStore
+from engine.supervised_task import SUPERVISED_TASK_TYPE, complete_supervised_task
 from engine.live_data_policy import validate_live_payload
 from engine.operating_policy import OperatingPolicyError, load_operating_policy
 from scripts.task_envelope import envelope_hash, validate as validate_envelope
@@ -214,6 +215,11 @@ def run_once(store: TaskStore, live_gateway=None, environ=None) -> dict | None:
     task_type = task["task_type"]
     if task_type == INGEST_TASK_TYPE:
         return _complete_ingest_task(store, task)
+    if task_type == SUPERVISED_TASK_TYPE:
+        # A supervised process, not a model call. It owns its own lease fencing
+        # and cancellation, so it must not be wrapped in the inference
+        # heartbeat below; it is also deliberately absent from SAFE_TASKS.
+        return complete_supervised_task(store, task, environ=environ)
     if task_type not in SAFE_TASKS:
         store.finish(task["id"], "blocked", error=f"Unsupported task type: {task_type}",
                      lease_token=task["lease_token"])
