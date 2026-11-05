@@ -80,12 +80,25 @@ jobs:
           test -n "$RAAWAA_ENGINE_STAGING_API_TOKEN" || { echo "Missing ephemeral Staging token"; exit 1; }
           printf '%s' "$RAAWAA_ENGINE_STAGING_API_TOKEN" | npx --yes wrangler@4.156.1 secret put ENGINE_API_TOKEN --config wrangler.staging.toml
       - name: Enqueue, claim, execute, and read back exactly one harmless task
+        shell: bash
         env:
           RAAWAA_ENGINE_API_URL: https://raawaa-autonomous-engine-staging.ghith-shikhkhaled.workers.dev
           RAAWAA_ENGINE_PROCESS_SUPERVISOR: enabled
           RAAWAA_ENGINE_LIVE_INFERENCE: disabled
           RAAWAA_ENGINE_STAGING_TOKEN_INSTALLED: "true"
-        run: python scripts/run_staging_p1_task_proof.py
+        run: |
+          set -o pipefail
+          # The bounded outcome line is uploaded as an artifact because step
+          # logs/summaries are not always retrievable by automation.
+          python scripts/run_staging_p1_task_proof.py 2>&1 | tee p1-proof-output.txt
+      - name: Upload bounded proof outcome
+        if: ${{ always() }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: staging-p1-task-proof-${{ github.run_id }}
+          path: p1-proof-output.txt
+          if-no-files-found: warn
+          retention-days: 14
       - name: Revoke temporary Staging bearer token
         if: ${{ always() && steps.install_staging_token.outcome == 'success' }}
         env:

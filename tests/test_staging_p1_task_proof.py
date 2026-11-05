@@ -190,6 +190,8 @@ class WorkflowShapeTests(unittest.TestCase):
         self.assertNotIn("schedule:", text)
         self.assertNotIn("cron:", text)
         self.assertIn("scripts/run_staging_p1_task_proof.py", text)
+        self.assertIn("actions/upload-artifact@", text)
+        self.assertIn("p1-proof-output.txt", text)
         self.assertIn("secret put ENGINE_API_TOKEN --config wrangler.staging.toml", text)
         self.assertIn("secret delete ENGINE_API_TOKEN --config wrangler.staging.toml", text)
         self.assertIn("NEVER counts toward the Runtime-004", text)
