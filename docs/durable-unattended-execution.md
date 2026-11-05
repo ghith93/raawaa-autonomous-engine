@@ -247,8 +247,15 @@ recovery contract is deliberately narrow:
   UTC day's exact probe key (never enqueues it). If that row is still
   `running`, it is routed through the same exact-task recovery on the
   Cloudflare ledger and reported in the run output as `previous_slot`
-  (task ID + terminal status) for monitoring. The Supabase fallback never
-  recovers across ledgers. No broad stale-task sweep was added.
+  (task ID + resulting status) for monitoring. This lookup scans only the
+  newest 100 rows, not an exact-key API: when the page is full and the key is
+  absent, the probe fails closed instead of claiming absence or proceeding to
+  fallback. A `pending` previous row is reported as `pending_unresolved`, not
+  as terminal; it is not automatically claimed. If recovery returns `pending`,
+  that too is nonterminal. An unexpected task under the same key or invalid
+  status is rejected. The Supabase fallback never recovers across ledgers.
+  No broad stale-task sweep was added; work older than the immediately previous
+  UTC slot is not checked.
 - **Backend-specific acceptance.** A run's outcome records its `backend`.
   Only successes with `backend=cloudflare_staging` count toward the
   Runtime-004 Cloudflare-primary gate. A `supabase_free_fallback` success is

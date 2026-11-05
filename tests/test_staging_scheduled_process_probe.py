@@ -231,6 +231,67 @@ class StagingScheduledProbeTests(unittest.TestCase):
         self.assertEqual(store.enqueued_keys, [slot_key])
         self.assertEqual(store.claimed_id, "probe-123")
 
+    def test_previous_slot_absence_is_not_inferred_from_a_full_page(self):
+        store = FakeStore()
+        store.previous_tasks = [{"id": str(i), "idempotency_key": "other"} for i in range(100)]
+        fallback_factory = Mock()
+        processor = Mock()
+        with self.assertRaisesRegex(probe.ScheduledProbeError, "lookup is inconclusive"):
+            probe.run_scheduled_probe(
+                cron_environment(), store_factory=lambda *args, **kwargs: store,
+                fallback_store_factory=fallback_factory, processor=processor,
+            )
+        self.assertIsNone(store.enqueued)
+        fallback_factory.assert_not_called()
+        processor.assert_not_called()
+        store.previous_tasks.pop()
+        self.assertEqual(probe._reconcile_previous_slot(
+            store, probe.IDEMPOTENCY_PREFIX + "20261105", backend="cloudflare_staging"
+        )["status"], "absent")
+
+    def test_previous_slot_found_on_full_page_is_still_checked(self):
+        store = FakeStore()
+        store.previous_tasks = [{"id": str(i), "idempotency_key": "other"} for i in range(99)]
+        store.previous_tasks.append({
+            "id": "probe-yesterday", "task_type": probe.TASK_TYPE, "title": probe.TITLE,
+            "idempotency_key": probe.IDEMPOTENCY_PREFIX + "20261104",
+            "payload_json": json.dumps({"operation": probe.OPERATION}), "status": "succeeded",
+        })
+        result = probe._reconcile_previous_slot(
+            store, probe.IDEMPOTENCY_PREFIX + "20261105", backend="cloudflare_staging"
+        )
+        self.assertEqual(result["status"], "already_dispositioned")
+        self.assertEqual(result["task_id"], "probe-yesterday")
+
+    def test_previous_slot_reports_pending_as_unresolved_not_dispositioned(self):
+        store = FakeStore()
+        store.previous_tasks = [{
+            "id": "probe-yesterday", "task_type": probe.TASK_TYPE, "title": probe.TITLE,
+            "idempotency_key": probe.IDEMPOTENCY_PREFIX + "20261104",
+            "payload_json": json.dumps({"operation": probe.OPERATION}), "status": "pending",
+        }]
+        result = probe._reconcile_previous_slot(
+            store, probe.IDEMPOTENCY_PREFIX + "20261105", backend="cloudflare_staging"
+        )
+        self.assertEqual(result["status"], "pending_unresolved")
+        self.assertEqual(result["task_status"], "pending")
+        self.assertEqual(store.recovered_ids, [])
+
+    def test_previous_slot_key_collision_or_invalid_status_fails_closed(self):
+        store = FakeStore()
+        previous = {
+            "id": "probe-yesterday", "task_type": probe.TASK_TYPE, "title": probe.TITLE,
+            "idempotency_key": probe.IDEMPOTENCY_PREFIX + "20261104",
+            "payload_json": json.dumps({"operation": probe.OPERATION}), "status": "succeeded",
+        }
+        for field, value in (("title", "different"), ("task_type", "different"), ("status", "unknown")):
+            with self.subTest(field=field):
+                store.previous_tasks = [{**previous, field: value}]
+                with self.assertRaises(probe.ScheduledProbeError):
+                    probe._reconcile_previous_slot(
+                        store, probe.IDEMPOTENCY_PREFIX + "20261105", backend="cloudflare_staging"
+                    )
+
     def test_previous_slot_key_rolls_over_month_and_year_boundaries(self):
         self.assertEqual(
             probe._previous_slot_key(probe.IDEMPOTENCY_PREFIX + "20270101"),
