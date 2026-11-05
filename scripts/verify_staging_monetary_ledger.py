@@ -62,19 +62,18 @@ def verify_staging_target() -> None:
 
 
 def default_policy_nanos() -> tuple[int, int, int]:
-    policy = json.loads(Path("config/policy.json").read_text(encoding="utf-8"))
-    def nanos(value: Any) -> int:
-        if isinstance(value, bool) or not isinstance(value, (int, float)):
-            raise RuntimeError("Configured monetary budget is not numeric")
-        amount = Decimal(str(value)) * Decimal(1_000_000_000)
-        if amount != amount.to_integral_value() or amount < 0:
-            raise RuntimeError("Configured monetary budget cannot be represented as integer nano-USD")
-        return int(amount)
-    return (
-        nanos(policy["daily_budget_usd"]),
-        nanos(policy["monthly_budget_usd"]),
-        nanos(policy["per_task_budget_usd"]),
-    )
+    """Staging-only synthetic ledger-math fixture caps (nano-USD).
+
+    These values exist solely so the isolated Staging harness can exercise
+    the monetary ledger's cap arithmetic with synthetic reservations that
+    are never settled against a real provider and never spend money. They
+    are NOT spend authorization: the active repository policy
+    (``config/policy.json``) is zero-spend (all caps USD 0, paid calls and
+    paid fallback disabled), and this harness only ever runs against the
+    isolated Staging D1, whose policy row it restores to these same fixture
+    values afterwards — exactly as it did when they were read from config.
+    """
+    return (400_000_000, 12_000_000_000, 200_000_000)
 
 
 

@@ -327,7 +327,7 @@ class CliTests(unittest.TestCase):
             status = json.loads(output.getvalue())
             self.assertFalse(status["network_calls_enabled"])
             self.assertFalse(status["paid_calls_enabled"])
-            self.assertEqual(status["budgets"]["per_task_usd"], 0.2)
+            self.assertEqual(status["budgets"]["per_task_usd"], 0)
 
     def test_monetary_status_is_read_only_and_lists_ambiguous_reservations(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -351,8 +351,9 @@ class CliTests(unittest.TestCase):
             self.assertEqual(result["pending_reservations"][0]["estimated_cost_usd"], 0.25)
             self.assertEqual(result["per_task_usage"][0]["task_id"], "task-test")
             self.assertTrue(result["per_task_usage"][0]["over_budget"])
-            self.assertFalse(result["budget_status"]["daily_over_budget"])
-            self.assertFalse(result["budget_status"]["monthly_over_budget"])
+            # The synthetic legacy reservation exceeds the zero-spend caps.
+            self.assertTrue(result["budget_status"]["daily_over_budget"])
+            self.assertTrue(result["budget_status"]["monthly_over_budget"])
             self.assertIn("Legacy usage rows", result["per_task_attribution_note"])
             self.assertIn("Do not release", result["reconciliation_note"])
             self.assertNotIn("gsk_", output.getvalue())

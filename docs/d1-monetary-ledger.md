@@ -10,7 +10,7 @@ This implementation does not enable model inference. Provider profiles remain di
 
 Migration `0006_monetary_budget_ledger.sql` adds:
 
-- `monetary_budget_policy`: the operator-owned hard caps in integer nano-USD (currently $0.40/day, $12/month, $0.20/task). The API token cannot change these values; every new reservation must match the D1 policy exactly.
+- `monetary_budget_policy`: the operator-owned hard caps in integer nano-USD (seeded by migration 0006 at $0.40/day, $12/month, $0.20/task as ledger guardrails). The API token cannot change these values; every new reservation must match the D1 policy exactly. These row values are guardrail/test fixtures only: the active repository policy is zero-spend (all caps USD 0, paid calls disabled), so they do not authorize any spend, and the isolated Staging harness exercises them with synthetic reservations that are never settled against a provider.
 - `monetary_reservations`: one record per request reservation, with idempotency key, task/provider/model attribution, estimate, policy caps, lifecycle status, actual cost and token usage.
 - `monetary_route_quarantines`: persistent provider/model quarantine after actual cost exceeds the estimate or the applicable hard cap.
 

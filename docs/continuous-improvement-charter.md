@@ -81,14 +81,14 @@ Avoid repeating previously rejected or completed proposals unless new evidence c
 
 ## 7. Cost, quota, and model routing
 
-The default target is the highest sustainable quality within the operator-approved USD 15 all-in monthly ceiling. The active model allocation is USD 12/month with a USD 0.40 daily cap and USD 0.20 per-task cap; infrastructure paid overages remain disabled at USD 0 and USD 3 remains unallocated reserve.
+The default target is the highest sustainable quality within the operator-mandated USD 0 zero-spend ceiling: every active monetary cap is exactly USD 0 and paid routes are disabled. (The former USD 15 all-in ceiling with a USD 12/month model allocation was superseded by the owner's 2026-11-05 zero-spend directive.)
 
 - Prefer verified free tiers and open-source tools, but verify the exact account plan, model, region, quotas, commercial-use terms, and data policy.
 - Unknown price or quota means ineligible.
-- Use verified-free routes first. The hybrid strategy permits a paid fallback only after a provider-enforced hard stop/prepaid cap is verified and explicitly configured below the USD 12 model allocation; it remains disabled by default.
+- Use verified-free routes first. The hybrid strategy permits a paid fallback only after a new explicit owner spend approval and a provider-enforced hard stop/prepaid cap verified below the approved allocation; it remains disabled.
 - Pin model IDs and endpoints; never silently fall back to paid models or automatic billing.
-- Reserve spend atomically before provider I/O; include actual spend and ambiguous reservations in the monthly USD 12 model cap. Stop on unknown charges or unresolved reservations.
-- Keep Cloudflare and GitHub Actions within free/included allowances; do not enable paid overages or spend the USD 3 reserve without a separately verified hard stop and explicit budget reallocation.
+- Reserve spend atomically before provider I/O; include actual spend and ambiguous reservations in the monthly model cap (currently USD 0, so any positive amount is over budget). Stop on unknown charges or unresolved reservations.
+- Keep Cloudflare and GitHub Actions within free/included allowances; do not enable paid overages or spend anything without a separately verified hard stop and an explicit owner spend approval.
 - Enforce provider request/token limits at all relevant windows (per-minute, daily, monthly, and per-task) before network I/O.
 - Reserve quota atomically; retain reservations after ambiguous timeouts or transport failures; rotate only on explicitly understood retryable responses.
 - Cache reusable research and provider metadata with freshness/expiry rules.

@@ -34,7 +34,7 @@ Groq Free account access and model-catalog visibility were verified through a re
 ## Safety and cost model
 
 - Hybrid/free-first: verified free providers are preferred; paid fallback remains disabled until provider-enforced spend blocking is verified.
-- Hard budget: USD 15/month all-in; USD 12/month model cap, USD 0.40/day, USD 0.20/task; USD 0 paid infrastructure overages; USD 3 unallocated reserve.
+- Hard budget: **USD 0 (zero-spend mandate)** — every monetary cap in the active policy is exactly USD 0, paid model calls and paid fallback are disabled, and only verified zero-cost routes may ever be selected. (A USD 15/month envelope applied until the owner's 2026-11-05 zero-spend directive; superseded.)
 - Unknown provider pricing, quota, or commercial eligibility is treated as unavailable until verified.
 - Secrets never belong in source control; use narrowly scoped repository secrets only for deliberately enabled integrations.
 - Agents propose work; policy gates determine what may execute.

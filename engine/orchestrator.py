@@ -19,8 +19,8 @@ SAFE_TASK_TYPES = {"research_brief", "code_review", "content_draft", "system_aud
 ID_RE = re.compile(r"^[a-zA-Z][a-zA-Z0-9_-]{0,63}$")
 DEFAULT_POLICY = {
     "max_parallel_agents": 2,
-    "per_task_budget_usd": 0.2,
-    "monthly_budget_usd": 12,
+    "per_task_budget_usd": 0,
+    "monthly_budget_usd": 0,
     "allow_paid_model_calls": False,
     "mode": "safe_dry_run",
     "allow_external_writes": False,
