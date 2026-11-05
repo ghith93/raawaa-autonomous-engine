@@ -76,6 +76,8 @@ from engine.process_supervisor import (
     SupervisorRefusal,
     default_registry,
 )
+from engine.remote_process_dispatch_ledger import RemoteProcessDispatchLedger
+from engine.remote_task_store import RemoteTaskStore
 from engine.task_store import TaskStore
 
 __all__ = [
@@ -206,15 +208,15 @@ def complete_supervised_task(
         return {"id": task_id, "status": "blocked", "reason": "process_supervisor_disabled"}
 
     db_path = getattr(store, "db_path", None)
-    if supervisor is None and db_path is None:
-        # The dispatch ledger is the at-most-once guarantee; a remote store with
-        # no local ledger file cannot provide it, so this fails closed.
+    if supervisor is None and db_path is None and not isinstance(store, RemoteTaskStore):
+        # The dispatch ledger is the at-most-once guarantee. Only the explicit
+        # local SQLite store and the authenticated D1 adapter provide one.
         store.finish(
             task_id, "blocked",
-            error="Supervised execution requires a local task store with a dispatch ledger.",
+            error="Supervised execution requires a supported durable dispatch ledger.",
             lease_token=lease_token,
         )
-        return {"id": task_id, "status": "blocked", "reason": "supervisor_requires_local_store"}
+        return {"id": task_id, "status": "blocked", "reason": "supervisor_requires_durable_ledger"}
 
     operations = WORKER_OPERATIONS if allowed_operations is None else allowed_operations
     try:
@@ -225,7 +227,10 @@ def complete_supervised_task(
                 "detail": str(exc)}
 
     if supervisor is None:
-        ledger = SqliteDispatchLedger(db_path)
+        ledger = (
+            RemoteProcessDispatchLedger(store) if isinstance(store, RemoteTaskStore)
+            else SqliteDispatchLedger(db_path)
+        )
         supervisor = ProcessSupervisor(default_registry(REPOSITORY_ROOT), ledger)
     if watchdog is None:
         watchdog = LeaseWatchdog(

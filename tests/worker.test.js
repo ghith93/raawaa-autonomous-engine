@@ -194,6 +194,20 @@ test("task invocation lifecycle route is authenticated", async () => {
   assert.equal(response.status, 401);
 });
 
+test("process dispatch route is authenticated and refuses absent or non-process task leases", async () => {
+  const unauthenticated = await worker.fetch(request("/v1/tasks/task-1/process-dispatches", {
+    method: "POST", token: null, body: { action: "prepare" },
+  }), { DB: dbMock(), ENGINE_API_TOKEN: TOKEN });
+  assert.equal(unauthenticated.status, 401);
+
+  const DB = dbMock();
+  const wrongTask = await worker.fetch(request("/v1/tasks/task-1/process-dispatches", {
+    method: "POST", body: { action: "prepare", lease_token: "lease-1" },
+  }), { DB, ENGINE_API_TOKEN: TOKEN });
+  assert.equal(wrongTask.status, 409);
+  assert.equal(DB.calls.some(call => call.kind === "run"), false);
+});
+
 
 test("claim endpoint is authenticated and returns an empty queue safely", async () => {
   const DB = dbMock();
@@ -1334,7 +1348,8 @@ test("schema diagnostics report every table the Worker depends on", async () => 
   assert.deepEqual(body.missing, []);
   assert.ok(body.checked.includes("task_dependencies"), "task_dependencies must be probed");
   assert.ok(body.checked.includes("workflow_runs"), "workflow_runs must be probed");
-  assert.equal(body.checked.length, 7);
+  assert.ok(body.checked.includes("task_process_dispatches"), "process dispatch ledger must be probed");
+  assert.equal(body.checked.length, 8);
 });
 
 test("schema diagnostics name the table a deploy forgot to migrate", async () => {

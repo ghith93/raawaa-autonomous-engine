@@ -220,6 +220,23 @@ def _utc_now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def _dispatch_outcome(classification: str, executed: Mapping[str, Any] | None = None) -> dict[str, Any]:
+    """Build the versioned remote-safe outcome fields; no missing value implies success."""
+    source = executed or {}
+    return {
+        "classification": classification,
+        "exit_code": source.get("exit_code"),
+        "signal_number": source.get("signal_number"),
+        "timed_out": classification == "timed_out",
+        "cancelled": classification == "cancelled",
+        "output_truncated": bool(source.get("output_truncated", False)),
+        "stdout": source.get("stdout", "") if isinstance(source.get("stdout", ""), str) else "",
+        "stderr": source.get("stderr", "") if isinstance(source.get("stderr", ""), str) else "",
+        "duration_seconds": round(float(source.get("duration_seconds", 0.0)), 3),
+        "descendants_killed": int(source.get("descendants_killed", 0)),
+    }
+
+
 # ---------------------------------------------------------------------------
 # Operations: the only programs this module will start
 # ---------------------------------------------------------------------------
@@ -615,10 +632,14 @@ class DispatchRecord:
     detail: str | None
     created_at: str
     updated_at: str
+    result: dict[str, Any] | None = None
+    step_key: str | None = None
+    operation_version: str | None = None
+    operation_fingerprint: str | None = None
 
     @property
     def terminal(self) -> bool:
-        return self.status in {"settled", "quarantined"}
+        return self.status in {"settled", "ambiguous", "quarantined"}
 
 
 class DispatchLedger(Protocol):
@@ -632,6 +653,7 @@ class DispatchLedger(Protocol):
         operation: str,
         argv_digest: str,
         lease_fingerprint: str | None = None,
+        lease_token: str | None = None,
     ) -> DispatchRecord | None: ...
 
     def settle(
@@ -641,6 +663,7 @@ class DispatchLedger(Protocol):
         classification: str,
         exit_code: int | None,
         output_truncated: bool,
+        result: dict[str, Any] | None = None,
     ) -> None: ...
 
     def quarantine(self, dispatch_id: str, detail: str) -> None: ...
@@ -718,6 +741,7 @@ class SqliteDispatchLedger:
         operation: str,
         argv_digest: str,
         lease_fingerprint: str | None = None,
+        lease_token: str | None = None,
     ) -> DispatchRecord | None:
         """Claim the dispatch id, or return the record that already holds it.
 
@@ -749,6 +773,7 @@ class SqliteDispatchLedger:
         classification: str,
         exit_code: int | None,
         output_truncated: bool,
+        result: dict[str, Any] | None = None,
     ) -> None:
         if classification not in CLASSIFICATIONS:
             raise DispatchLedgerError(f"unknown classification {classification!r}")
@@ -1319,7 +1344,7 @@ class ProcessSupervisor:
             )
 
         dispatch_id = self.dispatch_id(task_id, operation, parameters, dispatch_key=dispatch_key)
-        argv_digest = hashlib.sha256("\x00".join(argv).encode("utf-8")).hexdigest()[:32]
+        argv_digest = hashlib.sha256("\x00".join(argv).encode("utf-8")).hexdigest()
 
         # Ownership first, record second. A fence checked after the ledger claim
         # would leave an ``in_flight`` row for work that never started, and every
@@ -1355,6 +1380,7 @@ class ProcessSupervisor:
                     operation=spec.name,
                     argv_digest=argv_digest,
                     lease_fingerprint=lease_fingerprint,
+                    lease_token=lease_token,
                 )
             except Exception as exc:
                 # Without a ledger we cannot promise "at most once", and a
@@ -1385,6 +1411,7 @@ class ProcessSupervisor:
                         classification="refused",
                         exit_code=None,
                         output_truncated=False,
+                        result=_dispatch_outcome("refused"),
                     )
                 except Exception:  # pragma: no cover - ledger already broken
                     pass
@@ -1408,6 +1435,7 @@ class ProcessSupervisor:
                         classification="refused",
                         exit_code=None,
                         output_truncated=False,
+                        result=_dispatch_outcome("refused"),
                     )
                 except Exception:  # pragma: no cover - ledger already broken
                     pass
@@ -1451,6 +1479,7 @@ class ProcessSupervisor:
                     classification=observed,
                     exit_code=executed["exit_code"],
                     output_truncated=executed["output_truncated"],
+                    result=_dispatch_outcome(observed, executed),
                 )
             except Exception as exc:
                 # The process ran; we cannot prove what we recorded about it.
@@ -1497,12 +1526,18 @@ class ProcessSupervisor:
     def _replay(self, spec: OperationSpec, argv: tuple[str, ...], record: DispatchRecord) -> ProcessOutcome:
         """Report what the ledger already knows instead of running it again."""
         if record.status == "settled":
+            recorded = record.result or {}
             return ProcessOutcome(
                 classification=record.classification or "ambiguous",
                 operation=spec.name,
                 argv=argv,
                 exit_code=record.exit_code,
-                output_truncated=record.output_truncated,
+                signal_number=recorded.get("signal_number"),
+                stdout=recorded.get("stdout", "") if isinstance(recorded.get("stdout", ""), str) else "",
+                stderr=recorded.get("stderr", "") if isinstance(recorded.get("stderr", ""), str) else "",
+                output_truncated=record.output_truncated or bool(recorded.get("output_truncated", False)),
+                duration_seconds=float(recorded.get("duration_seconds", 0.0)),
+                descendants_killed=int(recorded.get("descendants_killed", 0)),
                 dispatch_id=record.dispatch_id,
                 replayed=True,
                 started=False,
@@ -1510,10 +1545,12 @@ class ProcessSupervisor:
             )
         # Either the recorded run is in flight somewhere else right now, or it
         # was interrupted and quarantined. Both answers are "do not run it".
-        reason = (
-            "dispatch_already_in_flight" if record.status == "in_flight"
-            else f"dispatch_quarantined:{record.detail or 'unspecified'}"
-        )
+        if record.status == "in_flight":
+            reason = "dispatch_already_in_flight"
+        elif record.status == "ambiguous":
+            reason = f"dispatch_ambiguous:{record.detail or 'unspecified'}"
+        else:
+            reason = f"dispatch_quarantined:{record.detail or 'unspecified'}"
         return ProcessOutcome(
             classification="ambiguous",
             operation=spec.name,
