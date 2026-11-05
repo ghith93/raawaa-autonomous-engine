@@ -15,10 +15,6 @@ TOKEN = "synthetic-engine-token"
 
 def status_payload():
     return {
-        "telegram_webhook_schema": {
-            "available": True,
-            "status": "Migration 0005 applied; webhook activation remains separately gated",
-        },
         "task_runner_watchdog": {
             "ready": False,
             "missing": ["GITHUB_APP_ID", "GITHUB_APP_INSTALLATION_ID", "GITHUB_APP_PRIVATE_KEY", "GITHUB_APP_WATCHDOG_ENABLED"],
@@ -86,7 +82,6 @@ class MobileStatusProbeTests(unittest.TestCase):
             "http": "200",
             "paper_ledger": "available",
             "provider_usage": "available",
-            "telegram_receipts": "available",
             "watchdog_ready": "not_ready",
             "watchdog_missing": "GITHUB_APP_ID,GITHUB_APP_INSTALLATION_ID,GITHUB_APP_PRIVATE_KEY,GITHUB_APP_WATCHDOG_ENABLED",
             "watchdog_last_dispatch_requested": "none",
@@ -200,7 +195,6 @@ class MobileStatusProbeTests(unittest.TestCase):
         result = probe.summarize_mobile_status({})
         self.assertEqual(result["paper_ledger"], "unknown")
         self.assertEqual(result["provider_usage"], "unknown")
-        self.assertEqual(result["telegram_receipts"], "unknown")
         self.assertEqual(result["last_scan"], "unknown")
         self.assertEqual(result["source_freshness"], "unknown")
         self.assertEqual(result["ci_health"], "unknown")
@@ -251,15 +245,6 @@ class MobileStatusProbeTests(unittest.TestCase):
                 self.assertEqual(result["worker_cron_status"], "invalid")
                 self.assertEqual(result["worker_cron_schedule"], "unknown")
                 self.assertEqual(result["worker_cron_last_seen"], "unknown")
-
-    def test_telegram_receipt_schema_absence_is_reported_without_enabling_webhook(self):
-        payload = status_payload()
-        payload["telegram_webhook_schema"] = {
-            "available": False,
-            "status": "Migration 0005 is not applied to this database",
-        }
-        result = probe.summarize_mobile_status(payload)
-        self.assertEqual(result["telegram_receipts"], "not_available")
 
     def test_authenticated_probe_uses_only_approved_https_worker_and_get(self):
         seen = {}
@@ -350,7 +335,6 @@ class MobileStatusProbeTests(unittest.TestCase):
             parsed = dict(line.rstrip("\n").split("=", 1) for line in output if "=" in line)
             self.assertEqual(parsed["http"], "200")
             self.assertEqual(parsed["paper_ledger"], "available")
-            self.assertEqual(parsed["telegram_receipts"], "available")
             self.assertEqual(parsed["worker_cron_status"], "recorded")
             self.assertEqual(parsed["worker_cron_last_seen"], "2026-11-03T00:45:00.000Z")
             self.assertEqual(parsed["watchdog_ready"], "not_ready")

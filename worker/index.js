@@ -3,7 +3,6 @@ import { handleMonetaryLedger } from "./monetary-ledger.js";
 import { handlePaperLedger } from "./paper-ledger.js";
 import { handleTaskInvocation } from "./task-invocations.js";
 import { handleTaskProcessDispatch } from "./task-process-dispatches.js";
-import { handleTelegramWebhook } from "./telegram-webhook.js";
 import { handleWorkflowDispatch, handleWorkflowRunLookup } from "./workflow-dispatch.js";
 import { handleMobilePage, handleMobileStatus } from "./mobile-status.js";
 import { dispatchDueWorkflows } from "./task-runner-watchdog.js";
@@ -306,8 +305,6 @@ export default {
       }
     }
 
-    const telegramResponse = await handleTelegramWebhook(request, env, url);
-    if (telegramResponse) return telegramResponse;
 
 
     if (url.pathname !== "/v1/tasks" && url.pathname !== "/v1/audit" &&

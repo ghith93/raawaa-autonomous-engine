@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import worker from "../worker/index.js";
 
 const TOKEN = "mobile-status-test-token";
-function dbMock(migrationVersions=["0003_durable_quota_ledger","0004_paper_event_ledger","0005_telegram_webhook_receipts","0009_task_execution_mode"], workerCron={created_at:"2026-11-03T00:00:00.000Z",details_json:JSON.stringify({cron:"*/15 * * * *",requeued:2,failed:1})}, watchdogEvents=[], ciHealthRow=null, killSwitchRow=null, invocationCounts=[], scanRow=null, sourceRows=[], executionModeStatusCounts=[
+function dbMock(migrationVersions=["0003_durable_quota_ledger","0004_paper_event_ledger","0009_task_execution_mode"], workerCron={created_at:"2026-11-03T00:00:00.000Z",details_json:JSON.stringify({cron:"*/15 * * * *",requeued:2,failed:1})}, watchdogEvents=[], ciHealthRow=null, killSwitchRow=null, invocationCounts=[], scanRow=null, sourceRows=[], executionModeStatusCounts=[
   {execution_mode:"not_started",status:"pending",count:3},
   {execution_mode:"dry_run",status:"succeeded",count:2},
   {execution_mode:"live_inference",status:"succeeded",count:1},
@@ -47,7 +47,6 @@ test("mobile status page is public static HTML and never embeds an API token",as
  const body=await response.text();
  assert.match(body,/Read-only operational snapshot/);
  assert.match(body,/Recorded model inference costs/);
- assert.match(body,/Telegram control readiness/);
  assert.match(body,/Worker Cron/);
  assert.match(body,/Task Runner watchdog/);
  assert.match(body,/Latest explicit research scan/);
@@ -85,7 +84,6 @@ test("mobile status endpoint returns read-only D1 metrics and explicit unknowns"
  assert.equal(JSON.stringify(body).includes("groq:gpt-oss-20b"),false);
  assert.equal(JSON.stringify(body).includes('"provider":"groq"'),false);
  assert.equal(JSON.stringify(body).includes("reservation_id"),false);
- assert.deepEqual(body.telegram_webhook_schema,{available:true,status:"Migration 0005 applied; webhook activation remains separately gated"});
  assert.deepEqual(body.execution_modes,{
   available:true,
   counts:{not_started:3,dry_run:2,live_inference:1,unknown:4},
@@ -142,14 +140,6 @@ test("mobile status reports Worker Cron history as unknown when no heartbeat exi
  assert.equal(body.unavailable_metrics.worker_cron,"No Worker Cron heartbeat has been recorded yet");
 });
 
-test("mobile status reports Telegram webhook schema as unavailable until migration 0005 is applied",async()=>{
- const DB=dbMock(["0003_durable_quota_ledger","0004_paper_event_ledger"]);
- const response=await worker.fetch(request("/v1/mobile/status"),{DB,ENGINE_API_TOKEN:TOKEN});
- assert.equal(response.status,200);
- const body=await response.json();
- assert.deepEqual(body.telegram_webhook_schema,{available:false,status:"Migration 0005 is not applied to this database"});
- assert.equal(DB.calls.some(call=>call.sql.includes("telegram_update_receipts")),false);
-});
 
 test("mobile status returns fresh validated CI and default inference-gate snapshots",async()=>{
  const now=new Date().toISOString();
@@ -220,7 +210,7 @@ test("mobile status preserves stale CI and inference-gate snapshots as stale",as
 });
 
 test("mobile status exposes only aggregate durable task invocation lifecycle counts",async()=>{
- const versions=["0003_durable_quota_ledger","0004_paper_event_ledger","0005_telegram_webhook_receipts","0006_monetary_budget_ledger","0007_task_model_invocations"];
+ const versions=["0003_durable_quota_ledger","0004_paper_event_ledger","0006_monetary_budget_ledger","0007_task_model_invocations"];
  const counts=[
   {status:"prepared",count:2},
   {status:"in_flight",count:1},
@@ -241,7 +231,7 @@ test("mobile status exposes only aggregate durable task invocation lifecycle cou
 });
 
 test("mobile status does not query invocation tables before migration 0007",async()=>{
- const DB=dbMock(["0003_durable_quota_ledger","0004_paper_event_ledger","0005_telegram_webhook_receipts"]);
+ const DB=dbMock(["0003_durable_quota_ledger","0004_paper_event_ledger"]);
  const response=await worker.fetch(request("/v1/mobile/status"),{DB,ENGINE_API_TOKEN:TOKEN});
  assert.equal(response.status,200);
  const body=await response.json();
@@ -266,7 +256,7 @@ test("mobile status reports explicit scan and per-source freshness without distu
   {created_at:now,details_json:JSON.stringify({scan_id:"123:1",source:"crossref",status:"unavailable",observed_at:now,freshness_hours:24,request_count:1,item_count:0,reason_code:"http_429"})},
  ];
  const invocations=[{status:"ambiguous",count:1},{status:"settled",count:2}];
- const DB=dbMock(["0003_durable_quota_ledger","0004_paper_event_ledger","0005_telegram_webhook_receipts","0006_monetary_budget_ledger","0007_task_model_invocations"],undefined,[],null,null,invocations,scanRow,sourceRows);
+ const DB=dbMock(["0003_durable_quota_ledger","0004_paper_event_ledger","0006_monetary_budget_ledger","0007_task_model_invocations"],undefined,[],null,null,invocations,scanRow,sourceRows);
  const response=await worker.fetch(request("/v1/mobile/status"),{DB,ENGINE_API_TOKEN:TOKEN});
  assert.equal(response.status,200);
  const body=await response.json();

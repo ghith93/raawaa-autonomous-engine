@@ -12,7 +12,8 @@ were removed too. No replacement trading project is planned.
 The dedicated remote branch `feature/telegram-arbitrage-engine` is retired.
 The active Arena session branch is not a project branch and is retained.
 
-Unchanged: Raawaa core, its Telegram mobile control integration, existing
-Worker paper-ledger routes and applied database migrations. No production
+Raawaa core, existing Worker paper-ledger routes and applied database migrations remain.
+The owner subsequently also cancelled the separate Telegram mobile integration;
+its webhook, setup tools and readiness metrics have now been removed. No production
 resource, shared secret, remote ledger or Git history is erased by this change.
 Historical branch-audit entries remain as records, not active project references.

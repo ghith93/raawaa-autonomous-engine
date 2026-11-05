@@ -22,7 +22,6 @@ _OUTPUT_KEYS = (
     "http",
     "paper_ledger",
     "provider_usage",
-    "telegram_receipts",
     "worker_cron_status",
     "worker_cron_last_seen",
     "worker_cron_schedule",
@@ -215,14 +214,6 @@ def summarize_mobile_status(payload: object, http_status: int = 200) -> dict[str
             return "available"
         return "not_available" if isinstance(value, str) and value else "unknown"
 
-    telegram_schema = payload.get("telegram_webhook_schema")
-    telegram_available = telegram_schema.get("available") if isinstance(telegram_schema, dict) else None
-    telegram_receipts = (
-        "available" if telegram_available is True
-        else "not_available" if telegram_available is False
-        else "unknown"
-    )
-
     watchdog_values = _watchdog_values(payload)
 
     def gap_flag(key: str, marker: str, missing_label: str) -> str:
@@ -350,7 +341,6 @@ def summarize_mobile_status(payload: object, http_status: int = 200) -> dict[str
         "http": str(http_status),
         "paper_ledger": migration_flag("paper_ledger"),
         "provider_usage": migration_flag("provider_usage"),
-        "telegram_receipts": telegram_receipts,
         **watchdog_values,
         **worker_cron_values,
         "last_scan": gap_flag("last_scan", "not recorded", "not_recorded"),
