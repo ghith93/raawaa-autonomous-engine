@@ -209,6 +209,120 @@ test("process dispatch route is authenticated and refuses absent or non-process 
 });
 
 
+function recoveryDb(overrides = {}) {
+  const calls = [];
+  const current = {
+    id: "probe-123",
+    idempotency_key: "staging-cron-supervised-probe:20261105",
+    task_type: "supervised_probe",
+    title: "Scheduled Staging read-only process probe",
+    payload_json: JSON.stringify({ operation: "python_platform_probe" }),
+    status: "running",
+    attempts: 1,
+    max_attempts: 2,
+    execution_mode: "dry_run",
+    priority: 100,
+    dependencies_json: "[]",
+    result_json: null,
+    lease_token: "old-lease",
+    lease_expires_at: "2000-01-01T00:00:00.000Z",
+    ...overrides.current,
+  };
+  return {
+    calls,
+    prepare(sql) {
+      return {
+        sql, values: [],
+        bind(...values) { this.values = values; return this; },
+        async first() {
+          calls.push({ kind: "first", sql, values: this.values });
+          if (sql.includes("FROM tasks WHERE id=?") && sql.includes("idempotency_key")) return current;
+          if (sql.includes("FROM task_process_dispatches")) return overrides.dispatch ?? { status: "in_flight" };
+          if (sql.includes("UPDATE task_process_dispatches")) return overrides.quarantined ?? { status: "ambiguous" };
+          if (sql.includes("UPDATE tasks SET status=?")) return overrides.updated ?? {
+            id: "probe-123", status: "pending", attempts: 1, max_attempts: 2,
+          };
+          if (sql.includes("SELECT status,attempts,max_attempts")) return overrides.latest ?? null;
+          return null;
+        },
+        async run() {
+          calls.push({ kind: "run", sql, values: this.values });
+          return { meta: { changes: 1 } };
+        },
+      };
+    },
+  };
+}
+
+test("exact supervised-probe recovery requires authentication, POST, and an empty body", async () => {
+  const path = "/v1/tasks/probe-123/recover-supervised-probe";
+  const unauthenticated = await worker.fetch(request(path, {
+    method: "POST", token: null, body: {},
+  }), { DB: recoveryDb(), ENGINE_API_TOKEN: TOKEN });
+  assert.equal(unauthenticated.status, 401);
+  const wrongMethod = await worker.fetch(request(path, { method: "GET" }), {
+    DB: recoveryDb(), ENGINE_API_TOKEN: TOKEN,
+  });
+  assert.equal(wrongMethod.status, 405);
+  const extraInput = await worker.fetch(request(path, {
+    method: "POST", body: { task_type: "anything" },
+  }), { DB: recoveryDb(), ENGINE_API_TOKEN: TOKEN });
+  assert.equal(extraInput.status, 400);
+});
+
+test("exact supervised-probe recovery requeues only an expired exact task and preserves in-flight dispatch", async () => {
+  const DB = recoveryDb();
+  const response = await worker.fetch(request(
+    "/v1/tasks/probe-123/recover-supervised-probe", { method: "POST", body: {} },
+  ), { DB, ENGINE_API_TOKEN: TOKEN });
+  assert.equal(response.status, 200);
+  assert.deepEqual(await response.json(), {
+    status: "pending", recovered: true, replay: false, attempts: 1,
+    max_attempts: 2, dispatch_status: "in_flight",
+  });
+  const update = DB.calls.find(call => call.kind === "first" && call.sql.includes("UPDATE tasks SET status=?"));
+  assert.ok(update.sql.includes("WHERE id=?"));
+  assert.ok(update.sql.includes("AND lease_token=?"));
+  assert.ok(update.sql.includes("AND lease_expires_at<?"));
+  assert.equal(update.values[0], "pending");
+  assert.equal(update.values[3], "probe-123");
+  assert.ok(DB.calls.some(call => call.kind === "run" &&
+    call.values[1] === "supervised_probe_lease_recovered"));
+});
+
+test("exact recovery rejects a different task envelope and a non-expired lease without writes", async () => {
+  for (const overrides of [
+    { current: { task_type: "system_audit" } },
+    { current: { idempotency_key: "other-task:20261105" } },
+    { current: { payload_json: JSON.stringify({ operation: "other" }) } },
+    { current: { lease_expires_at: "2999-01-01T00:00:00.000Z" } },
+  ]) {
+    const DB = recoveryDb(overrides);
+    const response = await worker.fetch(request(
+      "/v1/tasks/probe-123/recover-supervised-probe", { method: "POST", body: {} },
+    ), { DB, ENGINE_API_TOKEN: TOKEN });
+    assert.ok([403, 409].includes(response.status));
+    assert.equal(DB.calls.some(call => call.sql?.includes("UPDATE tasks SET status=?")), false);
+  }
+});
+
+test("exact recovery fails the normal one-attempt probe without enabling a retry", async () => {
+  const DB = recoveryDb({ current: { max_attempts: 1 } });
+  const response = await worker.fetch(request(
+    "/v1/tasks/probe-123/recover-supervised-probe", { method: "POST", body: {} },
+  ), { DB, ENGINE_API_TOKEN: TOKEN });
+  assert.equal(response.status, 200);
+  const result = await response.json();
+  assert.equal(result.status, "failed");
+  assert.equal(result.recovered, true);
+  assert.equal(result.dispatch_status, "ambiguous");
+  const dispatchQuarantine = DB.calls.find(call => call.kind === "first" &&
+    call.sql.includes("UPDATE task_process_dispatches"));
+  assert.ok(dispatchQuarantine.sql.includes("status='in_flight'"));
+  const update = DB.calls.find(call => call.kind === "first" && call.sql.includes("UPDATE tasks SET status=?"));
+  assert.equal(update.values[0], "failed");
+});
+
 test("claim endpoint is authenticated and returns an empty queue safely", async () => {
   const DB = dbMock();
   const response = await worker.fetch(request("/v1/tasks/claim", { method: "POST", body: {} }), {

@@ -11,6 +11,7 @@ import json
 import os
 import re
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Mapping
 
@@ -39,6 +40,12 @@ LEASE_TIMEOUT_SECONDS = 120
 
 class ScheduledProbeError(RuntimeError):
     """The scheduled Staging probe failed a fail-closed precondition."""
+
+
+def _daily_slot_idempotency_key(now: datetime | None = None) -> str:
+    """Deduplicate schedule events by the UTC calendar slot, not run ID."""
+    instant = now or datetime.now(timezone.utc)
+    return IDEMPOTENCY_PREFIX + instant.astimezone(timezone.utc).strftime("%Y%m%d")
 
 
 def _payload(task: Mapping[str, Any]) -> dict[str, Any]:
@@ -78,7 +85,7 @@ def validate_environment(environ: Mapping[str, str]) -> tuple[str, str]:
     token = environ.get("RAAWAA_ENGINE_API_TOKEN", "")
     if token_installed == "true" and len(token) < 32:
         raise ScheduledProbeError("A temporary Staging-only API token is required")
-    return token if token_installed == "true" else "", IDEMPOTENCY_PREFIX + run_id
+    return token if token_installed == "true" else "", _daily_slot_idempotency_key()
 
 
 def _make_fallback_store(
@@ -122,19 +129,32 @@ def _run_on_store(
         raise ScheduledProbeError("Queue returned a task outside the reviewed probe envelope")
     _payload(task)
 
-    # A workflow rerun with the same run_id must not launch a second process.
+    # Same-day duplicate schedule events reuse one durable row. A completed row
+    # is evidence, not permission to run the child again.
     if task.get("status") == "succeeded":
         return {
             "task_id": task_id,
             "status": "succeeded",
             "classification": "already_settled",
             "replayed": True,
+            "recovered": False,
             "provider_calls": 0,
             "external_writes": 0,
             "backend": backend,
             "fallback_standby": fallback_standby,
         }
-    if task.get("status") != "pending":
+    recovered = False
+    if task.get("status") == "running":
+        if backend != "cloudflare_staging":
+            raise ScheduledProbeError(
+                "The Supabase fallback does not recover a running task; refusing a cross-ledger replay"
+            )
+        recovery = store.recover_supervised_probe(task_id)
+        if not isinstance(recovery, dict) or recovery.get("status") != "pending":
+            status = recovery.get("status") if isinstance(recovery, dict) else "invalid"
+            raise ScheduledProbeError(f"The exact Staging probe is not recoverable (status={status})")
+        recovered = bool(recovery.get("recovered"))
+    elif task.get("status") != "pending":
         raise ScheduledProbeError("The idempotent probe task is not pending")
 
     claimed = store.claim_supervised_probe(task_id)
@@ -162,6 +182,7 @@ def _run_on_store(
         "operation": OPERATION,
         "dispatch_id": result["dispatch_id"],
         "replayed": False,
+        "recovered": recovered,
         "provider_calls": 0,
         "external_writes": 0,
         "backend": backend,
