@@ -10,6 +10,7 @@ import json
 import os
 import re
 import subprocess
+import sys
 import urllib.error
 import urllib.request
 import uuid
@@ -19,6 +20,10 @@ from decimal import Decimal
 from pathlib import Path
 from urllib.parse import quote
 from typing import Any
+
+# This file is launched as ``python scripts/verify_staging_monetary_ledger.py``,
+# which places ``scripts/`` rather than the repository root on sys.path.
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from engine.process_supervisor import ProcessSupervisor, default_registry
 from engine.remote_process_dispatch_ledger import RemoteProcessDispatchLedger
