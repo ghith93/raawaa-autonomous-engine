@@ -2,6 +2,7 @@ import { handleQuota } from "./quota.js";
 import { handleMonetaryLedger } from "./monetary-ledger.js";
 import { handlePaperLedger } from "./paper-ledger.js";
 import { handleTaskInvocation } from "./task-invocations.js";
+import { handleTaskProcessDispatch } from "./task-process-dispatches.js";
 import { handleTelegramWebhook } from "./telegram-webhook.js";
 import { handleWorkflowDispatch, handleWorkflowRunLookup } from "./workflow-dispatch.js";
 import { handleMobilePage, handleMobileStatus } from "./mobile-status.js";
@@ -31,6 +32,7 @@ const REQUIRED_SCHEMA_TABLES = Object.freeze([
   "schema_migrations",
   "monetary_reservations",
   "task_model_invocations",
+  "task_process_dispatches",
   "workflow_runs",
 ]);
 
@@ -323,6 +325,7 @@ export default {
         url.pathname !== "/v1/workflows/dispatch" &&
         !/^\/v1\/workflows\/[A-Za-z][A-Za-z0-9_-]{0,127}$/.test(url.pathname) &&
         !/^\/v1\/tasks\/[A-Za-z0-9_-]+\/invocations$/.test(url.pathname) &&
+        !/^\/v1\/tasks\/[A-Za-z0-9_-]+\/process-dispatches$/.test(url.pathname) &&
         url.pathname !== "/v1/research/candidates/review" &&
         !/^\/v1\/tasks\/[A-Za-z0-9_-]+\/(heartbeat|finish|retry)$/.test(url.pathname)) {
       return json({ error: "not_found" }, 404);
@@ -372,6 +375,8 @@ export default {
     if (monetaryResponse) return monetaryResponse;
     const paperLedgerResponse = await handlePaperLedger(request, env, url);
     if (paperLedgerResponse) return paperLedgerResponse;
+    const processDispatchResponse = await handleTaskProcessDispatch(request, env, url);
+    if (processDispatchResponse) return processDispatchResponse;
     const invocationResponse = await handleTaskInvocation(request, env, url);
     if (invocationResponse) return invocationResponse;
 

@@ -1,32 +1,28 @@
 # Durable and unattended execution — options, decision, and what is proven
 
-**Status:** decision made and evidenced; one option implemented and locally
-proven; nothing deployed, nothing written to production D1.
+**Status:** local SQLite crash recovery is proven, and a process-scoped remote
+D1 ledger/Worker route/Python adapter is implemented and locally tested on PR
+#540. It has not been deployed or verified against Staging D1; nothing was
+written to production D1. The initial model-invocation reuse proposal is rejected
+by the compatibility review below.
 **Tasks:** `CHATGPT-ENGINE-RUNTIME-003` (issue #464). **Spend:** USD 0.
 **Supersedes:** nothing. **Depends on:** `docs/process-supervisor.md`.
 
 ## The gap, stated exactly
 
-`engine/supervised_task.py` refuses to run a supervised task when the task store
-has no local `db_path`:
+Before Runtime-003 part 2, `engine/supervised_task.py` correctly refused a
+remote store because it had no durable dispatch ledger. The current PR adds a
+separate D1-backed process ledger, but the only scheduled consumer —
+`.github/workflows/task-runner.yml`, every five minutes — still targets the
+**production** control Worker and does not set `RAAWAA_ENGINE_PROCESS_SUPERVISOR`.
+That switch remains off. A GitHub-hosted runner's filesystem is destroyed when
+the job ends, so a local `process_dispatches` row could not survive across runs;
+the new adapter instead writes to the remote D1 table. This implementation has
+only been exercised against the local D1 emulation, not Staging or production.
 
-```python
-db_path = getattr(store, "db_path", None)
-if supervisor is None and db_path is None:
-    store.finish(task_id, "blocked", error="Supervised execution requires a local task store …")
-```
-
-That is fail-closed and correct, and it has a price: the **only** scheduled
-consumer the project has — `.github/workflows/task-runner.yml`, every five
-minutes — uses `RemoteTaskStore` against
-`raawaa-autonomous-engine-control.ghith-shikhkhaled.workers.dev`, which is the
-**production** control Worker and its production D1. A GitHub-hosted runner's
-filesystem is destroyed when the job ends, so a `process_dispatches` row written
-there is not durable across runs. On that host, the at-most-once guarantee the
-supervisor provides has nowhere to live.
-
-The gap is therefore precise: **where does the dispatch record live when the
-worker is ephemeral and the queue is remote?**
+The gap is therefore precise: **does the D1-backed identity/outcome lifecycle
+remain safe across actual remote leases, worker termination, and scheduled
+recovery?**
 
 ## Measured facts about what already exists
 
@@ -45,29 +41,16 @@ worker is ephemeral and the queue is remote?**
 
 ## The three options
 
-### (a) Durable D1 dispatch ledger + remote queue/lease integration
+### (a) Reuse the existing D1 model-invocation route — rejected
 
-Put the dispatch record in the same D1 database as the task and the lease, and
-reuse the **existing** invocation route instead of building a second one.
-
-- **What it costs:** nothing. D1 and the Worker route are already deployed and
-  already exercised by Staging CI on every merge.
-- **What it needs:** a Python adapter implementing the supervisor's
-  `DispatchLedger` protocol over `POST /v1/tasks/{id}/invocations`, with
-  `step_key = process-dispatch:<dispatch_id>` and `task_kind =
-  process_supervision`. `begin` = `prepare` + `start`; `settle` = `settle`;
-  `quarantine` = `ambiguous`.
-- **What it cannot do, and this is the honest part:** the invocation table
-  records *identity and lifecycle*, not *outcome*. A replayed `settled`
-  invocation therefore cannot report whether the process succeeded. The only
-  sound reading is "it ran and the outcome is not recoverable" — which maps to
-  `ambiguous`, not to `succeeded`. A crash in the microseconds between `settle`
-  and writing the task result costs one ambiguous task result. That is the same
-  trade the supervisor already makes everywhere else, and it is the fail-closed
-  direction.
-- **Second limitation:** there is no remote stale sweep. An `in_flight`
-  invocation whose worker died blocks that dispatch identity permanently until
-  an operator resolves it. Safe (never replays), but not self-healing.
+The existing route already provides lease-fenced identity and useful at-most-once
+transitions, so it initially appeared to be the smallest option. The Runtime-003
+part 2 compatibility review below found it is not safe to use for subprocesses:
+it has no immutable operation fingerprint, no outcome fields, no atomic result +
+task completion action, and it applies model-specific route-rejection retry
+semantics. Do not build the proposed Python adapter on this route. A separate,
+process-scoped D1 record/action contract is the revised direction. Its isolated
+D1 cost/quotas and deployment must be verified before remote execution is enabled.
 
 ### (b) A genuinely persistent isolated runner with a durable local ledger
 
@@ -94,35 +77,32 @@ Temporal, or Cloudflare Durable Objects/Workflows.
   Cloudflare Workflows is a spike in this repository
   (`tests/cloudflare_workflows_local_smoke.mjs`), not a binding in
   `wrangler.toml`, and its limits under this account are unverified.
-- **Verdict:** more moving parts than the problem requires, for a durability
-  property the existing D1 table can already express.
+- **Current status:** deferred. A dedicated D1 table and narrow authenticated
+  actions appear simpler and more directly aligned with process dispatch than
+  introducing a second runtime, but no account-specific quota/deployment
+  verification or remote execution proof exists.
 
-## Decision
+## Initial decision — superseded by the compatibility review below
 
-**Option (a), in its least-complex form: reuse the existing invocation route
-rather than adding a `process_dispatches` table and a new ingress path.**
+The initial option-(a) proposal to reuse the existing invocation route was
+reconsidered in Runtime-003 part 2. That route cannot persist and atomically
+bind a subprocess fingerprint/outcome to task completion; see the verified
+incompatibilities below. Do not implement the original reuse proposal.
 
-Reasons, in order of weight:
-
-1. It is the only option that puts dispatch identity next to the lease it
-   depends on, in one atomic statement, in one database. A separate durable
-   store would have to be reconciled against that lease forever.
-2. It needs **no** Worker change, **no** migration and **no** new public route,
-   so it adds no ingress surface and no schema risk. The security review's
-   standing concern about new public paths simply does not apply.
-3. Its failure mode is `ambiguous`, which the supervisor already defines as
-   "never retry, investigate". Nothing has to be re-taught.
-4. Everything about it can be tested locally, so this slice stays inside "no
-   production D1 writes, no deployments, no paid use".
+These were the original reasons for preferring reuse, but they are not
+sufficient: sharing a lease fence does not supply the process-specific identity
+and result contract. The compatibility review below supersedes this proposal.
 
 Explicitly **not** done, and why:
 
-- No new D1 table, because the existing one already encodes the property.
-- No Worker-side reconcile action, because a wrong reconcile is a replay, and a
-  replay is the one thing this whole subsystem exists to prevent.
+- Runtime-003 part 1 did not add a process-specific D1 table or route. This
+  Runtime-003 part 2 PR now adds migration `0013_task_process_dispatches` and a
+  dedicated authenticated Worker route, because the model invocation table does
+  not encode the full subprocess identity/outcome property.
+- No Worker-side reconcile action was added. A wrong reconcile can replay work;
+  uncertain started dispatches must remain quarantined for investigation.
 - No scheduled enablement of `RAAWAA_ENGINE_PROCESS_SUPERVISOR` on the
-  production Task Runner, because that is a production behaviour change and
-  this slice does not authorize one.
+  production Task Runner; the switch remains off pending isolated validation.
 
 ## What is proven now: crash recovery on a durable target
 
@@ -149,18 +129,86 @@ That is the restart/crash path the previous increment could not show, on a
 target that genuinely outlives the process that wrote it. It is **local**
 evidence: a file on a disposable machine, not D1, not a deployment.
 
+## Runtime-003 part 2 — compatibility review and revised decision
+
+**Review result (2026-11-05): the current model-invocation API is not a safe
+subprocess dispatch ledger.** The earlier option-(a) suggestion to directly
+reuse `/v1/tasks/{id}/invocations` is withdrawn. The route has useful lease
+fencing and at-most-once identity primitives, but its contract is specifically
+a logical model-call lifecycle and cannot prove a supervised process outcome.
+The original compatibility proposal was withdrawn. PR #540 now implements a
+separate adapter and route, but neither is deployed or enabled in any scheduled
+runner.
+
+Verified incompatibilities in the current code:
+
+| Required subprocess guarantee | Existing invocation contract | Consequence |
+|---|---|---|
+| Bind one stable per-task/step identity to an immutable operation fingerprint | `task_model_invocations` stores `step_key` and `task_kind`, but no argv/operation fingerprint. `task_kind` only rejects a different string; it does not validate what operation was actually launched. | Reusing the route without changing its contract cannot detect a task retry whose operation differs under the same dispatch identity. Putting a digest in `task_kind` would overload a model-domain field rather than provide a typed, reviewed contract. |
+| Record subprocess outcome evidence | `settle` records only `status='settled'` and timestamps; there is no classification, exit code, signal, timeout/cancellation state, or truncation metadata. | `settled` cannot mean process success. A process result may not be inferred from invocation status. |
+| Atomically bind durable result to completion under the current lease | Invocation settle and `/v1/tasks/{id}/finish` are distinct requests. `finish` stores the task result and clears the lease; the invocation transition does not store that result. | Either order has a crash/response-loss gap: settle first can leave a settled row without result, while finish first ends the lease and prevents a subsequent fenced invocation transition. No existing API operation atomically writes both. |
+| Represent process execution without model-route retry semantics | Invocation start requires a `route_id`; the lifecycle supports returning to `prepared` only after a recorded explicit route rejection, then starting another route. | A synthetic process route would borrow model-specific retry rules and misrepresent subprocesses in model invocation metrics. The route must not be broadened for this use. |
+
+`tests/d1_local_worker_smoke.mjs` now exercises the model route separately and
+the new process route against a real local Worker with Wrangler's local D1:
+concurrent duplicate prepare, fingerprint mismatch, start-once, restart after
+prepared/in-flight/settled, immutable bounded result, concurrent task claims,
+stale-lease fencing and no-replay quarantine. It also runs
+`tests/fixtures/remote_process_dispatch_smoke.py`, which uses the Python adapter
+against that local Worker and starts the allowlisted platform probe process.
+This is local D1 emulation evidence, not Cloudflare Staging or production D1
+concurrency. The Python adapter unit tests simulate a lost response after start
+and confirm a subsequent lease quarantines rather than starts again.
+
+### Revised implementation (local only; Staging verification pending)
+
+PR #540 adds `migrations/0013_task_process_dispatches.sql`,
+`worker/task-process-dispatches.js`, and `engine/remote_process_dispatch_ledger.py`.
+The identity is unique on `(task_id, step_key)` with a stable process step key,
+operation version, a full SHA-256 operation fingerprint over the trusted argv
+digest, and a lease fingerprint (never the lease token). The Worker accepts only
+the existing `supervised_probe` task type and fixed read-only operation names.
+Every insert/update is conditional on the active, unexpired task lease in its
+D1 statement. `start` commits before the child is spawned. Settled records carry
+version-1 classification, exit code, signal, timeout/cancellation booleans,
+truncation, bounded stdout/stderr, duration and descendant metadata.
+
+`prepared` may safely resume because it proves no start transition committed.
+An `in_flight` record observed under a later valid task lease is atomically
+quarantined as `ambiguous`; `settled` replays return the persisted result. A
+lost start response never authorizes a child launch. A lost settlement
+response leaves the current client ambiguous; a later delivery reads a durable
+settled outcome and replays it without spawning. Exact repeated `settle` requests
+are idempotent only when their serialized outcomes match. Remote stale
+reconciliation is intentionally unsupported: ambiguous work is non-replayable
+and operator recovery tooling remains future work. The adapter is integrated
+only for `RemoteTaskStore`; no local `db_path` is fabricated.
+`tasks.execution_mode` remains an inference label, not process execution mode.
+The guarded post-merge Staging verifier also exercises one temporary,
+lease-fenced `python_platform_probe` against isolated Staging D1, checks durable
+settlement and same-outcome replay without a second child start, then removes
+only its own fixture rows. This is a bounded Staging verification run, not a
+Cron-triggered or unattended execution proof; it has not run yet.
+
+Local checks currently pass: 66 focused supervisor/adapter tests, 206 Worker
+tests, and the local D1 integration smoke including a real local child. Exact PR
+CI and isolated Staging verification are still pending. The scheduled supervisor
+switch remains off; no Staging deployment, production deployment, production
+D1 write, inference, or spend occurred.
+
 ## What is still not proven
 
-1. **No remote durability yet.** The D1-backed dispatch ledger is decided, not
-   implemented. Until it is, a supervised task on the scheduled runner is
-   refused by design.
-2. **No unattended schedule.** Nothing enqueues `supervised_probe`. The
-   five-minute runner would process one only if it were enqueued, and the switch
-   is off there.
-3. **No remote crash proof.** The crash test proves the local ledger and the
-   lease-recovery path. Proving the D1 path needs a real interrupted remote run,
-   which this slice is not authorized to create.
-4. **No operator tooling** for an `in_flight` invocation that no worker owns.
+1. **No isolated Staging D1 proof yet.** The adapter is implemented on PR #540
+   and tested with local D1 emulation; it has not been deployed to or exercised
+   against isolated Staging D1.
+2. **No unattended schedule.** Nothing enqueues `supervised_probe`; the
+   production five-minute runner switch is off. No Staging-specific scheduled
+   runner has been added.
+3. **No remote crash proof.** Local tests cover Worker restart boundaries and
+   simulated start-response loss, but no real runner was killed against Staging
+   D1 between each transition.
+4. **No operator tooling** for an orphaned/ambiguous process dispatch or safe
+   human resolution.
 5. Still not a sandbox, still no network isolation, still no `setsid` escape
    defence.
 

@@ -19,6 +19,10 @@ from pathlib import Path
 from urllib.parse import quote
 from typing import Any
 
+from engine.process_supervisor import ProcessSupervisor, default_registry
+from engine.remote_process_dispatch_ledger import RemoteProcessDispatchLedger
+from engine.remote_task_store import RemoteTaskStore
+
 
 BASE_URL = os.environ.get(
     "RAAWAA_ENGINE_STAGING_URL",
@@ -557,6 +561,72 @@ def verify_task_invocation_lifecycle(run_tag: str) -> None:
             )
         execute_staging_sql("DELETE FROM tasks WHERE id='" + task_id + "'", retry_safe=True)
 
+def verify_process_dispatch_lifecycle(run_tag: str) -> None:
+    """Run one fixed, read-only child against isolated Staging D1, then replay its result."""
+    verify_staging_target()
+    task_id = str(uuid.uuid4())
+    lease_token = uuid.uuid4().hex
+    now = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+    expires = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(time.time() + 600))
+    idempotency_key = PREFIX + run_tag + "-process-" + task_id
+    values = (task_id, idempotency_key, lease_token, now, expires)
+    require(all("'" not in value for value in values),
+            "Generated Staging process fixture contained an unsafe SQL character")
+    execute_staging_sql(
+        "INSERT OR IGNORE INTO tasks(id,idempotency_key,task_type,title,payload_json,status,attempts,max_attempts,"
+        "created_at,updated_at,lease_token,lease_expires_at) VALUES("
+        f"'{task_id}','{idempotency_key}','supervised_probe','Process dispatch verification',"
+        "'{\"operation\":\"python_platform_probe\"}','running',1,2,"
+        f"'{now}','{now}','{lease_token}','{expires}')",
+        retry_safe=True,
+    )
+
+    try:
+        store = RemoteTaskStore(BASE_URL, TOKEN, timeout=30, reject_redirects=True)
+        supervisor = ProcessSupervisor(
+            default_registry(), RemoteProcessDispatchLedger(store)
+        )
+        fence = lambda: store.heartbeat(task_id, lease_token, lease_timeout_seconds=900)
+        first = supervisor.run_operation(
+            "python_platform_probe", {}, task_id=task_id, lease_token=lease_token,
+            fence_before=fence, fence_after=fence,
+        )
+        require(first.classification == "succeeded" and first.exit_code == 0 and
+                first.started is True and first.replayed is False and
+                isinstance(first.dispatch_id, str) and bool(first.stdout.strip()),
+                "Staging process dispatch did not persist a successful read-only child outcome")
+
+        replay = supervisor.run_operation(
+            "python_platform_probe", {}, task_id=task_id, lease_token=lease_token,
+            fence_before=fence, fence_after=fence,
+        )
+        require(replay.classification == "succeeded" and replay.exit_code == 0 and
+                replay.started is False and replay.replayed is True and
+                replay.dispatch_id == first.dispatch_id and replay.stdout == first.stdout,
+                "Staging process dispatch did not replay its settled result without starting another child")
+        store.finish(task_id, "succeeded", result={
+            "verification": "staging_process_dispatch_v1",
+            "dispatch_id": first.dispatch_id,
+            "classification": first.classification,
+            "inference": "none",
+            "provider_calls": 0,
+        }, lease_token=lease_token)
+    finally:
+        task_sql = task_id.replace("'", "''")
+        execute_staging_sql(
+            f"DELETE FROM task_process_dispatches WHERE task_id='{task_sql}'",
+            retry_safe=True,
+        )
+        execute_staging_sql(
+            f"DELETE FROM audit_log WHERE task_id='{task_sql}'",
+            retry_safe=True,
+        )
+        execute_staging_sql(
+            f"DELETE FROM tasks WHERE id='{task_sql}'",
+            retry_safe=True,
+        )
+
+
 def run() -> None:
     require(BASE_URL.startswith("https://"), "Staging Worker URL must use HTTPS")
     require(bool(TOKEN), "RAAWAA_ENGINE_STAGING_API_TOKEN is required")
@@ -585,6 +655,7 @@ def run() -> None:
     cleanup_test_reservations()
     verify_token_quota_concurrency(run_tag)
     verify_task_invocation_lifecycle(run_tag)
+    verify_process_dispatch_lifecycle(run_tag)
 
     cap_test("daily", run_tag, "daily")
     cap_test("monthly", run_tag, "monthly")
@@ -721,7 +792,7 @@ def run() -> None:
             "Mobile status does not report the D1 token quota ledger as available")
 
     cleanup_test_reservations()
-    print("Staging D1 verification passed: token quota concurrency/settlement, durable multi-step invocation identities, lease fencing, explicit 429 route rotation, blocked ambiguous/settled replay, global daily/monthly/task monetary caps, operator-policy tamper rejection, idempotency, pre-I/O release, ambiguous settlement, over-estimate quarantine, Worker redeploy persistence, and aggregate-only authenticated mobile status. No model provider was called.")
+    print("Staging D1 verification passed: token quota concurrency/settlement, durable multi-step invocation identities, process-dispatch child settlement/replay, lease fencing, explicit 429 route rotation, blocked ambiguous/settled replay, global daily/monthly/task monetary caps, operator-policy tamper rejection, idempotency, pre-I/O release, ambiguous settlement, over-estimate quarantine, Worker redeploy persistence, and aggregate-only authenticated mobile status. No model provider was called.")
 
 
 if __name__ == "__main__":

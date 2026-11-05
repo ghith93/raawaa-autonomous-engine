@@ -637,6 +637,208 @@ try {
   });
   assertStatus(ambiguousReplay, 409, "ambiguous invocation cannot be replayed");
 
+  // Finish the model-route fixture before running process-specific D1 checks.
+  const invocationFinished = await api("/v1/tasks/" + invocationTaskId + "/finish", {
+    method: "POST", body: { lease_token: invocationLease, status: "blocked", error: "model lifecycle smoke complete" },
+  });
+  assertStatus(invocationFinished, 200, "finish model invocation fixture task");
+
+  // The process-dispatch ledger has a distinct route/schema and a typed result.
+  const processTask = await api("/v1/tasks/enqueue", {
+    method: "POST",
+    body: { task_type: "supervised_probe", title: "Process dispatch lifecycle",
+      payload: { operation: "python_platform_probe" },
+      idempotency_key: "d1-local-process-" + randomUUID(), max_attempts: 2, priority: 100 },
+  });
+  assertStatus(processTask, 201, "enqueue process dispatch task");
+  const processClaim = await api("/v1/tasks/claim", { method: "POST", body: { execution_mode: "dry_run" } });
+  assertStatus(processClaim, 200, "claim process dispatch task");
+  const processTaskId = processTask.payload.task.id;
+  assert.equal(processClaim.payload.task.id, processTaskId, "highest-priority process task is claimed");
+  const processLease = processClaim.payload.lease_token;
+  const processPath = "/v1/tasks/" + processTaskId + "/process-dispatches";
+  const processIdentity = {
+    action: "prepare", lease_token: processLease,
+    dispatch_id: randomUUID().replaceAll("-", ""),
+    step_key: "supervised_process:v1", operation: "python_platform_probe",
+    operation_version: "process-supervisor:v1", operation_fingerprint: "a".repeat(64),
+    lease_fingerprint: "b".repeat(16),
+  };
+  const concurrentPrepare = await Promise.all([
+    api(processPath, { method: "POST", body: processIdentity }),
+    api(processPath, { method: "POST", body: processIdentity }),
+  ]);
+  assert.deepEqual(concurrentPrepare.map(item => item.status), [200, 200]);
+  assert.equal(concurrentPrepare[0].payload.dispatch.dispatch_id, processIdentity.dispatch_id);
+  assert.equal(concurrentPrepare[1].payload.dispatch.dispatch_id, processIdentity.dispatch_id);
+  const changedFingerprint = await api(processPath, {
+    method: "POST", body: { ...processIdentity, operation_fingerprint: "c".repeat(64) },
+  });
+  assertStatus(changedFingerprint, 409, "operation fingerprint cannot change for one task/step");
+
+  // A process killed after the durable prepare may resume before start.
+  await stopWorker(server);
+  server = launchWorker();
+  await waitForWorker(server, () => logs);
+  const prepareAfterRestart = await api(processPath, { method: "POST", body: processIdentity });
+  assertStatus(prepareAfterRestart, 200, "prepared identity survives Worker restart");
+  assert.equal(prepareAfterRestart.payload.dispatch.status, "prepared");
+  const processStarted = await api(processPath, {
+    method: "POST", body: { action: "start", lease_token: processLease, dispatch_id: processIdentity.dispatch_id },
+  });
+  assertStatus(processStarted, 200, "durable process start");
+  const duplicateProcessStart = await api(processPath, {
+    method: "POST", body: { action: "start", lease_token: processLease, dispatch_id: processIdentity.dispatch_id },
+  });
+  assertStatus(duplicateProcessStart, 409, "process start is at most once");
+
+  // A worker crash after start leaves in_flight; restart never authorizes replay.
+  await stopWorker(server);
+  server = launchWorker();
+  await waitForWorker(server, () => logs);
+  const inFlightAfterRestart = await api(processPath, { method: "POST", body: processIdentity });
+  assertStatus(inFlightAfterRestart, 200, "in-flight identity survives Worker restart");
+  assert.equal(inFlightAfterRestart.payload.dispatch.status, "in_flight");
+  const replayStart = await api(processPath, {
+    method: "POST", body: { action: "start", lease_token: processLease, dispatch_id: processIdentity.dispatch_id },
+  });
+  assertStatus(replayStart, 409, "started process cannot be replayed");
+
+  const processOutcome = {
+    classification: "succeeded", exit_code: 0, signal_number: null,
+    timed_out: false, cancelled: false, output_truncated: false,
+    stdout: "local D1 process outcome", stderr: "", duration_seconds: 0.02,
+    descendants_killed: 0,
+  };
+  const processSettled = await api(processPath, {
+    method: "POST", body: { action: "settle", lease_token: processLease,
+      dispatch_id: processIdentity.dispatch_id, outcome: processOutcome },
+  });
+  assertStatus(processSettled, 200, "persist versioned process outcome");
+  const settleResponseReplay = await api(processPath, {
+    method: "POST", body: { action: "settle", lease_token: processLease,
+      dispatch_id: processIdentity.dispatch_id, outcome: processOutcome },
+  });
+  assertStatus(settleResponseReplay, 200, "lost settle response is idempotently reconcilable");
+  assert.equal(settleResponseReplay.payload.replay, true);
+  const conflictingSettle = await api(processPath, {
+    method: "POST", body: { action: "settle", lease_token: processLease,
+      dispatch_id: processIdentity.dispatch_id,
+      outcome: { ...processOutcome, exit_code: 1, classification: "failed" } },
+  });
+  assertStatus(conflictingSettle, 409, "settled process outcome is immutable");
+  await stopWorker(server);
+  server = launchWorker();
+  await waitForWorker(server, () => logs);
+  const settledAfterRestart = await api(processPath, { method: "POST", body: processIdentity });
+  assertStatus(settledAfterRestart, 200, "settled outcome survives Worker restart");
+  assert.equal(settledAfterRestart.payload.dispatch.status, "settled");
+  assert.deepEqual(settledAfterRestart.payload.dispatch.outcome, processOutcome);
+  const processFinished = await api("/v1/tasks/" + processTaskId + "/finish", {
+    method: "POST", body: { lease_token: processLease, status: "succeeded", result: { process: processOutcome } },
+  });
+  assertStatus(processFinished, 200, "finish process task after durable settlement");
+
+  // Two concurrent task claims cannot share one lease or dispatch identity.
+  const concurrentProcessTasks = await Promise.all(["claim-a", "claim-b"].map(key => api("/v1/tasks/enqueue", {
+    method: "POST", body: { task_type: "supervised_probe", title: "Concurrent process claim",
+      payload: { operation: "python_platform_probe" }, idempotency_key: "d1-local-" + key + "-" + randomUUID(),
+      max_attempts: 2, priority: 99 },
+  })));
+  for (const item of concurrentProcessTasks) assertStatus(item, 201, "enqueue concurrent process task");
+  const concurrentClaims = await Promise.all([
+    api("/v1/tasks/claim", { method: "POST", body: { execution_mode: "dry_run" } }),
+    api("/v1/tasks/claim", { method: "POST", body: { execution_mode: "dry_run" } }),
+  ]);
+  assert.deepEqual(concurrentClaims.map(item => item.status), [200, 200]);
+  const claimedIds = concurrentClaims.map(item => item.payload.task.id).sort();
+  const expectedClaimIds = concurrentProcessTasks.map(item => item.payload.task.id).sort();
+  assert.deepEqual(claimedIds, expectedClaimIds, "concurrent claims are disjoint and complete");
+  for (const claim of concurrentClaims) {
+    const taskId = claim.payload.task.id;
+    const path = "/v1/tasks/" + taskId + "/process-dispatches";
+    const identity = { ...processIdentity, action: "prepare", lease_token: claim.payload.lease_token,
+      dispatch_id: randomUUID().replaceAll("-", ""), operation_fingerprint: "d".repeat(64) };
+    const preparedDispatch = await api(path, { method: "POST", body: identity });
+    assertStatus(preparedDispatch, 200, "prepare independently claimed process dispatch");
+    const startedDispatch = await api(path, { method: "POST", body: { action: "start",
+      lease_token: claim.payload.lease_token, dispatch_id: identity.dispatch_id } });
+    assertStatus(startedDispatch, 200, "start independently claimed process dispatch");
+    const ambiguousDispatch = await api(path, { method: "POST", body: { action: "ambiguous",
+      lease_token: claim.payload.lease_token, dispatch_id: identity.dispatch_id, detail: "test-interrupted" } });
+    assertStatus(ambiguousDispatch, 200, "quarantine uncertain process dispatch");
+    const finished = await api("/v1/tasks/" + taskId + "/finish", { method: "POST",
+      body: { lease_token: claim.payload.lease_token, status: "blocked", error: "local ambiguity test" } });
+    assertStatus(finished, 200, "finish quarantined process task");
+  }
+
+  // A lost lease after start is fenced; its replacement worker sees in_flight and
+  // can only quarantine it, never start a second process.
+  const staleTask = await api("/v1/tasks/enqueue", {
+    method: "POST", body: { task_type: "supervised_probe", title: "Stale lease process dispatch",
+      payload: { operation: "python_platform_probe" }, idempotency_key: "d1-local-stale-" + randomUUID(),
+      max_attempts: 3, priority: 100 },
+  });
+  assertStatus(staleTask, 201, "enqueue stale lease dispatch task");
+  const staleClaim = await api("/v1/tasks/claim", { method: "POST", body: { execution_mode: "dry_run" } });
+  assertStatus(staleClaim, 200, "claim stale lease dispatch task");
+  const staleId = staleTask.payload.task.id;
+  const stalePath = "/v1/tasks/" + staleId + "/process-dispatches";
+  const staleIdentity = { ...processIdentity, lease_token: staleClaim.payload.lease_token,
+    dispatch_id: randomUUID().replaceAll("-", ""), operation_fingerprint: "e".repeat(64) };
+  assertStatus(await api(stalePath, { method: "POST", body: staleIdentity }), 200, "prepare before stale lease");
+  assertStatus(await api(stalePath, { method: "POST", body: { action: "start",
+    lease_token: staleClaim.payload.lease_token, dispatch_id: staleIdentity.dispatch_id } }), 200, "start before stale lease");
+  executeLocalSql("UPDATE tasks SET lease_expires_at='2000-01-01T00:00:00.000Z' WHERE id='" + staleId + "'");
+  const staleRecovery = await api("/v1/tasks/recover", { method: "POST", body: {} });
+  assertStatus(staleRecovery, 200, "recover expired supervised task lease");
+  assert.ok(staleRecovery.payload.requeued >= 1, "stale task lease is requeued");
+  const replacementClaim = await api("/v1/tasks/claim", { method: "POST", body: { execution_mode: "dry_run" } });
+  assertStatus(replacementClaim, 200, "replacement worker claims stale task");
+  assert.equal(replacementClaim.payload.task.id, staleId);
+  const staleSettle = await api(stalePath, { method: "POST", body: { action: "settle",
+    lease_token: staleClaim.payload.lease_token, dispatch_id: staleIdentity.dispatch_id,
+    outcome: processOutcome } });
+  assertStatus(staleSettle, 409, "lost lease cannot settle process result");
+  const replacementPrepare = await api(stalePath, { method: "POST", body: {
+    ...staleIdentity, lease_token: replacementClaim.payload.lease_token,
+  } });
+  assertStatus(replacementPrepare, 200, "replacement observes durable in-flight identity");
+  assert.equal(replacementPrepare.payload.dispatch.status, "in_flight");
+  const staleReplayStart = await api(stalePath, { method: "POST", body: { action: "start",
+    lease_token: replacementClaim.payload.lease_token, dispatch_id: staleIdentity.dispatch_id } });
+  assertStatus(staleReplayStart, 409, "replacement cannot duplicate uncertain process");
+  const staleQuarantine = await api(stalePath, { method: "POST", body: { action: "ambiguous",
+    lease_token: replacementClaim.payload.lease_token, dispatch_id: staleIdentity.dispatch_id,
+    detail: "lease_lost_after_start" } });
+  assertStatus(staleQuarantine, 200, "replacement quarantines stale in-flight dispatch");
+  const quarantineReplay = await api(stalePath, { method: "POST", body: { action: "ambiguous",
+    lease_token: replacementClaim.payload.lease_token, dispatch_id: staleIdentity.dispatch_id,
+    detail: "lease_lost_after_start" } });
+  assertStatus(quarantineReplay, 200, "ambiguous state replay is idempotent");
+  assert.equal(quarantineReplay.payload.replay, true);
+  assertStatus(await api("/v1/tasks/" + staleId + "/finish", { method: "POST",
+    body: { lease_token: replacementClaim.payload.lease_token, status: "blocked", error: "ambiguous dispatch" } }),
+  200, "finish stale task without replay");
+
+  // End-to-end Python adapter + real supervised child + local D1 Worker API.
+  const pythonDispatch = spawnSync("python3", ["tests/fixtures/remote_process_dispatch_smoke.py"], {
+    cwd: process.cwd(), env: { ...safeEnvironment(), PYTHONPATH: process.cwd(),
+      RAAWAA_LOCAL_WORKER_URL: BASE, RAAWAA_LOCAL_WORKER_TOKEN: TOKEN },
+    encoding: "utf8", timeout: 30_000,
+    maxBuffer: 2 * 1024 * 1024,
+  });
+  if (pythonDispatch.error || pythonDispatch.status !== 0) {
+    throw new Error("Python remote process dispatch smoke failed.\n" +
+      (pythonDispatch.stdout || "") + "\n" + (pythonDispatch.stderr || "") +
+      (pythonDispatch.error ? "\n" + pythonDispatch.error.message : ""));
+  }
+  const pythonDispatchResult = JSON.parse(pythonDispatch.stdout.trim());
+  assert.equal(pythonDispatchResult.task_status, "succeeded");
+  assert.equal(pythonDispatchResult.classification, "succeeded");
+  assert.equal(pythonDispatchResult.replayed, false);
+  assert.match(pythonDispatchResult.dispatch_id, /^[0-9a-f]{32}$/);
+
   const quotaBase = {
     action: "reserve",
     route_id: "d1-local:concurrency",
@@ -936,12 +1138,12 @@ try {
   status = await api("/v1/mobile/status");
   assertStatus(status, 200, "mobile status after D1 writes");
   assert.equal(status.payload.paper_events.find(row => row.event_type === "candidate_detected")?.count, 1);
-  assert.equal(status.payload.tasks.find(row => row.status === "succeeded")?.count, 8,
-    "four workflow steps plus the legacy task and three dependency-smoke tasks should be durably succeeded");
+  assert.equal(status.payload.tasks.find(row => row.status === "succeeded")?.count, 10,
+    "workflow, dependency, and two supervised-process tasks should be durably succeeded");
   assert.equal(status.payload.tasks.find(row => row.status === "failed")?.count, 1,
     "the failed dependency root remains visibly failed");
-  assert.equal(status.payload.tasks.find(row => row.status === "blocked")?.count, 2,
-    "failed dependency descendants remain blocked");
+  assert.equal(status.payload.tasks.find(row => row.status === "blocked")?.count, 6,
+    "failed dependencies and no-replay supervised tasks remain blocked");
   assert.equal(status.payload.monetary_ledger.available, true);
   assert.equal(status.payload.monetary_ledger.pending_count, 1);
   assert.equal(status.payload.monetary_ledger.ambiguous_count, 1);
@@ -959,7 +1161,7 @@ try {
 
   console.log(
     "Local D1 integration passed: migrations, authenticated status, task enqueue/idempotency/lease fencing, " +
-    "concurrent token plus global daily/monthly/per-task monetary caps, idempotency conflict/replay, pre-I/O-only release, ambiguous reservations across restart, duplicate/conflicting settlement, quarantine, mobile monetary status and spend breakdown, append-only paper ledger/hash replay, and disabled Telegram webhook.",
+    "process-dispatch prepare/start/settle and ambiguity, concurrent claims, stale-lease fencing and restart no-replay, Python remote adapter with a real local child, monetary/quota and paper ledgers, and disabled Telegram webhook.",
   );
 } catch (error) {
   throw new Error(String(error?.stack || error) + "\nWrangler logs:\n" + logs);
