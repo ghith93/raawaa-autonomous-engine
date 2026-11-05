@@ -3,6 +3,25 @@
 **Status:** decided, contract implemented, live proof not yet run.
 **Date:** 2026-11-04. **Issue:** #440. **Related:** #427 (stays disabled), #34.
 
+## Probe-hardening update — 2026-11-05 (offline only)
+
+The live workflow now runs an explicit six-test identity/count gate and treats
+skips, expected failures, failures, or partial runs as failure. A synthetic
+host-environment marker is checked as a required boolean without outputting
+values; a separate live negative control injects only that harmless marker
+*inside* the sandbox process and must detect it. An offline negative control also
+exercises the generated probe program. The multiline probe is encoded in one
+newline-free command argument: the independent argv validator rejects literal
+newlines, so the old raw template could not start. Checkout token persistence is
+disabled for the proof job. These are harness changes, not live sandbox evidence.
+
+**Release posture unchanged:** #427 was already merged but its Codespaces
+executor release gate remains false. #440 remains open; this proof still does
+not verify all resource-exhaustion, descendant-cleanup, lease-revocation, and
+unreviewed-ref acceptance criteria. Do not dispatch the live workflow until its
+exact changes and provenance have been independently reviewed and a verified
+immutable image digest and zero-cost runner eligibility are established.
+
 ## The finding that forced the decision
 
 The Codespaces bridge launches repository-controlled commands as a child process of

@@ -72,6 +72,12 @@ class SandboxWorkflowInjectionTest(unittest.TestCase):
         self.assertIn("if: always()", self.text)
         self.assertIn("tr -d '\\r\\n'", self.text)
 
+    def test_live_workflow_uses_fail_closed_runner_and_no_persisted_checkout_token(self):
+        self.assertIn("python3 scripts/run_sandbox_adversarial_tests.py", self.text)
+        self.assertNotIn("python3 -m unittest tests.adversarial.test_sandbox_escape", self.text)
+        self.assertIn("persist-credentials: false", self.text)
+        self.assertIn("does not satisfy all issue #440 acceptance criteria", self.text)
+
     def test_the_guard_detects_the_pattern_it_is_meant_to_catch(self):
         # A guard that cannot fail is not a guard.
         sample = "        run: |\n          echo \"- image: `${{ inputs.image }}`\"\n"

@@ -17,9 +17,11 @@ reason produces ``denied:<Error>``, so a wrong canary path used to satisfy the
 "file outside the mount is unreadable" assertion while proving nothing.
 """
 import importlib
+import json
 import os
 import shutil
 import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -49,6 +51,7 @@ def _good_output(**overrides):
     output = {
         "control": "raawaa-autonomous-engine\n\nAn independent, cost-controlled",
         "host_canary": "denied:FileNotFoundError",
+        "secret_marker_present": False,
         "network": "denied:OSError",
         "root_write": "denied:OSError",
         "exists:/var/run/docker.sock": False,
@@ -81,6 +84,16 @@ class FalseTestGuardTest(unittest.TestCase):
 
     def test_a_complete_observation_is_accepted(self):
         self.assertIsNone(probe._assert_probe_usable(_good_output()))
+
+    def test_secret_result_is_required_typed_and_detects_exposure(self):
+        for value in (None, "false", 0, 1):
+            with self.subTest(value=value), self.assertRaisesRegex(AssertionError, "boolean"):
+                probe._assert_probe_usable(_good_output(secret_marker_present=value))
+        with self.assertRaisesRegex(AssertionError, "synthetic host secret"):
+            probe._assert_secret_not_in_environ(_good_output(secret_marker_present=True))
+        with self.assertRaisesRegex(AssertionError, "explicitly report"):
+            probe._assert_secret_not_in_environ({})
+        probe._assert_secret_not_in_environ(_good_output(secret_marker_present=False))
 
     def test_a_probe_that_exits_non_zero_produces_no_output(self):
         completed = _completed(stdout='{"control": "raawaa-autonomous-engine"}', returncode=1)
@@ -155,6 +168,54 @@ class ProbeProgramTest(unittest.TestCase):
         self.addCleanup(setattr, probe, "PROBE_TEMPLATE", original)
         with self.assertRaisesRegex(RuntimeError, "__HOST_CANARY_PATH__"):
             probe._probe_program("/tmp/canary")
+
+    def test_multiline_program_is_a_valid_newline_free_sandbox_command(self):
+        from engine.sandbox_policy import SandboxRequest, assert_sandbox_argv, build_docker_argv
+
+        program = probe._probe_program("/tmp/canary")
+        command = probe._python_command(program)
+        self.assertTrue(all("\n" not in arg and "\r" not in arg for arg in command))
+        request = SandboxRequest(
+            image="python@sha256:" + "a" * 64, command=command,
+            source_dir=str(Path(__file__).resolve().parents[2]),
+        )
+        vector = build_docker_argv(request)
+        assert_sandbox_argv(vector, expected_source_dir=request.source_dir)
+        small = probe._python_command("print('line one')\nprint('line two')\n")
+        result = subprocess.run([sys.executable, *small[1:]], capture_output=True, text=True, check=True)
+        self.assertEqual(result.stdout, "line one\nline two\n")
+
+    def test_environment_canary_positive_and_negative_controls(self):
+        # Execute the actual generated program, but stub network and root writes.
+        # Only a synthetic marker is supplied, never real environment contents.
+        program = probe._probe_program("/no-such-host-canary", control_path=str(Path(__file__).resolve()))
+        wrapper = """
+import builtins, socket
+_original_open = builtins.open
+def safe_open(path, *args, **kwargs):
+    if path == '/escaped':
+        raise OSError('disabled by offline test')
+    return _original_open(path, *args, **kwargs)
+def no_network(*args, **kwargs):
+    raise OSError('disabled by offline test')
+builtins.open = safe_open
+socket.create_connection = no_network
+exec(PROGRAM)
+""".replace("PROGRAM", repr(program))
+        for env, expected in (({}, False), ({"SYNTHETIC_CANARY": "prefix-" + probe.SECRET_MARKER}, True)):
+            with self.subTest(expected=expected):
+                completed = subprocess.run(
+                    [sys.executable, "-I", "-c", wrapper], env=env,
+                    capture_output=True, text=True, timeout=10, check=True,
+                )
+                output = json.loads(completed.stdout)
+                self.assertIs(output["secret_marker_present"], expected)
+                self.assertNotIn(probe.SECRET_MARKER, completed.stdout)
+                if expected:
+                    with self.assertRaisesRegex(AssertionError, "synthetic host secret"):
+                        probe._assert_secret_not_in_environ(output)
+                else:
+                    probe._assert_secret_not_in_environ(output)
 
     def test_the_probe_actually_reads_something_it_must_see(self):
         # The control path must be inside the mounted workspace, or it proves

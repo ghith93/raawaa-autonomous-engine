@@ -2,8 +2,8 @@ name: Sandbox adversarial proof
 
 # #440 asks for evidence that a real boundary exists around repository task code,
 # and explicitly says a green ordinary CI run is not that evidence. This is the
-# workflow that can produce it: an ephemeral VM, gVisor installed on it, and five
-# probes that try to escape and report what they saw.
+# workflow that can produce partial evidence: an ephemeral VM, gVisor installed on it,
+# and six checks that try to escape or validate a synthetic negative control.
 #
 # Manual dispatch on purpose. It pulls an image and downloads gVisor, so it is not
 # something to run on every push, and the image must be named by digest — a tag
@@ -36,6 +36,8 @@ jobs:
     steps:
       - name: Check out reviewed main
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
 
       - name: Set up Python
         uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7
@@ -83,7 +85,7 @@ jobs:
           IMAGE: ${{ inputs.image }}
         run: |
           RAAWAA_SANDBOX_LIVE=1 RAAWAA_SANDBOX_IMAGE="$IMAGE" \
-            python3 -m unittest tests.adversarial.test_sandbox_escape -v
+            python3 scripts/run_sandbox_adversarial_tests.py
 
       - name: Summary
         if: always()
@@ -102,7 +104,8 @@ jobs:
             echo ""
             printf -- '- image: `%s`\n' "$SAFE_IMAGE"
             echo "- runtime: runsc (gVisor), network none, read-only rootfs, cap-drop ALL, non-root"
-            echo "- probes: host canary outside the mount, positive control read, docker socket, /root/.ssh, egress, root write"
+            echo "- probes: host canary outside the mount, synthetic environment canary, positive control read, docker socket, /root/.ssh, egress, root write"
             echo ""
             echo "A skipped or partially run probe is reported as a failure, never as containment."
+            echo "Passing these probes alone does not satisfy all issue #440 acceptance criteria."
           } >> "$GITHUB_STEP_SUMMARY"
