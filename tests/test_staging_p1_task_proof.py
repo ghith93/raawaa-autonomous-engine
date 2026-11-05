@@ -183,6 +183,23 @@ class StepSummaryTests(unittest.TestCase):
             self.assertIn("Staging P1 task proof FAILED", summary.read_text(encoding="utf-8"))
 
 
+def _heredoc_python_blocks(path: str) -> list[str]:
+    lines = Path(path).read_text(encoding="utf-8").splitlines()
+    blocks: list[str] = []
+    i = 0
+    while i < len(lines):
+        if "<<'PY'" in lines[i]:
+            indent = len(lines[i]) - len(lines[i].lstrip())
+            body = []
+            i += 1
+            while i < len(lines) and lines[i].strip() != "PY":
+                body.append(lines[i][indent:] if lines[i].startswith(" " * indent) else lines[i])
+                i += 1
+            blocks.append("\n".join(body))
+        i += 1
+    return blocks
+
+
 class WorkflowShapeTests(unittest.TestCase):
     def test_workflow_is_manual_only_and_revokes_token(self):
         text = Path(".github/workflows/staging-p1-task-proof.yml").read_text(encoding="utf-8")
@@ -197,6 +214,16 @@ class WorkflowShapeTests(unittest.TestCase):
         self.assertIn("secret put ENGINE_API_TOKEN --config wrangler.staging.toml", text)
         self.assertIn("secret delete ENGINE_API_TOKEN --config wrangler.staging.toml", text)
         self.assertIn("NEVER counts toward the Runtime-004", text)
+
+    def test_embedded_workflow_python_compiles(self):
+        # A syntax error in a heredoc Python block only surfaces at workflow
+        # runtime; compile every embedded block here so CI catches it first.
+        for workflow in (".github/workflows/staging-p1-task-proof.yml",
+                         ".github/workflows/staging-supervised-process-probe.yml"):
+            blocks = _heredoc_python_blocks(workflow)
+            self.assertTrue(blocks, workflow)
+            for block in blocks:
+                compile(block, workflow, "exec")  # raises SyntaxError on failure
 
 
 if __name__ == "__main__":
