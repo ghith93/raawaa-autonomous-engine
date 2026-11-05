@@ -375,6 +375,25 @@ class StagingScheduledProbeTests(unittest.TestCase):
         self.assertEqual(result["backend"], "cloudflare_staging")
         self.assertEqual(result["fallback_standby"], "ready")
 
+    def test_scheduled_env_without_standby_never_calls_fallback_health(self):
+        # Regression: the scheduled workflow no longer enables the standby
+        # check, whose /health RPC persistently writes a heartbeat row.
+        primary = FakeStore()
+        fallback_factory = Mock()
+        result = probe.run_scheduled_probe(
+            cron_environment(),
+            store_factory=lambda *args, **kwargs: primary,
+            fallback_store_factory=fallback_factory,
+            oidc_token_factory=Mock(),
+            processor=lambda *args, **kwargs: {
+                "id": "probe-123", "status": "succeeded", "classification": "succeeded",
+                "operation": probe.OPERATION, "dispatch_id": "d" * 32, "replayed": False,
+            },
+        )
+        fallback_factory.assert_not_called()
+        self.assertEqual(result["backend"], "cloudflare_staging")
+        self.assertEqual(result["fallback_standby"], "not_checked")
+
     def test_rejects_wrong_task_payload_without_claim_or_execution(self):
         store = FakeStore()
         store.payload = {"operation": "unapproved"}

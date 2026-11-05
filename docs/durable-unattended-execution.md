@@ -249,9 +249,21 @@ recovery contract is deliberately narrow:
   Cloudflare ledger and reported in the run output as `previous_slot`
   (task ID + terminal status) for monitoring. The Supabase fallback never
   recovers across ledgers. No broad stale-task sweep was added.
+- **Backend-specific acceptance.** A run's outcome records its `backend`.
+  Only successes with `backend=cloudflare_staging` count toward the
+  Runtime-004 Cloudflare-primary gate. A `supabase_free_fallback` success is
+  genuine schedule evidence for the fallback path only; it never counts as
+  Cloudflare-primary acceptance.
+- **No standby heartbeat on the scheduled path.** The fallback `/health`
+  RPC (`engine_fallback_ping`) performs a persistent heartbeat write on
+  every call, so the scheduled workflow does not enable the standby check;
+  the fallback store is created only when the Cloudflare primary actually
+  fails. The RPC remains available for explicit manual diagnostics and is
+  otherwise unused by automation.
 - **Not yet proven:** two distinct real `event=schedule` successes with
-  separate durable task/dispatch IDs and temporary-token revocation remain
-  the post-merge acceptance gate. Local D1 and CI evidence do not count.
+  `backend=cloudflare_staging`, separate durable task/dispatch IDs and
+  temporary-token revocation remain the post-merge acceptance gate. Local
+  D1 and CI evidence do not count.
 
 ## What is still not proven
 

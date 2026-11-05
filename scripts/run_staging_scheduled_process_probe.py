@@ -275,9 +275,12 @@ def run_scheduled_probe(
     fallback_store = None
     fallback_standby = "not_checked"
 
-    # A daily signed heartbeat keeps a Free project from being marked inactive.
-    # Failure is non-fatal to Cloudflare; the fallback is attempted again only
-    # if the primary fails, and the project may still be paused or unavailable.
+    # The scheduled workflow deliberately does NOT enable the standby check:
+    # the fallback `/health` RPC (`engine_fallback_ping`) performs a persistent
+    # heartbeat write on every call, so invoking it daily from the schedule
+    # would be an unreported external mutation. The standby branch below is
+    # retained only for explicit manual diagnostics; the fallback store is
+    # otherwise created solely when the Cloudflare primary actually fails.
     if env.get("RAAWAA_ENGINE_FALLBACK_STANDBY_CHECK", "").strip().lower() == "enabled":
         try:
             fallback_store = _make_fallback_store(env, fallback_store_factory, oidc_token_factory)
