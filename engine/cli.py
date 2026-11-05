@@ -26,6 +26,13 @@ from engine.profile_routing import build_route_plan, render_markdown as render_r
 from engine.orchestrator import validate_and_plan
 from engine.workflow_dispatch import dispatch_body, render_markdown as render_dispatch_markdown
 from engine.workflow_manifest import build_workflow_run_manifest
+from engine.process_supervisor import (
+    ProcessSupervisor,
+    child_environment_names,
+    SqliteDispatchLedger,
+    SupervisorRefusal,
+    default_registry,
+)
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -245,6 +252,30 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_parser("quota-status", help="Inspect local provider quota usage and threshold alerts; no network calls")
     research = sub.add_parser("research-discover", help="Read-only discovery of public GitHub and academic research metadata")
     research.add_argument("--max-per-query", type=int, default=None)
+
+    sub.add_parser(
+        "supervisor-operations",
+        help="List the allowlisted operations the process supervisor may start; starts nothing",
+    )
+    run_operation = sub.add_parser(
+        "run-operation",
+        help="Show, and only with --confirm run, one allowlisted supervised operation",
+    )
+    run_operation.add_argument("--operation", required=True)
+    run_operation.add_argument("--task-id", required=True)
+    run_operation.add_argument(
+        "--parameter", action="append", default=[], metavar="NAME=VALUE",
+        help="Value for one declared argument slot; repeat for each slot",
+    )
+    run_operation.add_argument("--wall-seconds", type=float, default=None)
+    run_operation.add_argument(
+        "--confirm", action="store_true",
+        help="Actually start the process. Without it the resolved plan is printed and nothing runs.",
+    )
+    run_operation.add_argument(
+        "--reconcile-stale-seconds", type=float, default=900.0,
+        help="Quarantine interrupted dispatches older than this before running",
+    )
     return parser
 
 
@@ -435,6 +466,47 @@ def main() -> int:
                 "without provider-side evidence that the request was not billed."
             ),
         }, indent=2, ensure_ascii=False))
+    elif args.command == "supervisor-operations":
+        print(json.dumps(default_registry(ROOT).describe(), indent=2, ensure_ascii=False))
+    elif args.command == "run-operation":
+        parameters = {}
+        for item in args.parameter:
+            name, separator, value = item.partition("=")
+            if not separator or not name.strip():
+                raise ValueError("--parameter must be NAME=VALUE")
+            parameters[name.strip()] = value
+        registry = default_registry(ROOT)
+        try:
+            spec = registry.get(args.operation)
+            argv = spec.build_argv(parameters)
+        except SupervisorRefusal as exc:
+            print(json.dumps({"status": "refused", "reason": str(exc)}, indent=2))
+            return 1
+        if not args.confirm:
+            # The dry run is the inspectable half: the exact vector, the exact
+            # limits, and the names of the variables the child will see. Values
+            # are never printed, because one of them could be a credential.
+            print(json.dumps({
+                "status": "dry_run",
+                "note": "Nothing was started. Pass --confirm to run this operation.",
+                "operation": spec.name,
+                "argv": list(argv),
+                "wall_seconds": args.wall_seconds or spec.wall_seconds,
+                "output_bytes": spec.output_bytes,
+                "working_directory": spec.working_directory or "<disposable temporary directory>",
+                "child_environment_variables": list(child_environment_names()),
+            }, indent=2, ensure_ascii=False))
+            return 0
+        supervisor = ProcessSupervisor(registry, SqliteDispatchLedger(db_path()))
+        reconciled = supervisor.reconcile(stale_after_seconds=args.reconcile_stale_seconds)
+        outcome = supervisor.run_operation(
+            args.operation, parameters, task_id=args.task_id,
+            wall_seconds=args.wall_seconds,
+        )
+        payload = outcome.as_dict()
+        payload["reconciled_dispatches"] = reconciled
+        print(json.dumps(payload, indent=2, ensure_ascii=False))
+        return 0 if outcome.classification == "succeeded" else 1
     elif args.command == "model-status":
         policy = load_json(ROOT / "config" / "policy.json")
         gateway = ModelGateway(
