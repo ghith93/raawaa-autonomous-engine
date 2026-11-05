@@ -3,8 +3,12 @@
 **Status:** local SQLite crash recovery and local D1 lifecycle tests pass. PR
 #540 merged the process-scoped D1 ledger/Worker route/Python adapter. Its guarded
 post-merge Staging migration and Worker deployment succeeded, but the remote
-verification step failed; successful remote process-dispatch behavior remains
-unproven pending diagnosis. No Production deployment or D1 write occurred. The
+verification step failed before its process test ran: direct script execution
+placed `scripts/` rather than the repository root on `sys.path`, so importing
+`engine` failed. This was reproduced locally; the follow-up adds a root-path
+bootstrap and regression test. Successful remote process-dispatch behavior
+remains unproven pending a fresh guarded Staging run. No Production deployment
+or D1 write occurred. The
 initial model-invocation reuse proposal is rejected by the compatibility review
 below.
 **Tasks:** `CHATGPT-ENGINE-RUNTIME-003` (issue #464). **Spend:** USD 0.
@@ -191,11 +195,14 @@ only for `RemoteTaskStore`; no local `db_path` is fabricated.
 The guarded post-merge Staging verifier is configured to exercise one
 lease-fenced `python_platform_probe` against isolated Staging D1, check durable
 settlement and same-outcome replay without a second child start, then remove
-only its own fixture rows. Run #41957449242 applied the migration and deployed
-the isolated Worker, but the verifier step failed. Available GitHub job metadata
-does not reveal the failing check or whether the probe reached child launch;
-remote dispatch behavior is therefore unknown, not passed. This is not a
-Cron-triggered or unattended execution proof.
+only its own fixture rows. Runs #41957449242 and #41958480499 applied the
+migration and deployed the isolated Worker, but the verifier step failed before
+it reached the Staging API: direct script invocation omitted the repository
+root from `sys.path`, producing `ModuleNotFoundError: engine`. This was
+reproduced locally and fixed by bootstrapping the repository root before the
+engine imports, with a no-credentials direct-invocation regression test. The
+fixed verifier has not yet run on Staging, so remote dispatch behavior remains
+unproven. This is not a Cron-triggered or unattended execution proof.
 
 Local checks passed: 66 focused supervisor/adapter tests, 206 Worker tests,
 1,040 Python tests (7 live-sandbox skips), and the local D1 integration smoke
