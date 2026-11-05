@@ -1,5 +1,6 @@
 """Local SQLite concurrency tests only; no remote D1 or model inference."""
 from concurrent.futures import ThreadPoolExecutor
+from threading import Barrier
 import json
 import sqlite3
 from unittest.mock import patch
@@ -56,6 +57,23 @@ class LocalPilotTests(unittest.TestCase):
         self.assertIsNotNone(claim_local(self.store, task_id=task_id, **ARGS))
         with self.assertRaisesRegex(ValueError, 'reserved'):
             self.store.enqueue('system_audit', 'Bypass', idempotency_key='research-pilot:other')
+
+    def test_race_between_real_generic_claim_and_targeted_claim(self):
+        for number in range(12):
+            args = dict(ARGS, key=f'research-pilot:race-{number}')
+            task_id, _ = admit_local(self.store, **args)
+            barrier = Barrier(2)
+            def generic():
+                barrier.wait(timeout=5)
+                return self.store.claim_next(execution_mode='dry_run')
+            def targeted():
+                barrier.wait(timeout=5)
+                return claim_local(self.store, task_id=task_id, **args)
+            with ThreadPoolExecutor(max_workers=2) as pool:
+                generic_future = pool.submit(generic)
+                target_future = pool.submit(targeted)
+                self.assertIsNone(generic_future.result(timeout=10))
+                self.assertEqual(target_future.result(timeout=10)['id'], task_id)
 
     def test_generic_dependency_blocking_does_not_mutate_quarantined_row(self):
         dependency = self.store.enqueue('system_audit', 'Failed dependency')

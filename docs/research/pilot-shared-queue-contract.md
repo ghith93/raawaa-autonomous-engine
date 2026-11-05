@@ -48,3 +48,31 @@ negative test. Local mocks or SQLite success are not remote D1 evidence; a
 separate cost-verified, authorized isolated Staging run is needed later. Enforce
 model evidence, credential scoping, zero-cost controls and no-fallback before
 any enqueue/provider invocation; none is established by this design.
+
+## D1 documentation evidence and transaction sketch
+
+On 2026-11-05, Cloudflare's [D1 batch documentation](https://developers.cloudflare.com/d1/worker-api/d1-database/#batch)
+states that a batch runs as a SQL transaction and a statement failure aborts or
+rolls back the sequence. [D1 limits](https://developers.cloudflare.com/d1/platform/limits/)
+describe each individual database as single-threaded, queuing concurrent requests
+and returning overload errors when the queue is full. These are provider claims,
+not proof that a particular pilot implementation is safe. SQL errors, overload,
+timeouts, lost responses and retry behavior need independent tests.
+
+Candidate admission batch: parameterized `INSERT ... ON CONFLICT DO NOTHING`
+for an immutable unique idempotency key; then an audit insert **conditioned on
+the inserted task ID**, followed by a lookup within the same batch. Evaluate the
+returned row against the entire identity and lifecycle; a conflict must never
+produce a second task or audit. The returned created flag must come from actual
+insert changes, not from a pre-read. On response loss, reconcile by immutable
+key and exact identity; if the outcome cannot be verified, return unknown and
+do not dispatch. Do not use `OR IGNORE` to hide non-uniqueness failures.
+
+Candidate claim batch: conditional `UPDATE ... RETURNING` for exact task ID,
+reserved key, immutable identity, pending state, attempt count zero and correct
+mode, assigning a fresh token and expiry; then an audit insert conditioned on
+that exact newly installed token and running state. Both statements must share
+one D1 batch; no provider call until its successful result is parsed and lease
+ownership is revalidated. Database triggers, schema constraints, collisions,
+ambiguous batch results and session/readback consistency must be tested rather
+than assumed. This sketch is intentionally not code or an authorization to write.
