@@ -91,6 +91,14 @@ jobs:
           # The bounded outcome line is uploaded as an artifact because step
           # logs/summaries are not always retrievable by automation.
           python scripts/run_staging_p1_task_proof.py 2>&1 | tee p1-proof-output.txt
+      - name: Surface bounded proof outcome as an annotation
+        if: ${{ always() }}
+        shell: bash
+        run: |
+          # Annotations are retrievable through the GitHub API when step logs
+          # and artifacts are not; the outcome line is already bounded/redacted.
+          outcome="$(head -c 900 p1-proof-output.txt | tr '\n' ' ')"
+          echo "::notice title=Staging P1 task proof outcome::${outcome}"
       - name: Upload bounded proof outcome
         if: ${{ always() }}
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
