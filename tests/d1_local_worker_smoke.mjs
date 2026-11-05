@@ -951,6 +951,34 @@ try {
   assert.equal("by_provider" in status.payload.model_costs_usd, false);
   assert.equal("unresolved" in status.payload.monetary_ledger, false);
 
+  // Inject reserved rows directly into the isolated local D1 database; ordinary
+  // enqueue is intentionally forbidden, and this is not a remote D1 test.
+  const reserved = await api("/v1/tasks/enqueue", { method: "POST", body: {
+    task_type: "research_brief", title: "reserved", idempotency_key: "research-pilot:rejected", payload: {},
+  }});
+  assertStatus(reserved, 400, "generic enqueue rejects pilot namespace");
+  assert.equal(reserved.payload.error, "reserved_idempotency_key");
+  executeLocalSql(`
+    INSERT INTO tasks(id,idempotency_key,task_type,title,payload_json,status,created_at,updated_at,priority)
+      VALUES ('pilot-local-free','research-pilot:free','research_brief','pilot','{}','pending','2026-01-01','2026-01-01',100),
+             ('pilot-local-child','research-pilot:child','research_brief','pilot child','{}','pending','2026-01-01','2026-01-01',100);
+    INSERT INTO task_dependencies(task_id,dependency_task_id) VALUES ('pilot-local-child','${failureParent.payload.task.id}');
+  `);
+  const ignoredPilot = await api("/v1/tasks/claim", { method: "POST", body: { execution_mode: "dry_run" } });
+  assertStatus(ignoredPilot, 200, "generic claim skips pilots");
+  assert.equal(ignoredPilot.payload.task, null);
+  const pilotRows = await api("/v1/tasks?limit=100");
+  assertStatus(pilotRows, 200, "pilot state readback");
+  for (const id of ["pilot-local-free", "pilot-local-child"]) {
+    const row = pilotRows.payload.tasks.find(task => task.id === id);
+    assert.equal(row?.status, "pending", `generic claim and dependency blocking must not mutate ${id}`);
+    assert.equal(row.attempts, 0);
+  }
+  const disabledCodespacePilot = await api("/v1/codespace/tasks/claim", {
+    method: "POST", token: CODESPACE_TOKEN, body: { execution_mode: "dry_run" },
+  });
+  assertStatus(disabledCodespacePilot, 503, "Codespace remains release-gated");
+
   const webhookDisabled = await api("/v1/telegram/webhook", {
     method: "POST",
     body: { update_id: 1 },

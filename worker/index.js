@@ -448,12 +448,12 @@ export default {
             SELECT child.id FROM tasks child
             JOIN task_dependencies d ON d.task_id=child.id
             JOIN tasks dependency ON dependency.id=d.dependency_task_id
-            WHERE child.status='pending' AND dependency.status IN ('failed','blocked')
+            WHERE child.status='pending' AND substr(child.idempotency_key,1,15) <> 'research-pilot:' AND dependency.status IN ('failed','blocked')
             UNION
             SELECT child.id FROM tasks child
             JOIN task_dependencies d ON d.task_id=child.id
             JOIN blocked b ON b.id=d.dependency_task_id
-            WHERE child.status='pending'
+            WHERE child.status='pending' AND substr(child.idempotency_key,1,15) <> 'research-pilot:'
           )
           SELECT id FROM blocked ORDER BY id LIMIT 50
         `).all();
@@ -462,10 +462,10 @@ export default {
           const blockedStatements = [];
           for (const blockedId of blockedIds) {
             blockedStatements.push(env.DB.prepare(
-              "INSERT INTO audit_log(task_id,event,details_json,created_at) SELECT id,'task_blocked_by_dependency',?,? FROM tasks WHERE id=? AND status='pending'"
+              "INSERT INTO audit_log(task_id,event,details_json,created_at) SELECT id,'task_blocked_by_dependency',?,? FROM tasks WHERE id=? AND status='pending' AND substr(idempotency_key,1,15) <> 'research-pilot:'"
             ).bind(JSON.stringify({ reason: "dependency_failed_or_blocked" }), nowIso, blockedId));
             blockedStatements.push(env.DB.prepare(
-              "UPDATE tasks SET status='blocked',error='Dependency failed or was blocked.',updated_at=?,lease_token=NULL,lease_expires_at=NULL WHERE id=? AND status='pending'"
+              "UPDATE tasks SET status='blocked',error='Dependency failed or was blocked.',updated_at=?,lease_token=NULL,lease_expires_at=NULL WHERE id=? AND status='pending' AND substr(idempotency_key,1,15) <> 'research-pilot:'"
             ).bind(nowIso, blockedId));
           }
           await env.DB.batch(blockedStatements);
@@ -473,7 +473,7 @@ export default {
         const claim = await env.DB.prepare(`
           UPDATE tasks SET status='running', attempts=attempts+1, execution_mode=?, updated_at=?,
             lease_token=?, lease_expires_at=?
-          WHERE id=(SELECT candidate.id FROM tasks candidate WHERE candidate.status='pending' ${taskTypeFilter}
+          WHERE id=(SELECT candidate.id FROM tasks candidate WHERE candidate.status='pending' AND substr(candidate.idempotency_key,1,15) <> 'research-pilot:' ${taskTypeFilter}
             AND NOT EXISTS (
               SELECT 1 FROM task_dependencies d
               JOIN tasks dependency ON dependency.id=d.dependency_task_id
@@ -481,7 +481,7 @@ export default {
                 AND (dependency.status <> 'succeeded' OR dependency.execution_mode <> ?)
             )
             ORDER BY candidate.priority DESC, candidate.created_at ASC, candidate.id ASC LIMIT 1)
-            AND status='pending' ${taskTypeFilter}
+            AND status='pending' AND substr(idempotency_key,1,15) <> 'research-pilot:' ${taskTypeFilter}
           RETURNING id,idempotency_key,task_type,title,payload_json,status,attempts,
             max_attempts,created_at,updated_at,execution_mode,priority,dependencies_json,lease_token,lease_expires_at
         `).bind(executionMode, nowIso, leaseToken, expires, executionMode).first();
@@ -620,6 +620,9 @@ export default {
         rawDependencies.some(dep => !validText(dep, 128)) ||
         new Set(rawDependencies).size !== rawDependencies.length) {
       return json({ error: "invalid_task" }, 400);
+    }
+    if (key.startsWith("research-pilot:")) {
+      return json({ error: "reserved_idempotency_key" }, 400);
     }
     const dependsOn = [...rawDependencies].sort();
     const dependenciesJson = JSON.stringify(dependsOn);

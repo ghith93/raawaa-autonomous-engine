@@ -1,4 +1,4 @@
-# Shared-queue isolation design — not implemented for D1
+# Shared-queue isolation design — D1 pilot admission not implemented
 
 ## Consumer and producer inventory at main a72c48f
 
@@ -7,10 +7,14 @@
   rejects them at generic local enqueue. `recover_stale` can still terminally fail
   expired one-attempt pilots. SQLite locking and tests do not prove remote D1.
 - Remote `engine.worker.run_once` → `RemoteTaskStore.claim_next` → Worker
-  `POST /v1/tasks/claim`. The D1 SQL excludes Codespace task types, **not** pilot
-  identities; its recursive dependency blocking can mutate pilot rows too.
+  `POST /v1/tasks/claim`. Main a72c48f does not exclude pilot identities. This
+  draft adds exclusion to claim and recursive dependency blocking, and rejects
+  generic enqueue; it is tested only against local Wrangler/D1, not deployed or
+  proved against remote D1. Other mutation paths remain to be inventoried.
 - Codespace bridge → `POST /v1/codespace/tasks/claim` selects Codespace types;
-  release remains hard-disabled. Re-check every principal/route before rollout.
+  release remains hard-disabled; the shared claim SQL includes the exclusion,
+  but its active Codespace branch has not been exercised. Re-check every
+  principal/route before rollout.
 - Admission includes local/remote CLI and `TaskStore.enqueue`, Worker
   `/v1/tasks/enqueue`, GitHub comment ingest, workflows, and Worker workflow
   dispatch's batched task insert. Audit direct database writers before claiming
@@ -76,3 +80,26 @@ one D1 batch; no provider call until its successful result is parsed and lease
 ownership is revalidated. Database triggers, schema constraints, collisions,
 ambiguous batch results and session/readback consistency must be tested rather
 than assumed. This sketch is intentionally not code or an authorization to write.
+
+## Cloudflare Workers AI backup decision (2026-11-05)
+
+The owner requests Workers AI Free as a backup. Treat backup as an explicitly
+selected new task/route, not silent provider rotation or retry following an
+ambiguous dispatch. No binding, gateway route, model call or deployment has
+been enabled. Use the existing quota gateway and durable invocation/monetary
+ledger, not a parallel dispatcher; the existing gateway's routing behavior
+must be reviewed for strict one-route/no-fallback semantics before reuse.
+
+Cloudflare documents 10,000 neurons/day at no charge on Workers Free, while
+Workers Paid incurs overage, and some models require paid billing. See [pricing]
+(https://developers.cloudflare.com/workers-ai/platform/pricing/) and [errors]
+(https://developers.cloudflare.com/workers-ai/platform/errors/). A quota 3036,
+capacity 3040, or paid-model 5035 must not initiate an automatic fallback.
+Catalog visibility does not prove account plan, eligible model, billing route,
+or zero infrastructure overage. AI Gateway unified billing/prepaid credits are
+not authorized. Public fixtures only; verify [data usage]
+(https://developers.cloudflare.com/workers-ai/platform/data-usage/) before
+transmitting anything. Account-specific Workers Free evidence, usage and
+billing reconciliation, operator-owned privacy decision where needed, D1
+isolation, current evidence and containment remain gates. Unknown = disabled.
+No claim that a free allowance alone proves the account-wide $15 hard ceiling.
