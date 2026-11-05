@@ -171,3 +171,16 @@ account-wide Neuron/cost reconciliation must be demonstrated before use. A
 pinned route and local UUID cannot guarantee exactly-once external inference.
 The existing task-invocation endpoint excludes pilot tasks in this draft, so it
 cannot currently serve as the pilot's specialized invocation protocol.
+
+### Strict-route review response
+
+Strict mode now requires an exact `adapters[route_id]` entry; provider-level
+adapter fallback remains available only in non-strict mode. After `prepare`, the
+checkpoint must contain the same `pinned_route_id` or generation stops before
+reservation or provider I/O. The current `TaskInvocationStore.prepare` does not
+supply this field: consequently strict mode is **not usable with it**, by design.
+The fake store tests demonstrate rejection of missing/mismatched bindings, not
+that a binding was durably created, recorded with a policy version, or survives
+restart. Read-only preflight cannot inspect per-task invocation binding; an
+eligible preflight result is not authorization to dispatch. Durable route
+binding and replay/settlement/lease-loss tests remain required before wiring.

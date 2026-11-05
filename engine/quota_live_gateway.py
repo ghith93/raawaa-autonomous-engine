@@ -54,6 +54,11 @@ class QuotaAwareLiveGateway:
         # Fail closed if mutable configuration becomes absent or ambiguous.
         return selected if len(selected) == 1 else []
 
+    def _adapter_for(self, profile):
+        if self.pinned_route_id is not None:
+            return self.adapters.get(profile.route_id)
+        return self.adapters.get(profile.route_id) or self.adapters.get(profile.provider)
+
     def _live_enabled(self) -> bool:
         return (
             self.network_calls_enabled
@@ -94,7 +99,7 @@ class QuotaAwareLiveGateway:
                 continue
             if not self.quota_manager.eligible(profile, estimated_tokens):
                 continue
-            if self.adapters.get(profile.route_id) is None and self.adapters.get(profile.provider) is None:
+            if self._adapter_for(profile) is None:
                 continue
             return {
                 "eligible": True,
@@ -128,6 +133,11 @@ class QuotaAwareLiveGateway:
                 )
             except Exception as exc:
                 raise ProviderUnavailable("Could not prepare a durable task-step invocation; provider was not called.") from exc
+            # Strict mode cannot use the existing unbound prepare response: the
+            # durable owner must supply the route recorded for this exact step.
+            # A missing binding or a changed route fails before any provider I/O.
+            if self.pinned_route_id is not None and checkpoint.get("pinned_route_id") != self.pinned_route_id:
+                raise ProviderUnavailable("Durable invocation route binding is missing or mismatched; provider was not called.")
             request = replace(request, request_id=checkpoint["request_id"], invocation_id=checkpoint["invocation_id"])
         if not isinstance(request.request_id, str) or not request.request_id.strip():
             raise ProviderUnavailable(
@@ -156,7 +166,7 @@ class QuotaAwareLiveGateway:
                 continue
             if not self.quota_manager.eligible(profile, estimated_tokens):
                 continue
-            adapter = self.adapters.get(profile.route_id) or self.adapters.get(profile.provider)
+            adapter = self._adapter_for(profile)
             if adapter is None:
                 continue
             input_price = profile.input_cost_per_million_usd

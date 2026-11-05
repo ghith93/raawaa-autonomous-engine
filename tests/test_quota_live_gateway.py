@@ -771,8 +771,9 @@ class QuotaAwareGatewayTests(unittest.TestCase):
                 selected = FakeAdapter("groq", LiveAdapterError("untrusted secret message", status_code=status, error_code="permissions_error"))
                 backup = FakeAdapter("cerebras")
                 store = FakeInvocationStore()
+                store.prepared["pinned_route_id"] = first.route_id
                 gateway = QuotaAwareLiveGateway(
-                    QuotaManager([first, second], quota), {"groq": selected, "cerebras": backup}, usage, True,
+                    QuotaManager([first, second], quota), {first.route_id: selected, second.route_id: backup}, usage, True,
                     environ={"RAAWAA_ENGINE_LIVE_INFERENCE": "enabled"}, invocation_store=store,
                     pinned_route_id=first.route_id)
                 self.assertEqual(gateway.preflight_capacity(max_output_tokens=20)["route_id"], first.route_id)
@@ -785,10 +786,47 @@ class QuotaAwareGatewayTests(unittest.TestCase):
                 self.assertEqual(usage.totals()["pending_reservations"], 1)
                 self.assertNotIn("untrusted secret message", str(quota.audit_events()))
 
+    def test_pinned_route_rejects_provider_key_only_adapter(self):
+        first = self.profile()
+        adapter = FakeAdapter("groq")
+        store = FakeInvocationStore()
+        store.prepared["pinned_route_id"] = first.route_id
+        gateway = QuotaAwareLiveGateway(
+            QuotaManager([first], self.quota), {"groq": adapter}, self.usage, True,
+            environ={"RAAWAA_ENGINE_LIVE_INFERENCE": "enabled"}, invocation_store=store,
+            pinned_route_id=first.route_id)
+        self.assertFalse(gateway.preflight_capacity(max_output_tokens=20)["eligible"])
+        request = GenerationRequest("research", "public", 20, task_id="task-1", step_key="step", lease_token="lease")
+        with self.assertRaises(ProviderUnavailable):
+            gateway.generate(request)
+        self.assertEqual(adapter.calls, 0)
+        self.assertNotIn("start", [call[0] for call in store.calls])
+
+    def test_pinned_route_requires_matching_prepared_durable_binding(self):
+        first = self.profile()
+        second = self.profile(provider="cerebras", account="backup")
+        store = FakeInvocationStore()
+        request = GenerationRequest("research", "public", 20, task_id="task-1", step_key="step", lease_token="lease")
+        for binding in (None, second.route_id):
+            with self.subTest(binding=binding):
+                if binding is None:
+                    store.prepared.pop("pinned_route_id", None)
+                else:
+                    store.prepared["pinned_route_id"] = binding
+                adapter = FakeAdapter("groq")
+                gateway = QuotaAwareLiveGateway(
+                    QuotaManager([first, second], self.quota), {first.route_id: adapter}, self.usage, True,
+                    environ={"RAAWAA_ENGINE_LIVE_INFERENCE": "enabled"}, invocation_store=store,
+                    pinned_route_id=first.route_id)
+                with self.assertRaisesRegex(ProviderUnavailable, "binding is missing or mismatched"):
+                    gateway.generate(request)
+                self.assertEqual(adapter.calls, 0)
+        self.assertNotIn("start", [call[0] for call in store.calls])
+
     def test_pinned_route_rechecks_dynamic_profile_ambiguity(self):
         first = self.profile()
         manager = QuotaManager([first], self.quota)
-        gateway = QuotaAwareLiveGateway(manager, {"groq": FakeAdapter("groq")}, self.usage, True,
+        gateway = QuotaAwareLiveGateway(manager, {first.route_id: FakeAdapter("groq")}, self.usage, True,
             environ={"RAAWAA_ENGINE_LIVE_INFERENCE": "enabled"}, invocation_store=FakeInvocationStore(),
             pinned_route_id=first.route_id)
         manager.profiles.append(first)
