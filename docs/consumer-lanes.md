@@ -38,8 +38,11 @@ own configured token is denied; it does not fall back to the general token.
 
 The Python runner selects a lane with `RAAWAA_ENGINE_WORKER_LANE` (default
 `general`) and reads the corresponding capability from
-`RAAWAA_ENGINE_LANE_TOKEN`. The scheduled specialist wrapper maps each repository
-secret to that runtime variable. The general runner needs no additional token.
+`RAAWAA_ENGINE_LANE_TOKEN`. The prepared specialist runner maps each repository
+secret to that runtime variable. It refuses to run when live inference is disabled
+rather than falsely completing business work as a dry run. If explicitly enabled,
+the existing provider policy, verified-zero-cost routing, and quota ledgers remain
+mandatory. The general runner needs no additional token.
 Specialist claims, heartbeats, retries, and finishes carry the same lane
 identity; D1 and SQLite reject cross-lane lifecycle mutations even when a
 caller has a valid task lease token.
