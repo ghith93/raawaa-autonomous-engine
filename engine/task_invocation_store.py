@@ -9,16 +9,23 @@ from engine.remote_task_store import RemoteTaskStore, RemoteTaskStoreError
 class TaskInvocationStore:
     """Lease-fenced logical model-call checkpoints; never performs model I/O."""
 
-    def __init__(self, task_store: RemoteTaskStore):
+    def __init__(self, task_store: RemoteTaskStore, worker_lane: str = "general"):
         if not isinstance(task_store, RemoteTaskStore):
             raise TypeError("task_store must be a configured RemoteTaskStore")
+        if worker_lane not in {
+            "general", "specialist:researcher", "specialist:reviewer",
+            "specialist:marketer", "specialist:operator", "specialist:mobile_tester",
+        }:
+            raise ValueError("invalid worker_lane")
         self.task_store = task_store
+        self.worker_lane = worker_lane
 
     def _post(self, task_id: str, payload: dict[str, Any]) -> dict[str, Any]:
         if not isinstance(task_id, str) or not task_id.strip():
             raise ValueError("task_id is required")
         result = self.task_store._request(
-            f"/v1/tasks/{task_id}/invocations", "POST", payload
+            f"/v1/tasks/{task_id}/invocations", "POST", payload,
+            worker_lane=self.worker_lane,
         )
         if not isinstance(result, dict):
             raise RemoteTaskStoreError("Invocation API returned invalid data")
