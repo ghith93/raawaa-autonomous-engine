@@ -77,7 +77,11 @@ explicit one-shot acceptance gate, not a production schedule. It runs only
 after an `Engine CI` push to `main` succeeds and that main commit message
 contains `[groq-specialist-smoke]`.
 
-The workflow is restricted to the isolated Staging Worker and Staging D1. It
+The workflow is restricted to the isolated Staging Worker and Staging D1. The
+lane-isolation proof recognizes only the exact untouched pending smoke task as
+a protected exception, gives its own researcher proof task higher priority,
+and verifies the reserved task remains pending for this workflow. All other
+pending tasks still block the proof. It
 temporarily enables only the reviewed Groq `openai/gpt-oss-20b` Free-tier
 route, installs short-lived Staging API, quota-admin, and researcher-lane
 capabilities, and runs one bounded researcher task. The shared D1 monetary and
