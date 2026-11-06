@@ -79,6 +79,41 @@ function dbMock(options = {}) {
   };
 }
 
+test("specialist claim requires a dedicated lane capability token", async () => {
+  const DB = dbMock();
+  const response = await worker.fetch(request("/v1/tasks/claim", {
+    method: "POST", body: { execution_mode: "dry_run", worker_lane: "specialist:researcher" },
+  }), { DB, ENGINE_API_TOKEN: TOKEN });
+  assert.equal(response.status, 401);
+  assert.equal(DB.calls.length, 0);
+});
+
+test("generic consumer cannot heartbeat a specialist lease", async () => {
+  const DB = dbMock({ currentTask: {
+    id: "task-1", status: "running", attempts: 1, max_attempts: 2,
+    task_type: "research_brief", execution_mode: "dry_run",
+    execution_lane: "specialist:researcher", lease_token: "lease-1",
+    lease_expires_at: "2999-01-01T00:00:00.000Z",
+  } });
+  const response = await worker.fetch(request("/v1/tasks/task-1/heartbeat", {
+    method: "POST", body: { lease_token: "lease-1", worker_lane: "general" },
+  }), { DB, ENGINE_API_TOKEN: TOKEN });
+  assert.equal(response.status, 403);
+  assert.deepEqual(await response.json(), { error: "lane_ownership_lost" });
+  assert.equal(DB.calls.some(call => call.kind === "run"), false);
+});
+
+test("enqueue rejects specialist task type and lane mismatch", async () => {
+  const DB = dbMock();
+  const response = await worker.fetch(request("/v1/tasks/enqueue", {
+    method: "POST", body: { task_type: "content_draft", title: "Bad lane",
+      idempotency_key: "bad-lane", execution_lane: "specialist:researcher" },
+  }), { DB, ENGINE_API_TOKEN: TOKEN });
+  assert.equal(response.status, 400);
+  assert.deepEqual(await response.json(), { error: "task_type_lane_mismatch" });
+  assert.equal(DB.calls.length, 0);
+});
+
 test("health is read-only and does not require a token", async () => {
   const DB = dbMock();
   const response = await worker.fetch(request("/health", { token: null }), { DB });
