@@ -443,6 +443,18 @@ test("task invocation lifecycle route is authenticated", async () => {
   assert.equal(response.status, 401);
 });
 
+test("specialist capability cannot enter the general supervised-process ledger", async () => {
+  const researcherToken = "researcher-lane-token-0123456789abcdef0123456789";
+  const DB = dbMock({ laneTask: { execution_lane: "general" } });
+  const response = await worker.fetch(request("/v1/tasks/task-1/process-dispatches", {
+    method: "POST", body: { action: "prepare", lease_token: "lease-1",
+      worker_lane: "specialist:researcher" },
+    extraHeaders: { "x-engine-lane-token": researcherToken },
+  }), { DB, ENGINE_API_TOKEN: TOKEN, ENGINE_RESEARCHER_LANE_TOKEN: researcherToken });
+  assert.equal(response.status, 403);
+  assert.equal(DB.calls.some(call => call.kind === "run"), false);
+});
+
 test("process dispatch route is authenticated and refuses absent or non-process task leases", async () => {
   const unauthenticated = await worker.fetch(request("/v1/tasks/task-1/process-dispatches", {
     method: "POST", token: null, body: { action: "prepare" },
