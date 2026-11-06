@@ -126,6 +126,27 @@ def _verify_previous_ambiguous_task(store: RemoteTaskStore) -> dict:
         and row.get("status") == "ambiguous"
         and int(row.get("estimated_cost_nanos", -1)) == 0
     ]
+    if not matches:
+        # A workflow rerun after successful reconciliation must be a no-op:
+        # the exact v8 task remains terminal/blocked, and its task-scoped
+        # monetary snapshot must show no pending reservation.
+        if (
+            int(snapshot.get("task_pending_count", -1)) == 0
+            and int(snapshot.get("task_reserved_nanos", -1)) == 0
+            and not unresolved
+        ):
+            return {
+                "task_id": PREVIOUS_AMBIGUOUS_TASK_ID,
+                "task_status": previous.get("status"),
+                "stale_recovery": recovery,
+                "reservation_id": "6f578c73-507d-5ce8-82b9-33d343523f82",
+                "reservation_status": "already_settled",
+                "actual_cost_nanos": 0,
+                "token_quota_estimate_preserved": True,
+            }
+        raise SystemExit(
+            "Refusing smoke: prior ambiguous reservation is neither the exact pending record nor already settled."
+        )
     if len(matches) != 1 or int(snapshot.get("task_pending_count", -1)) != 1:
         raise SystemExit(
             "Refusing smoke: prior ambiguous reservation does not match the exact zero-cost record."
