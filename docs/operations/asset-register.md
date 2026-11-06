@@ -189,3 +189,33 @@ Keep PR #459 draft until ignored-file integrity is corrected and an actual enfor
 - The current Task Runner workflow still has its existing five-minute schedule at minute offsets 2, 7, 12, 17, 22, 27, 32, 37, 42, 47, 52, and 57 UTC, plus the existing manual workflow_dispatch. Its concurrency group remains d1-task-runner.
 - A fresh repository Actions-runs query (first 100 returned runs) showed the latest Task Runner events as workflow_dispatch #41749347645 and push #41743485185; no event=schedule was visible in that result. Primary GitHub schedule liveness is therefore still unverified, not proven disabled. GitHub scheduled events are best-effort.
 - The Worker Cron heartbeat is a separate maintenance signal and was current at 00:45:34Z. The GitHub App watchdog is a separate fallback and remains not_ready because GITHUB_APP_WATCHDOG_ENABLED is missing. No schedule, watchdog, Worker variable, secret, or permissions were changed.
+
+## Live revalidation — 2026-11-06 (main `ca61019682a222559a339ad7e4c3c78b13d2a373`)
+
+### Repository, CI, and governance
+
+- Current main SHA: `ca61019682a222559a339ad7e4c3c78b13d2a373`. Exact-main Engine CI [#42257309989](https://github.com/ghith93/raawaa-autonomous-engine/actions/runs/42257309989) passed all five test/Staging/telemetry/readback jobs.
+- Current open draft PRs: #574, #536, #523, and #405. Their exact-head CI runs passed historically, but each branch is behind current main; no independent review submissions or review threads were found. No merge was performed.
+- Active main ruleset #26464558 requires PRs, strict `test` status, and resolved review threads; it requires zero approving reviews and has a repository-role bypass actor. Do not claim that independent approval is enforced by GitHub.
+
+### Cloudflare, D1, queue, and cost
+
+- Staging migration/Worker/remote D1 lane-isolation/monetary-ledger checks passed in current main CI. Production Control Worker workflow [#42258067719](https://github.com/ghith93/raawaa-autonomous-engine/actions/runs/42258067719) was skipped.
+- Task Runner [#42258592425](https://github.com/ghith93/raawaa-autonomous-engine/actions/runs/42258592425) was dispatched by `raawaa-engine[bot]`; Worker Cron heartbeat and watchdog dispatch intent preceded it. It completed `queue_idle` with 0 tasks processed, 0 pending, and 0 running; watchdog reported ready. This is one successful idle poll, not proof of a continuously operating executor.
+- No Task Runner `event=schedule` or supervised-process-probe run was found in the latest 100 Actions runs; the 2026-11-06 03:47 UTC supervised probe was independently absent. Runtime-004 remains 0/2.
+- Cloudflare billing inventory [#42257310076](https://github.com/ghith93/raawaa-autonomous-engine/actions/runs/42257310076) read subscriptions successfully (0 total/active/paid) but spend-policy returned HTTP 503 after bounded retries; no external `usage_block` hard stop is verified. No mutation occurred.
+- Current engine policy remains safe dry-run with USD 0 configured budgets, paid calls/fallback off, external writes off, `provider_hard_stop_verified=false`, and all provider routes disabled. The $15/month outer ceiling is not spending authorization; no paid inference/API, paid infrastructure, subscription, or automatic paid fallback is permitted under the current owner instruction.
+
+### Connected capabilities and automation
+
+- Activepieces project Ghith's Project has one ACTIVE project-scoped GitHub connection and one ENABLED, published flow: Raawaa GitHub Workflow Control. The flow is Manual Trigger → GitHub `trigger_workflow_dispatch` for `.github/workflows/task-runner.yml` on `main`; it is not a recurring scheduler. No PRODUCTION Activepieces runs were returned. The Activepieces model catalog is visible, but pricing, quotas, account eligibility, and runtime availability are unverified; no model call was made.
+- The live ChatGPT automation inventory now returns 8 records: 3 enabled, 4 paused, and 1 completed. Two enabled automations target the engine; a separate enabled cross-project automation includes Raawaa-store and was not touched. See [ChatGPT Automation Inventory](chatgpt-automation-inventory.md) for exact schedules and run evidence.
+- Issue #464 remains the durable ChatGPT/Arena handoff. Latest visible comment #6685840439 has no later Arena-authored reply. Arena's GitHub-connected Agent Mode remains a manual handoff, not an automatically wakeable worker.
+- ARTEMIS remains registered but disabled and not runtime verified. No daemon, secure endpoint, ADB-authorized device, or eligible zero-cost model route was verified.
+
+### Next safe actions
+
+- Correct the authenticated GitHub research redirect handling in issue #575 before broadening discovery; keep tests offline with synthetic credentials.
+- Keep the research persistence path in issue #576 dormant until its Worker target, redirect-safe readback, idempotent retry, and exact-key verification contract are fixed.
+- Preserve the current inference kill switch. Re-verify account tier, exact organization quota, Data Controls/ZDR, and provider-side hard-stop evidence before any future free-only inference.
+
