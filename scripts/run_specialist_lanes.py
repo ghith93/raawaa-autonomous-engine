@@ -153,7 +153,7 @@ def main() -> int:
                 access_client_secret=env.get("CF_ACCESS_CLIENT_SECRET") or env.get("RAAWAA_ENGINE_CF_ACCESS_CLIENT_SECRET"),
                 lane_token=lane_token,
             )
-            invocation_store = TaskInvocationStore(task_store)
+            invocation_store = TaskInvocationStore(task_store, worker_lane=lane)
             gateway = build_live_gateway(
                 db_path(),
                 POLICY_PATH,
