@@ -43,7 +43,7 @@ class FakeStore:
         self.task = task
         self.finished: dict | None = None
 
-    def recover_stale(self):
+    def recover_stale(self, worker_lane="general"):  # noqa: ARG002 - interface parity
         return {}
 
     def claim_next(self, execution_mode=None, worker_lane="general"):  # noqa: ARG002 - interface parity
