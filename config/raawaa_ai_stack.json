@@ -64,5 +64,74 @@
     "لا تشترِ نموذجًا لصور المنتج — عبتك لا يعرفها أحد",
     "لا تدفع مقابل كتابة كابشن — النصوص جاهزة في المستودع"
   ],
-  "total_needed_spend_usd": 0
+  "total_needed_spend_usd": 0,
+  "image_sources_2026_11": {
+    "nano_banana": {
+      "open_source": false,
+      "weights_published": false,
+      "free_api": false,
+      "note_ar": "مغلق تمامًا. لا يوجد ولا سيُوجد مصدر مفتوح له. أي مقال يقول 'مجاني عبر API' قديم.",
+      "paid_price_usd_per_image": {
+        "lite_1k": 0.034,
+        "standard_1k": 0.067,
+        "pro_1k": 0.134
+      },
+      "minimum_prepay_usd": 5
+    },
+    "free_now": [
+      {
+        "id": "cloudflare_workers_ai_flux_schnell",
+        "cost": 0,
+        "commercial_use": true,
+        "images_per_day": 173,
+        "resolution": 1024,
+        "credit_card_required": false,
+        "why_ar": "نفس حساب Cloudflare الذي تستخدمه للموقع. ١٠٠٠٠ neuron/يوم.",
+        "endpoint": "https://api.cloudflare.com/client/v4/accounts/{account_id}/ai/run/@cf/black-forest-labs/flux-1-schnell"
+      },
+      {
+        "id": "this_platform_image_model",
+        "cost": 0,
+        "commercial_use": true,
+        "note_ar": "GPT Image 2 — أثبت الكتابة العربية الصحيحة هنا فعليًا."
+      }
+    ],
+    "open_weights_best": {
+      "id": "Qwen/Qwen-Image-2512",
+      "license": "Apache-2.0",
+      "commercial_use": true,
+      "params_b": 20,
+      "vram_gb": {
+        "bf16": 64,
+        "fp8": 24,
+        "q4_gguf": 13.2
+      },
+      "strength_ar": "أفضل كتابة نص عربي/متعدد اللغات بين الأوزان المفتوحة",
+      "warning_ar": "لا تستخدم Qwen-Image-2.1 — ترخيصه بحثي وغير تجاري."
+    },
+    "rejected": [
+      {
+        "id": "modelscope_qwen",
+        "reason_ar": "غير تجاري + تحقق هوية صيني"
+      },
+      {
+        "id": "pollinations",
+        "reason_ar": "يتطلب رصيدًا مدفوعًا الآن"
+      },
+      {
+        "id": "huggingface_free",
+        "reason_ar": "صفر رصيد شهري للحسابات المجانية"
+      },
+      {
+        "id": "gemini_api_free",
+        "reason_ar": "لا طبقة مجانية لأي نموذج صور"
+      }
+    ],
+    "monthly_need_vs_available": {
+      "need_images": 26,
+      "cloudflare_free_capacity": 5200,
+      "usage_pct": 0.5
+    }
+  },
+  "principle_2_ar": "المشكلة ليست توفر الصور — المشكلة أن النشر لم يبدأ."
 }
