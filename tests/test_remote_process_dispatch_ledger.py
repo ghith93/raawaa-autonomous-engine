@@ -53,7 +53,7 @@ def settled_outcome():
 
 class RemoteProcessDispatchLedgerTests(unittest.TestCase):
     def setUp(self):
-        self.remote = RemoteTaskStore("https://engine.example", "test-token")
+        self.remote = RemoteTaskStore("https://engine.example", "test-token", lane_token="general-lane-token-0123456789abcdef0123456789")
         self.ledger = RemoteProcessDispatchLedger(self.remote)
 
     def test_begin_durably_prepares_then_starts_before_returning_permission_to_spawn(self):
