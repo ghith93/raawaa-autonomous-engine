@@ -39,7 +39,7 @@ class SpecialistLaneRunnerTests(unittest.TestCase):
         self.assertEqual(env["RAAWAA_ENGINE_WORKER_LANE"], "specialist:researcher")
         self.assertEqual(env["RAAWAA_ENGINE_LANE_TOKEN"], token)
         self.assertEqual(env["RAAWAA_ENGINE_LIVE_INFERENCE"], "disabled")
-        self.assertEqual(run.call_args.args[0][-3:], ["--max-tasks", "1", "--max-seconds"] if False else run.call_args.args[0][-3:])
+        self.assertEqual(run.call_args.args[0][-4:], ["--max-tasks", "1", "--max-seconds", "35"])
 
 
 if __name__ == "__main__":
