@@ -3,12 +3,16 @@
   "updated": "2026-11-06",
   "brand": "raawaa",
   "currency": "USD",
-  "market": {"country": "SY", "primary_city": "Hama", "payment": ["cod", "sham_cash"]},
-  "delivery": {"fee": 2, "refusal_fee": 1, "free_shipping_from": 32},
+  "market": {
+    "country": "SY",
+    "primary_city": "Hama",
+    "payment": ["cod", "sham_cash", "syriatel_cash", "mtn_cash"]
+  },
+  "delivery": {"fee": 2, "refusal_fee": 1, "free_shipping_from": 15},
   "honesty": {
     "max_discount_pct": 35,
     "banned_patterns": ["last item", "resetting countdown", "implausible discount", "unverifiable social proof"],
-    "guarantee_ar": "افتح الطلب أمام المندوب. إن لم يعجبك، لا تدفع."
+    "guarantee_ar": "افحص العبوة الزجاجية والملصق وتاريخ التحضير وسلامة ختم الأمان أمام المندوب قبل الدفع. إن لم تطابق ما طلبته، لا تدفع شيئًا."
   },
   "catalogue_rules": {
     "min_gross_margin_pct": 35,

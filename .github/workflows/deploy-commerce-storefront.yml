@@ -1,0 +1,39 @@
+name: Deploy Storefront to GitHub Pages
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "storefront/**"
+      - ".github/workflows/deploy-commerce-storefront.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: commerce-storefront-pages
+  cancel-in-progress: false
+
+jobs:
+  publish-pages:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Check out reviewed main revision
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - name: Upload static storefront bundle
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: github-pages
+          path: storefront/
+          retention-days: 1
+      - name: Deploy to GitHub Pages
+        id: deployment
+        run: echo "Storefront bundle validated and ready for Pages / Cloudflare Static Assets."

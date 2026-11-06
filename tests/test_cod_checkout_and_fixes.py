@@ -20,6 +20,7 @@ from engine.commerce.cod_checkout import (
     LocalJsonlSink,
     SinkUnavailable,
     StoreCatalog,
+    load_store_catalog,
     prepare_checkout,
 )
 from engine.commerce.delivery import (
@@ -31,7 +32,9 @@ from engine.commerce.delivery import (
 from engine.commerce.money import Money
 from engine.commerce.unit_economics import Sku, break_even_refusal, contribution
 from engine.image_providers import CloudflareFlux
+from scripts import raawaa_card_html as card_html
 from scripts import raawaa_compose as compose
+from scripts.serve_storefront_preview import LocalCommerceStore
 
 
 def _solid_png(path: Path, width: int, height: int, rgb: tuple[int, int, int]) -> None:
@@ -270,6 +273,65 @@ class MultiStoreCodCheckoutTests(unittest.TestCase):
             prepare_checkout(
                 self._catalog(),
                 CheckoutRequest("سارة", "12345", "hama", [CheckoutLineInput("50ml", 1)]),
+            )
+
+    def test_canonical_raawaa_store_catalog_and_sham_cash_discount(self):
+        cat = load_store_catalog("raawaa")
+        self.assertEqual(cat.store_id, "raawaa")
+        self.assertEqual(cat.prepaid_discount_pct, 10)
+        order = prepare_checkout(
+            cat,
+            CheckoutRequest(
+                customer_name="ليان المحمد",
+                customer_phone="0997310856",
+                zone_id="hama",
+                lines=[CheckoutLineInput("50ml", 1)],
+                address_detail="حي الشريعة قرب جامع النور",
+                payment_method="sham_cash",
+                scent="فانيلا دافئة",
+            ),
+            day="2026-11-06",
+        )
+        self.assertEqual(order.subtotal.major, 18.0)
+        self.assertEqual(order.discount.major, 1.8)
+        self.assertEqual(order.delivery_fee.major, 0.0)
+        self.assertEqual(order.total.major, 16.2)
+
+    def test_local_sqlite_preview_store_lifecycle_and_economics(self):
+        store = LocalCommerceStore(":memory:")
+        status, created = store.create_order({
+            "store_id": "raawaa",
+            "customer_name": "هدى السالم",
+            "customer_phone": "0933445566",
+            "zone_id": "damascus",
+            "address_detail": "المزة فيلات غربية جانب القنصلية",
+            "payment_method": "cod",
+            "scent": "rose",
+            "lines": [{"sku": "100ml", "quantity": 1}],
+        })
+        self.assertEqual(status, 201)
+        ref = created["order_ref"]
+        for next_st in ("confirmed", "prepared", "shipped", "delivered"):
+            code, _ = store.transition_order(ref, next_st)
+            self.assertEqual(code, 200)
+        board = store.list_orders("raawaa")
+        self.assertEqual(board["summary"]["delivered_revenue_usd"], 27.0)
+        # $27 - $4 unit - $2 courier = $21
+        self.assertEqual(board["summary"]["delivered_contribution_usd"], 21.0)
+
+    def test_deterministic_rtl_card_generator_blocks_forbidden_claims(self):
+        import json
+        root = Path(__file__).resolve().parents[1]
+        raawaa_json = json.loads((root / "config" / "stores" / "raawaa.json").read_text(encoding="utf-8"))
+        html_out = card_html.render_store_card_html(raawaa_json, "50ml", aspect="3x4")
+        self.assertIn('dir="rtl"', html_out)
+        self.assertIn("$18", html_out)
+
+        tampered = dict(raawaa_json)
+        tampered["tagline_ar"] = "يعالج تساقط الشعر نهائيًا"
+        with self.assertRaises(ValueError):
+            card_html.render_store_card_html(
+                tampered, "50ml", forbidden_claims=["يعالج تساقط الشعر"]
             )
 
 

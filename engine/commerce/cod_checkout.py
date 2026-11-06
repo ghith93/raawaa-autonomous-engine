@@ -77,6 +77,9 @@ class StoreCatalog:
     free_shipping_from: Money | None = None
     allowed_payments: tuple[str, ...] = PAYMENT_METHODS
     inspection_policy_ar: str = HYGIENE_SAFE_INSPECTION_AR
+    primary_zone_id: str = "hama"
+    prepaid_discount_pct: int = 0
+    prepaid_discount_methods: tuple[str, ...] = ("sham_cash",)
 
     def __post_init__(self) -> None:
         if not self.store_id.strip():
@@ -85,6 +88,8 @@ class StoreCatalog:
         if len(cleaned_wa) < 10:
             raise CheckoutError("whatsapp_e164 must be an international digits string")
         self.whatsapp_e164 = cleaned_wa
+        if not 0 <= int(self.prepaid_discount_pct) <= 35:
+            raise CheckoutError("prepaid_discount_pct must be within 0..35")
 
 
 @dataclass(frozen=True)
@@ -103,6 +108,7 @@ class CheckoutRequest:
     payment_method: str = "cod"
     wallet_transfer_ref: str = ""
     notes: str = ""
+    scent: str = ""
     country_code: str = "963"
 
 
@@ -135,6 +141,9 @@ class PreparedOrder:
     inspection_policy_ar: str
     rto_risk: RtoRiskAssessment
     created_at: str
+    discount: Money = field(default_factory=lambda: Money.zero("USD"))
+    scent: str = ""
+    notes: str = ""
 
 
 def _utc_now() -> datetime:
@@ -267,14 +276,21 @@ def prepare_checkout(
         if (any_item_free_delivery or qualifies_threshold)
         else zone.fee
     )
-    total = subtotal + delivery_fee
+    discount_minor = 0
+    if (
+        catalog.prepaid_discount_pct > 0
+        and request.payment_method in catalog.prepaid_discount_methods
+    ):
+        discount_minor = round(subtotal.minor * catalog.prepaid_discount_pct / 100)
+    discount = Money(discount_minor, catalog.currency)
+    total = Money(max(0, subtotal.minor - discount.minor) + delivery_fee.minor, catalog.currency)
 
     sku_sig = "+".join(sorted(sku_signature_parts))
     stamp = day or _utc_now().strftime("%Y-%m-%d")
     idem = idempotency_key(phone, f"{catalog.store_id}:{sku_sig}", day=stamp)
     order_ref = short_order_ref(catalog.store_id, idem)
 
-    home_zone = primary_zone_id or next(iter(catalog.zones))
+    home_zone = primary_zone_id or catalog.primary_zone_id or next(iter(catalog.zones))
     risk = assess_rto_risk(
         payment_method=request.payment_method,
         total=total,
@@ -283,6 +299,7 @@ def prepare_checkout(
         address_detail=address,
     )
 
+    scent = (request.scent or "").strip()[:40]
     msg = _build_whatsapp_message(
         catalog=catalog,
         order_ref=order_ref,
@@ -293,8 +310,10 @@ def prepare_checkout(
         payment_method=request.payment_method,
         transfer_ref=transfer_ref,
         lines=resolved_lines,
+        discount=discount,
         delivery_fee=delivery_fee,
         total=total,
+        scent=scent,
         notes=notes,
     )
     wa_url = f"https://wa.me/{catalog.whatsapp_e164}?text={urllib.parse.quote(msg)}"
@@ -312,6 +331,7 @@ def prepare_checkout(
         wallet_transfer_ref=transfer_ref,
         lines=resolved_lines,
         subtotal=subtotal,
+        discount=discount,
         delivery_fee=delivery_fee,
         total=total,
         whatsapp_url=wa_url,
@@ -319,6 +339,8 @@ def prepare_checkout(
         inspection_policy_ar=catalog.inspection_policy_ar,
         rto_risk=risk,
         created_at=_utc_now().isoformat(),
+        scent=scent,
+        notes=notes,
     )
 
 
@@ -341,8 +363,10 @@ def _build_whatsapp_message(
     payment_method: str,
     transfer_ref: str,
     lines: list[dict[str, Any]],
+    discount: Money,
     delivery_fee: Money,
     total: Money,
+    scent: str,
     notes: str,
 ) -> str:
     items_text = "\n".join(
@@ -354,18 +378,68 @@ def _build_whatsapp_message(
     parts = [
         f"تأكيد طلب #{order_ref} — {catalog.brand_ar}",
         items_text,
+    ]
+    if scent:
+        parts.append(f"العطر المختار: {scent}")
+    if discount.minor > 0:
+        parts.append(f"خصم الدفع المسبق: -${discount.major:.2f}")
+    parts.extend([
         f"التوصيل ({zone.label_ar}): {ship_text}",
         f"الإجمالي: ${total.major:.2f}",
         f"طريقة الدفع: {pay_label}" + (f" (مرجع التحويل: {transfer_ref})" if transfer_ref else ""),
         f"الاسم: {name}",
         f"الهاتف: {phone}",
-    ]
+    ])
     if address:
         parts.append(f"العنوان: {address}")
     if notes:
         parts.append(f"ملاحظات: {notes}")
     parts.append("أؤكد صحة الرقم والعنوان لإرسال الطلب.")
     return "\n".join(parts)
+
+
+def load_store_catalog(store_or_path: str | Path, *, root: Path | None = None) -> StoreCatalog:
+    """Load a canonical multi-store JSON catalog from `config/stores/<store_id>.json`."""
+    base = root or Path(__file__).resolve().parents[2]
+    candidate = Path(store_or_path)
+    if not candidate.suffix:
+        candidate = base / "config" / "stores" / f"{store_or_path}.json"
+    elif not candidate.is_absolute():
+        candidate = base / candidate
+    data = json.loads(candidate.read_text(encoding="utf-8"))
+    currency = data.get("currency", "USD")
+    items = {
+        row["sku"]: CatalogItem(
+            sku=row["sku"],
+            title_ar=row["title_ar"],
+            unit_price=Money.of(row["unit_price"], currency),
+            free_delivery=bool(row.get("free_delivery", False)),
+        )
+        for row in data.get("items", [])
+    }
+    zones = {
+        row["zone_id"]: DeliveryZone(
+            zone_id=row["zone_id"],
+            label_ar=row["label_ar"],
+            fee=Money.of(row.get("fee", 0), currency),
+        )
+        for row in data.get("zones", [])
+    }
+    free_from = data.get("free_shipping_from")
+    return StoreCatalog(
+        store_id=data["store_id"],
+        brand_ar=data["brand_ar"],
+        whatsapp_e164=data["whatsapp_e164"],
+        currency=currency,
+        items=items,
+        zones=zones,
+        free_shipping_from=Money.of(free_from, currency) if free_from is not None else None,
+        allowed_payments=tuple(data.get("allowed_payments", PAYMENT_METHODS)),
+        inspection_policy_ar=data.get("inspection_policy_ar", HYGIENE_SAFE_INSPECTION_AR),
+        primary_zone_id=data.get("primary_zone_id", "hama"),
+        prepaid_discount_pct=int(data.get("prepaid_discount_pct", 0)),
+        prepaid_discount_methods=tuple(data.get("prepaid_discount_methods", ["sham_cash"])),
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -507,7 +581,10 @@ def _serialize_order(order: PreparedOrder) -> dict[str, Any]:
         "payment_method": order.payment_method,
         "wallet_transfer_ref": order.wallet_transfer_ref,
         "lines": order.lines,
+        "scent": order.scent,
+        "notes": order.notes,
         "subtotal": order.subtotal.major,
+        "discount": order.discount.major,
         "delivery_fee": order.delivery_fee.major,
         "total": order.total.major,
         "currency": order.total.currency,

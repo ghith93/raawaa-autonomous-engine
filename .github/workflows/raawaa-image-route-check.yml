@@ -21,14 +21,15 @@ permissions:
 jobs:
   verify:
     name: Verify Workers AI, D1, and image generation
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7
         with:
-          python-version: "3.11"
+          python-version: "3.12"
 
       # Every job in this repository used to demand one exact secret name, so the
       # appearance of an alias broke it silently. The resolver accepts any alias for
@@ -180,7 +181,7 @@ jobs:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
         run: python scripts/raawaa_images.py --status
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         if: always()
         with:
           name: raawaa-image-check
