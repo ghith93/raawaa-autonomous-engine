@@ -44,11 +44,6 @@ def main() -> None:
         {"topic": "deterministic lane isolation test"},
         idempotency_key=f"staging-lane-general-sentinel:{suffix}", priority=90,
     )
-    general_sentinel_last = general_store.enqueue(
-        "research_brief", "Staging general lane final sentinel",
-        {"topic": "deterministic lane isolation test"},
-        idempotency_key=f"staging-lane-general-final:{suffix}", priority=80,
-    )
     specialist = researcher_store.enqueue(
         "research_brief", "Staging researcher lane isolation proof",
         {"topic": "deterministic lane isolation test"},
@@ -70,6 +65,17 @@ def main() -> None:
     general_store.finish(general_sentinel_claim["id"], "succeeded",
                  {"mode": "dry_run", "proof": "general-sentinel"},
                  lease_token=general_sentinel_claim["lease_token"], worker_lane="general")
+
+    if general_store.claim_next(execution_mode="dry_run", worker_lane="general") is not None:
+        raise SystemExit("General consumer claimed the pending researcher task")
+
+    # Add a higher-priority general task while the researcher task is pending.
+    # The researcher must still claim its own lower-priority task.
+    general_sentinel_last = general_store.enqueue(
+        "research_brief", "Staging general lane final sentinel",
+        {"topic": "deterministic lane isolation test"},
+        idempotency_key=f"staging-lane-general-final:{suffix}", priority=80,
+    )
 
     # Drain the general lane while the researcher task is still pending.
     general_sentinel_last_claim = general_store.claim_next(
