@@ -586,6 +586,46 @@ try {
   assertStatus(missingExact, 200, "missing exact claim");
   assert.equal(missingExact.payload.task, null);
 
+  // The actual Python worker and HTTP adapter complete only the requested ID.
+  const targetedWorkerTask = await api("/v1/tasks/enqueue", {method: "POST", body: {
+    task_type: "research_brief", title: "Targeted worker proof", payload: {topic: "local proof"},
+    idempotency_key: "d1-target-worker-" + randomUUID(), priority: 1,
+  }});
+  const targetedWorkerOther = await api("/v1/tasks/enqueue", {method: "POST", body: {
+    task_type: "system_audit", title: "Higher priority remains pending", payload: {},
+    idempotency_key: "d1-target-other-" + randomUUID(), priority: 100,
+  }});
+  assertStatus(targetedWorkerTask, 201, "enqueue targeted worker fixture");
+  assertStatus(targetedWorkerOther, 201, "enqueue targeted worker sentinel");
+  const targetedPython = spawnSync("python3", ["-c", `
+import json, os
+from engine.remote_task_store import RemoteTaskStore
+from engine.worker import run_once
+base = os.environ['LOCAL_URL']
+if not base.startswith('http://127.0.0.1:'):
+    raise SystemExit('local test requires loopback')
+# Test fixture only: production RemoteTaskStore continues to require HTTPS.
+store = RemoteTaskStore.__new__(RemoteTaskStore)
+store.base_url, store.token = base, os.environ['LOCAL_TOKEN']
+store.access_client_id = store.access_client_secret = store.lane_token = ''
+store.timeout, store.reject_redirects = 10.0, True
+print(json.dumps(run_once(store, environ={}, task_id=os.environ['LOCAL_TASK_ID'])))
+`], {cwd: process.cwd(), env: {...safeEnvironment(), LOCAL_URL: BASE, LOCAL_TOKEN: TOKEN,
+    LOCAL_TASK_ID: targetedWorkerTask.payload.task.id, PYTHONDONTWRITEBYTECODE: "1"},
+    encoding: "utf8", timeout: 30000});
+  assert.equal(targetedPython.status, 0, targetedPython.stderr);
+  const targetedResult = JSON.parse(targetedPython.stdout.trim());
+  assert.equal(targetedResult.id, targetedWorkerTask.payload.task.id);
+  assert.equal(targetedResult.status, "succeeded");
+  assert.equal(targetedResult.mode, "dry_run");
+  const sentinelRead = await api("/v1/tasks?task_id=" + targetedWorkerOther.payload.task.id);
+  assert.equal(sentinelRead.payload.tasks[0].status, "pending");
+  const sentinelClaim = await api("/v1/tasks/claim", {method: "POST", body: {execution_mode: "dry_run"}});
+  assert.equal(sentinelClaim.payload.task.id, targetedWorkerOther.payload.task.id);
+  assertStatus(await api("/v1/tasks/" + targetedWorkerOther.payload.task.id + "/finish", {method: "POST", body: {
+    lease_token: sentinelClaim.payload.lease_token, status: "succeeded", result: {mode: "dry_run"},
+  }}), 200, "finish targeted worker sentinel");
+
   // A narrowly scoped supervised claim targets one exact safe task and must
   // not sweep or claim unrelated D1 queue rows.
   const failedDependency = await api("/v1/tasks/enqueue", {
@@ -1681,7 +1721,7 @@ try {
   status = await api("/v1/mobile/status");
   assertStatus(status, 200, "mobile status after D1 writes");
   assert.equal(status.payload.paper_events.find(row => row.event_type === "candidate_detected")?.count, 1);
-  assert.equal(status.payload.tasks.find(row => row.status === "succeeded")?.count, 15,
+  assert.equal(status.payload.tasks.find(row => row.status === "succeeded")?.count, 17,
     "workflow, dependency, supervised-process, exact-claim, and concurrent-claim fixtures should be durably succeeded");
   assert.equal(status.payload.tasks.find(row => row.status === "failed")?.count, 3,
     "failed dependency roots remain visibly failed");

@@ -171,7 +171,8 @@ def _build_prompt(contract: dict, operating_policy: dict) -> str:
         f"{json.dumps(payload, ensure_ascii=False, sort_keys=True)}"
     )
 
-def run_once(store: TaskStore, live_gateway=None, environ=None, worker_lane: str | None = None) -> dict | None:
+def run_once(store: TaskStore, live_gateway=None, environ=None, worker_lane: str | None = None,
+             *, task_id: str | None = None) -> dict | None:
     environ = os.environ if environ is None else environ
     worker_lane = worker_lane or environ.get("RAAWAA_ENGINE_WORKER_LANE", "general")
     allowed_lanes = {"general", "specialist:researcher", "specialist:reviewer", "specialist:marketer", "specialist:operator", "specialist:mobile_tester"}
@@ -185,8 +186,20 @@ def run_once(store: TaskStore, live_gateway=None, environ=None, worker_lane: str
                 "detail": str(exc)}
 
 
-    # Recover abandoned work before claiming another item.
-    recovery = store.recover_stale(worker_lane=worker_lane)
+    # Exact execution is deliberately opt-in, dry-run only, and must not recover
+    # or mutate other tasks. An uncertain lease remains for explicit recovery.
+    if task_id is not None:
+        import re
+        if not isinstance(task_id, str) or not re.fullmatch(r"[A-Za-z0-9_-]{1,128}", task_id):
+            return {"status": "blocked", "reason": "invalid_task_id"}
+        if _live_requested(environ):
+            return {"status": "blocked", "reason": "exact_live_inference_disabled"}
+        if not callable(getattr(store, "claim_exact", None)):
+            return {"status": "blocked", "reason": "exact_claim_unavailable"}
+        recovery = {"requeued": 0, "failed": 0}
+    else:
+        # Legacy queue workers retain their existing lane-scoped recovery.
+        recovery = store.recover_stale(worker_lane=worker_lane)
 
     # In live mode, check current free-route capacity before consuming a task lease.
     # This is read-only and deliberately does not reserve quota; generate() repeats
@@ -213,7 +226,8 @@ def run_once(store: TaskStore, live_gateway=None, environ=None, worker_lane: str
                     "capacity_reason": reason, "recovery": recovery}
 
     execution_mode = "live_inference" if _live_requested(environ) else "dry_run"
-    task = store.claim_next(execution_mode=execution_mode, worker_lane=worker_lane)
+    task = (store.claim_exact(task_id, execution_mode="dry_run", worker_lane=worker_lane)
+            if task_id is not None else store.claim_next(execution_mode=execution_mode, worker_lane=worker_lane))
     if task is None:
         return {"status": "idle", "recovery": recovery} if any(recovery.values()) else None
 
