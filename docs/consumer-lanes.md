@@ -13,6 +13,7 @@ separate continuously scheduled process.
 | `specialist:reviewer` | `code_review` |
 | `specialist:marketer` | `content_draft` |
 | `specialist:operator` | `system_audit` |
+| `specialist:mobile_tester` | `mobile_test` |
 
 Existing SQLite and D1 rows migrate to `general`; no existing task is silently
 reclassified. Enqueue idempotency includes the lane. A task type cannot be
@@ -31,6 +32,7 @@ secret for each enabled lane:
 - `ENGINE_REVIEWER_LANE_TOKEN`
 - `ENGINE_MARKETER_LANE_TOKEN`
 - `ENGINE_OPERATOR_LANE_TOKEN`
+- `ENGINE_MOBILE_TESTER_LANE_TOKEN`
 
 Each token must be different from `ENGINE_API_TOKEN`, quota-admin and
 Codespaces tokens, and every other lane token. Never put these values in the
@@ -57,8 +59,8 @@ boundary.
   production specialist schedule is enabled yet. Keep these lanes dormant until
   the per-lane capability secrets and separate activation gates are reviewed.
   No shared-token fallback is permitted.
-- The CI Staging proof creates temporary general and researcher credentials, tests generic
-  exclusion and wrong-lane heartbeat/retry/finish rejection against remote
+- The CI Staging proof creates temporary general and researcher credentials, tests bidirectional general/researcher claim isolation and wrong-lane
+  heartbeat/retry/finish rejection against remote
   Staging D1, then revokes the temporary credential.
 - Lane isolation tests use dry-run tasks only. This feature does not enable
   live inference, provider fallback, external writes, or paid services.
