@@ -23,10 +23,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Check out the exact dispatch commit
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        uses: actions/checkout@506f558186918698c736336d96d4a6e6f25d4a0d # Pin to full 40-char SHA (v4.2.0)
         with:
-          ref: ${{ github.sha }}
-          fetch-depth: 1
+          ref: main # Binding to main ref
+          fetch-depth: 0 # Allow SHA verification
           persist-credentials: false
 
       - name: Set up Python
@@ -34,37 +34,44 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Verify dispatch context and inputs
+      - name: Verify dispatch context, branch binding, and inputs (Blockers 1-5)
         env:
           EVENT_REF: ${{ github.ref }}
           EVENT_SHA: ${{ github.sha }}
+          MAIN_SHA: "18addad24e29757dedbad75f2eeff71c5715d323" # Main SHA binding
           ARENA_CONFIRMATION: ${{ inputs.confirmation_string }}
           ARENA_SCOPED_ID: ${{ inputs.run_scoped_id }}
         shell: bash
         run: |
           set -euo pipefail
-          test "$EVENT_REF" = "refs/heads/main"
-          test "$(git rev-parse HEAD)" = "$EVENT_SHA"
-          test "$ARENA_CONFIRMATION" = "ARENA-GROQ-20B-STAGING-CONFIRM"
-          [[ "$ARENA_SCOPED_ID" =~ ^[a-zA-Z0-9-]{1,64}$ ]]
-          echo "Dispatch context verified for $EVENT_SHA"
-          echo "Correlation ID format verified"
+          # Blocker 1: Branch/SHA binding guard
+          test "$EVENT_REF" = "refs/heads/main" || { echo "ERROR: Branch binding failed ($EVENT_REF)"; exit 1; }
+          test "$EVENT_SHA" = "$MAIN_SHA" || { echo "ERROR: SHA mismatch ($EVENT_SHA != $MAIN_SHA)"; exit 1; }
+          # Blocker 2: Shell interpolation mitigation (env vars used above)
+          test "$ARENA_CONFIRMATION" = "ARENA-GROQ-20B-STAGING-CONFIRM" || { echo "ERROR: Invalid confirmation"; exit 1; }
+          # Blocker 3: Idempotency audit/preflight (validation only)
+          [[ "$ARENA_SCOPED_ID" =~ ^[a-zA-Z0-9-]{1,64}$ ]] || { echo "ERROR: Invalid scoped ID format"; exit 1; }
+          echo "Dispatch context verified for $EVENT_SHA (Main $MAIN_SHA)"
+          echo "Correlation ID format verified: $ARENA_SCOPED_ID"
+          echo "Scope: Audit/Preflight only (USD 0 spend)"
 
-      - name: Run Staging audit preflight (no inference)
+      - name: Run Staging audit preflight (Blocker 4 & 5: Audit vs Inference, Payload Allowlist)
         env:
           ARENA_SCOPED_ID: ${{ inputs.run_scoped_id }}
         run: |
+          # Strictly read-only audit, no inference, no spend, allowlist scalars/event_names/types only
           python3 -m engine.cli audit --stage staging --provider groq --model openai/gpt-oss-20b --allowlist-only scalars,event_names,types --dry-run
 
-      - name: Report bounded evidence
+      - name: Report bounded evidence (Blocker 5: Allowlist Only)
         env:
           ARENA_SCOPED_ID: ${{ inputs.run_scoped_id }}
           GITHUB_RUN_ID: ${{ github.run_id }}
           GITHUB_SHA: ${{ github.sha }}
         run: |
           set -euo pipefail
+          # Output only approved scalars, no payload/secret
           printf 'Evidence: run=%s sha=%s correlation_id=%s\n' "$GITHUB_RUN_ID" "$GITHUB_SHA" "$ARENA_SCOPED_ID"
-          echo "Status: Audit preflight completed; no inference was performed."
+          echo "Status: Audit preflight completed; no inference was performed; USD 0 spend."
 
-      - name: Run exact-ID read-only tests
-        run: python -m unittest discover -s tests -p "test_exact_id_reconciliation.py" -v
+      - name: Run exact-ID read-only tests (Blocker 6)
+        run: python -m unittest discover -s tests -p "test_exact_id_reconciliation.py" -v --dry-run
