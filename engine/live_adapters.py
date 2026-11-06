@@ -102,15 +102,29 @@ class OpenAICompatibleAdapter:
         key = self.environ.get(self.api_key_env, "").strip()
         if not key:
             raise LiveAdapterError(f"Missing environment variable: {self.api_key_env}")
+        body = {
+            "model": model,
+            "messages": [{"role": "user", "content": request.prompt}],
+            "stream": False,
+        }
+        if self.provider == "groq" and model in {
+            "openai/gpt-oss-20b", "openai/gpt-oss-120b",
+        }:
+            # Groq's GPT-OSS models spend completion budget on reasoning tokens.
+            # Keep the reasoning effort bounded and ask for the final answer only;
+            # use the current completion-token parameter rather than deprecated
+            # max_tokens so a small budget is not consumed before answer text.
+            body.update({
+                "max_completion_tokens": request.max_output_tokens,
+                "include_reasoning": False,
+                "reasoning_effort": "low",
+            })
+        else:
+            body["max_tokens"] = request.max_output_tokens
         payload = _post_json(
             self.base_url + "/chat/completions",
             {"Authorization": f"Bearer {key}"},
-            {
-                "model": model,
-                "messages": [{"role": "user", "content": request.prompt}],
-                "max_tokens": request.max_output_tokens,
-                "stream": False,
-            },
+            body,
             self.timeout,
         )
         try:

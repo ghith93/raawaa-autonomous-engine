@@ -19,7 +19,8 @@ sys.path.insert(0, str(ROOT))
 from engine.remote_task_store import RemoteTaskStore
 from scripts.run_specialist_lanes import main as run_specialist_lanes
 
-IDEMPOTENCY_KEY = "groq-free-inference-staging-specialist-smoke-2026-11-06-v8"
+IDEMPOTENCY_KEY = "groq-free-inference-staging-specialist-smoke-2026-11-06-v9"
+PREVIOUS_AMBIGUOUS_TASK_ID = "775916a6-8f2e-43c0-84aa-f3cc7712cf18"
 EXECUTION_LANE = "specialist:researcher"
 ROUTE_IDS = ("groq:primary:openai/gpt-oss-20b",)
 
@@ -76,14 +77,121 @@ def _quota(store: RemoteTaskStore, route_id: str, task_id: str) -> dict:
 def _diagnostics(store: RemoteTaskStore, task_id: str) -> dict:
     mobile = store._request("/v1/mobile/status")
     routes = {route: _quota(store, route, task_id) for route in ROUTE_IDS}
+    rows = store.list_tasks(100, worker_lane=EXECUTION_LANE)
+    exact = next((row for row in rows if row.get("id") == task_id), None)
+    task_state = None if exact is None else {
+        key: exact.get(key)
+        for key in ("status", "attempts", "max_attempts", "execution_mode",
+                    "error", "lease_expires_at", "updated_at", "execution_lane")
+        if key in exact
+    }
     return {
         "task_id": task_id,
+        "task_state": task_state,
         "task_counts": _counts(mobile),
         "provider_usage": mobile.get("provider_usage"),
         "model_costs_usd": mobile.get("model_costs_usd"),
         "monetary_ledger": mobile.get("monetary_ledger"),
         "route_usage_and_audit": routes,
     }
+
+
+def _verify_previous_ambiguous_task(store: RemoteTaskStore) -> dict:
+    """Never replay the prior ambiguous call; recover its expired one-attempt lease only."""
+    recovery = store.recover_stale(worker_lane=EXECUTION_LANE)
+    rows = store.list_tasks(100, worker_lane=EXECUTION_LANE)
+    if len(rows) >= 100:
+        raise SystemExit("Refusing smoke: researcher lane readback may be incomplete.")
+    previous = next((row for row in rows
+                     if row.get("id") == PREVIOUS_AMBIGUOUS_TASK_ID), None)
+    if not previous or previous.get("status") not in {"failed", "blocked"}:
+        raise SystemExit(
+            "Refusing smoke: previous ambiguous task is not terminal; no replay or new task will be created."
+        )
+    active = [row for row in rows if row.get("status") in {"pending", "running"}]
+    if active:
+        raise SystemExit(
+            "Refusing smoke: researcher lane still contains pending/running work after stale recovery."
+        )
+
+    query = urlencode({"task_id": PREVIOUS_AMBIGUOUS_TASK_ID})
+    response = store._request("/v1/monetary-ledger?" + query)
+    snapshot = response.get("snapshot")
+    unresolved = snapshot.get("unresolved", []) if isinstance(snapshot, dict) else []
+    matches = [
+        row for row in unresolved
+        if row.get("task_id") == PREVIOUS_AMBIGUOUS_TASK_ID
+        and row.get("provider") == "groq"
+        and row.get("model") == "openai/gpt-oss-20b"
+        and row.get("status") == "ambiguous"
+        and int(row.get("estimated_cost_nanos", -1)) == 0
+    ]
+    if len(matches) != 1 or int(snapshot.get("task_pending_count", -1)) != 1:
+        raise SystemExit(
+            "Refusing smoke: prior ambiguous reservation does not match the exact zero-cost record."
+        )
+    reservation_id = matches[0].get("reservation_id")
+    if not isinstance(reservation_id, str) or not reservation_id:
+        raise SystemExit("Refusing smoke: the exact ambiguous reservation has no durable ID.")
+    # Groq Free is operator-confirmed and the route profile records a hard zero
+    # estimated cost. Settle only this exact zero-dollar reservation; token quota
+    # remains consumed conservatively in the separate quota ledger.
+    settled = store._request("/v1/monetary-ledger", "POST", {
+        "action": "settle",
+        "reservation_id": reservation_id,
+        "actual_cost_nanos": 0,
+        "input_tokens": 0,
+        "output_tokens": 0,
+    })
+    if settled.get("settled") is not True:
+        raise SystemExit("Could not settle the exact verified-Free zero-cost reservation.")
+    after = store._request("/v1/monetary-ledger?" + query).get("snapshot", {})
+    if int(after.get("task_pending_count", -1)) != 0 or after.get("unresolved"):
+        raise SystemExit("The exact ambiguous reservation remains unresolved after zero-cost settlement.")
+    return {
+        "task_id": PREVIOUS_AMBIGUOUS_TASK_ID,
+        "task_status": previous.get("status"),
+        "stale_recovery": recovery,
+        "reservation_id": reservation_id,
+        "reservation_status": "settled",
+        "actual_cost_nanos": 0,
+        "token_quota_estimate_preserved": True,
+    }
+
+
+def _assert_zero_spend(store: RemoteTaskStore, successful_task_id: str) -> dict:
+    mobile = store._request("/v1/mobile/status")
+    ledger = mobile.get("monetary_ledger", {})
+    if (
+        not ledger.get("available")
+        or ledger.get("daily_spent_usd") != 0
+        or ledger.get("monthly_spent_usd") != 0
+        or ledger.get("pending_reserved_usd") != 0
+        or ledger.get("pending_count") != 0
+        or ledger.get("ambiguous_count") != 0
+        or mobile.get("model_costs_usd", {}).get("total") != 0
+    ):
+        raise SystemExit("Monetary ledger did not settle with zero spend and no unresolved reservations.")
+
+    global_snapshot = store._request("/v1/monetary-ledger").get("snapshot", {})
+    if global_snapshot.get("unresolved", []):
+        raise SystemExit("Global monetary ledger contains unresolved reservations.")
+
+    task_snapshot = store._request(
+        "/v1/monetary-ledger?" + urlencode({"task_id": successful_task_id})
+    ).get("snapshot", {})
+    if (
+        int(task_snapshot.get("task_pending_count", -1)) != 0
+        or int(task_snapshot.get("task_spent_nanos", -1)) != 0
+    ):
+        raise SystemExit("The new smoke task did not settle at exactly zero cost.")
+    return {
+        "daily_spend_usd": ledger.get("daily_spent_usd"),
+        "monthly_spend_usd": ledger.get("monthly_spent_usd"),
+        "pending_reservations": 0,
+        "ambiguous_reservations": 0,
+    }
+
 
 
 def _assert_only_exact_smoke_task_pending(store: RemoteTaskStore, task_id: str) -> None:
@@ -116,6 +224,7 @@ def main() -> int:
         access_client_secret=os.environ.get("CF_ACCESS_CLIENT_SECRET"),
     )
     before_mobile = _wait_for_authenticated_worker(store)
+    previous_ambiguous = _verify_previous_ambiguous_task(store)
     task = store.enqueue(
         "research_brief",
         "Single public Groq Free-tier inference connectivity check",
@@ -135,19 +244,15 @@ def main() -> int:
 
     if task.get("status") == "succeeded":
         # Re-running this workflow must never repeat a successful model call.
-        mobile = store._request("/v1/mobile/status")
-        ledger = mobile.get("monetary_ledger", {})
-        if (not ledger.get("available") or ledger.get("daily_spent_usd") != 0
-                or ledger.get("pending_count") != 0 or ledger.get("ambiguous_count") != 0
-                or mobile.get("model_costs_usd", {}).get("total") != 0):
-            raise SystemExit("Previously completed smoke task has unexpected cost or ledger state.")
+        ledger_summary = _assert_zero_spend(store, task_id)
         print(json.dumps({
             "status": "already_succeeded_no_replay",
             "task_id": task_id,
             "provider": "groq",
             "model_routes": list(ROUTE_IDS),
             "new_provider_calls": 0,
-            "daily_spend_usd": ledger.get("daily_spent_usd"),
+            "previous_ambiguous_task": previous_ambiguous,
+            **ledger_summary,
         }, sort_keys=True))
         return 0
     if task.get("status") != "pending":
@@ -184,12 +289,7 @@ def main() -> int:
     if not used_routes or sum(item["tokens"] for item in used_routes) < 1:
         raise SystemExit("No durable provider token usage was recorded for the smoke task.")
 
-    after_mobile = store._request("/v1/mobile/status")
-    ledger = after_mobile.get("monetary_ledger", {})
-    if (not ledger.get("available") or ledger.get("daily_spent_usd") != 0
-            or ledger.get("monthly_spent_usd") != 0 or ledger.get("pending_count") != 0
-            or ledger.get("ambiguous_count") != 0 or after_mobile.get("model_costs_usd", {}).get("total") != 0):
-        raise SystemExit("Monetary ledger did not settle at exactly zero cost.")
+    ledger_summary = _assert_zero_spend(store, task_id)
 
     print(json.dumps({
         "status": "success",
@@ -198,10 +298,8 @@ def main() -> int:
         "provider": "groq",
         "execution_lane": EXECUTION_LANE,
         "used_routes": used_routes,
-        "daily_spend_usd": ledger.get("daily_spent_usd"),
-        "monthly_spend_usd": ledger.get("monthly_spent_usd"),
-        "pending_reservations": ledger.get("pending_count"),
-        "ambiguous_reservations": ledger.get("ambiguous_count"),
+        "previous_ambiguous_task": previous_ambiguous,
+        **ledger_summary,
         "paid_fallback_enabled": False,
     }, sort_keys=True))
     return 0
