@@ -407,6 +407,11 @@ class QuotaAwareGatewayTests(unittest.TestCase):
         with self.assertRaisesRegex(ProviderUnavailable, "failed unexpectedly"):
             gateway.generate(self.request)
         self.assertEqual(self.usage.totals()["daily_usd"], 0.0)
+        failure = next(
+            event for event in self.quota.audit_events()
+            if event["event"] == "adapter_failure"
+        )
+        self.assertEqual(failure["details"]["failure_stage"], "response_validation")
 
     def test_429_cools_down_and_rotates(self):
         first = self.profile()
