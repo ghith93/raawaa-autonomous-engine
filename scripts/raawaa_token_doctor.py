@@ -71,9 +71,13 @@ def shape_report(token: str) -> list[str]:
     if token.lower().startswith("bearer "):
         problems.append("contains the word 'Bearer'; only the token itself is needed")
     if len(token) < 40:
-        problems.append(f"length is {len(token)}; Cloudflare API tokens are typically 40 characters")
-    if len(token) > 60:
-        problems.append(f"length is {len(token)}; far longer than a token, likely a value got appended")
+        problems.append(
+            f"length is {len(token)}; a Cloudflare API token is 40 characters, so this is truncated")
+    elif len(token) > 45:
+        # Not automatically wrong, but it is the shape of a different vendor's key.
+        problems.append(
+            f"length is {len(token)}; Cloudflare API tokens are 40 characters, so this may be "
+            "a key from another service or a value with something appended")
     return problems
 
 
@@ -104,8 +108,10 @@ def interpret(status: int, payload: dict) -> str:
     if status == 0:
         return ("network", "this machine cannot reach api.cloudflare.com; the token may be fine")
     if 1000 in codes or "invalid api token" in messages:
-        return ("invalid", "the token is expired, deleted, or was copied incompletely "
-                           "— create a new one at https://dash.cloudflare.com/profile/api-tokens")
+        return ("invalid",
+                "Cloudflare does not recognise this value. A token's secret is shown once and "
+                "cannot be recovered, so it must be replaced: create a token at "
+                "https://dash.cloudflare.com/profile/api-tokens and update the secret")
     if 7003 in codes or "could not route" in messages:
         return ("account", "the token is valid but the Account ID belongs to a different account")
     if 9109 in codes or "unauthorized to access requested resource" in messages:

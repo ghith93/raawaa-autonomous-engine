@@ -22,7 +22,16 @@ class ShapeTests(unittest.TestCase):
         self.assertTrue(any("asterisk" in p for p in doctor.shape_report("v1.0-****")))
 
     def test_a_truncated_value_is_flagged_by_length(self):
-        self.assertTrue(any("40 characters" in p for p in doctor.shape_report("short")))
+        self.assertTrue(any("truncated" in p for p in doctor.shape_report("short")))
+
+    def test_a_longer_value_is_flagged_as_probably_foreign(self):
+        # 53 characters with clean shape is exactly what the repository contained and
+        # Cloudflare rejected, so the shape check must say something about it.
+        problems = doctor.shape_report("a" * 53)
+        self.assertTrue(any("40 characters" in p for p in problems), problems)
+
+    def test_a_canonical_40_character_token_is_clean(self):
+        self.assertEqual(doctor.shape_report("a" * 40), [])
 
     def test_bearer_prefix_is_flagged(self):
         problems = doctor.shape_report("Bearer abcdef")
