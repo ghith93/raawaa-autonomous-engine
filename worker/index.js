@@ -46,9 +46,15 @@ async function schemaProbe(env) {
       reasons[table] = storageDetail(error);
     }
   }
+  try {
+    await env.DB.prepare("SELECT execution_lane FROM tasks LIMIT 1").all();
+  } catch (error) {
+    missing.push("tasks.execution_lane");
+    reasons["tasks.execution_lane"] = storageDetail(error);
+  }
   return {
     ok: missing.length === 0,
-    checked: [...REQUIRED_SCHEMA_TABLES],
+    checked: [...REQUIRED_SCHEMA_TABLES, "tasks.execution_lane"],
     missing,
     reasons,
   };
