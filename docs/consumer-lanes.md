@@ -43,9 +43,11 @@ secret to that runtime variable. It refuses to run when live inference is disabl
 rather than falsely completing business work as a dry run. If explicitly enabled,
 the existing provider policy, verified-zero-cost routing, and quota ledgers remain
 mandatory. The general runner needs no additional token.
-Specialist task readback, claims, stale recovery, heartbeats, retries, and finishes
-carry the same lane identity; D1 and SQLite reject cross-lane reads and lifecycle
-mutations even when a caller has a valid task lease token.
+Remote D1 task readback, claims, stale recovery, heartbeats, retries, and finishes
+carry the same lane identity and require the lane capability. SQLite exposes the
+same lane-filtered list and lease-ownership contract to local workers; direct local
+database access remains a trusted host boundary, not a separate authentication
+boundary.
 
 ## Execution and rollout
 
