@@ -132,7 +132,7 @@ jobs:
           GRAPHIFY_NO_TIPS: "1"
         run: |
           python -m graphify extract . --code-only
-          python -m graphify . --cluster-only
+          python -m graphify cluster-only . --no-label
           python - <<'PY'
           import json
           from pathlib import Path
