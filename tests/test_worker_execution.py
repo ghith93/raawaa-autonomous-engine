@@ -264,9 +264,13 @@ class WorkerExecutionTests(unittest.TestCase):
             execution_lane="specialist:mobile_tester",
         )
         result = run_once(store, environ={}, worker_lane="specialist:mobile_tester")
-        self.assertEqual(result["status"], "succeeded")
+        self.assertEqual(result, {
+            "status": "blocked", "reason": "specialist_agent_disabled",
+            "agent_id": "mobile_tester",
+        })
         saved = {task["id"]: task for task in store.list_tasks()}
-        self.assertEqual(saved[mobile["id"]]["status"], "succeeded")
+        self.assertEqual(saved[mobile["id"]]["status"], "pending")
+        self.assertEqual(saved[mobile["id"]]["attempts"], 0)
         self.assertEqual(saved[general["id"]]["status"], "pending")
 
     def test_general_runner_never_claims_specialist_task(self):
