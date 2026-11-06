@@ -314,6 +314,7 @@ class StagingContentionProofTests(unittest.TestCase):
                     "execution_mode": "dry_run",
                     "priority": 100,
                     "dependencies_json": "[]",
+                    "lease_expires_at": "2099-01-01T00:00:00Z",
                 }
 
             def list_tasks(self, _limit):
