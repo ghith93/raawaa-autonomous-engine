@@ -244,11 +244,15 @@ async function reviewResearchCandidate(request, env) {
   } catch { return json({ error: "storage_unavailable" }, 503); }
 }
 
-async function recoverStaleTasks(env) {
+async function recoverStaleTasks(env, workerLane = null) {
   const nowIso = new Date().toISOString();
-  const stale = await env.DB.prepare(
-    "SELECT id,attempts,max_attempts,lease_token FROM tasks WHERE status='running' AND (lease_expires_at IS NULL OR lease_expires_at < ?) ORDER BY updated_at,id LIMIT 100"
-  ).bind(nowIso).all();
+  const laneFilter = workerLane === null ? "" : " AND execution_lane=?";
+  const staleStatement = env.DB.prepare(
+    "SELECT id,attempts,max_attempts,lease_token FROM tasks WHERE status='running' AND (lease_expires_at IS NULL OR lease_expires_at < ?)" +
+    laneFilter + " ORDER BY updated_at,id LIMIT 100"
+  );
+  const stale = await (workerLane === null ? staleStatement.bind(nowIso) :
+    staleStatement.bind(nowIso, workerLane)).all();
   const statements = [];
   for (const task of stale.results || []) {
     const status = task.attempts < task.max_attempts ? "pending" : "failed";
@@ -491,7 +495,18 @@ export default {
     }
 
     if (request.method === "POST" && url.pathname === "/v1/tasks/recover") {
-      try { return json(await recoverStaleTasks(env)); }
+      let recoveryInput;
+      try { recoveryInput = await readOptionalJson(request); }
+      catch (error) {
+        return json({ error: error.message === "body_too_large" ? "body_too_large" : "invalid_json" }, 400);
+      }
+      if (!recoveryInput || typeof recoveryInput !== "object" || Array.isArray(recoveryInput)) {
+        return json({ error: "invalid_recovery_request" }, 400);
+      }
+      const workerLane = recoveryInput.worker_lane ?? "general";
+      if (!EXECUTION_LANES.has(workerLane)) return json({ error: "invalid_worker_lane" }, 400);
+      if (!laneTokenAuthorized(request, env, workerLane)) return json({ error: "lane_unauthorized" }, 401);
+      try { return json(await recoverStaleTasks(env, workerLane)); }
       catch { return json({ error: "storage_unavailable" }, 503); }
     }
 
