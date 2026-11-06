@@ -73,7 +73,7 @@ class ProviderWorkflowSecurityTests(unittest.TestCase):
         self.assertIn("SOURCE_BRANCH: ${{ github.event.workflow_run.head_branch }}", source)
         self.assertIn("SOURCE_EVENT: ${{ github.event.workflow_run.event }}", source)
         self.assertIn("git log -1 --format=%B | grep -Fq '[groq-specialist-smoke]'", source)
-        self.assertIn('[[ "$SOURCE_CONCLUSION" == "success" && "$SOURCE_BRANCH" == "main" && "$marker" == "true" ]]', source)
+        self.assertIn('[[ "$SOURCE_CONCLUSION" == "success" && "$SOURCE_BRANCH" == "main" && "$SOURCE_EVENT" == "push" && "$marker" == "true" ]]', source)
         self.assertIn("needs.eligibility.outputs.eligible == 'true'", source)
         self.assertIn("github.event.workflow_run.head_sha", source)
         self.assertEqual(source.count("persist-credentials: false"), 2)
