@@ -12,6 +12,22 @@ from engine.provider import GenerationRequest
 from engine.quota_manager import QuotaManager
 
 
+def _safe_adapter_failure_code(exc: Exception) -> str:
+    """Return a bounded diagnostic code without persisting provider messages."""
+    if not isinstance(exc, ValueError):
+        return "unclassified_adapter_failure"
+    known = {
+        "prompt is required": "empty_prompt",
+        "max_output_tokens must be between 1 and 4096": "invalid_output_token_limit",
+        "adapter response route does not match reserved profile": "response_route_mismatch",
+        "adapter response text must be a non-empty string": "empty_completion",
+        "live adapter returned a mocked completion": "mocked_completion",
+        "adapter response token counts are invalid": "invalid_token_usage",
+        "adapter response cost is invalid": "invalid_cost",
+    }
+    return known.get(str(exc), "unclassified_value_error")
+
+
 class QuotaAwareLiveGateway:
     """Only calls a provider after a verified-free, commercial-use route is reserved."""
 
@@ -332,7 +348,9 @@ class QuotaAwareLiveGateway:
                     self.invocation_store.mark_ambiguous(request.task_id, request.lease_token, request.invocation_id)
                 self._audit(
                     "adapter_failure", request, profile,
-                    error_type=type(exc).__name__, reason="ambiguous_adapter_failure",
+                    error_type=type(exc).__name__,
+                    error_code=_safe_adapter_failure_code(exc),
+                    reason="ambiguous_adapter_failure",
                 )
                 raise ProviderUnavailable(
                     "Live adapter failed unexpectedly; route rotation was stopped."
