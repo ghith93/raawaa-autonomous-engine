@@ -147,8 +147,8 @@ jobs:
           manifest = json.loads(Path("config/project-agent-map.json").read_text(encoding="utf-8"))
           nodes = graph.get("nodes", [])
           edges = graph.get("edges", graph.get("links", []))
-          project_nodes = [n for n in nodes if isinstance(n, dict) and n.get("_origin") == "project_map" and n.get("file_type") == "project_map"]
-          project_edges = [e for e in edges if isinstance(e, dict) and e.get("_origin") == "project_map"]
+          project_nodes = [n for n in nodes if isinstance(n, dict) and isinstance(n.get("metadata"), dict) and n["metadata"].get("map_node_id")]
+          project_edges = [e for e in edges if isinstance(e, dict) and str(e.get("source_location", "")).startswith("edges[")]
           if len(project_nodes) != len(manifest.get("nodes", [])):
               raise SystemExit("Project/agent topology nodes are missing from the combined graph")
           if len(project_edges) < len(manifest.get("edges", [])):
