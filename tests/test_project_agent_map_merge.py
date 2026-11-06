@@ -59,6 +59,8 @@ class ProjectAgentMapMergeTests(unittest.TestCase):
         ids = {n["id"] for n in self.graph["nodes"]}
         self.assertIn("src_task_store", ids)
         self.assertTrue(any(n.get("metadata", {}).get("map_node_id") == "agent:engineer" for n in self.graph["nodes"]))
+        engineer_node = next(n for n in self.graph["nodes"] if n.get("metadata", {}).get("map_node_id") == "agent:engineer")
+        self.assertEqual(engineer_node["label"], "agent: engineer [declared]")
         self.assertTrue(any(n.get("metadata", {}).get("evidence_path") == "docs/task-store.md" for n in self.graph["nodes"]))
         self.assertEqual(
             self.graph["graph"]["project_agent_map_node_count"],
