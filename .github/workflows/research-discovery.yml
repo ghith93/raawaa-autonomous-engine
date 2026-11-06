@@ -17,12 +17,23 @@ on:
   schedule:
     - cron: "31 5 * * *"
   workflow_dispatch:
+  pull_request:
+    paths:
+      - ".github/workflows/research-discovery.yml"
+      - ".graphifyignore"
+      - "config/**"
+      - "engine/**"
+      - "worker/**"
+      - "scripts/**"
+      - "tests/**"
+      - "docs/research/**"
+      - "docs/research-and-development-operating-system.ar.md"
 
 permissions:
   contents: read
 
 concurrency:
-  group: scheduled-research-discovery
+  group: scheduled-research-discovery-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -97,3 +108,74 @@ jobs:
           GITHUB_WORKFLOW: ${{ github.workflow }}
           RESEARCH_SCAN_STARTED_AT: ${{ steps.scan_clock.outputs.started_at }}
         run: python scripts/publish_research_scan_telemetry.py research-candidates.json
+
+  knowledge_graph:
+    if: github.event_name == 'pull_request' || github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    permissions:
+      contents: read
+    steps:
+      - name: Check out reviewed main
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - name: Set up Python
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7
+        with:
+          python-version: "3.12"
+      - name: Validate project and agent topology
+        run: python scripts/validate_project_agent_map.py config/project-agent-map.json .
+      - name: Test project map graph overlay
+        run: python -m unittest tests.test_project_agent_map_merge -v
+      - name: Install pinned Graphify OSS
+        run: python -m pip install --disable-pip-version-check --no-input "graphifyy[sql]==0.9.103"
+      - name: Build local code and project-agent knowledge graph (no model)
+        env:
+          GRAPHIFY_OUT: graphify-out
+          GRAPHIFY_NO_TIPS: "1"
+        run: |
+          python -m graphify extract . --code-only
+          python scripts/merge_project_agent_map.py --graph graphify-out/graph.json --map config/project-agent-map.json
+          python -m graphify cluster-only . --no-label
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          graph_path = Path("graphify-out/graph.json")
+          report_path = Path("graphify-out/GRAPH_REPORT.md")
+          if not graph_path.is_file() or not report_path.is_file():
+              raise SystemExit("Graphify did not produce the expected graph and report")
+          graph = json.loads(graph_path.read_text(encoding="utf-8"))
+          manifest = json.loads(Path("config/project-agent-map.json").read_text(encoding="utf-8"))
+          nodes = graph.get("nodes", [])
+          edges = graph.get("edges", graph.get("links", []))
+          project_nodes = [n for n in nodes if isinstance(n, dict) and n.get("_origin") == "project_map" and n.get("file_type") == "project_map"]
+          project_edges = [e for e in edges if isinstance(e, dict) and e.get("_origin") == "project_map"]
+          if len(project_nodes) != len(manifest.get("nodes", [])):
+              raise SystemExit("Project/agent topology nodes are missing from the combined graph")
+          if len(project_edges) < len(manifest.get("edges", [])):
+              raise SystemExit("Project/agent topology edges are missing from the combined graph")
+          if not isinstance(nodes, list) or not nodes:
+              raise SystemExit("Graphify produced an empty or invalid node list")
+          if not isinstance(edges, list):
+              raise SystemExit("Graphify produced an invalid edge list")
+          from pathlib import PurePosixPath
+          for node in nodes:
+              source = node.get("source_file") if isinstance(node, dict) else None
+              if source:
+                  path = PurePosixPath(str(source).replace("\\", "/"))
+                  if path.is_absolute() or ".." in path.parts:
+                      raise SystemExit(f"Graphify emitted an unsafe source path: {source}")
+          html_path = Path("graphify-out/graph.html")
+          if not html_path.is_file():
+              raise SystemExit("Graphify did not produce graph.html")
+          print(f"Combined graph validated: nodes={len(nodes)} edges={len(edges)} project_nodes={len(project_nodes)} project_edges={len(project_edges)} html_bytes={html_path.stat().st_size}")
+          PY
+      - name: Upload short-lived knowledge graph artifact
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: project-knowledge-graph-${{ github.run_id }}
+          path: |
+            graphify-out/graph.json
+            graphify-out/graph.html
+            graphify-out/GRAPH_REPORT.md
+          if-no-files-found: error
+          retention-days: 7
