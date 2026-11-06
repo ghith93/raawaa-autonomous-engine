@@ -50,5 +50,21 @@ class TaskInvocationStoreTests(unittest.TestCase):
         call.assert_called_once()
 
 
+    def test_specialist_invocations_carry_the_lane_capability(self):
+        lane_token = "researcher-lane-token-0123456789abcdef0123456789"
+        remote = RemoteTaskStore(
+            "https://engine.example", "test-token", lane_token=lane_token,
+        )
+        store = TaskInvocationStore(remote, worker_lane="specialist:researcher")
+        with patch.object(remote, "_request", return_value={"ok": True}) as call:
+            store.start("task-1", "lease-1", "invocation-1", "groq:model-a")
+        self.assertEqual(call.call_args.kwargs["worker_lane"], "specialist:researcher")
+        self.assertEqual(remote.lane_token, lane_token)
+
+    def test_invalid_invocation_lane_is_rejected(self):
+        with self.assertRaisesRegex(ValueError, "invalid worker_lane"):
+            TaskInvocationStore(self.remote, worker_lane="specialist:unknown")
+
+    
 if __name__ == "__main__":
     unittest.main()
