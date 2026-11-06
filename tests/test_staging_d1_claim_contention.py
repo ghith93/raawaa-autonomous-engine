@@ -93,6 +93,11 @@ class StagingContentionProofTests(unittest.TestCase):
                         "idempotency_key": "staging-d1-contention:old-run:1",
                         "payload_json": '{"operation": "python_platform_probe"}',
                         "status": "pending",
+                        "attempts": 0,
+                        "max_attempts": 1,
+                        "execution_mode": "not_started",
+                        "priority": 100,
+                        "dependencies_json": "[]",
                     },
                     {
                         "id": "lookalike",
@@ -101,6 +106,24 @@ class StagingContentionProofTests(unittest.TestCase):
                         "idempotency_key": "staging-d1-contention:lookalike:1",
                         "payload_json": '{"operation": "different_operation"}',
                         "status": "pending",
+                        "attempts": 0,
+                        "max_attempts": 1,
+                        "execution_mode": "not_started",
+                        "priority": 100,
+                        "dependencies_json": "[]",
+                    },
+                    {
+                        "id": "lookalike-attempted",
+                        "task_type": "supervised_probe",
+                        "title": "Remote Staging D1 concurrent claim contention proof",
+                        "idempotency_key": "staging-d1-contention:attempted:1",
+                        "payload_json": '{"operation": "python_platform_probe"}',
+                        "status": "pending",
+                        "attempts": 1,
+                        "max_attempts": 1,
+                        "execution_mode": "not_started",
+                        "priority": 100,
+                        "dependencies_json": "[]",
                     },
                     {
                         "id": "unrelated",
@@ -129,7 +152,7 @@ class StagingContentionProofTests(unittest.TestCase):
         self.assertEqual(store.finished[0][0:2], ("stale-proof", "blocked"))
         self.assertEqual(
             [row["id"] for row in store.rows if row["status"] == "pending"],
-            ["lookalike", "unrelated"],
+            ["lookalike", "lookalike-attempted", "unrelated"],
         )
 
     def test_two_concurrent_claims_have_one_winner_and_durable_completion(self):
