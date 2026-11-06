@@ -1613,8 +1613,8 @@ try {
   status = await api("/v1/mobile/status");
   assertStatus(status, 200, "mobile status after D1 writes");
   assert.equal(status.payload.paper_events.find(row => row.event_type === "candidate_detected")?.count, 1);
-  assert.equal(status.payload.tasks.find(row => row.status === "succeeded")?.count, 12,
-    "workflow, dependency, supervised-process, and exact-claim fixtures should be durably succeeded");
+  assert.equal(status.payload.tasks.find(row => row.status === "succeeded")?.count, 13,
+    "workflow, dependency, supervised-process, exact-claim, and concurrent-claim fixtures should be durably succeeded");
   assert.equal(status.payload.tasks.find(row => row.status === "failed")?.count, 3,
     "failed dependency roots remain visibly failed");
   assert.equal(status.payload.tasks.find(row => row.status === "blocked")?.count, 8,
