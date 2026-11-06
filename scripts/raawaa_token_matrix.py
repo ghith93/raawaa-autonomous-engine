@@ -28,6 +28,10 @@ API = "https://api.cloudflare.com/client/v4"
 # The operations this project performs, in dependency order.
 CAPABILITIES = [
     ("token_active", "GET", "/user/tokens/verify", "the value is a live token"),
+    # Lists the accounts this token can see. When this succeeds and the configured
+    # account is not among them, the two secrets belong to different accounts —
+    # which is the single most common cause of a 9109 that looks like a bad token.
+    ("accounts", "GET", "/accounts", "can enumerate its own accounts"),
     ("account", "GET", "/accounts/{account}", "can see the account"),
     ("d1", "GET", "/accounts/{account}/d1/database", "can reach D1"),
     ("ai_models", "GET", "/accounts/{account}/ai/models/search?per_page=1", "can list Workers AI models"),
@@ -97,6 +101,25 @@ def probe(token: str, account: str, *, spend_neurons: bool = False) -> dict:
     return result
 
 
+def discover_accounts(token: str) -> list[dict]:
+    """Return the accounts this token can see, with ids masked for printing."""
+    status, payload = _call("GET", "/accounts", token)
+    if status == 0 or not payload.get("success"):
+        return []
+    accounts = []
+    for account in payload.get("result") or []:
+        if not isinstance(account, dict):
+            continue
+        account_id = str(account.get("id", ""))
+        accounts.append({
+            "name": account.get("name"),
+            "id_prefix": account_id[:6],
+            "id_suffix": account_id[-4:],
+            "id": account_id,
+        })
+    return accounts
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Token capability matrix")
     parser.add_argument("--account", default=os.environ.get("CLOUDFLARE_ACCOUNT_ID", ""))
@@ -107,6 +130,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--spend-neurons", action="store_true",
                         help="also test image generation (costs 14.4 neurons)")
     parser.add_argument("--json", help="append results to this file")
+    parser.add_argument("--discover", action="store_true",
+                        help="print the accounts this token can see, and whether the configured "
+                             "account id is one of them")
     args = parser.parse_args(argv)
 
     account = args.account.strip()
@@ -122,6 +148,27 @@ def main(argv: list[str] | None = None) -> int:
                 candidates.append((name, value.strip()))
     else:
         candidates.append((args.label or args.token_var, os.environ.get(args.token_var, "").strip()))
+
+    if args.discover:
+        token = os.environ.get(args.token_var, "").strip()
+        found = discover_accounts(token)
+        if not found:
+            print("this token cannot list accounts; it is scoped to a resource, not to an account")
+            return 1
+        print(f"token can see {len(found)} account(s):")
+        for account in found:
+            match = "  <- matches CLOUDFLARE_ACCOUNT_ID" if account["id"] == account else ""
+            print(f"  {account['name']:<30} {account['id_prefix']}...{account['id_suffix']}{match}")
+        configured = account
+        ids = [a["id"] for a in found]
+        if configured in ids:
+            print("\nconfigured account id is among them: the secrets agree")
+            return 0
+        print("\nconfigured account id is NOT among them: the two secrets belong to "
+              "different accounts, which produces 9109 on every resource call")
+        if len(found) == 1:
+            print(f"use this value for CLOUDFLARE_ACCOUNT_ID: {ids[0]}")
+        return 1
 
     rows = []
     for name, value in candidates:

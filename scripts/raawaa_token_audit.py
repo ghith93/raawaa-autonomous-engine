@@ -119,7 +119,6 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--json", help="write the report here")
     args = parser.parse_args(argv)
 
-    token = os.environ.get("CLOUDFLARE_ACCOUNT_ID", "") and os.environ.get("CLOUDFLARE_API_TOKEN", "")
     token = os.environ.get("CLOUDFLARE_API_TOKEN", "").strip()
     if not token:
         print("CLOUDFLARE_API_TOKEN is required", file=sys.stderr)
