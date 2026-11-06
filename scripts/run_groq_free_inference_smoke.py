@@ -97,10 +97,6 @@ def main() -> int:
         access_client_secret=os.environ.get("CF_ACCESS_CLIENT_SECRET"),
     )
     before_mobile = _wait_for_authenticated_worker(store)
-    counts = _counts(before_mobile)
-    if counts.get("pending", 0) or counts.get("running", 0):
-        raise SystemExit("Refusing smoke test: Staging queue is not idle.")
-
     task = store.enqueue(
         "research_brief",
         "Single public Groq Free-tier inference connectivity check",
@@ -137,6 +133,17 @@ def main() -> int:
     if task.get("status") != "pending":
         print(json.dumps({"status": "not_pending_no_replay", "diagnostics": _diagnostics(store, task_id)}, sort_keys=True))
         raise SystemExit("Smoke task is not pending; refusing automatic replay.")
+
+    # A prior preflight may have enqueued this exact idempotent task before a
+    # later local-policy check failed. Permit only that one pending task; never
+    # drain unrelated Staging work or race an unrelated pending task.
+    mobile = store._request("/v1/mobile/status")
+    counts = _counts(mobile)
+    pending_rows = [row for row in store.list_tasks(100)
+                    if row.get("status") == "pending"]
+    if (counts.get("pending", 0) != 1 or counts.get("running", 0) != 0
+            or len(pending_rows) != 1 or pending_rows[0].get("id") != task_id):
+        raise SystemExit("Refusing smoke test: Staging queue contains work outside this exact smoke task.")
 
     before_routes = {route: _quota(store, route, task_id) for route in ROUTE_IDS}
     gateway = build_live_gateway(
