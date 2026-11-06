@@ -134,13 +134,11 @@ jobs:
           GRAPHIFY_NO_TIPS: "1"
         run: |
           python -m graphify extract . --code-only
-          # Graphify clustering rewrites graph.json from its extraction cache.
-          # Run it before adding our deterministic agent/capability overlay.
           python -m graphify cluster-only . --no-label
           python scripts/merge_project_agent_map.py --graph graphify-out/graph.json --map config/project-agent-map.json
           python - <<'PY'
           import json
-          from pathlib import Path
+          from pathlib import Path, PurePosixPath
           graph_path = Path("graphify-out/graph.json")
           report_path = Path("graphify-out/GRAPH_REPORT.md")
           if not graph_path.is_file() or not report_path.is_file():
@@ -148,34 +146,34 @@ jobs:
           graph = json.loads(graph_path.read_text(encoding="utf-8"))
           manifest = json.loads(Path("config/project-agent-map.json").read_text(encoding="utf-8"))
           nodes = graph.get("nodes", [])
-          edges = graph.get("edges", graph.get("links", []))
+          links = graph.get("links", graph.get("edges", []))
           project_nodes = [n for n in nodes if isinstance(n, dict) and n.get("_origin") == "project_map" and n.get("file_type") == "project_map"]
-          project_edges = [e for e in edges if isinstance(e, dict) and e.get("_origin") == "project_map"]
+          project_links = [e for e in links if isinstance(e, dict) and e.get("_origin") == "project_map"]
           if len(project_nodes) != len(manifest.get("nodes", [])):
-              raise SystemExit("Project/agent topology nodes are missing from the combined graph")
-          if len(project_edges) < len(manifest.get("edges", [])):
-              raise SystemExit("Project/agent topology edges are missing from the combined graph")
-          if not isinstance(nodes, list) or not nodes:
-              raise SystemExit("Graphify produced an empty or invalid node list")
-          if not isinstance(edges, list):
-              raise SystemExit("Graphify produced an invalid edge list")
-          from pathlib import PurePosixPath
+              raise SystemExit(f"Project/agent topology nodes mismatch: {len(project_nodes)} != {len(manifest.get('nodes', []))}")
+          if len(project_links) < len(manifest.get("edges", [])):
+              raise SystemExit(f"Project/agent topology edges missing: {len(project_links)} < {len(manifest.get('edges', []))}")
+          if not isinstance(nodes, list) or not nodes or not isinstance(links, list):
+              raise SystemExit("Graphify produced an empty or invalid graph")
           for node in nodes:
               source = node.get("source_file") if isinstance(node, dict) else None
               if source:
-                  path = PurePosixPath(str(source).replace("\\", "/"))
+                  path = PurePosixPath(str(source).replace("\\\\", "/"))
                   if path.is_absolute() or ".." in path.parts:
                       raise SystemExit(f"Graphify emitted an unsafe source path: {source}")
           html_path = Path("graphify-out/graph.html")
           if not html_path.is_file():
               raise SystemExit("Graphify did not produce graph.html")
-          print(f"Combined graph validated: nodes={len(nodes)} edges={len(edges)} project_nodes={len(project_nodes)} project_edges={len(project_edges)} html_bytes={html_path.stat().st_size}")
+          # Preserve the full combined topology before any Graphify visualization transforms.
+          Path("graphify-out/project-agent-graph.json").write_text(json.dumps(graph, ensure_ascii=False, indent=2) + "\\n", encoding="utf-8")
+          print(f"Combined graph validated: nodes={len(nodes)} links={len(links)} project_nodes={len(project_nodes)} project_links={len(project_links)} html_bytes={html_path.stat().st_size}")
           PY
       - name: Upload short-lived knowledge graph artifact
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: project-knowledge-graph-${{ github.run_id }}
           path: |
+            graphify-out/project-agent-graph.json
             graphify-out/graph.json
             graphify-out/graph.html
             graphify-out/GRAPH_REPORT.md
