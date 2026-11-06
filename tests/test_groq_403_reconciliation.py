@@ -56,11 +56,13 @@ class Groq403StagingReconciliationTests(unittest.TestCase):
         after = {"snapshot": {"task_pending_count": 0, "unresolved": []}}
         with patch.object(reconcile, "api", side_effect=[
             (200, before), (200, quota), (200, {"settled": True}),
-            (200, {"ok": True}), (200, after),
+            (200, {"ok": True, "until_at": "2026-11-07T16:00:00.000Z"}),
+            (200, {"cooldown": {"until_at": "2026-11-07T16:00:00.000Z", "reason": "manual_reconcile_http_403"}}),
+            (200, after),
         ]) as api:
             with patch("builtins.print"):
                 reconcile.run()
-        self.assertEqual(api.call_count, 5)
+        self.assertEqual(api.call_count, 6)
         self.assertEqual(api.call_args_list[2].args[2]["actual_cost_nanos"], 0)
         self.assertEqual(api.call_args_list[2].args[2]["reservation_id"], reservation["reservation_id"])
         self.assertEqual(api.call_args_list[3].args[2]["seconds"], 86400)
