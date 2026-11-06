@@ -1,3 +1,4 @@
+import json
 import unittest
 from io import BytesIO
 from urllib.error import HTTPError
@@ -20,10 +21,39 @@ class LiveAdapterTests(unittest.TestCase):
             result=adapter.generate("model-x",GenerationRequest("test","hi",20))
         self.assertEqual(result.text,"hello"); self.assertEqual(result.input_tokens,3)
         self.assertFalse(result.mocked); self.assertIn("/chat/completions",call.call_args.args[0].full_url)
+        body = json.loads(call.call_args.args[0].data.decode("utf-8"))
+        self.assertEqual(body["max_completion_tokens"], 20)
+        self.assertNotIn("max_tokens", body)
         self.assertEqual(
             call.call_args.args[0].get_header("User-agent"),
             "RaawaaAutonomousEngine/1.0 (+https://github.com/ghith93/raawaa-autonomous-engine)",
         )
+
+    def test_gpt_oss_uses_low_reasoning_and_completion_token_parameter(self):
+        body = b'{"choices":[{"message":{"content":"GROQ_FREE_STAGING_OK"}}],"usage":{"prompt_tokens":3,"completion_tokens":4}}'
+        adapter = OpenAICompatibleAdapter(
+            "groq", "https://api.groq.com/openai/v1", "KEY", environ={"KEY": "secret"}
+        )
+        with patch("engine.live_adapters.urlopen", return_value=FakeResponse(body)) as call:
+            result = adapter.generate(
+                "openai/gpt-oss-20b", GenerationRequest("research_brief", "Return a short confirmation.", 512)
+            )
+        payload = json.loads(call.call_args.args[0].data.decode("utf-8"))
+        self.assertEqual(result.text, "GROQ_FREE_STAGING_OK")
+        self.assertEqual(payload["max_completion_tokens"], 512)
+        self.assertEqual(payload["reasoning_effort"], "low")
+        self.assertIs(payload["include_reasoning"], False)
+        self.assertNotIn("max_tokens", payload)
+
+    def test_empty_openai_compatible_completion_has_safe_error_code(self):
+        body = b'{"choices":[{"message":{"content":""}}],"usage":{"prompt_tokens":3,"completion_tokens":0}}'
+        adapter = OpenAICompatibleAdapter(
+            "groq", "https://api.groq.com/openai/v1", "KEY", environ={"KEY": "secret"}
+        )
+        with patch("engine.live_adapters.urlopen", return_value=FakeResponse(body)):
+            with self.assertRaises(LiveAdapterError) as raised:
+                adapter.generate("openai/gpt-oss-20b", GenerationRequest("research_brief", "Return a short confirmation.", 512))
+        self.assertEqual(raised.exception.error_code, "empty_completion")
 
     def test_gemini(self):
         body=b'{"candidates":[{"content":{"parts":[{"text":"hello"}]}}],"usageMetadata":{"promptTokenCount":4,"candidatesTokenCount":2}}'
