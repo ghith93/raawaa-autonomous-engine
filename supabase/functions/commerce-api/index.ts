@@ -538,7 +538,7 @@ function formatOwnerOrderAlert(
   const waCustomer = `https://wa.me/963${prepared.customer_phone.replace(/^0/, "")}`;
   const ownerUrl =
     Deno.env.get("COMMERCE_OWNER_DASHBOARD_URL") ||
-    "https://raawaa-storefront.ghith-shikhkhaled.workers.dev/owner/";
+    "https://raawaa.pages.dev/owner/";
 
   const lines = [
     `🔔 طلب جديد — ${brandAr} (#${prepared.order_ref})`,
@@ -1047,7 +1047,7 @@ Deno.serve(async (req: Request) => {
     if (req.method === "POST" && path === "/v1/owner/notify-test") {
       const ownerUrl =
         Deno.env.get("COMMERCE_OWNER_DASHBOARD_URL") ||
-        "https://raawaa-storefront.ghith-shikhkhaled.workers.dev/owner/";
+        "https://raawaa.pages.dev/owner/";
       const msg = [
         "✅ اختبار إشعار فوري ناجح — متجر رواء",
         `• المنطقة المخدّمة: ${regionLabel}`,
