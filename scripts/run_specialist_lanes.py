@@ -1,7 +1,8 @@
-"""Run enabled specialist consumers as bounded, dry-run-only batches.
+"""Run enabled specialist consumers as bounded live-inference batches.
 
-Each lane has its own capability token. Missing tokens leave that lane dormant;
-there is no fallback to the general token. Live inference is forcibly disabled.
+Dry-run completion is deliberately refused here: it would mark business work as
+succeeded without doing it. The live gateway still enforces policy, quota and
+zero-cost provider eligibility before a task lease is claimed.
 """
 from __future__ import annotations
 
@@ -25,7 +26,9 @@ def main() -> int:
         print("Specialist runner blocked: authenticated engine API configuration is missing.")
         return 1
     base = os.environ.copy()
-    base["RAAWAA_ENGINE_LIVE_INFERENCE"] = "disabled"
+    if base.get("RAAWAA_ENGINE_LIVE_INFERENCE", "disabled").lower() != "enabled":
+        print("Specialist runner dormant: live inference is disabled; refusing to complete tasks as dry runs.")
+        return 0
     enabled = 0
     failures = 0
     for lane, token_name in LANES:
@@ -57,7 +60,7 @@ def main() -> int:
             failures += 1
     if enabled == 0:
         print("No specialist lane capabilities are configured; no specialist tasks were claimed.")
-    print(f"Specialist lanes enabled={enabled}, failed={failures}; live inference=disabled.")
+    print(f"Specialist lanes enabled={enabled}, failed={failures}; live inference=enabled and policy-gated.")
     return 1 if failures else 0
 
 
