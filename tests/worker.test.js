@@ -39,7 +39,7 @@ function dbMock(options = {}) {
           if (sql.includes("SELECT 1")) return { ok: 1 };
           if (sql.includes("SELECT id,status,attempts")) return options.currentTask || {
             id: "task-1", status: "running", attempts: 1, max_attempts: 2,
-            task_type: "research_brief", execution_mode: "not_started", lease_token: "lease-1",
+            task_type: "research_brief", execution_mode: "not_started", execution_lane: "general", lease_token: "lease-1",
             lease_expires_at: "2999-01-01T00:00:00.000Z",
           };
           if (sql.includes("WHERE idempotency_key")) return options.existingTask || insertedTask;
