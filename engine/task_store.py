@@ -324,11 +324,25 @@ class TaskStore:
                     failed += 1
         return {"requeued": recovered, "failed": failed}
 
-    def list_tasks(self, limit: int = 50) -> list[dict[str, Any]]:
+    def list_tasks(self, limit: int = 50,
+                   worker_lane: str | None = None) -> list[dict[str, Any]]:
         limit = max(1, min(int(limit), 200))
+        if worker_lane is not None and worker_lane not in {
+            "general", "specialist:researcher", "specialist:reviewer",
+            "specialist:marketer", "specialist:operator", "specialist:mobile_tester",
+        }:
+            raise ValueError("invalid worker_lane")
         with self._connect() as db:
-            return [self._task_dict(row) for row in db.execute(
-                "SELECT * FROM tasks ORDER BY created_at DESC,id DESC LIMIT ?", (limit,)).fetchall()]
+            if worker_lane is None:
+                rows = db.execute(
+                    "SELECT * FROM tasks ORDER BY created_at DESC,id DESC LIMIT ?", (limit,)
+                ).fetchall()
+            else:
+                rows = db.execute(
+                    "SELECT * FROM tasks WHERE execution_lane=? ORDER BY created_at DESC,id DESC LIMIT ?",
+                    (worker_lane, limit),
+                ).fetchall()
+            return [self._task_dict(row) for row in rows]
 
     def audit_events(self, limit: int = 100) -> list[dict[str, Any]]:
         limit = max(1, min(int(limit), 500))
