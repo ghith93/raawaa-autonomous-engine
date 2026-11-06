@@ -38,7 +38,7 @@ jobs:
       - name: Run Python unit tests
         run: python -m unittest discover -s tests -v
       - name: Compile remote Staging verification harness
-        run: python -m py_compile scripts/verify_staging_monetary_ledger.py scripts/run_staging_d1_claim_contention.py scripts/run_staging_lane_isolation.py
+        run: python -m py_compile scripts/verify_staging_monetary_ledger.py scripts/run_staging_d1_claim_contention.py scripts/run_staging_lane_isolation.py scripts/run_specialist_lanes.py
       - name: Set up Node.js
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
         with:
