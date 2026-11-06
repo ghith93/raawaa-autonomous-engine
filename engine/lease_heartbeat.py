@@ -22,6 +22,7 @@ class LeaseHeartbeat:
         lease_token: str,
         interval_seconds: float = 300.0,
         lease_timeout_seconds: int = 900,
+        worker_lane: str = "general",
     ):
         if not task_id or not lease_token:
             raise ValueError("task ID and lease token are required")
@@ -34,6 +35,7 @@ class LeaseHeartbeat:
         self.lease_token = lease_token
         self.interval_seconds = interval_seconds
         self.lease_timeout_seconds = lease_timeout_seconds
+        self.worker_lane = worker_lane
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
         self._error: BaseException | None = None
@@ -57,6 +59,7 @@ class LeaseHeartbeat:
                     self.task_id,
                     self.lease_token,
                     self.lease_timeout_seconds,
+                    worker_lane=self.worker_lane,
                 )
             except BaseException as exc:
                 with self._lock:
