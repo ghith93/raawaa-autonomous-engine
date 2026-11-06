@@ -230,7 +230,7 @@ jobs:
           RAAWAA_ENGINE_API_URL: https://raawaa-autonomous-engine-staging.ghith-shikhkhaled.workers.dev
           RAAWAA_ENGINE_API_TOKEN: ${{ env.RAAWAA_ENGINE_STAGING_API_TOKEN }}
           RAAWAA_ENGINE_GENERAL_LANE_TOKEN: ${{ env.RAAWAA_ENGINE_STAGING_GENERAL_LANE_TOKEN }}
-          RAAWAA_ENGINE_RESEARCHER_LANE_TOKEN: ${{ env.RAAWAA_ENGINE_STAGING_RESEARCHER_LANE_TOKEN }}
+          RAAWAA_ENGINE_LANE_TOKEN: ${{ env.RAAWAA_ENGINE_STAGING_RESEARCHER_LANE_TOKEN }}
           RAAWAA_ENGINE_LIVE_INFERENCE: disabled
         run: python scripts/run_staging_lane_isolation.py
       - name: Verify remote Staging D1 monetary ledger
