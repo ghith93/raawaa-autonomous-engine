@@ -8,7 +8,10 @@ import os
 import unittest
 from unittest.mock import patch
 
-from scripts.run_groq_free_inference_smoke import _wait_for_authenticated_worker
+from scripts.run_groq_free_inference_smoke import (
+    _assert_only_exact_smoke_task_pending,
+    _wait_for_authenticated_worker,
+)
 
 
 class _Response:
@@ -61,6 +64,46 @@ class GroqSmokePreflightTests(unittest.TestCase):
             "/v1/mobile/status",
             (1, "specialist:researcher"),
         ])
+
+
+class GroqSmokeLaneQueueTests(unittest.TestCase):
+    class LaneStore:
+        def __init__(self, rows):
+            self.rows = rows
+            self.calls = []
+
+        def list_tasks(self, limit, worker_lane="general"):
+            self.calls.append((limit, worker_lane))
+            return [dict(row) for row in self.rows]
+
+    def test_preflight_is_scoped_to_researcher_lane(self):
+        store = self.LaneStore([{"id": "smoke-task", "status": "pending"}])
+        _assert_only_exact_smoke_task_pending(store, "smoke-task")
+        self.assertEqual(store.calls, [(100, "specialist:researcher")])
+
+    def test_preflight_rejects_an_unrelated_pending_researcher_task(self):
+        store = self.LaneStore([
+            {"id": "smoke-task", "status": "pending"},
+            {"id": "other-task", "status": "pending"},
+        ])
+        with self.assertRaisesRegex(SystemExit, "researcher lane contains work"):
+            _assert_only_exact_smoke_task_pending(store, "smoke-task")
+
+    def test_preflight_rejects_a_running_researcher_task(self):
+        store = self.LaneStore([
+            {"id": "smoke-task", "status": "pending"},
+            {"id": "other-running", "status": "running"},
+        ])
+        with self.assertRaisesRegex(SystemExit, "researcher lane contains work"):
+            _assert_only_exact_smoke_task_pending(store, "smoke-task")
+
+    def test_preflight_fails_closed_on_incomplete_researcher_readback(self):
+        store = self.LaneStore([
+            {"id": f"task-{index}", "status": "succeeded"} for index in range(100)
+        ])
+        with self.assertRaisesRegex(SystemExit, "readback may be incomplete"):
+            _assert_only_exact_smoke_task_pending(store, "smoke-task")
+
 
 
 if __name__ == "__main__":

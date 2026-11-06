@@ -89,6 +89,19 @@ def _diagnostics(store: RemoteTaskStore, task_id: str) -> dict:
     }
 
 
+def _assert_only_exact_smoke_task_pending(store: RemoteTaskStore, task_id: str) -> None:
+    """Inspect only the researcher lane; other lanes cannot be claimed by this worker."""
+    rows = store.list_tasks(100, worker_lane=EXECUTION_LANE)
+    if len(rows) >= 100:
+        raise SystemExit("Refusing smoke test: researcher lane readback may be incomplete.")
+    pending = [row for row in rows if row.get("status") == "pending"]
+    running = [row for row in rows if row.get("status") == "running"]
+    if len(pending) != 1 or pending[0].get("id") != task_id or running:
+        raise SystemExit(
+            "Refusing smoke test: researcher lane contains work outside this exact smoke task."
+        )
+
+
 def main() -> int:
     if os.environ.get("RAAWAA_ENGINE_LIVE_INFERENCE", "").strip().lower() != "enabled":
         raise SystemExit("Refusing inference: explicit one-shot live switch is missing.")
@@ -147,13 +160,7 @@ def main() -> int:
     # A prior preflight may have enqueued this exact idempotent task before a
     # later local-policy check failed. Permit only that one pending task; never
     # drain unrelated Staging work or race an unrelated pending task.
-    mobile = store._request("/v1/mobile/status")
-    counts = _counts(mobile)
-    pending_rows = [row for row in store.list_tasks(100, worker_lane=EXECUTION_LANE)
-                    if row.get("status") == "pending"]
-    if (counts.get("pending", 0) != 1 or counts.get("running", 0) != 0
-            or len(pending_rows) != 1 or pending_rows[0].get("id") != task_id):
-        raise SystemExit("Refusing smoke test: Staging queue contains work outside this exact smoke task.")
+    _assert_only_exact_smoke_task_pending(store, task_id)
 
     before_routes = {route: _quota(store, route, task_id) for route in ROUTE_IDS}
     gateway = build_live_gateway(
