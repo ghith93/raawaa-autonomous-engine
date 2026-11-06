@@ -1,0 +1,43 @@
+{
+  "schema_version": 1,
+  "channel": {
+    "repository": "ghith93/raawaa-autonomous-engine",
+    "issue_number": 464,
+    "issue_url": "https://github.com/ghith93/raawaa-autonomous-engine/issues/464",
+    "report_header_prefix": "ARENA REPORT",
+    "automatic_session_wake_supported": false,
+    "unofficial_wake_interfaces_prohibited": true,
+    "wake_boundary_note": "Arena Agent Mode has no officially supported public API, webhook, or scheduled trigger to wake an idle session automatically. GitHub Issue #464 is the durable asynchronous inbox and decision log; every new or resumed Arena session starts from a user prompt and immediately reconstructs state from AGENTS.md, this manifest, and unprocessed #464 comments."
+  },
+  "startup_required_files": [
+    "AGENTS.md",
+    "docs/master-autonomous-execution-directive.ar.md",
+    "docs/continuous-improvement-charter.md",
+    "docs/architecture.md",
+    "docs/operations.md",
+    "docs/integrations/arena-agent-mode.ar.md",
+    "docs/operations/asset-register.md",
+    "docs/operations/workflow-catalog.md",
+    "docs/operations/tooling-capability-inventory-2026-11-03.md",
+    "config/policy.json",
+    "config/agents.json",
+    "config/provider_profiles.json",
+    "config/integrations.json",
+    "config/tool_permissions.json"
+  ],
+  "watermark": {
+    "last_processed_comment_id": 6692775468,
+    "last_processed_comment_created_at": "2026-11-06T18:51:16Z",
+    "last_processed_comment_url": "https://github.com/ghith93/raawaa-autonomous-engine/issues/464#issuecomment-6692775468",
+    "last_reviewed_task_comment_id": 6692040154,
+    "last_verified_main_sha": "5b842230a8724fb4be5ef4de3284dd8fbf21a000",
+    "updated_at_utc": "2026-11-06T19:30:00Z",
+    "summary": "Completed independent deep-review verification of #464 comment 6692040154 through 6692775468, live clean storefront cutover on https://raawaa.pages.dev/, and permanent GitHub-backed session continuity protocol."
+  },
+  "open_engineering_priorities": [
+    "P0: Harden .github/workflows/raawaa-image-route-check.yml (remove arena/** push trigger and retired TELEGRAM_* env references; enforce secret-bearing push-branch guard in scripts/check_workflow_dispatch_guards.py) and remove retired Telegram aliases from config/credentials.json.",
+    "P0: Fix Staging D1 100-row list_tasks ceiling and concurrent-future cleanup bug in scripts/run_staging_d1_claim_contention.py that caused Engine CI Staging job failures on main runs 42276938719 and 42277935747.",
+    "P1: Reconcile docs/operations.md and open Draft PR #608 (distinguish run 42254857112 attempt 1 specialist-lane success vs attempt 2 non-idempotent re-run failure, and sync 25-workflow inventory).",
+    "P1: Complete Issue #577 exact task-ID lane targeting/recovery and observe second genuine event=schedule pass for Runtime-004 (currently 1/2 via run 42211351856)."
+  ]
+}
