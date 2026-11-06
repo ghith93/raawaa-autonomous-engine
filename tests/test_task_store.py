@@ -254,6 +254,23 @@ class TaskStoreTests(unittest.TestCase):
         self.assertEqual({task["id"]: task for task in self.store.list_tasks()}[child["id"]]["status"],
                          "blocked")
 
+    def test_stale_recovery_is_scoped_to_the_requesting_lane(self):
+        general = self.store.enqueue("research_brief", "General stale")
+        specialist = self.store.enqueue("research_brief", "Specialist stale",
+                                        execution_lane="specialist:researcher")
+        general_claim = self.store.claim_next(worker_lane="general")
+        specialist_claim = self.store.claim_next(worker_lane="specialist:researcher")
+        with sqlite3.connect(self.store.db_path) as db:
+            db.execute("UPDATE tasks SET lease_expires_at='2000-01-01T00:00:00+00:00' WHERE id IN (?,?)",
+                       (general["id"], specialist["id"]))
+        self.assertEqual(self.store.recover_stale(worker_lane="general"),
+                         {"requeued": 1, "failed": 0})
+        saved = {task["id"]: task for task in self.store.list_tasks()}
+        self.assertEqual(saved[general["id"]]["status"], "pending")
+        self.assertEqual(saved[specialist["id"]]["status"], "running")
+        self.assertEqual(self.store.recover_stale(worker_lane="specialist:researcher"),
+                         {"requeued": 1, "failed": 0})
+
     def test_specialist_lane_must_match_task_contract(self):
         with self.assertRaisesRegex(ValueError, "does not match task_type"):
             self.store.enqueue("content_draft", "Wrong lane",
