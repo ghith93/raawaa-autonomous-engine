@@ -160,6 +160,7 @@ jobs:
           RAAWAA_ENGINE_LIVE_INFERENCE: enabled
           RAAWAA_ENGINE_WORKER_LANE: specialist:researcher
           RAAWAA_ENGINE_LANE_TOKEN: ${{ env.RAAWAA_ENGINE_STAGING_RESEARCHER_LANE_TOKEN }}
+          RAAWAA_ENGINE_RESEARCHER_LANE_TOKEN: ${{ env.RAAWAA_ENGINE_STAGING_RESEARCHER_LANE_TOKEN }}
           RAAWAA_ENGINE_STAGING_API_TOKEN: ${{ env.RAAWAA_ENGINE_STAGING_API_TOKEN }}
           GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
         run: python scripts/run_groq_free_inference_smoke.py
