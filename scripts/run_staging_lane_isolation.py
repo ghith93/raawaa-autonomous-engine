@@ -18,7 +18,8 @@ def main() -> None:
     if not os.environ.get("RAAWAA_ENGINE_LANE_TOKEN"):
         raise SystemExit("Missing ephemeral researcher lane token")
     store = RemoteTaskStore()
-    preexisting = store.list_tasks(100)
+    preexisting = (store.list_tasks(100) +
+                   store.list_tasks(100, worker_lane="specialist:researcher"))
     active = [task for task in preexisting if task.get("status") in {"pending", "running"}
               and task.get("execution_lane", "general") in {"general", "specialist:researcher"}]
     if active:
