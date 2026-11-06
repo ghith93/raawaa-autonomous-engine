@@ -174,14 +174,33 @@ class RemoteTaskStore:
             raise RemoteTaskStoreError("Remote task API omitted the task")
         return task
 
-    def list_tasks(self, limit: int = 50, worker_lane: str = "general") -> list[dict[str, Any]]:
+    def list_tasks(
+        self,
+        limit: int = 50,
+        worker_lane: str = "general",
+        *,
+        status: str | None = None,
+        task_id: str | None = None,
+    ) -> list[dict[str, Any]]:
+        import re
+        from urllib.parse import urlencode
+
         limit = max(1, min(int(limit), 100))
         if worker_lane not in {"general", "specialist:researcher", "specialist:reviewer",
                                "specialist:marketer", "specialist:operator", "specialist:mobile_tester"}:
             raise ValueError("invalid worker_lane")
-        path = f"/v1/tasks?limit={limit}"
+        query_params: list[tuple[str, str]] = [("limit", str(limit))]
         if worker_lane != "general":
-            path += f"&worker_lane={worker_lane}"
+            query_params.append(("worker_lane", worker_lane))
+        if status is not None:
+            if status not in {"pending", "running", "succeeded", "failed", "blocked"}:
+                raise ValueError("invalid status filter")
+            query_params.append(("status", status))
+        if task_id is not None:
+            if not isinstance(task_id, str) or not re.fullmatch(r"[A-Za-z0-9_-]{1,128}", task_id):
+                raise ValueError("task_id must be 1-128 safe identifier characters")
+            query_params.append(("task_id", task_id))
+        path = "/v1/tasks?" + urlencode(query_params, safe=":")
         result = self._request(path, worker_lane=worker_lane)
         tasks = result.get("tasks")
         if not isinstance(tasks, list):

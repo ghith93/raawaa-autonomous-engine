@@ -166,6 +166,97 @@ class StagingContentionProofTests(unittest.TestCase):
         self.assertEqual(result["provider_calls"], 0)
         self.assertEqual(result["spend_usd"], 0)
 
+    def test_over_hundred_historical_succeeded_tasks_do_not_trip_pending_cleanup_ceiling(self):
+        class LargeHistoryStore(FakeStore):
+            def __init__(self, *args, **kwargs):
+                super().__init__(*args, **kwargs)
+                self.history = [
+                    {"id": f"hist-{i}", "status": "succeeded", "task_type": "supervised_probe"}
+                    for i in range(150)
+                ]
+                self.queries = []
+
+            def list_tasks(self, limit=50, *, status=None, task_id=None):
+                self.queries.append({"limit": limit, "status": status, "task_id": task_id})
+                rows = list(self.history) + ([dict(self.task)] if self.task else [])
+                if status is not None:
+                    rows = [r for r in rows if r.get("status") == status]
+                if task_id is not None:
+                    rows = [r for r in rows if r.get("id") == task_id]
+                return rows[:limit]
+
+        created_stores = []
+
+        def factory(*args, **kwargs):
+            s = LargeHistoryStore(*args, **kwargs)
+            created_stores.append(s)
+            return s
+
+        result = run_proof(self.env, store_factory=factory, executor_factory=ThreadPoolExecutor)
+        self.assertEqual(result["status"], "succeeded")
+        self.assertEqual(created_stores[0].queries[0]["status"], "pending")
+        self.assertEqual(created_stores[0].queries[1]["task_id"], "staging-task-1")
+
+    def test_winning_lease_is_retired_when_sibling_concurrent_claim_raises(self):
+        class FlakyFirstClaimStore(FakeStore):
+            def __init__(self, *args, **kwargs):
+                super().__init__(*args, **kwargs)
+                self.calls = 0
+                self.finish_calls = []
+
+            def claim_supervised_probe(self, task_id):
+                with self.lock:
+                    self.calls += 1
+                    if self.calls == 1:
+                        raise RuntimeError("transient_http_503")
+                return super().claim_supervised_probe(task_id)
+
+            def finish(self, task_id, status, result=None, error=None, lease_token=None, execution_mode=None):
+                self.finish_calls.append((task_id, status, lease_token))
+                return super().finish(
+                    task_id, status, result=result, error=error,
+                    lease_token=lease_token, execution_mode=execution_mode,
+                )
+
+        created = []
+
+        def factory(*args, **kwargs):
+            s = FlakyFirstClaimStore(*args, **kwargs)
+            created.append(s)
+            return s
+
+        class SequentialExecutor:
+            def __init__(self, **_kwargs):
+                pass
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_exc):
+                return False
+
+            def submit(self, fn, *args):
+                class ImmediateFuture:
+                    def __init__(self):
+                        self._exc = None
+                        self._res = None
+                        try:
+                            self._res = fn(*args)
+                        except BaseException as exc:  # noqa: BLE001
+                            self._exc = exc
+
+                    def result(self):
+                        if self._exc is not None:
+                            raise self._exc
+                        return self._res
+
+                return ImmediateFuture()
+
+        with self.assertRaises(StagingContentionProofError):
+            run_proof(self.env, store_factory=factory, executor_factory=SequentialExecutor)
+        self.assertEqual(created[0].finish_calls, [("staging-task-1", "blocked", "lease-test")])
+        self.assertEqual(created[0].task["status"], "blocked")
+
 
 if __name__ == "__main__":
     unittest.main()

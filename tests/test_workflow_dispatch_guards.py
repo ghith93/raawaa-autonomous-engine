@@ -209,3 +209,105 @@ class TriggerParsingTests(unittest.TestCase):
         path = Path(__file__).resolve().parents[1] / ".github" / "workflows" / "deploy-worker.yml"
         self.assertFalse(check.has_manual_dispatch(path.read_text(encoding="utf-8")))
 
+
+class PushAndPullRequestSecretGuardTests(unittest.TestCase):
+    def test_arena_branch_push_with_secrets_is_rejected_even_with_job_if(self):
+        content = """on:
+  push:
+    branches: [main, "arena/**"]
+jobs:
+  verify:
+    if: github.ref == 'refs/heads/main'
+    steps:
+      - env:
+          TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+"""
+        violations = check.push_branch_secret_violations(
+            ".github/workflows/raawaa-image-route-check.yml", content
+        )
+        self.assertEqual(len(violations), 1)
+        self.assertIn("arena/**", violations[0])
+
+    def test_main_only_push_branches_passes(self):
+        content = """on:
+  push:
+    branches:
+      - main
+jobs:
+  verify:
+    if: github.ref == 'refs/heads/main'
+    steps:
+      - env:
+          TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+"""
+        self.assertEqual(check.push_branch_secret_violations("safe.yml", content), [])
+
+    def test_unscoped_push_requires_main_ref_guard_on_secret_jobs(self):
+        bad = """on:
+  push:
+jobs:
+  test:
+    steps:
+      - run: echo ok
+  secret_job:
+    steps:
+      - env:
+          TOKEN: ${{ secrets.API_TOKEN }}
+"""
+        good = """on:
+  push:
+jobs:
+  test:
+    steps:
+      - run: echo ok
+  secret_job:
+    if: github.ref == 'refs/heads/main'
+    steps:
+      - env:
+          TOKEN: ${{ secrets.API_TOKEN }}
+"""
+        self.assertEqual(len(check.push_branch_secret_violations("bad.yml", bad)), 1)
+        self.assertEqual(check.push_branch_secret_violations("good.yml", good), [])
+
+    def test_pull_request_target_with_secrets_is_rejected(self):
+        content = """on:
+  pull_request_target:
+jobs:
+  unsafe:
+    if: github.ref == 'refs/heads/main'
+    steps:
+      - env:
+          TOKEN: ${{ secrets.API_TOKEN }}
+"""
+        violations = check.push_branch_secret_violations("prt.yml", content)
+        self.assertTrue(any("pull_request_target" in v for v in violations))
+
+    def test_manual_dispatch_without_main_guard_on_image_workflow_is_rejected(self):
+        content = """on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - env:
+          TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+"""
+        violations = check.workflow_violations(
+            ".github/workflows/raawaa-image-route-check.yml", content
+        )
+        self.assertEqual(len(violations), 1)
+        self.assertIn("lacks an explicit main-ref guard", violations[0])
+
+    def test_all_repository_workflows_pass_push_and_pr_secret_guards(self):
+        workflow_dir = Path(__file__).resolve().parents[1] / ".github" / "workflows"
+        for path in sorted(workflow_dir.glob("*.yml")):
+            with self.subTest(workflow=path.name):
+                content = path.read_text(encoding="utf-8")
+                self.assertEqual(
+                    check.push_branch_secret_violations(f".github/workflows/{path.name}", content),
+                    [],
+                )
+
+

@@ -35,9 +35,13 @@ class ResolutionTests(unittest.TestCase):
         self.assertEqual(found.name, "CLOUDFLARE_ACCESS_AUDIT_TOKEN")
 
     def test_absence_is_data_not_an_exception(self):
-        found = resolve("telegram_bot", {}, self.config)
+        found = resolve("engine_token", {}, self.config)
         self.assertFalse(found.present)
         self.assertIsNone(found.name)
+
+    def test_retired_telegram_roles_are_absent(self):
+        for retired_role in ("telegram_bot", "owner_chat"):
+            self.assertNotIn(retired_role, self.config.get("roles", {}))
 
     def test_whitespace_only_value_counts_as_absent(self):
         self.assertFalse(resolve("cloudflare_token", {"CLOUDFLARE_API_TOKEN": "   "},

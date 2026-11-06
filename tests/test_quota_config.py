@@ -49,24 +49,45 @@ class ProviderProfileConfigTests(unittest.TestCase):
         self.assertEqual(entry.api_key_env, "NVIDIA_API_KEY")
         self.assertEqual(entry.model_stage, "candidate")
 
-    def test_production_gpt_oss_profiles_are_staged_with_priority_and_limits(self):
+    def test_production_gpt_oss_profiles_reflect_20b_staged_and_120b_quarantined(self):
         entries = load_provider_profile_registry(self.source)
         by_model = {entry.profile.model: entry for entry in entries}
-        for model, priority in (("openai/gpt-oss-20b", 10), ("openai/gpt-oss-120b", 20)):
-            with self.subTest(model=model):
-                entry = by_model[model]
-                self.assertEqual(entry.model_stage, "production")
-                self.assertTrue(entry.production_use_allowed)
-                self.assertTrue(entry.profile.production_use_allowed)
-                self.assertFalse(entry.enabled)
-                self.assertFalse(entry.ready_for_routing)
-                self.assertEqual(entry.profile.priority, priority)
-                self.assertEqual(entry.profile.minute_request_limit, 30)
-                self.assertEqual(entry.profile.minute_token_limit, 8000)
-                self.assertEqual(entry.profile.daily_request_limit, 1000)
-                self.assertEqual(entry.profile.daily_token_limit, 200000)
-                self.assertEqual(entry.profile.input_cost_per_million_usd, 0.0)
-                self.assertIn("openai/gpt-oss", entry.model_terms_source_url)
+
+        entry_20b = by_model["openai/gpt-oss-20b"]
+        self.assertEqual(entry_20b.model_stage, "production")
+        self.assertTrue(entry_20b.production_use_allowed)
+        self.assertTrue(entry_20b.profile.production_use_allowed)
+        self.assertTrue(entry_20b.profile.free_verified)
+        self.assertFalse(entry_20b.enabled)
+        self.assertFalse(entry_20b.ready_for_routing)
+        self.assertEqual(entry_20b.profile.priority, 10)
+        self.assertEqual(entry_20b.profile.minute_request_limit, 30)
+        self.assertEqual(entry_20b.profile.minute_token_limit, 8000)
+        self.assertEqual(entry_20b.profile.daily_request_limit, 1000)
+        self.assertEqual(entry_20b.profile.daily_token_limit, 200000)
+        self.assertEqual(entry_20b.profile.input_cost_per_million_usd, 0.0)
+        self.assertIn("openai/gpt-oss", entry_20b.model_terms_source_url)
+
+        entry_120b = by_model["openai/gpt-oss-120b"]
+        self.assertEqual(entry_120b.model_stage, "production")
+        self.assertFalse(entry_120b.production_use_allowed)
+        self.assertFalse(entry_120b.profile.production_use_allowed)
+        self.assertFalse(entry_120b.profile.free_verified)
+        self.assertFalse(entry_120b.enabled)
+        self.assertFalse(entry_120b.ready_for_routing)
+        self.assertEqual(entry_120b.profile.priority, 20)
+
+        # Even if accidentally enabled, quarantined 120B must fail closed.
+        data = json.loads(self.source.read_text(encoding="utf-8"))
+        for route in data["routes"]:
+            if route["model"] == "openai/gpt-oss-120b":
+                route["enabled"] = True
+        self.path.write_text(json.dumps(data), encoding="utf-8")
+        flipped = next(
+            item for item in load_provider_profile_registry(self.path)
+            if item.profile.model == "openai/gpt-oss-120b"
+        )
+        self.assertFalse(flipped.ready_for_routing)
 
     def test_registry_requires_managed_opt_in_mode_and_boolean_enablement(self):
         data = json.loads(self.source.read_text(encoding="utf-8"))

@@ -1,6 +1,8 @@
 # Raawaa Engine — Asset and Capability Register
 
-**Snapshot:** 2026-11-03 21:45 UTC  
+> **Live Provenance Notice (2026-11-06):** Elements of the 2026-11-03 snapshot below (including `main` SHA `168c5f35` and Activepieces `0 connections / 0 flows`) have been superseded by timestamped live checks on `main` `7818cdfd851f9820e29041093496b68b847d5449` (Activepieces now has 1 `ACTIVE` GitHub connection and 1 published manual flow `oDKKtoRanykDWtyBdkQFt` -> `task-runner.yml` on `main`; Production D1 has 2 pending migrations `0013`/`0014` per run `42285058780`; Groq `120B` is quarantined `free_verified=false` / `production_use_allowed=false`). Always consult [`docs/operations/resource-capability-inventory.md`](./resource-capability-inventory.md) and run `python3 -m engine.cli resource-inventory --strict` for current derived state.
+
+**Historical Snapshot:** 2026-11-03 21:45 UTC  
 **Scope:** Known connected accounts, project assets, permissions, secret names, reusable workflows and runtime state. Revalidate at the start of every session; never treat tool-catalog presence as proof of account access.
 
 ## Startup rule

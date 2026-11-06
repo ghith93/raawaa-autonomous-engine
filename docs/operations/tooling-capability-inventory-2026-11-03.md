@@ -1,5 +1,7 @@
 # Tooling and capability inventory — 2026-11-03
 
+> **Live Provenance Notice (2026-11-06):** This file preserves the historical `2026-11-03` ChatGPT session snapshot (`1,912` tool defs / `248` skills / `0` Activepieces connections). As of `2026-11-06T20:04:44Z` (`main` `7818cdfd851f9820e29041093496b68b847d5449`, Issue `#464` comments `6694076722`–`6694272932`), the ChatGPT session catalog reports `1,930` tool definitions and `271` skills across `38` packs, and Activepieces (`Ghith's Project`) has `1` `ACTIVE` GitHub connection and `1` published manual flow (`Raawaa GitHub Workflow Control`, `oDKKtoRanykDWtyBdkQFt`). See [`docs/operations/resource-capability-inventory.md`](./resource-capability-inventory.md) and `config/integrations.json` (`external_operator_surfaces` & `live_account_observations`) for generated provenance-tracked inventory.
+
 This is a dated snapshot of the ChatGPT-connected environment used to operate the engine. It is not a claim that every listed tool is connected, authorized for every operation, or available inside the standalone Python runtime. Recheck before relying on counts or account status.
 
 ## Inventory snapshot

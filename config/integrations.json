@@ -157,5 +157,358 @@
       "status": "candidate_registered_disabled",
       "status_reason": "NVIDIA offers a free prototype endpoint, but public documentation does not publish stable numeric quotas and account-specific hosted terms/eligibility are not verified. No provider request has been sent; route is deliberately ineligible for routing."
     }
-  }
+  },
+  "external_operator_surfaces": {
+    "chatgpt_session_plane": {
+      "name": "ChatGPT Operator Session Plane",
+      "execution_plane": "external_operator_session",
+      "lifecycle_state": "connected",
+      "can_engine_call_directly": false,
+      "session_tool_definitions_count": 1930,
+      "session_skills_count": 271,
+      "session_skill_packs_count": 38,
+      "connectors": {
+        "github": {"state": "connected", "permission_posture": "Allow all actions", "least_privilege_review_required": true},
+        "activepieces": {"state": "connected", "permission_posture": "Allow all actions", "least_privilege_review_required": true},
+        "notion": {"state": "connected", "permission_posture": "Allow all actions", "least_privilege_review_required": true},
+        "cloudflare": {"state": "blocked", "permission_posture": "not_installed", "least_privilege_review_required": false},
+        "firecrawl": {"state": "connected", "permission_posture": "Allow low-risk actions", "credits_remaining": 418, "credits_total": 1000, "billing_period_end": "2026-11-29"},
+        "supabase": {"state": "permission_verified", "permission_posture": "Allow low-risk actions"},
+        "render": {"state": "permission_verified", "permission_posture": "Allow low-risk actions", "deployed_services": 0},
+        "slack": {"state": "unknown", "permission_posture": "workspace_list_empty"},
+        "canva": {"state": "configured", "permission_posture": "brand_kit_empty"},
+        "gsc_wizard": {"state": "blocked", "permission_posture": "no_search_console_properties"},
+        "runzumi": {"state": "blocked", "permission_posture": "no_workspace_consent"},
+        "tinyfish": {"state": "blocked", "permission_posture": "not_installed_excluded"}
+      },
+      "automations": {
+        "raawaa_engine_daily_ops": {
+          "enabled": true,
+          "scheduler_liveness": "unknown",
+          "last_run_time": "2026-11-02T15:17:12Z",
+          "next_run_time": null,
+          "note": "Ephemeral ChatGPT scheduled prompt; last recorded run failed and next_run_time is null. Never count as engine runtime health."
+        }
+      },
+      "provenance": {
+        "source_path_or_url": "https://github.com/ghith93/raawaa-autonomous-engine/issues/464#issuecomment-6694076722",
+        "verified_at": "2026-11-06T19:54:18Z",
+        "evidence_ref": "Issue #464 comment 6694076722 + docs/operations/asset-register.md",
+        "confidence": "verified"
+      }
+    },
+    "activepieces_ghiths_project": {
+      "name": "Activepieces — Ghith's Project",
+      "project_id": "8A2qoCJNq9zlORJZMlrfw",
+      "execution_plane": "external_operator_session",
+      "lifecycle_state": "permission_verified",
+      "can_engine_call_directly": false,
+      "active_connections": [
+        {"external_id": "cn2iEAi2bWbLfeOVOu7D8", "piece": "github", "status": "ACTIVE"}
+      ],
+      "flows": [
+        {
+          "flow_id": "oDKKtoRanykDWtyBdkQFt",
+          "display_name": "Raawaa GitHub Workflow Control",
+          "enabled": true,
+          "trigger": "manual",
+          "target": ".github/workflows/task-runner.yml on main",
+          "production_runs_observed": 0
+        }
+      ],
+      "tables_count": 0,
+      "catalog_ai_models_count": 21,
+      "notable_catalog_only_models": [
+        {
+          "model_id": "x-ai/grok-4.20",
+          "provider": "activepieces_catalog_xai",
+          "lifecycle_state": "blocked",
+          "reason": "Catalog-only listing inside Activepieces; pricing, free tier, hard stop, and account entitlement unverified. Distinct from Groq."
+        }
+      ],
+      "provenance": {
+        "source_path_or_url": "https://github.com/ghith93/raawaa-autonomous-engine/issues/464#issuecomment-6694076722",
+        "verified_at": "2026-11-06T19:58:42Z",
+        "evidence_ref": "Issue #464 comments 6694076722 & 6694158507 (Activepieces GitHub action invoked groq-connection-check.yml run 42284232726)",
+        "confidence": "verified"
+      }
+    },
+    "supabase_ghaiooth_org": {
+      "name": "Supabase Organization Ghaiooth (External Non-Engine Projects)",
+      "execution_plane": "external_operator_session",
+      "lifecycle_state": "runtime_verified",
+      "can_engine_call_directly": false,
+      "projects": [
+        {"ref": "oyoyozdugicmnkfhjovo", "name": "Ghaioooth-core", "region": "eu-west-1", "status": "ACTIVE_HEALTHY", "rls_migration": "20261106181609"},
+        {"ref": "xuwtuhfqjjwszxqkmivj", "name": "secondary-project", "status": "ACTIVE_HEALTHY", "rls_migration": "20261106181603"}
+      ],
+      "note": "Separate external projects; canonical Raawaa Engine task/budget/quota state lives in Cloudflare D1, never Supabase.",
+      "provenance": {
+        "source_path_or_url": "https://github.com/ghith93/raawaa-autonomous-engine/issues/464#issuecomment-6693664182",
+        "verified_at": "2026-11-06T19:35:23Z",
+        "evidence_ref": "Issue #464 comment 6693664182",
+        "confidence": "verified"
+      }
+    }
+  },
+  "infrastructure_assets": {
+    "cloudflare_production_control_worker": {
+      "name": "Production Control Worker & Production D1",
+      "worker_name": "raawaa-autonomous-engine-control",
+      "url": "https://raawaa-autonomous-engine-control.ghith-shikhkhaled.workers.dev",
+      "d1_database_name": "raawaa-autonomous-e",
+      "d1_database_id": "f0ffbed3-940f-488d-a7d1-31cbc5fbf742",
+      "execution_plane": "cloudflare_edge",
+      "lifecycle_state": "runtime_verified",
+      "secret_names": ["CLOUDFLARE_API_TOKEN", "CLOUDFLARE_ACCOUNT_ID", "ENGINE_API_TOKEN", "ENGINE_QUOTA_ADMIN_TOKEN"],
+      "watchdog_variable_missing": "GITHUB_APP_WATCHDOG_ENABLED",
+      "provenance": {
+        "source_path_or_url": "wrangler.toml",
+        "verified_at": "2026-11-06T20:04:44Z",
+        "expires_at": "2026-11-13T20:04:44Z",
+        "evidence_ref": "Task Runner run 42283331978 (HTTP 200, queue_idle) + d1-migration-inventory.yml run 42285058780 (2 pending migrations: 0013_task_process_dispatches.sql, 0014_task_execution_lanes.sql)",
+        "confidence": "verified"
+      },
+      "pending_production_migrations": [
+        "0013_task_process_dispatches.sql",
+        "0014_task_execution_lanes.sql"
+      ],
+      "production_worker_schema_compatibility": {
+        "currently_deployed_worker_compatible_with_current_d1": true,
+        "main_head_worker_compatible_with_unmigrated_d1": false,
+        "migrations_0013_0014_backward_compatible_with_currently_deployed_worker": true,
+        "note": "worker/index.js on main (7818cdfd) hard-requires task_process_dispatches and tasks.execution_lane across schemaProbe and queue endpoints; deploy-worker.yml preflight blocks deployment until 0013 and 0014 are applied under a separate Production migration approval gate. Do not apply them without explicit owner approval."
+      }
+    },
+    "cloudflare_isolated_staging_worker": {
+      "name": "Isolated Staging Control Worker & Staging D1",
+      "worker_name": "raawaa-autonomous-engine-staging",
+      "url": "https://raawaa-autonomous-engine-staging.ghith-shikhkhaled.workers.dev",
+      "d1_database_name": "raawaa-engine-staging",
+      "d1_database_id": "231dd948-04a0-49e3-ad73-444f77d69477",
+      "execution_plane": "staging_isolated",
+      "lifecycle_state": "runtime_verified",
+      "secret_names": ["CLOUDFLARE_API_TOKEN", "CLOUDFLARE_ACCOUNT_ID"],
+      "pending_staging_migrations": [],
+      "provenance": {
+        "source_path_or_url": "wrangler.staging.toml",
+        "verified_at": "2026-11-06T20:04:44Z",
+        "expires_at": "2026-11-13T20:04:44Z",
+        "evidence_ref": "Engine CI run 42280889414 on main 7818cdfd (5/5 jobs passed) + d1-staging-inventory.yml run 42285072627 (ok=true, rows_read=0, 0 pending migrations)",
+        "confidence": "verified"
+      }
+    },
+    "cloudflare_commerce_pages_and_worker": {
+      "name": "Raawaa Clean Brand Storefront (Pages) & Multi-Store Commerce Spine",
+      "storefront_url": "https://raawaa.pages.dev",
+      "owner_dashboard_url": "https://raawaa.pages.dev/owner/",
+      "retired_worker_subdomain": "raawaa-commerce-spine.ghith-shikhkhaled.workers.dev",
+      "worker_name": "raawaa-commerce-spine",
+      "d1_database_name": "raawaa-commerce-d1",
+      "d1_database_id": "a95f8518-29c7-4908-82ca-8cb56a9255a0",
+      "execution_plane": "cloudflare_edge",
+      "lifecycle_state": "runtime_verified",
+      "secret_names": ["CLOUDFLARE_API_TOKEN", "CLOUDFLARE_ACCOUNT_ID"],
+      "provenance": {
+        "source_path_or_url": "wrangler.storefront.toml",
+        "verified_at": "2026-11-06T18:55:00Z",
+        "expires_at": "2026-11-13T18:55:00Z",
+        "evidence_ref": "PRs #609-#611 + deploy-commerce-storefront.yml run 42274941247",
+        "confidence": "verified"
+      }
+    },
+    "cloudflare_billing_and_access_posture": {
+      "name": "Cloudflare Account Billing & Access Controls",
+      "execution_plane": "cloudflare_edge",
+      "lifecycle_state": "permission_verified",
+      "paid_subscriptions_count": 0,
+      "spend_policy_hard_stop_verified": false,
+      "cloudflare_access_enabled": false,
+      "secret_names": ["CLOUDFLARE_API_TOKEN", "CLOUDFLARE_ACCESS_AUDIT_TOKEN", "CLOUDFLARE_ACCOUNT_ID"],
+      "note": "Subscriptions API HTTP 200 confirms read permission; Spend Policies API returned HTTP 404 (run 42285028161) so no external usage_block hard stop is verified; Cloudflare Access is not enabled (run 42285013735) so Worker bearer token auth is the active boundary.",
+      "provenance": {
+        "source_path_or_url": "https://github.com/ghith93/raawaa-autonomous-engine/issues/464#issuecomment-6694272932",
+        "verified_at": "2026-11-06T20:04:44Z",
+        "expires_at": "2026-11-13T20:04:44Z",
+        "evidence_ref": "Workflow runs 42285013735 (Access inventory) & 42285028161 (Billing inventory) on 7818cdfd",
+        "confidence": "verified"
+      }
+    },
+    "github_main_protection_ruleset": {
+      "name": "GitHub Repository Ruleset main-protection",
+      "ruleset_id": 26464558,
+      "execution_plane": "engine_runtime",
+      "lifecycle_state": "enabled",
+      "required_status_checks": ["test"],
+      "required_approving_review_count": 0,
+      "secret_names": [],
+      "note": "Enforces PRs, strict up-to-date test status, resolved review threads, and blocks force-push/deletion; required approving reviews = 0.",
+      "provenance": {
+        "source_path_or_url": "https://github.com/ghith93/raawaa-autonomous-engine/issues/464#issuecomment-6694187249",
+        "verified_at": "2026-11-06T20:00:11Z",
+        "expires_at": "2026-11-13T20:00:11Z",
+        "evidence_ref": "Ruleset ID 26464558 re-verified in Issue #464 comment 6694187249",
+        "confidence": "verified"
+      }
+    }
+  },
+  "live_account_observations": [
+    {
+      "observation_id": "obs-secret-readiness-42284892504",
+      "workflow": ".github/workflows/secret-readiness.yml",
+      "run_id": 42284892504,
+      "head_sha": "7818cdfd851f9820e29041093496b68b847d5449",
+      "observed_at": "2026-11-06T20:02:54Z",
+      "expires_at": "2026-11-13T20:02:54Z",
+      "evidence_type": "boolean_secret_name_presence_only",
+      "source_url": "https://github.com/ghith93/raawaa-autonomous-engine/actions/runs/42284892504",
+      "checked_secret_names_present": [
+        "CLOUDFLARE_API_TOKEN",
+        "CLOUDFLARE_ACCOUNT_ID",
+        "ENGINE_API_TOKEN",
+        "GROQ_API_KEY"
+      ],
+      "checked_secret_names_absent": [
+        "GEMINI_API_KEY"
+      ],
+      "verification_facets": {
+        "present": true,
+        "authenticated": "unknown",
+        "read_permission_verified": "unknown",
+        "catalog_visible": "not_applicable",
+        "inference_verified": false,
+        "production_compatible": "unknown"
+      },
+      "scope_limitation": "Checks boolean presence of 5 repository secret names only; never proves token validity, scope, account ownership, or remaining credentials.json aliases."
+    },
+    {
+      "observation_id": "obs-groq-connection-42284232726",
+      "workflow": ".github/workflows/groq-connection-check.yml",
+      "run_id": 42284232726,
+      "head_sha": "7818cdfd851f9820e29041093496b68b847d5449",
+      "observed_at": "2026-11-06T19:58:01Z",
+      "expires_at": "2026-11-13T19:58:01Z",
+      "evidence_type": "read_only_api_auth_and_model_catalog",
+      "source_url": "https://github.com/ghith93/raawaa-autonomous-engine/actions/runs/42284232726",
+      "secret_names": ["GROQ_API_KEY"],
+      "models_visible": ["openai/gpt-oss-20b", "openai/gpt-oss-120b"],
+      "inference_requests": 0,
+      "verification_facets": {
+        "present": true,
+        "authenticated": true,
+        "read_permission_verified": true,
+        "catalog_visible": true,
+        "inference_verified": false,
+        "production_compatible": false
+      },
+      "scope_limitation": "Proves GROQ_API_KEY auth and /openai/v1/models catalog visibility with 0 inference requests. Does not prove project-level inference permission (120B previously returned HTTP 403 and remains quarantined; 20B has 1 historical Staging smoke in run 42254857112 attempt 1)."
+    },
+    {
+      "observation_id": "obs-cloudflare-access-42285013735",
+      "workflow": ".github/workflows/cloudflare-access-inventory.yml",
+      "run_id": 42285013735,
+      "head_sha": "7818cdfd851f9820e29041093496b68b847d5449",
+      "observed_at": "2026-11-06T20:03:20Z",
+      "expires_at": "2026-11-13T20:03:20Z",
+      "evidence_type": "read_only_cloudflare_access_posture",
+      "source_url": "https://github.com/ghith93/raawaa-autonomous-engine/actions/runs/42285013735",
+      "secret_names": ["CLOUDFLARE_API_TOKEN", "CLOUDFLARE_ACCOUNT_ID"],
+      "verification_facets": {
+        "present": true,
+        "authenticated": true,
+        "read_permission_verified": true,
+        "catalog_visible": "not_applicable",
+        "inference_verified": "not_applicable",
+        "production_compatible": true
+      },
+      "scope_limitation": "Cloudflare Access is not enabled on this account; Access apps and service-token inventories are not applicable. Worker bearer token auth is the active protection boundary."
+    },
+    {
+      "observation_id": "obs-cloudflare-billing-42285028161",
+      "workflow": ".github/workflows/cloudflare-billing-inventory.yml",
+      "run_id": 42285028161,
+      "head_sha": "7818cdfd851f9820e29041093496b68b847d5449",
+      "observed_at": "2026-11-06T20:03:45Z",
+      "expires_at": "2026-11-13T20:03:45Z",
+      "evidence_type": "read_only_cloudflare_subscriptions_and_spend_policy",
+      "source_url": "https://github.com/ghith93/raawaa-autonomous-engine/actions/runs/42285028161",
+      "secret_names": ["CLOUDFLARE_API_TOKEN", "CLOUDFLARE_ACCOUNT_ID"],
+      "verification_facets": {
+        "present": true,
+        "authenticated": true,
+        "read_permission_verified": true,
+        "catalog_visible": "not_applicable",
+        "inference_verified": "not_applicable",
+        "production_compatible": false
+      },
+      "scope_limitation": "Subscriptions API returned HTTP 200; spend-policy endpoint returned HTTP 404. No external Cloudflare account-level usage_block hard stop is verified; never infer a hard spending stop from HTTP 404."
+    },
+    {
+      "observation_id": "obs-cloudflare-workers-ai-42285042447",
+      "workflow": ".github/workflows/cloudflare-workers-ai-inventory.yml",
+      "run_id": 42285042447,
+      "head_sha": "7818cdfd851f9820e29041093496b68b847d5449",
+      "observed_at": "2026-11-06T20:04:05Z",
+      "expires_at": "2026-11-13T20:04:05Z",
+      "evidence_type": "read_only_workers_ai_model_catalog",
+      "source_url": "https://github.com/ghith93/raawaa-autonomous-engine/actions/runs/42285042447",
+      "secret_names": ["CLOUDFLARE_API_TOKEN", "CLOUDFLARE_ACCOUNT_ID"],
+      "models_visible": ["@cf/google/gemma-4-26b-a4b-it"],
+      "inference_requests": 0,
+      "verification_facets": {
+        "present": true,
+        "authenticated": true,
+        "read_permission_verified": true,
+        "catalog_visible": true,
+        "inference_verified": false,
+        "production_compatible": false
+      },
+      "scope_limitation": "Workers AI catalog HTTP 200 and Gemma 4 candidate visible with 0 inference requests. Account Workers plan, shared 10,000 Neurons/day consumption, and zero-overage hard stop remain unverified."
+    },
+    {
+      "observation_id": "obs-d1-production-migrations-42285058780",
+      "workflow": ".github/workflows/d1-migration-inventory.yml",
+      "run_id": 42285058780,
+      "head_sha": "7818cdfd851f9820e29041093496b68b847d5449",
+      "observed_at": "2026-11-06T20:04:25Z",
+      "expires_at": "2026-11-13T20:04:25Z",
+      "evidence_type": "read_only_production_d1_migration_inventory",
+      "source_url": "https://github.com/ghith93/raawaa-autonomous-engine/actions/runs/42285058780",
+      "secret_names": ["CLOUDFLARE_API_TOKEN", "CLOUDFLARE_ACCOUNT_ID"],
+      "pending_migrations": [
+        "0013_task_process_dispatches.sql",
+        "0014_task_execution_lanes.sql"
+      ],
+      "verification_facets": {
+        "present": true,
+        "authenticated": true,
+        "read_permission_verified": true,
+        "catalog_visible": "not_applicable",
+        "inference_verified": "not_applicable",
+        "production_compatible": false
+      },
+      "scope_limitation": "Production D1 lacks 0013_task_process_dispatches.sql and 0014_task_execution_lanes.sql. Currently deployed older Production Worker still serves general-lane health/status (run 42283331978), but main worker/index.js cannot be deployed until an owner-approved Production migration gate applies 0013 and 0014."
+    },
+    {
+      "observation_id": "obs-d1-staging-migrations-42285072627",
+      "workflow": ".github/workflows/d1-staging-inventory.yml",
+      "run_id": 42285072627,
+      "head_sha": "7818cdfd851f9820e29041093496b68b847d5449",
+      "observed_at": "2026-11-06T20:04:44Z",
+      "expires_at": "2026-11-13T20:04:44Z",
+      "evidence_type": "read_only_staging_d1_health_and_migration_inventory",
+      "source_url": "https://github.com/ghith93/raawaa-autonomous-engine/actions/runs/42285072627",
+      "secret_names": ["CLOUDFLARE_API_TOKEN", "CLOUDFLARE_ACCOUNT_ID"],
+      "pending_migrations": [],
+      "verification_facets": {
+        "present": true,
+        "authenticated": true,
+        "read_permission_verified": true,
+        "catalog_visible": "not_applicable",
+        "inference_verified": "not_applicable",
+        "production_compatible": "not_applicable"
+      },
+      "scope_limitation": "Isolated Staging D1 healthcheck ok=true, rows_read=0, 0 pending migrations (0001-0014 all applied; verified end-to-end in Engine CI run 42280889414)."
+    }
+  ]
 }
