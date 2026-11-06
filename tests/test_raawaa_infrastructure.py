@@ -86,10 +86,17 @@ class OrderValidationTests(unittest.TestCase):
 
 
 class CapacityTests(unittest.TestCase):
-    def test_accepts_under_the_limit_and_closes_at_it(self):
-        self.assertTrue(infra.capacity_gate(0)["accepting"])
-        self.assertTrue(infra.capacity_gate(19)["accepting"])
-        gate = infra.capacity_gate(20)
+    def test_default_has_no_invented_limit(self):
+        for count in (0, 19, 500):
+            gate = infra.capacity_gate(count)
+            self.assertTrue(gate["accepting"], count)
+            self.assertTrue(gate["unlimited"])
+
+    def test_an_explicit_limit_still_works_when_the_operator_sets_one(self):
+        storefront = infra.load_storefront()
+        storefront["capacity"]["max_orders_per_day"] = 20
+        self.assertTrue(infra.capacity_gate(19, storefront)["accepting"])
+        gate = infra.capacity_gate(20, storefront)
         self.assertFalse(gate["accepting"])
         self.assertIsNotNone(gate["message_ar"])
 
@@ -104,6 +111,10 @@ class OfferTests(unittest.TestCase):
 
     def test_lead_offer_is_the_duo(self):
         self.assertEqual(infra.active_offer(self.offers)["id"], "launch-duo")
+
+    def test_invented_daily_cap_is_listed_as_fake_scarcity(self):
+        forbidden = " ".join(c["claim_ar"] for c in self.offers["forbidden_fake_scarcity"])
+        self.assertIn("٢٠ طلبًا يوميًا", forbidden)
 
     def test_every_allowed_scarcity_is_actually_true(self):
         for claim in self.offers["allowed_scarcity"]:

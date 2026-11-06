@@ -141,21 +141,22 @@ class ProductionGateTests(unittest.TestCase):
     def setUp(self):
         self.brand = econ.load_brand()
 
-    def test_brand_file_says_made_to_order_without_pretending_to_hold_stock(self):
-        self.assertEqual(self.brand["production"]["status"], "made_to_order")
-        self.assertEqual(self.brand["production"]["stock_units"], 0)
-        self.assertEqual(self.brand["production"]["lead_time_hours"], 24)
+    def test_brand_file_records_real_raw_material_coverage(self):
+        production = self.brand["production"]
+        self.assertEqual(production["status"], "made_to_order")
+        self.assertEqual(production["raw_materials_units"], 10000)
+        self.assertEqual(production["max_orders_per_day"], 0)  # 0 = no invented cap
 
     def test_product_week_is_allowed_in_made_to_order_mode(self):
         plan = content.week_plan(self.brand, week=1, start=date(2026, 11, 7))
         self.assertEqual(plan["counts"]["total"], 6)
 
-    def test_a_zero_capacity_founder_cannot_publish_product_content(self):
+    def test_a_founder_without_materials_cannot_publish_product_content(self):
         brand = econ.load_brand()
-        brand["production"] = dict(brand["production"], capacity_per_day=0)
+        brand["production"] = dict(brand["production"], raw_materials_units=0)
         with self.assertRaises(ValueError) as ctx:
             content.week_plan(brand, week=1, start=date(2026, 11, 7))
-        self.assertIn("no manufactured stock", str(ctx.exception))
+        self.assertIn("no product can be supplied", str(ctx.exception))
 
     def test_no_stock_and_no_made_to_order_is_refused(self):
         brand = econ.load_brand()

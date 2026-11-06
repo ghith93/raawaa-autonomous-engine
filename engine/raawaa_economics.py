@@ -186,8 +186,10 @@ def inventory_runway(brand: dict[str, Any], units: int, *, mix: dict[str, int] |
     }
 
 
-def report(brand: dict[str, Any] | None = None, *, units: int = 10000) -> dict[str, Any]:
+def report(brand: dict[str, Any] | None = None, *, units: int | None = None) -> dict[str, Any]:
     brand = brand or load_brand()
+    if units is None:
+        units = int(brand.get("production", {}).get("raw_materials_units", 0)) or 10000
     return {
         "mode": "raawaa_unit_economics_read_only",
         "note": "Deterministic. No network, no model calls, no task writes.",

@@ -213,9 +213,9 @@ def production_ready(brand: dict[str, Any]) -> bool:
     published promise says so. Both are truthful; neither invents urgency.
     """
     production = brand.get("production", {})
-    if str(production.get("status")) == "made_to_order":
-        return int(production.get("capacity_per_day", 0)) > 0 and bool(production.get("promise_ar"))
-    return int(production.get("stock_units", 0)) > 0
+    has_materials = int(production.get("raw_materials_units", 0)) > 0
+    has_stock = int(production.get("stock_units", 0)) > 0
+    return (has_materials or has_stock) and bool(production.get("promise_ar"))
 
 
 def prelaunch_week(brand: dict[str, Any] | None = None, *, start: date | None = None) -> dict[str, Any]:
@@ -278,9 +278,9 @@ def week_plan(brand: dict[str, Any] | None = None, *, week: int = 1, start: date
         raise ValueError("week must be >= 1")
     if not production_ready(brand) and not brand.get("_test_fixture_stock"):
         raise ValueError(
-            "no manufactured stock yet: use prelaunch_week() until the first batch arrives. "
-            "Publishing product content for a product that does not exist is the one mistake "
-            "this engine refuses to help with."
+            "no product can be supplied: production.raw_materials_units is 0 and there is no "
+            "stock. Publishing product content for a product that does not exist is the one "
+            "mistake this engine refuses to help with."
         )
     if start is None:
         today = date.today()

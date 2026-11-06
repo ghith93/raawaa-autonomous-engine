@@ -120,16 +120,23 @@ def idempotency_key(payload: dict[str, Any], *, today: date | None = None) -> st
 
 
 def capacity_gate(orders_today: int, storefront: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Accept orders. A limit of 0 means no limit, which is the default.
+
+    An invented cap is a manufactured scarcity claim, and it was wrong for this
+    business: raw materials cover 10,000 units. A cap exists only if the operator
+    sets a real one.
+    """
     storefront = storefront or load_storefront()
     limit = int(storefront["capacity"]["max_orders_per_day"])
     if orders_today < 0:
         raise ValueError("orders_today must be >= 0")
-    open_now = orders_today < limit
+    open_now = (limit == 0) or (orders_today < limit)
     return {
         "limit": limit,
+        "unlimited": limit == 0,
         "orders_today": orders_today,
         "accepting": open_now,
-        "message_ar": None if open_now else storefront["capacity"]["when_full_ar"],
+        "message_ar": None if open_now else storefront["capacity"].get("when_full_ar", "نستقبل طلبات الغد"),
     }
 
 
