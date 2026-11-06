@@ -18,6 +18,36 @@ def _stable_id(prefix: str, value: str) -> str:
     return f"{prefix}__{slug}__{digest}"
 
 
+def _display_label(item: dict[str, Any], source_id: str) -> str:
+    kind = str(item.get("kind", "node"))
+    kind_label = {
+        "agent_role": "agent",
+        "capability_gap": "gap",
+        "model_route": "provider",
+    }.get(kind, kind)
+    name = source_id.split(":", 1)[-1].replace("_", " ")
+    status = str(item.get("status", "unknown"))
+    if status.startswith("implemented"):
+        short_status = "implemented"
+    elif status.startswith("scheduled"):
+        short_status = "scheduled"
+    elif status.startswith("disabled"):
+        short_status = "disabled"
+    elif status.startswith(("not_implemented", "no_")):
+        short_status = "missing"
+    elif status.startswith("graphify_pilot"):
+        short_status = "pilot"
+    elif status.startswith("candidate"):
+        short_status = "candidate"
+    elif status.startswith(("artifacts", "offline_proposal", "proposals_not_inserted")):
+        short_status = "partial"
+    elif status.startswith("deny_by_default"):
+        short_status = "restricted"
+    else:
+        short_status = status.split("_", 1)[0]
+    return f"{kind_label}: {name} [{short_status}]"
+
+
 def merge_project_map(
     graph: dict[str, Any],
     project_map: dict[str, Any],
@@ -54,7 +84,7 @@ def merge_project_map(
         id_map[source_id] = node_id
         nodes.append({
             "id": node_id,
-            "label": item.get("label") or f"{item.get('kind', 'node')}: {source_id}",
+            "label": item.get("label") or _display_label(item, source_id),
             "file_type": "concept",
             "_origin": "project_map",
             "source_file": map_path,
