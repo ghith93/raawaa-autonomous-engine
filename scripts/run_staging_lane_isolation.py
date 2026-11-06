@@ -17,6 +17,16 @@ sys.path.insert(0, str(ROOT))
 
 from engine.remote_task_store import RemoteTaskStore, RemoteTaskStoreError
 
+SMOKE_TASK_IDEMPOTENCY_KEY = "groq-free-inference-staging-specialist-smoke-2026-11-06-v7"
+SMOKE_TASK_TITLE = "Single public Groq Free-tier inference connectivity check"
+SMOKE_TASK_PAYLOAD = {
+    "data_classification": "public",
+    "topic": "Confirm one bounded free-tier model inference and report the selected model.",
+    "questions": ["Return a concise confirmation that the smoke test completed."],
+    "source_urls": [],
+}
+SPECIALIST_PROOF_PRIORITY = 100
+
 
 def _active_task_summary(tasks: list[dict]) -> list[dict]:
     """Emit bounded operational metadata only; omit task titles, keys and payloads."""
@@ -31,6 +41,32 @@ def _queue_state(tasks: list[dict]) -> tuple[list[dict], list[dict]]:
     return pending, running
 
 
+def _reserved_smoke_pending(tasks: list[dict]) -> list[dict]:
+    """Recognize only the exact, untouched researcher smoke task reserved for the next workflow."""
+    reserved = []
+    for task in tasks:
+        if not (
+            isinstance(task, dict)
+            and task.get("task_type") == "research_brief"
+            and task.get("title") == SMOKE_TASK_TITLE
+            and task.get("idempotency_key") == SMOKE_TASK_IDEMPOTENCY_KEY
+            and task.get("status") == "pending"
+            and task.get("attempts") == 0
+            and task.get("max_attempts") == 1
+            and task.get("execution_mode") == "not_started"
+            and task.get("priority") == 50
+            and task.get("execution_lane") == "specialist:researcher"
+            and task.get("dependencies_json") in ("[]", None)
+        ):
+            continue
+        try:
+            if json.loads(task.get("payload_json", "")) == SMOKE_TASK_PAYLOAD:
+                reserved.append(task)
+        except (TypeError, ValueError):
+            continue
+    return reserved
+
+
 def main() -> None:
     if os.environ.get("RAAWAA_ENGINE_LIVE_INFERENCE", "disabled").lower() not in {"", "0", "false", "disabled", "off"}:
         raise SystemExit("Refusing lane proof unless live inference is disabled")
@@ -43,13 +79,22 @@ def main() -> None:
         raise SystemExit("Refusing lane proof because bounded queue readback may be incomplete")
     queue_rows = general_before + researcher_before
     pending, running = _queue_state(queue_rows)
-    if pending:
+    reserved_smoke = _reserved_smoke_pending(researcher_before)
+    reserved_ids = {task["id"] for task in reserved_smoke}
+    unrelated_pending = [task for task in pending if task.get("id") not in reserved_ids]
+    if len(reserved_smoke) > 1 or unrelated_pending:
         print(json.dumps({
             "status": "blocked_unrelated_pending_staging_tasks",
-            "pending_task_metadata": _active_task_summary(pending),
+            "pending_task_metadata": _active_task_summary(unrelated_pending),
+            "reserved_smoke_task_left_untouched": _active_task_summary(reserved_smoke),
             "running_tasks_left_untouched": _active_task_summary(running),
         }, sort_keys=True), flush=True)
         raise SystemExit("Refusing to claim unrelated pending Staging work")
+    if reserved_smoke:
+        print(json.dumps({
+            "status": "reserved_smoke_task_preserved_for_one_shot_inference",
+            "reserved_smoke_task_metadata": _active_task_summary(reserved_smoke),
+        }, sort_keys=True), flush=True)
     if running:
         # Running leases are not candidates for claim_next. Leave them untouched;
         # with no unrelated pending rows, the proof's own dependency-free tasks
@@ -79,6 +124,7 @@ def main() -> None:
         {"topic": "deterministic lane isolation test"},
         idempotency_key=f"staging-lane-researcher:{suffix}",
         execution_lane="specialist:researcher",
+        priority=SPECIALIST_PROOF_PRIORITY,
     )
 
     general_claim = store.claim_next(execution_mode="dry_run", worker_lane="general")
@@ -146,7 +192,14 @@ def main() -> None:
         raise SystemExit("Specialist task did not complete")
     if researcher_tasks[specialist["id"]].get("execution_lane") != "specialist:researcher":
         raise SystemExit("Specialist lane was not persisted")
-    print("PASS: general/specialist isolation, authenticated claim, wrong-lane lifecycle rejection, and readback")
+    if reserved_smoke:
+        reserved_id = reserved_smoke[0]["id"]
+        preserved = researcher_tasks.get(reserved_id)
+        if (not preserved or preserved.get("status") != "pending"
+                or preserved.get("idempotency_key") != SMOKE_TASK_IDEMPOTENCY_KEY
+                or preserved.get("attempts") != 0):
+            raise SystemExit("Lane proof modified or claimed the reserved Groq smoke task")
+    print("PASS: general/specialist isolation, protected smoke-task preservation, authenticated claim, wrong-lane lifecycle rejection, and readback")
 
 
 if __name__ == "__main__":

@@ -1,4 +1,5 @@
 """Regression coverage for standalone Staging lane proof invocation."""
+import json
 import os
 from pathlib import Path
 import subprocess
@@ -47,6 +48,71 @@ class StagingLaneIsolationScriptTests(unittest.TestCase):
         ])
         self.assertEqual(pending, [])
         self.assertEqual([task["id"] for task in running], ["running-1"])
+
+
+    def test_exact_reserved_groq_smoke_task_is_the_only_pending_exception(self):
+        from scripts.run_staging_lane_isolation import (
+            SMOKE_TASK_IDEMPOTENCY_KEY, SMOKE_TASK_TITLE, SMOKE_TASK_PAYLOAD,
+            _reserved_smoke_pending,
+        )
+        task = {
+            "id": "reserved-smoke-1",
+            "task_type": "research_brief",
+            "title": SMOKE_TASK_TITLE,
+            "idempotency_key": SMOKE_TASK_IDEMPOTENCY_KEY,
+            "payload_json": json.dumps(SMOKE_TASK_PAYLOAD),
+            "status": "pending",
+            "attempts": 0,
+            "max_attempts": 1,
+            "execution_mode": "not_started",
+            "priority": 50,
+            "execution_lane": "specialist:researcher",
+            "dependencies_json": "[]",
+        }
+        self.assertEqual(_reserved_smoke_pending([task]), [task])
+
+    def test_smoke_lookalike_with_changed_payload_is_not_exempt(self):
+        from scripts.run_staging_lane_isolation import (
+            SMOKE_TASK_IDEMPOTENCY_KEY, SMOKE_TASK_TITLE, _reserved_smoke_pending,
+        )
+        task = {
+            "id": "lookalike",
+            "task_type": "research_brief",
+            "title": SMOKE_TASK_TITLE,
+            "idempotency_key": SMOKE_TASK_IDEMPOTENCY_KEY,
+            "payload_json": '{"data_classification":"private"}',
+            "status": "pending",
+            "attempts": 0,
+            "max_attempts": 1,
+            "execution_mode": "not_started",
+            "priority": 50,
+            "execution_lane": "specialist:researcher",
+            "dependencies_json": "[]",
+        }
+        self.assertEqual(_reserved_smoke_pending([task]), [])
+
+    def test_smoke_task_is_not_exempt_after_it_has_been_claimed_or_reprioritized(self):
+        from scripts.run_staging_lane_isolation import (
+            SMOKE_TASK_IDEMPOTENCY_KEY, SMOKE_TASK_TITLE, SMOKE_TASK_PAYLOAD,
+            _reserved_smoke_pending,
+        )
+        base = {
+            "id": "reserved-smoke-2",
+            "task_type": "research_brief",
+            "title": SMOKE_TASK_TITLE,
+            "idempotency_key": SMOKE_TASK_IDEMPOTENCY_KEY,
+            "payload_json": json.dumps(SMOKE_TASK_PAYLOAD),
+            "status": "pending",
+            "attempts": 0,
+            "max_attempts": 1,
+            "execution_mode": "not_started",
+            "priority": 50,
+            "execution_lane": "specialist:researcher",
+            "dependencies_json": "[]",
+        }
+        for field, value in (("status", "running"), ("priority", 100), ("attempts", 1)):
+            candidate = {**base, field: value}
+            self.assertEqual(_reserved_smoke_pending([candidate]), [])
 
     def test_script_imports_repository_modules_when_run_outside_repo(self):
         script = ROOT / "scripts" / "run_staging_lane_isolation.py"
