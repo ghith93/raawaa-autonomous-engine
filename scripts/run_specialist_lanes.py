@@ -9,8 +9,12 @@ from __future__ import annotations
 
 import json
 import os
+import sys
 from pathlib import Path
 from urllib.parse import urlsplit
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
 
 from engine.batch_runner import run_batch
 from engine.cli import db_path
@@ -20,7 +24,6 @@ from engine.task_invocation_store import TaskInvocationStore
 from engine.worker import run_once
 
 
-ROOT = Path(__file__).resolve().parents[1]
 POLICY_PATH = ROOT / "config" / "policy.groq-smoke.json"
 REGISTRY_PATH = ROOT / "config" / "provider_profiles.groq-smoke.json"
 STAGING_HOST = "raawaa-autonomous-engine-staging.ghith-shikhkhaled.workers.dev"
@@ -40,6 +43,7 @@ LANES = (
 def _is_exact_staging_url(value: str) -> bool:
     try:
         parsed = urlsplit(value)
+        port = parsed.port
     except ValueError:
         return False
     return (
@@ -47,7 +51,7 @@ def _is_exact_staging_url(value: str) -> bool:
         and parsed.hostname == STAGING_HOST
         and parsed.username is None
         and parsed.password is None
-        and parsed.port is None
+        and port is None
         and parsed.path in ("", "/")
         and not parsed.query
         and not parsed.fragment
@@ -71,6 +75,8 @@ def _safe_batch_outcome(batch: dict) -> tuple[bool, int, str]:
             continue
         if result.get("status") != "succeeded" or result.get("mode") != "live_inference":
             return False, processed, "task_not_successfully_executed"
+    if processed == 0 and batch.get("stop_reason") != "queue_idle":
+        return False, processed, "empty_batch_not_idle"
     if processed == 1 and not any(
         isinstance(item, dict)
         and item.get("status") == "succeeded"
@@ -115,7 +121,10 @@ def main() -> int:
         return 1
 
     enabled = []
-    seen_tokens = {base.get("RAAWAA_ENGINE_API_TOKEN", "")}
+    seen_tokens = {
+        base.get("RAAWAA_ENGINE_API_TOKEN", ""),
+        base.get("RAAWAA_ENGINE_QUOTA_ADMIN_TOKEN", ""),
+    }
     for lane, token_name, task_type in LANES:
         lane_token = base.get(token_name, "").strip()
         if len(lane_token) < 32 or lane_token in seen_tokens:
