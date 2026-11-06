@@ -196,7 +196,7 @@ Keep PR #459 draft until ignored-file integrity is corrected and an actual enfor
 
 - Current main SHA: `ca61019682a222559a339ad7e4c3c78b13d2a373`. Exact-main Engine CI [#42257309989](https://github.com/ghith93/raawaa-autonomous-engine/actions/runs/42257309989) passed all five test/Staging/telemetry/readback jobs.
 - The exact main Git tree contains 396 entries and 23 workflow YAML files under `.github/workflows/`.
-- Current open draft PRs: #574, #536, #523, and #405. Their exact-head CI runs passed historically, but each branch is behind current main; no independent review submissions or review threads were found. No merge was performed.
+- Older open draft PRs: #574, #536, #523, and #405; their exact-head CI runs passed historically, but their branches are behind/diverged from current main and no independent review submissions or review threads were found. New docs-only PR [#608](https://github.com/ghith93/raawaa-autonomous-engine/pull/608) is based on current main `ca61019682a222559a339ad7e4c3c78b13d2a373`, head `d82bfac55006f9f7b4019eea60b92415dd4e4ebf`, with exact-head CI pending and no review yet. No merge was performed.
 - Active main ruleset #26464558 requires PRs, strict `test` status, and resolved review threads; it requires zero approving reviews and has a repository-role bypass actor. Do not claim that independent approval is enforced by GitHub.
 
 ### Cloudflare, D1, queue, and cost
