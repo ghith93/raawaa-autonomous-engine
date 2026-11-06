@@ -1,21 +1,55 @@
-# Agent startup policy
+# Agent Startup Policy
 
-Before every work cycle, every executive/lead agent, specialist, coding agent, reviewer, and AI-driven automation MUST read, in order:
+Before planning, delegating, coding, reviewing, merging, or reporting in any session, every coding agent MUST read and follow:
+
 1. `docs/master-autonomous-execution-directive.ar.md`
 2. `docs/continuous-improvement-charter.md`
 3. `docs/architecture.md`
-4. `docs/operations.md`, `docs/operations/asset-register.md`, `docs/operations/tooling-capability-inventory-2026-11-03.md`, `config/integrations.json`, `config/tool_permissions.json`, and applicable subsystem policies.
+4. `docs/operations.md`
+5. `docs/integrations/arena-agent-mode.ar.md`
+6. `config/session_continuity.json`
 
-These are mandatory repository policies, not optional context. Re-read them each cycle; do not rely only on chat history or cached summaries. If a runtime cannot read them, report that limitation and do not claim policy loading succeeded.
+## Mandatory Session Start Protocol (Every New or Resumed Session)
 
-A user message consisting only of `.` means resume autonomous execution from the latest verified repository state: inspect current GitHub state, PRs/issues, exact-head CI, workflows, deployments, and persisted task/memory state; execute the highest-priority safe unblocked task; test, review, update durable state, and continue. Do not return only a plan, ask for routine technical approval, or repeat completed work.
+Never rely on chat-window memory alone. Reconstruct live project state from GitHub and the repository first:
 
-Use the highest legitimate access already granted and needed. The operator's current mandate is a strict zero-spend rule: USD 0 per billing month for this project, with every monetary cap in the active policy (`config/policy.json`) set to exactly USD 0 and paid model calls and paid fallback disabled. Only verified zero-cost routes may ever be selected, and unknown pricing is blocked, never treated as free. (Superseded historical policy: a USD 15 all-in envelope with a USD 12 model allocation applied until the owner's 2026-11-05 zero-spend directive; do not reintroduce any non-zero cap without a new explicit owner spend approval.) Paid model fallback remains disabled until provider-side hard-stop controls are independently verified and the policy is deliberately updated under such an approval. No automatic plan upgrades. Existing security, privacy, data-classification, provider eligibility, quota, kill-switch, deployment, external-write, and irreversible-action gates remain binding. Do not modify storefront repositories. Use isolated branches and merge only after exact-head validation. Never expose secret values. Distinguish implementation, tests, merge, deployment, and runtime verification; claims require evidence.
-## Runtime enforcement requirement
+1. **Run the deterministic continuity preflight:**
+   ```bash
+   python3 scripts/session_continuity.py status --fetch-live
+   ```
+2. **Read the permanent coordination channel (`ghith93/raawaa-autonomous-engine` Issue `#464`):**
+   - Read the authoritative `CURRENT OWNER-AUTHORIZED OPERATING POLICY` in the top description of Issue `#464`.
+   - Read **every** comment on Issue `#464` with `Comment ID` greater than the effective watermark (`max(config/session_continuity.json.watermark.last_processed_comment_id, latest ARENA REPORT watermark on #464)`).
+   - Never ask the owner to manually copy or paste messages/reports between chats; GitHub Issue `#464` is the permanent handoff and decision channel.
+3. **Inspect the canonical capability, tool, workflow, integration, and policy registers before proposing or building anything:**
+   - `config/policy.json`, `config/agents.json`, `config/provider_profiles.json`, `config/integrations.json`, `config/tool_permissions.json`
+   - `docs/operations/asset-register.md`, `docs/operations/workflow-catalog.md`, `docs/operations/tooling-capability-inventory-2026-11-03.md`
+   - Live `.github/workflows/*.yml`, open PRs, open issues, exact-head CI runs, and deployed service endpoints.
+   - Note: `engine/memory.py` (`docs/memory-v1.md`) is runner-local SQLite and does **not** persist across ephemeral Arena sandboxes or GitHub Actions runners; durable cross-session state must live in GitHub (`#464` + tracked repository files). Do **not** build a parallel memory database or competing agent framework without proven need.
+4. **Resume on `.`:** A user message consisting only of `.` means: run this Session Start Protocol, reconstruct the latest verified repository and `#464` state, select the highest-priority safe unblocked task, execute, verify exact-head CI, and continue.
 
-The Python engine worker now loads and validates all five required policy documents at the start of every `run_once` cycle, before claiming a task. It reads the full documents locally, then supplies a compact trusted execution-policy summary plus SHA-256 fingerprints to the live model prompt before untrusted task payload. Regression tests cover missing/empty policy, fail-closed behavior, and prompt ordering. This enforcement applies to the Python worker/CLI Task Runner path; every new agent or provider invocation path must reuse `load_operating_policy()` and add equivalent tests. Do not imply that unrelated services or future runtimes inherit this enforcement automatically.
+## Manual-Wake Boundary (Explicit Technical Constraint)
 
+- **No automatic Arena session wake exists:** GitHub Issue `#464` is a durable asynchronous inbox and audit log; posting a comment on `#464` or running a GitHub Actions workflow does **not** automatically wake or start an Arena Agent Mode session.
+- **Strict prohibition on unofficial interfaces:** Never use undocumented/private Arena endpoints, UI scraping, or browser automation to simulate session wake-ups. A new or resumed Arena session starts only via a user-initiated message in Arena Agent Mode, which then immediately reads `AGENTS.md`, `config/session_continuity.json`, and Issue `#464`.
 
-## Mandatory capability and asset preflight
+## Standing Execution & Cost Guardrails
 
-Before creating a workflow, connector, agent, scheduler, provider route, account setup request, or new infrastructure, inspect the current tool/skill catalog, the dated tooling capability inventory, existing Activepieces projects/connections/flows, and the repository workflow tree. Distinguish catalog presence from an authenticated account, and distinguish ChatGPT-side connectors from credentials and adapters available inside the standalone engine. Reuse a verified existing mechanism before implementing another one. Refresh the durable inventory with evidence, last-verified time, permission scope, secret names only, costs/quotas, usage instructions, and limitations. Never record secret values.
+- **USD 0 spend (`$0` hard ceiling):** Zero new monetary spend across all models, APIs, cloud services, and infrastructure. Genuinely free provider quotas are permitted only when billing cannot be triggered and existing safety/privacy gates are respected.
+- **No weakening of safety gates:** Preserve established contracts, `safe_dry_run` defaults, secret-handling rules (names only, never values), least-privilege workflow guards, and repository separation (`ghith93/raawaa-autonomous-engine` vs external repos unless explicitly scoped for read-only review).
+
+## Mandatory Session End Protocol
+
+Before ending any substantive session:
+
+1. **Update repository watermark when committing repo changes:**
+   ```bash
+   python3 scripts/session_continuity.py record --comment-id <HIGHEST_PROCESSED_COMMENT_ID> --comment-created-at <ISO8601_UTC> --main-sha <VERIFIED_MAIN_SHA> --summary "<concise verified state>"
+   ```
+2. **Post a durable checkpoint comment on GitHub Issue `#464`** beginning literally with `ARENA REPORT` and recording:
+   - Highest processed `Comment ID` (watermark)
+   - Exact `main` SHA and active branch/PR SHA(s)
+   - Tests run and exact-head CI / workflow run IDs and conclusions
+   - Verified vs unverified runtime/deployment boundaries
+   - Provider/quota usage and confirmed `USD 0` spend evidence
+   - Remaining risks/blockers, next bounded task, and next actor

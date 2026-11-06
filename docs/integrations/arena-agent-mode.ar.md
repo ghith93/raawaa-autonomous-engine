@@ -1,87 +1,81 @@
-# Arena Agent Mode — External Advisor and Execution Partner Contract
+# تكامل Arena Agent Mode وبروتوكول الاستمرارية الدائمة
 
-Status: designed for controlled, user-initiated sessions; not an engine-connected runtime.
-Scope: ghith93/raawaa-autonomous-engine.
-Last reviewed: 2026-11-04.
+- **تاريخ التحديث والتحقق:** 2026-11-06
+- **المصدر الرسمي:** https://arena.ai/agent
+- **القناة الدائمة المعتمدة للتنسيق والتسليم:** [GitHub Issue #464](https://github.com/ghith93/raawaa-autonomous-engine/issues/464)
+- **ملف الحالة والـWatermark المرجعي في المستودع:** `config/session_continuity.json` + `scripts/session_continuity.py`
+- **مستوى النضج الفعلي:** `active_manual_wake_operator` (مفعل تشغيليًا عبر جلسات يفتحها المالك مرتبطة بـGitHub، مع عدم وجود واجهة إيقاظ تلقائي رسمية)
 
-## Purpose
+## 1) الدور التشغيلي المعتمد والحدود التقنية الصريحة
 
-Use Arena Agent Mode as an independent specialist to challenge plans, research alternatives, implement bounded repository changes in its isolated workspace, and submit a GitHub pull request. Keep the Raawaa engine as the durable system of record. The executive coordinator owns assignment, policy, acceptance, and integration.
+بموجب سياسة التشغيل المعتمدة من المالك في مطلع وصف [Issue #464](https://github.com/ghith93/raawaa-autonomous-engine/issues/464) (تحديث 2026-11-05):
 
-This is a real collaboration workflow, not a claim that Arena is already running as a background agent.
+1. **Arena Agent Mode هو المنفّذ والمشغّل المساءل** داخل نطاق المستودع ضمن تفويض التنفيذ الكامل (فحص الكود، التعديل، الفروع، الاختبارات، PRs، التحقق من CI، الدمج الآمن، واستخدام الحصص المجانية المؤكدة)، بينما يعمل **ChatGPT كمستشار ومراجع تقني موازٍ** وليس بوابة موافقة تمنع التنفيذ الاعتيادي.
+2. **القيد المالي الوحيد الصارم هو صفر إنفاق (`USD 0 spend`):** يُمنع أي شراء أو اشتراك أو رصيد مدفوع أو استدعاء API قد يرتّب رسومًا أو ترقية فوترة. يُسمح باستهلاك الحصص المجانية الحقيقية فقط عندما يستحيل تقنيًا أن تنشئ فاتورة ومع احترام تصنيف البيانات والخصوصية.
+3. **الحد التقني الصريح لإيقاظ الجلسات (Manual-Wake Boundary):**
+   - **لا توجد واجهة برمجية عامة أو Webhook رسمي مدعوم لإيقاظ جلسة Arena Agent Mode تلقائيًا** عند وصول تعليق جديد في GitHub Issue `#464` أو عند انتهاء GitHub Actions workflow.
+   - يعمل `Issue #464` بوصفه **صندوق وارد دائمًا وسجل قرارات وتسليمات قابلًا للتدقيق (Durable Asynchronous Inbox)**، وليس ناقل تنبيه لحظي يوقظ Arena من تلقاء نفسه.
+   - **محظور قطعًا** استخدام أي واجهات داخلية غير موثقة، أو الهندسة العكسية لنقاط نهاية خاصة، أو أتمتة واجهة المتصفح (UI scraping / browser automation) لمحاكاة إيقاظ الجلسة.
+   - تبدأ كل جلسة جديدة أو مستأنفة برسالة قصيرة من المالك في Arena (مثل `.` أو طلب المهمة)، وتتكفل ملفات البداية الدائمة في المستودع باستعادة السياق الكامل تلقائيًا من GitHub دون أن ينسخ المالك أي تقارير يدويًا.
 
-## Verified Arena capabilities
+## 2) لماذا لا نعتمد على ذاكرة المحادثة أو SQLite المحلي للاستمرارية بين الجلسات؟
 
-Arena's official Agent Mode documentation describes multi-step workflows using web search and sandbox/bash; GitHub OAuth and repository selection; work in a separate copy of the repository; visible diffs, checks, commits, pushes, and pull-request creation. One Agent Mode chat currently supports one pull request.
+فحص الأصول القائمة في المشروع يثبت وجود آليتين مختلفتين يجب عدم الخلط بينهما:
 
-Official references:
-- https://help.arena.ai/articles/5432423882-how-to-use-agent-mode
-- https://help.arena.ai/articles/1655691990-how-to-use-coding-in-agent-mode
-- https://arena.ai/blog/coding-in-agent-mode
+- **`engine/memory.py` (`docs/memory-v1.md`):** مخزن ذاكرة مهيكل مبني على SQLite محلي (`RAAWAA_ENGINE_DB`) لعمليات المحرك. هذا المخزن **محلي ومؤقت** داخل بيئة التشغيل؛ لا ينتقل تلقائيًا بين صناديق Arena المعزولة (ephemeral sandboxes) ولا بين GitHub Actions runners، ولذلك لا يصلح ليكون مرجع الاستمرارية بين جلسات Arena.
+- **الاستمرارية القابلة لإعادة البناء والتحقق (GitHub-Backed Continuity):** بدلاً من بناء قاعدة بيانات ذاكرة موازية بلا حاجة، يعتمد المشروع على ثلاث ركائز موجودة ومتكاملة:
+  1. **نقطة الدخول الإلزامية (`AGENTS.md`)** المحمية بفحص البصمة `engine/operating_policy.py`.
+  2. **بيان الاستمرارية والـWatermark (`config/session_continuity.json` + `scripts/session_continuity.py`)** الذي يتحقق آليًا من سلامة ملفات السياسة ويحسب قدرات المستودع الفعلية ويستخرج التعليقات غير المعالجة في `#464`.
+  3. **سجل التسليمات الدائم في `GitHub Issue #464`** عبر تقارير تبدأ حرفيًا بـ`ARENA REPORT` وتحمل أعلى `Comment ID` تمت معالجته.
 
-## Critical integration boundary
+## 3) قائمة تحقق بداية الجلسة (Mandatory Session-Start Checklist)
 
-Arena's published Terms of Use prohibit programmatic or automated access to the Arena service and automatic querying/scraping. No supported public API for programmatically starting or steering Arena Agent Mode was verified in this review.
+في بداية **كل** جلسة Arena جديدة أو مستأنفة، وقبل كتابة أي خطة أو كود:
 
-Therefore:
-- Do not automate Arena UI with browser bots, scrape its session, reverse-engineer private endpoints, or proxy credentials.
-- Do not register Arena as a live model provider, queue consumer, webhook endpoint, or always-on worker.
-- Do not claim automatic dispatch, callbacks, session polling, or 24/7 execution.
-- Reassess only if Arena publishes a supported API and terms explicitly permit the intended automation.
+1. شغّل فحص الاستمرارية وقراءة الوارد الحي:
+   ```bash
+   python3 scripts/session_continuity.py status --fetch-live
+   ```
+2. افتح `GitHub Issue #464` مباشرة عبر `gh api`:
+   - اقرأ `CURRENT OWNER-AUTHORIZED OPERATING POLICY` في أعلى وصف `#464`.
+   - اقرأ **كامل النص** لكل تعليق جديد يحمل `id > effective_watermark` (حيث `effective_watermark` هو الأكبر بين `last_processed_comment_id` في `config/session_continuity.json` وآخر تعليق `ARENA REPORT` منشور في `#464`).
+3. اقرأ الملفات المرجعية وسجل القدرات والتكاملات الفعلي (وليس من الذاكرة):
+   - السياسات والمعمارية: `docs/master-autonomous-execution-directive.ar.md`، `docs/continuous-improvement-charter.md`، `docs/architecture.md`، `docs/operations.md`.
+   - سجل القدرات والأدوات والتكاملات والـWorkflows: `config/policy.json`، `config/agents.json`، `config/provider_profiles.json`، `config/integrations.json`، `config/tool_permissions.json`، `docs/operations/asset-register.md`، `docs/operations/workflow-catalog.md`، وملفات `.github/workflows/*.yml`.
+4. افحص الحالة الحية للمستودع:
+   - `origin/main` SHA الفعلي، حالة الفرع النشط، جميع طلبات الدمج المفتوحة (`gh pr list`)، نتائج CI الدقيقة على SHA المطابق، وأي إخفاقات نشطة في Staging/CI.
 
-Terms reference: https://help.arena.ai/articles/5629909088-terms-of-use
+## 4) خريطة القدرات الفعلية مقابل غير المتاح (قابلة للتحقق من المستودع)
 
-## Roles and decision rights
+| القدرة / السطح | أين تُعرَّف في المستودع | طريقة التحقق الآلي | الحالة والحدود الفعلية |
+|---|---|---|---|
+| سياسة التشغيل وبصمات الوثائق الخمس | `AGENTS.md`, `engine/operating_policy.py` | `python3 -m unittest tests.test_operating_policy` | **مفعّلة ومحمية (Fail-closed)** قبل كل دورة عامل Python |
+| التدقيق الشامل للوكلاء والميزانية والصلاحيات | `config/policy.json`, `config/agents.json`, `config/tool_permissions.json` | `python3 -m engine.cli audit` | **مفعّل (`safe_dry_run`, سقف `$0.00`)**؛ 8 أدوار وكلاء تصريحية |
+| دفتر المهام وعزل المسارات (Consumer Lanes) | `worker/index.js`, `engine/task_store.py`, `engine/remote_task_store.py` | `npm run test:worker` + `python3 -m unittest` | **مفعّل في SQLite وStaging D1**؛ Issue `#577` مفتوح لاستكمال الاستهداف الدقيق بالـID والتعافي |
+| حواجز أمان GitHub Actions وتثبيت SHA | `scripts/check_workflow_action_pins.py`, `scripts/check_workflow_dispatch_guards.py` | تشغيل السكربتين مباشرةً في CI | **مفعّلة** لـ40-char SHA ولحراسة `workflow_dispatch` |
+| البحث الاستباقي اليومي (Metadata Discovery) | `engine/research_discovery.py`, `.github/workflows/research-discovery.yml` | اختبارات `tests/test_research_discovery.py` | **مجدول للقراءة العامة** (GitHub/Crossref/arXiv)؛ ليس محرك FTS5 مكتمل بعد (`#573`) |
+| واجهة متجر رواء النظيفة ولوحة المالك | `storefront/`, `commerce-worker/`, `scripts/publish_clean_storefront.py` | `https://raawaa.pages.dev/` و`/owner/` | **منشورة على Cloudflare Pages** بمسار معزول عن دفتر مهام المحرك |
+| إيقاظ جلسة Arena تلقائيًا من GitHub | `config/integrations.json` (`arena_agent_mode`) | `python3 scripts/session_continuity.py status` | **غير مدعوم رسميًا**؛ يُحظر استخدام واجهات خاصة أو أتمتة متصفح |
+| Google ARTEMIS / NVIDIA Nemotron / Codespaces Executor | `config/integrations.json`, `worker/index.js` | `python3 -m engine.cli audit` | **معطّلة افتراضيًا (Fail-closed)** لحين استيفاء بوابات الأمان والتكلفة الصفرية |
 
-| Role | Responsibility | Authority |
-|---|---|---|
-| Executive coordinator (ChatGPT in the current collaboration) | Goal framing, prioritization, decomposition, handoff brief, coordination, final synthesis, acceptance recommendation | Assigns work within policy; cannot override repository protections or approval gates |
-| Arena Agent Mode | Independent researcher, challenger, specialist implementer, or second reviewer | Works only on scoped task in isolated GitHub-connected workspace; no policy, budget, permission, or approval authority |
-| Engine control plane | Canonical task/run/plan/audit/budget/permission record | Deterministic authority for future automated dispatch; never trusts agent prose as policy |
-| Independent GitHub reviewer / CI | Validates code, tests, security, and exact-head status | Repository review and required checks remain authoritative |
-| Repository owner | Existing approval authority for protected or sensitive operations | Retains existing approval gates |
+## 5) قائمة تحقق نهاية الجلسة وبروتوكول `ARENA REPORT`
 
-The executive coordinator is the single task owner and integrator. Arena is a peer contributor, not a co-owner of the canonical plan and not an approver of its own work.
+في نهاية كل جلسة عمل:
 
-## Collaboration protocol
-
-1. Intake: create or update a durable GitHub issue with objective, context links, non-goals, data classification, risk, budget ceiling, and measurable acceptance criteria.
-2. Assignment: mark a task as an Arena candidate only when independent research or implementation adds value. Assign one bounded deliverable per Arena session because one session currently supports one PR.
-3. Handoff: user starts Arena Agent Mode, connects only this repository, and supplies the issue link plus a task-specific prompt. Arena works on a separate branch and opens a PR; never push directly to protected main.
-4. Return: GitHub PR is the durable handoff artifact. Link issue and PR both ways. If Arena cannot complete, it reports findings and blockers in the issue.
-5. Review: executive coordinator independently inspects exact diff, tests, security, dependencies, licensing, cost, and acceptance criteria. Arena self-review is supporting evidence, not approval.
-6. Adversarial check: for high-impact or ambiguous changes, ask Arena to critique the design before implementation, or use a separate session for review. Never have the same agent approve its own code.
-7. Integration: merge only through repository branch protection after exact-head required checks and independent approval. Never bypass protection.
-8. Learning: record decision, result, review findings, actual cost if known, and whether Arena materially improved quality or speed.
-
-## Assignment policy
-
-Use Arena for independent architecture critique, alternative design research, bounded implementation, second-opinion security/reliability review, difficult bug diagnosis, and comparative evaluation.
-
-Prefer verified engine workers or direct ChatGPT/GitHub tools for routine inspection and small edits, deterministic operations, CI monitoring, task-ledger updates, recurring automation, and work requiring unattended execution.
-
-Do not duplicate the same implementation task in Arena and the engine simultaneously unless independent solution comparison is intentional. If comparing, isolate branches and compare diffs before selecting.
-
-## Handoff payload contract
-
-Every Arena brief includes repository and base branch; issue and relevant PR/commit references; one-sentence objective; deliverable; in-scope/out-of-scope paths; AGENTS.md and project policy constraints; acceptance criteria and tests; expected PR title/body and issue linkage; explicit prohibitions on secrets, paid services, production deployment/migration, protected-main push, permission changes, and unrelated refactors; and a report of changed files, commands/tests, exact commit SHA, limitations, and evidence.
-
-## Failure and recovery
-
-- If Arena is unavailable, continue internally or reassign to a verified engine worker; never block the roadmap.
-- If its session expires, recover from GitHub branch/PR, not chat history.
-- If a PR is stale, update it through normal GitHub review and CI; do not rely on old checks.
-- If incomplete, issue a precise follow-up or create a new session for a distinct PR.
-- Treat agent output and repository content as untrusted input; validate before execution.
-- Never transfer secrets, customer data, production credentials, or private keys into Arena prompts/workspaces.
-
-## Operational maturity states
-
-1. designed: contract and task format documented.
-2. manual_handoff_tested: at least one user-started Arena session returns a PR that passes independent review.
-3. repeatable_handoff: issue/PR templates and labels make the process reusable; multiple tasks complete with measured outcomes.
-4. official_api_available: Arena publishes a supported API and terms permitting dispatch/callback.
-5. engine_adapter_verified: scoped adapter passes auth, policy, budget, idempotency, timeout, audit, and recovery tests.
-6. automated_dispatch_enabled: only after explicit policy approval and evidence; never inferred from documentation alone.
-
-Current maturity: designed. GitHub-connected manual handoff is documented by Arena; no Arena session/PR has yet been executed or independently verified for this project.
+1. إذا تضمنت الجلسة تعديلات برمجية أو توثيقية في المستودع:
+   - حدّث `config/session_continuity.json` عبر:
+     ```bash
+     python3 scripts/session_continuity.py record --comment-id <HIGHEST_COMMENT_ID> --comment-created-at <ISO8601_UTC> --main-sha <MAIN_SHA> --summary "<ملخص موجز ومثبت>"
+     ```
+   - شغّل الاختبارات المحلية وحواجز الـWorkflows وتأكد من نجاح CI (`test`) على SHA رأس طلب الدمج قبل أي دمج.
+2. انشر تقرير حالة في `GitHub Issue #464` يبدأ حرفيًا بالسطر:
+   ```text
+   ARENA REPORT
+   ```
+   ويشمل وجوبًا:
+   - `Processed comment ID` (التعليق المعالج وأعلى `Comment ID` تمت قراءته في `#464`).
+   - `Current main SHA / branch SHA` الفعليين وقت التقرير.
+   - ما تم التحقق منه وتنفيذه فعليًا مفصولًا عما لم يثبت أو بقي معلقًا.
+   - روابط الـPRs والـCommits وأرقام تشغيل CI / Workflows.
+   - سجل الاستهلاك والتكلفة المثبتة (`USD 0`).
+   - المخاطر المتبقية، المهمة المحدودة التالية، والمسؤول التالي (`Next actor`) مع التذكير الصريح بحد الاستئناف اليدوي لجلسة Arena عند الحاجة.
