@@ -20,8 +20,11 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
+import shutil
 import subprocess
 import sys
+import tempfile
 import time
 import urllib.error
 import urllib.request
@@ -29,6 +32,7 @@ from pathlib import Path
 from typing import Any
 
 CF_API_BASE = "https://api.cloudflare.com/client/v4"
+PAGES_COMPAT_DATE = "2026-10-28"
 
 # Priority order of clean, zero-personal-name brand slugs on `.pages.dev`.
 PREFERRED_BRAND_SLUGS: tuple[str, ...] = (
@@ -41,6 +45,25 @@ PREFERRED_BRAND_SLUGS: tuple[str, ...] = (
 )
 
 LEGACY_WORKER_TO_RETIRE = "raawaa-storefront"
+
+_ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
+_SECRET_LIKE_RE = re.compile(r"[A-Za-z0-9_-]{30,}")
+
+
+def _sanitize_error_snippet(raw: str) -> str:
+    """Extract a short, secret-free diagnostic line from Wrangler output."""
+    cleaned = _ANSI_RE.sub("", raw or "")
+    cleaned = _SECRET_LIKE_RE.sub("<redacted>", cleaned)
+    interesting: list[str] = []
+    for line in cleaned.splitlines():
+        s = line.strip()
+        if not s:
+            continue
+        low = s.lower()
+        if any(k in low for k in ("error", "code:", "typeerror", "invalid", "failed", "authentication", "permission")):
+            interesting.append(s)
+    joined = " | ".join(interesting[:2]) if interesting else " ".join(cleaned.split())
+    return joined[:110]
 
 
 def resolve_cloudflare_credentials(env: dict[str, str] | None = None) -> tuple[str, str]:
@@ -102,11 +125,7 @@ def _cf_error_code(payload: dict[str, Any]) -> str:
 
 
 def _is_pages_subdomain_globally_free(slug: str, timeout: int = 5) -> bool:
-    """Return True if `https://<slug>.pages.dev` is not already serving another account's site.
-
-    Cloudflare Pages appends a random 3-char hash (`<slug>-xyz.pages.dev`) when `<slug>.pages.dev`
-    is already claimed globally. Checking beforehand lets us pick an exact, unsuffixed brand URL.
-    """
+    """Return True if `https://<slug>.pages.dev` is not already serving another account's site."""
     req = urllib.request.Request(
         f"https://{slug}.pages.dev/",
         headers={"User-Agent": "RaawaaSlugCheck/1.0"},
@@ -114,14 +133,18 @@ def _is_pages_subdomain_globally_free(slug: str, timeout: int = 5) -> bool:
     )
     try:
         with urllib.request.urlopen(req, timeout=timeout) as resp:
-            # 2xx/3xx means another active Pages site already owns `<slug>.pages.dev`
             return resp.status >= 500
     except urllib.error.HTTPError as exc:
-        # 522 / 523 / 404 from unassigned Cloudflare Pages edge means free to claim
         return exc.code in (404, 522, 523, 530)
     except Exception:
-        # NXDOMAIN / TLS / connection refused => unclaimed!
         return True
+
+
+def _default_deployment_configs() -> dict[str, Any]:
+    return {
+        "production": {"compatibility_date": PAGES_COMPAT_DATE},
+        "preview": {"compatibility_date": PAGES_COMPAT_DATE},
+    }
 
 
 def select_or_create_pages_project(
@@ -149,21 +172,39 @@ def select_or_create_pages_project(
             existing_by_name[str(proj["name"]).lower()] = proj
 
     # 1) Reuse highest-priority clean brand project already owned by this account
-    for slug in candidates:
-        if slug in existing_by_name:
-            proj = existing_by_name[slug]
-            subdomain = str(proj.get("subdomain") or f"{slug}.pages.dev").strip()
-            domains = [
-                str(d).strip()
-                for d in (proj.get("domains") or [])
-                if d and not str(d).strip().endswith(".workers.dev")
-            ]
-            return {
-                "project_name": slug,
-                "subdomain": subdomain,
-                "domains": domains,
-                "created": False,
-            }
+    #    (preferring unsuffixed `<slug>.pages.dev` if multiple exist)
+    owned_candidates = [slug for slug in candidates if slug in existing_by_name]
+    exact_owned = [
+        slug
+        for slug in owned_candidates
+        if str(existing_by_name[slug].get("subdomain") or "") == f"{slug}.pages.dev"
+    ]
+    chosen_owned = exact_owned[0] if exact_owned else (owned_candidates[0] if owned_candidates else None)
+
+    if chosen_owned:
+        proj = existing_by_name[chosen_owned]
+        # Ensure `deployment_configs` has `compatibility_date` initialized for Wrangler 4
+        request_fn(
+            "PATCH",
+            f"{list_url}/{chosen_owned}",
+            auth_headers,
+            {
+                "production_branch": "main",
+                "deployment_configs": _default_deployment_configs(),
+            },
+        )
+        subdomain = str(proj.get("subdomain") or f"{chosen_owned}.pages.dev").strip()
+        domains = [
+            str(d).strip()
+            for d in (proj.get("domains") or [])
+            if d and not str(d).strip().endswith(".workers.dev")
+        ]
+        return {
+            "project_name": chosen_owned,
+            "subdomain": subdomain,
+            "domains": domains,
+            "created": False,
+        }
 
     # 2) Filter candidates to globally unclaimed exact `<slug>.pages.dev` first, then rest
     free_first = [s for s in candidates if slug_free_fn(s)]
@@ -175,7 +216,11 @@ def select_or_create_pages_project(
             "POST",
             list_url,
             auth_headers,
-            {"name": slug, "production_branch": "main"},
+            {
+                "name": slug,
+                "production_branch": "main",
+                "deployment_configs": _default_deployment_configs(),
+            },
         )
         if c_status in (200, 201) and c_payload.get("success"):
             proj = c_payload.get("result") or {}
@@ -190,26 +235,6 @@ def select_or_create_pages_project(
         if c_status in (401, 403):
             raise RuntimeError(f"cf_pages_create_permission_denied:{last_code}")
 
-    # 3) Fallback: if `raawaa-store` already exists in this account, we can still check it
-    if "raawaa-store" in existing_by_name:
-        # Try timestamped clean brand slug before touching anything shared
-        fallback_slug = "raawaa-syria"
-        c_status, c_payload = request_fn(
-            "POST",
-            list_url,
-            auth_headers,
-            {"name": fallback_slug, "production_branch": "main"},
-        )
-        if c_status in (200, 201) and c_payload.get("success"):
-            proj = c_payload.get("result") or {}
-            subdomain = str(proj.get("subdomain") or f"{fallback_slug}.pages.dev").strip()
-            return {
-                "project_name": fallback_slug,
-                "subdomain": subdomain,
-                "domains": [subdomain],
-                "created": True,
-            }
-
     raise RuntimeError(f"cf_pages_no_slug_available:{last_code}")
 
 
@@ -219,29 +244,47 @@ def deploy_pages_directory(
     account_id: str,
     api_token: str,
 ) -> None:
-    """Deploy static `storefront/` to Cloudflare Pages via pinned Wrangler 4.156.1."""
-    child_env = {
-        **os.environ,
-        "CLOUDFLARE_API_TOKEN": api_token,
-        "CLOUDFLARE_ACCOUNT_ID": account_id,
-    }
-    cmd = [
-        "npx",
-        "--yes",
-        "wrangler@4.156.1",
-        "pages",
-        "deploy",
-        str(storefront_dir),
-        f"--project-name={project_name}",
-        "--branch=main",
-        "--commit-dirty=true",
-    ]
-    proc = subprocess.run(cmd, env=child_env, check=False, text=True, capture_output=True)
-    if proc.returncode != 0:
-        raise RuntimeError(f"wrangler_pages_deploy_failed:exit_{proc.returncode}")
+    """Deploy static `storefront/` from an isolated temp directory via Wrangler 4.156.1."""
+    with tempfile.TemporaryDirectory(prefix="raawaa-pages-") as tmp:
+        tmp_path = Path(tmp)
+        site_dir = tmp_path / "site"
+        shutil.copytree(storefront_dir, site_dir)
+        (tmp_path / "wrangler.toml").write_text(
+            f'name = "{project_name}"\n'
+            f'compatibility_date = "{PAGES_COMPAT_DATE}"\n'
+            f'pages_build_output_dir = "./site"\n',
+            encoding="utf-8",
+        )
+        child_env = {
+            **os.environ,
+            "CLOUDFLARE_API_TOKEN": api_token,
+            "CLOUDFLARE_ACCOUNT_ID": account_id,
+        }
+        cmd = [
+            "npx",
+            "--yes",
+            "wrangler@4.156.1",
+            "pages",
+            "deploy",
+            "./site",
+            f"--project-name={project_name}",
+            "--branch=main",
+            "--commit-message=release",
+        ]
+        proc = subprocess.run(
+            cmd,
+            cwd=str(tmp_path),
+            env=child_env,
+            check=False,
+            text=True,
+            capture_output=True,
+        )
+        if proc.returncode != 0:
+            diag = _sanitize_error_snippet((proc.stderr or "") + "\n" + (proc.stdout or ""))
+            raise RuntimeError(f"pages_deploy({project_name}):{diag}")
 
 
-def verify_public_storefront(base_url: str, attempts: int = 8, delay_sec: float = 4.0) -> bool:
+def verify_public_storefront(base_url: str, attempts: int = 15, delay_sec: float = 4.0) -> bool:
     """Confirm both `/` and `/owner/` return HTTP 200 on the public clean URL."""
     clean_base = base_url.rstrip("/")
     for _ in range(attempts):
@@ -358,7 +401,6 @@ def main(argv: list[str] | None = None) -> int:
         selected = select_or_create_pages_project(account_id, token)
         project_name = selected["project_name"]
         subdomain = selected["subdomain"]
-        # Prefer custom domain if attached, otherwise clean `<brand>.pages.dev`
         custom_domains = [
             d for d in selected.get("domains", []) if not d.endswith(".pages.dev")
         ]
@@ -392,7 +434,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"Published clean owner dashboard: {owner_url}")
         return 0
     except Exception as exc:
-        reason = str(exc)[:120]
+        reason = str(exc)[:135]
         publish_github_deployment_status("failure", "", reason)
         print(f"Clean storefront publish failed: {reason}", file=sys.stderr)
         return 1
