@@ -34,14 +34,24 @@ def main() -> None:
     researcher_before = store.list_tasks(100, worker_lane="specialist:researcher")
     if len(general_before) >= 100 or len(researcher_before) >= 100:
         raise SystemExit("Refusing lane proof because bounded queue readback may be incomplete")
-    active = [task for task in general_before + researcher_before
-              if task.get("status") in {"pending", "running"}]
-    if active:
+    queue_rows = general_before + researcher_before
+    pending = [task for task in queue_rows if task.get("status") == "pending"]
+    running = [task for task in queue_rows if task.get("status") == "running"]
+    if pending:
         print(json.dumps({
-            "status": "blocked_unrelated_active_staging_tasks",
-            "active_task_metadata": _active_task_summary(active),
+            "status": "blocked_unrelated_pending_staging_tasks",
+            "pending_task_metadata": _active_task_summary(pending),
+            "running_tasks_left_untouched": _active_task_summary(running),
         }, sort_keys=True), flush=True)
-        raise SystemExit("Refusing to claim unrelated Staging work; relevant queue lanes are not idle")
+        raise SystemExit("Refusing to claim unrelated pending Staging work")
+    if running:
+        # Running leases are not candidates for claim_next. Leave them untouched;
+        # with no unrelated pending rows, the proof's own dependency-free tasks
+        # are the only claimable rows in each tested lane.
+        print(json.dumps({
+            "status": "existing_running_tasks_left_untouched",
+            "running_task_metadata": _active_task_summary(running),
+        }, sort_keys=True), flush=True)
     suffix = uuid.uuid4().hex
     general = store.enqueue(
         "research_brief", "Staging general lane isolation proof",
