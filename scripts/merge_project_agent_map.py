@@ -55,7 +55,7 @@ def merge_project_map(
         nodes.append({
             "id": node_id,
             "label": item.get("label") or f"{item.get('kind', 'node')}: {source_id}",
-            "file_type": "project_map",
+            "file_type": "concept",
             "_origin": "project_map",
             "source_file": map_path,
             "source_location": f"nodes[{index}]",
@@ -103,7 +103,7 @@ def merge_project_map(
                         nodes.append({
                             "id": target,
                             "label": normalized,
-                            "file_type": "project_evidence",
+                            "file_type": "concept",
                             "_origin": "project_map",
                             "source_file": map_path,
                             "source_location": f"evidence:{normalized}",
