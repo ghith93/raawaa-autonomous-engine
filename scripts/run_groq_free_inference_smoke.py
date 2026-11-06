@@ -16,13 +16,10 @@ from urllib.parse import urlencode
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from engine.batch_runner import run_batch
-from engine.cli import db_path
-from engine.live_runtime import build_live_gateway
 from engine.remote_task_store import RemoteTaskStore
-from engine.worker import run_once
+from scripts.run_specialist_lanes import main as run_specialist_lanes
 
-IDEMPOTENCY_KEY = "groq-free-inference-staging-specialist-smoke-2026-11-06-v7"
+IDEMPOTENCY_KEY = "groq-free-inference-staging-specialist-smoke-2026-11-06-v8"
 EXECUTION_LANE = "specialist:researcher"
 ROUTE_IDS = ("groq:primary:openai/gpt-oss-20b",)
 
@@ -163,29 +160,12 @@ def main() -> int:
     _assert_only_exact_smoke_task_pending(store, task_id)
 
     before_routes = {route: _quota(store, route, task_id) for route in ROUTE_IDS}
-    gateway = build_live_gateway(
-        db_path(), ROOT / "config" / "policy.groq-smoke.json",
-        ROOT / "config" / "provider_profiles.groq-smoke.json", environ=os.environ,
-    )
-    if gateway is None:
-        raise SystemExit("Live gateway failed closed; no provider request was sent.")
-
-    batch = run_batch(
-        store, max_tasks=1, max_seconds=60, max_parallel=1,
-        runner=lambda current_store: run_once(
-            current_store, live_gateway=gateway, environ=os.environ,
-            worker_lane=EXECUTION_LANE,
-        ),
-    )
-    result = (batch.get("results") or [{}])[0]
-    if (batch.get("tasks_processed") != 1 or result.get("status") != "succeeded"
-            or result.get("mode") != "live_inference" or result.get("id") != task_id):
+    if run_specialist_lanes() != 0:
         print(json.dumps({
-            "status": "batch_failed_no_replay",
-            "batch": batch,
+            "status": "specialist_runner_failed_no_replay",
             "diagnostics": _diagnostics(store, task_id),
         }, sort_keys=True))
-        raise SystemExit("Bounded batch did not complete the expected live-inference task.")
+        raise SystemExit("The integrated Staging specialist runner did not complete the expected task.")
 
     saved = next((item for item in store.list_tasks(100, worker_lane=EXECUTION_LANE)
                   if item.get("id") == task_id), None)
@@ -214,7 +194,7 @@ def main() -> int:
     print(json.dumps({
         "status": "success",
         "task_id": task_id,
-        "mode": result.get("mode"),
+        "mode": "live_inference",
         "provider": "groq",
         "execution_lane": EXECUTION_LANE,
         "used_routes": used_routes,
