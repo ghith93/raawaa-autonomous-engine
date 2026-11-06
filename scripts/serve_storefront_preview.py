@@ -406,6 +406,15 @@ def make_handler(store: LocalCommerceStore):
                 status, payload = store.create_order(self._read_json())
                 self._send_json(status, payload)
                 return
+            if parsed.path == "/api/commerce/v1/owner/notify-test":
+                if not self._authorized():
+                    self._send_json(401, {"ok": False, "error": "unauthorized"})
+                    return
+                self._send_json(
+                    200,
+                    {"ok": True, "channel": "preview-simulated", "served_by": "local-preview"},
+                )
+                return
             self._send_json(404, {"ok": False, "error": "not_found"})
 
         def do_PATCH(self) -> None:

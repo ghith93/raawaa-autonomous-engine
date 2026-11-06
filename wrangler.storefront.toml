@@ -1,0 +1,14 @@
+# Public Multi-Store Storefront & Owner Dashboard Static Hosting
+# Completely isolated from `wrangler.toml` (`raawaa-autonomous-engine-control`).
+# Served at zero Worker compute cost via Cloudflare Workers Static Assets:
+#   Storefront:      https://raawaa-storefront.ghith-shikhkhaled.workers.dev/
+#   Owner Dashboard: https://raawaa-storefront.ghith-shikhkhaled.workers.dev/owner/
+
+name = "raawaa-storefront"
+compatibility_date = "2026-10-28"
+workers_dev = true
+
+[assets]
+directory = "./storefront"
+html_handling = "auto-trailing-slash"
+not_found_handling = "none"

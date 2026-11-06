@@ -1,39 +1,147 @@
-name: Deploy Storefront to GitHub Pages
+name: Deploy Commerce Storefront & Multi-Store Worker
 
 on:
   push:
-    branches: [main]
+    branches:
+      - main
     paths:
       - "storefront/**"
+      - "commerce-worker/**"
+      - "commerce-migrations/**"
+      - "config/stores/**"
+      - "wrangler.commerce.toml"
+      - "wrangler.storefront.toml"
+      - ".github/workflows/deploy-commerce-storefront.yml"
+  pull_request:
+    paths:
+      - "storefront/**"
+      - "commerce-worker/**"
+      - "commerce-migrations/**"
+      - "config/stores/**"
+      - "wrangler.commerce.toml"
+      - "wrangler.storefront.toml"
       - ".github/workflows/deploy-commerce-storefront.yml"
   workflow_dispatch:
 
 permissions:
   contents: read
-  pages: write
-  id-token: write
-
-concurrency:
-  group: commerce-storefront-pages
-  cancel-in-progress: false
 
 jobs:
-  publish-pages:
-    if: github.ref == 'refs/heads/main'
+  validate-commerce-bundle:
+    name: Validate Multi-Store Catalog, Storefront & Commerce Worker
     runs-on: ubuntu-latest
-    timeout-minutes: 5
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7
+        with:
+          python-version: "3.12"
+
+      - name: Set up Node
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
+        with:
+          node-version: "22"
+
+      - name: Verify Storefront Assets & Multi-Store Catalogs
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          for required in [
+              "storefront/index.html",
+              "storefront/styles.css",
+              "storefront/checkout.js",
+              "storefront/raawaa-store-bridge.js",
+              "storefront/owner/index.html",
+              "storefront/owner/owner.js",
+              "commerce-worker/index.js",
+              "commerce-worker/catalogs.js",
+              "commerce-migrations/0001_commerce_spine.sql",
+              "wrangler.storefront.toml",
+          ]:
+              assert Path(required).is_file(), f"Missing {required}"
+
+          for cfg in sorted(Path("config/stores").glob("*.json")):
+              data = json.loads(cfg.read_text(encoding="utf-8"))
+              assert data.get("store_id"), f"Missing store_id in {cfg}"
+              assert data.get("items"), f"Empty items in {cfg}"
+          print("All storefront, owner dashboard, and multi-store catalog files verified.")
+          PY
+
+      - name: Run Commerce Python & Node Tests
+        run: |
+          python -m unittest tests.test_cod_checkout_and_fixes -v
+          node --test tests/commerce_worker.test.js
+
+      - name: Dry-Run Storefront Static Assets Bundle
+        run: |
+          npx --yes wrangler@4.156.1 deploy --config wrangler.storefront.toml --dry-run
+
+      - name: Upload Ready-to-Deploy Storefront Artifact
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: multi-store-storefront-dist
+          path: storefront/
+          retention-days: 14
+
+  deploy-storefront-live:
+    name: Publish Storefront & Owner Dashboard to Cloudflare Static Assets
+    needs: [validate-commerce-bundle]
+    if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+    runs-on: ubuntu-latest
     steps:
       - name: Check out reviewed main revision
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-      - name: Upload static storefront bundle
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
-          name: github-pages
+          persist-credentials: false
+
+      - name: Set up Node
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
+        with:
+          node-version: "22"
+
+      - name: Deploy Storefront & Owner Dashboard Static Assets
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          test -n "${CLOUDFLARE_API_TOKEN:-}"
+          test -n "${CLOUDFLARE_ACCOUNT_ID:-}"
+          npx --yes wrangler@4.156.1 deploy --config wrangler.storefront.toml
+          {
+            echo "### Storefront & Owner Dashboard Published"
+            echo "- Storefront: https://raawaa-storefront.ghith-shikhkhaled.workers.dev/"
+            echo "- Owner Orders Dashboard: https://raawaa-storefront.ghith-shikhkhaled.workers.dev/owner/"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  deploy-pages-mirror:
+    name: Publish Fallback Mirror to GitHub Pages (When Enabled)
+    needs: [validate-commerce-bundle]
+    if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+    continue-on-error: true
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    steps:
+      - name: Check out reviewed main revision
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+
+      - name: Configure GitHub Pages
+        uses: actions/configure-pages@983d7736d9b0ae728b81ab479565c72886d7745b # v5
+
+      - name: Upload Storefront Pages Artifact
+        uses: actions/upload-pages-artifact@56afc609e74202658d3ffba0e8f6dda462b719fa # v3
+        with:
           path: storefront/
-          retention-days: 1
+
       - name: Deploy to GitHub Pages
-        id: deployment
-        run: echo "Storefront bundle validated and ready for Pages / Cloudflare Static Assets."
+        uses: actions/deploy-pages@d6db90164ac5ed86f2b6aed7e0febac5b3c0c03e # v4

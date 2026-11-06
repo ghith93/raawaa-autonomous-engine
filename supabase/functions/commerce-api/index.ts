@@ -507,6 +507,145 @@ async function readBoundedJson(req: Request): Promise<Record<string, unknown>> {
   return parsed as Record<string, unknown>;
 }
 
+async function timingSafeSecretMatch(candidate: string, expected: string): Promise<boolean> {
+  if (!candidate || expected.length < 16) return false;
+  const enc = new TextEncoder();
+  const a = new Uint8Array(await crypto.subtle.digest("SHA-256", enc.encode(candidate)));
+  const b = new Uint8Array(await crypto.subtle.digest("SHA-256", enc.encode(expected)));
+  let diff = 0;
+  for (let i = 0; i < a.length; i++) diff |= a[i] ^ b[i];
+  return diff === 0;
+}
+
+const RTO_LABELS_AR: Record<string, string> = {
+  low: "منخفض",
+  medium: "متوسط",
+  high: "مرتفع — أكّد عبر واتساب قبل التحضير",
+};
+
+function formatOwnerOrderAlert(
+  prepared: Awaited<ReturnType<typeof validateAndPriceOrder>>,
+  regionLabel: string
+): string {
+  const catalog = STORE_CATALOGS[prepared.store_id];
+  const brandAr = catalog ? catalog.brand_ar : prepared.store_id;
+  const payAr = PAYMENT_LABELS_AR[prepared.payment_method] || prepared.payment_method;
+  const itemsSummary = prepared.lines
+    .map((l) => `${l.title_ar} ×${l.quantity}`)
+    .join(" + ");
+  const totalUsd = (prepared.total_cents / 100).toFixed(2);
+  const rtoLabel = RTO_LABELS_AR[prepared.rto_risk.level] || prepared.rto_risk.level;
+  const waCustomer = `https://wa.me/963${prepared.customer_phone.replace(/^0/, "")}`;
+  const ownerUrl =
+    Deno.env.get("COMMERCE_OWNER_DASHBOARD_URL") ||
+    "https://raawaa-storefront.ghith-shikhkhaled.workers.dev/owner/";
+
+  const lines = [
+    `🔔 طلب جديد — ${brandAr} (#${prepared.order_ref})`,
+    `• العميل: ${prepared.customer_name} | ${prepared.customer_phone}`,
+    `• المحافظة: ${prepared.zone_label_ar}${prepared.address_detail ? " — " + prepared.address_detail : ""}`,
+    `• الأصناف: ${itemsSummary}${prepared.scent ? " | العطر: " + prepared.scent : ""}`,
+    `• الإجمالي: $${totalUsd} (${payAr})${prepared.wallet_transfer_ref ? " | مرجع: " + prepared.wallet_transfer_ref : ""}`,
+    `• تقييم المرتجع: ${rtoLabel} (${prepared.rto_risk.score}/100)`,
+    `• المنطقة المخدّمة: ${regionLabel}`,
+    `• تواصل واتساب مع العميل: ${waCustomer}`,
+    `• افتح لوحة الطلبات: ${ownerUrl}`,
+  ];
+  if (prepared.notes) {
+    lines.splice(5, 0, `• ملاحظات العميل: ${prepared.notes}`);
+  }
+  return lines.join("\n");
+}
+
+async function dispatchOwnerAlert(
+  sql: ReturnType<typeof postgres>,
+  text: string
+): Promise<{ sent: boolean; channel: string; reason?: string }> {
+  const cleanText = String(text || "").trim().slice(0, 3500);
+  if (!cleanText) return { sent: false, channel: "none", reason: "empty_text" };
+
+  // 1) Direct Bot delivery if paired on this project (`oyoyozdugicmnkfhjovo`)
+  const botToken = (
+    Deno.env.get("COMMERCE_ALERT_BOT_TOKEN") ||
+    Deno.env.get("RAWAA_TELEGRAM_BOT_TOKEN") ||
+    ""
+  ).trim();
+
+  if (/^[0-9]+:[A-Za-z0-9_-]{20,}$/.test(botToken)) {
+    let chatId = (Deno.env.get("COMMERCE_ALERT_CHAT_ID") || "").trim();
+    if (!chatId) {
+      try {
+        const rows = await sql`
+          SELECT chat_id::text AS chat_id
+          FROM rawaa_store.telegram_recipient
+          WHERE singleton = true
+          LIMIT 1
+        `;
+        if (rows.length === 1 && rows[0]?.chat_id) {
+          chatId = String(rows[0].chat_id).trim();
+        }
+      } catch {
+        // `rawaa_store` schema not present on secondary project
+      }
+    }
+    if (/^-?[0-9]{1,20}$/.test(chatId)) {
+      try {
+        const resp = await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
+          method: "POST",
+          redirect: "error",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            chat_id: chatId,
+            text: cleanText,
+            disable_web_page_preview: true,
+            disable_notification: false,
+          }),
+          signal: AbortSignal.timeout(4500),
+        });
+        if (resp.ok) {
+          const payload = await resp.json();
+          if (payload?.ok === true && Number.isSafeInteger(payload?.result?.message_id)) {
+            return { sent: true, channel: "direct" };
+          }
+        }
+        return { sent: false, channel: "direct", reason: "bot_api_rejected" };
+      } catch {
+        return { sent: false, channel: "direct", reason: "bot_api_unreachable" };
+      }
+    }
+    return { sent: false, channel: "direct", reason: "recipient_not_paired" };
+  }
+
+  // 2) Cross-region relay from secondary (`us-east-1`) -> primary (`eu-west-1`)
+  const relayUrl = (Deno.env.get("COMMERCE_ALERT_RELAY_URL") || "").trim();
+  const relaySecret = (Deno.env.get("COMMERCE_ALERT_RELAY_SECRET") || "").trim();
+  if (relayUrl && relaySecret.length >= 16) {
+    try {
+      const resp = await fetch(relayUrl, {
+        method: "POST",
+        redirect: "error",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${relaySecret}`,
+        },
+        body: JSON.stringify({ text: cleanText }),
+        signal: AbortSignal.timeout(4500),
+      });
+      if (resp.ok) {
+        const data = await resp.json();
+        if (data?.ok === true) {
+          return { sent: true, channel: "relay" };
+        }
+      }
+      return { sent: false, channel: "relay", reason: "relay_rejected" };
+    } catch {
+      return { sent: false, channel: "relay", reason: "relay_unreachable" };
+    }
+  }
+
+  return { sent: false, channel: "none", reason: "not_configured" };
+}
+
 async function verifyOwnerAccess(req: Request): Promise<boolean> {
   const auth = req.headers.get("authorization") || "";
   if (!auth.startsWith("Bearer ")) return false;
@@ -515,14 +654,7 @@ async function verifyOwnerAccess(req: Request): Promise<boolean> {
 
   // 1) Timing-safe COMMERCE_OWNER_TOKEN check
   const ownerToken = Deno.env.get("COMMERCE_OWNER_TOKEN") || "";
-  if (ownerToken.length >= 16) {
-    const enc = new TextEncoder();
-    const a = new Uint8Array(await crypto.subtle.digest("SHA-256", enc.encode(candidate)));
-    const b = new Uint8Array(await crypto.subtle.digest("SHA-256", enc.encode(ownerToken)));
-    let diff = 0;
-    for (let i = 0; i < a.length; i++) diff |= a[i] ^ b[i];
-    if (diff === 0) return true;
-  }
+  if (await timingSafeSecretMatch(candidate, ownerToken)) return true;
 
   // 2) Supabase Auth session verification (`RAWAA_OWNER_USER_ID` on Ghaioooth-core)
   const supabaseUrl = Deno.env.get("OWNER_AUTH_ORIGIN_URL") || Deno.env.get("SUPABASE_URL") || "";
@@ -839,10 +971,28 @@ Deno.serve(async (req: Request) => {
         `;
       });
 
+      // Fire instant owner push alert (strictly non-blocking so order save never fails)
+      let ownerNotified = false;
+      try {
+        const alertMsg = formatOwnerOrderAlert(prepared, regionLabel);
+        const alertRes = await dispatchOwnerAlert(sql, alertMsg);
+        ownerNotified = alertRes.sent;
+        const alertNote = alertRes.sent
+          ? `alert_sent:${alertRes.channel}`
+          : `alert_skipped:${alertRes.reason || "none"}`;
+        await sql`
+          INSERT INTO commerce.order_events (order_ref, from_state, to_state, actor, reason, created_at)
+          VALUES (${prepared.order_ref}, 'requested', 'requested', 'notifier', ${alertNote}, now())
+        `;
+      } catch {
+        // Never block customer order response on notification side-effects
+      }
+
       return jsonResp(
         {
           ok: true,
           duplicate: false,
+          owner_notified: ownerNotified,
           served_by: regionLabel,
           store_id: prepared.store_id,
           order_ref: prepared.order_ref,
@@ -865,10 +1015,57 @@ Deno.serve(async (req: Request) => {
     }
   }
 
+  // Internal cross-region owner alert relay (`us-east-1` -> `eu-west-1`)
+  if (req.method === "POST" && path === "/v1/internal/alert-relay") {
+    const relaySecret = (Deno.env.get("COMMERCE_ALERT_RELAY_SECRET") || "").trim();
+    const auth = req.headers.get("authorization") || "";
+    const candidate = auth.startsWith("Bearer ") ? auth.slice(7).trim() : "";
+    if (!(await timingSafeSecretMatch(candidate, relaySecret))) {
+      return jsonResp({ ok: false, error: "unauthorized" }, 401, req);
+    }
+    let body: Record<string, unknown>;
+    try {
+      body = await readBoundedJson(req);
+    } catch {
+      return jsonResp({ ok: false, error: "invalid_json" }, 400, req);
+    }
+    const text = String(body.text || "").trim().slice(0, 3500);
+    if (!text) return jsonResp({ ok: false, error: "empty_text" }, 400, req);
+    const res = await dispatchOwnerAlert(sql, text);
+    return jsonResp(
+      { ok: res.sent, channel: res.channel, reason: res.reason || null },
+      res.sent ? 200 : 503,
+      req
+    );
+  }
+
   // Authenticated Owner Endpoints
   if (path.startsWith("/v1/owner/")) {
     const okAuth = await verifyOwnerAccess(req);
     if (!okAuth) return jsonResp({ ok: false, error: "unauthorized" }, 401, req);
+
+    if (req.method === "POST" && path === "/v1/owner/notify-test") {
+      const ownerUrl =
+        Deno.env.get("COMMERCE_OWNER_DASHBOARD_URL") ||
+        "https://raawaa-storefront.ghith-shikhkhaled.workers.dev/owner/";
+      const msg = [
+        "✅ اختبار إشعار فوري ناجح — متجر رواء",
+        `• المنطقة المخدّمة: ${regionLabel}`,
+        "• الإشعارات الفورية للطلبات الجديدة مفعّلة ومربوطة بلوحة الطلبات:",
+        ownerUrl,
+      ].join("\n");
+      const res = await dispatchOwnerAlert(sql, msg);
+      return jsonResp(
+        {
+          ok: res.sent,
+          channel: res.channel,
+          served_by: regionLabel,
+          reason: res.reason || null,
+        },
+        res.sent ? 200 : 503,
+        req
+      );
+    }
 
     if (req.method === "GET" && path === "/v1/owner/orders") {
       const storeFilter = (url.searchParams.get("store_id") || "all").trim().toLowerCase();

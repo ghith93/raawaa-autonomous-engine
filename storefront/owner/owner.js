@@ -289,6 +289,34 @@
 
   storeSelect.addEventListener("change", loadDashboard);
   document.getElementById("refresh-btn").addEventListener("click", loadDashboard);
+  const notifyBtn = document.getElementById("notify-test-btn");
+  const notifyFeedback = document.getElementById("notify-feedback");
+  if (notifyBtn) {
+    notifyBtn.addEventListener("click", async () => {
+      notifyBtn.disabled = true;
+      if (notifyFeedback) notifyFeedback.hidden = true;
+      try {
+        const res = await apiFetchWithFailover("/v1/owner/notify-test", {
+          method: "POST",
+          body: JSON.stringify({}),
+        });
+        if (notifyFeedback) {
+          notifyFeedback.className = "alert-box";
+          notifyFeedback.style.borderColor = "var(--ok)";
+          notifyFeedback.textContent = `✅ تم إرسال إشعار تجريبي فوري إلى البوت المربوط (${res.channel || "direct"} — ${res.served_by || "live"}).`;
+          notifyFeedback.hidden = false;
+        }
+      } catch (err) {
+        if (notifyFeedback) {
+          notifyFeedback.className = "alert-box alert-error";
+          notifyFeedback.textContent = `تعذر إرسال الإشعار التجريبي: ${err.message}`;
+          notifyFeedback.hidden = false;
+        }
+      } finally {
+        notifyBtn.disabled = false;
+      }
+    });
+  }
   document.querySelectorAll("#state-chips .chip").forEach((chip) => {
     chip.addEventListener("click", () => {
       document.querySelectorAll("#state-chips .chip").forEach((c) => c.classList.remove("active"));
