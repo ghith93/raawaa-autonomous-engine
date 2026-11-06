@@ -43,7 +43,7 @@ class TaskStore:
               priority INTEGER NOT NULL DEFAULT 50 CHECK(priority BETWEEN 0 AND 100),
               dependencies_json TEXT NOT NULL DEFAULT '[]',
               execution_lane TEXT NOT NULL DEFAULT 'general'
-                CHECK(execution_lane IN ('general','specialist:researcher','specialist:reviewer','specialist:marketer','specialist:operator','specialist:mobile_tester'))
+                CHECK(execution_lane IN ('general','specialist:researcher','specialist:reviewer','specialist:marketer','specialist:operator'))
             );
             CREATE INDEX IF NOT EXISTS idx_tasks_status_created ON tasks(status, created_at);
             CREATE TABLE IF NOT EXISTS audit_log (
@@ -297,7 +297,7 @@ class TaskStore:
             raise ValueError("lease_timeout_seconds must be positive")
         if worker_lane is not None and worker_lane not in {
             "general", "specialist:researcher", "specialist:reviewer",
-            "specialist:marketer", "specialist:operator", "specialist:mobile_tester",
+            "specialist:marketer", "specialist:operator",
         }:
             raise ValueError("invalid worker_lane")
         now = datetime.now(timezone.utc).isoformat()
