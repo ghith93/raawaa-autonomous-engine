@@ -560,7 +560,7 @@ export default {
             ORDER BY candidate.priority DESC, candidate.created_at ASC, candidate.id ASC LIMIT 1)
             AND status='pending' ${taskTypeFilter} ${laneTaskFilter}
           RETURNING id,idempotency_key,task_type,title,payload_json,status,attempts,
-            max_attempts,created_at,updated_at,execution_mode,priority,dependencies_json,lease_token,lease_expires_at
+            max_attempts,created_at,updated_at,execution_mode,priority,dependencies_json,execution_lane,lease_token,lease_expires_at
         `).bind(executionMode, nowIso, leaseToken, expires, ...laneBindings, executionMode, ...laneBindings).first();
         if (!claim) return json({ task: null });
         await env.DB.prepare(
