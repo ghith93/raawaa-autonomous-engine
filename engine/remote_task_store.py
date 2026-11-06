@@ -173,7 +173,7 @@ class RemoteTaskStore:
     def list_tasks(self, limit: int = 50, worker_lane: str = "general") -> list[dict[str, Any]]:
         limit = max(1, min(int(limit), 100))
         if worker_lane not in {"general", "specialist:researcher", "specialist:reviewer",
-                               "specialist:marketer", "specialist:operator", "specialist:mobile_tester"}:
+                               "specialist:marketer", "specialist:operator"}:
             raise ValueError("invalid worker_lane")
         path = f"/v1/tasks?limit={limit}"
         if worker_lane != "general":
