@@ -94,6 +94,7 @@ class StagingContentionProofTests(unittest.TestCase):
                         "task_type": "supervised_probe",
                         "title": "Remote Staging D1 concurrent claim contention proof",
                         "idempotency_key": "staging-d1-contention:old-run:1",
+                        "payload_json": '{"operation": "python_platform_probe"}',
                         "status": "pending",
                     },
                     {
