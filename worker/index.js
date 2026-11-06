@@ -449,7 +449,7 @@ export default {
       if (!laneTokenAuthorized(request, env, workerLane)) return json({ error: "lane_unauthorized" }, 401);
       try {
         const result = await env.DB.prepare(
-          "SELECT id,idempotency_key,task_type,title,payload_json,status,attempts,max_attempts,created_at,updated_at,execution_mode,priority,dependencies_json,execution_lane FROM tasks WHERE execution_lane=? ORDER BY created_at DESC,id DESC LIMIT ?"
+          "SELECT id,idempotency_key,task_type,title,payload_json,status,attempts,max_attempts,created_at,updated_at,execution_mode,priority,dependencies_json,execution_lane,lease_expires_at FROM tasks WHERE execution_lane=? ORDER BY created_at DESC,id DESC LIMIT ?"
         ).bind(workerLane, rawLimit).all();
         const tasks = (result.results || []).map(task => {
           let dependsOn = [];
