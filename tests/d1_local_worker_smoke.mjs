@@ -409,6 +409,56 @@ try {
     });
   }
 
+  // Real concurrent claim contention against the local D1-backed Worker:
+  // two independent HTTP requests race for one pending row. D1 must serialize
+  // the conditional UPDATE so exactly one worker receives its lease.
+  const contentionTask = await api("/v1/tasks/enqueue", {
+    method: "POST",
+    body: {
+      task_type: "system_audit",
+      title: "Local D1 concurrent claim contention",
+      payload: { purpose: "prove single lease under simultaneous claims", external_writes: false },
+      idempotency_key: "d1-local-concurrent-claim-" + randomUUID(),
+      max_attempts: 1,
+      priority: 100,
+    },
+  });
+  assertStatus(contentionTask, 201, "enqueue concurrent-claim fixture");
+  const [claimA, claimB] = await Promise.all([
+    api("/v1/tasks/claim", { method: "POST", body: { execution_mode: "dry_run" } }),
+    api("/v1/tasks/claim", { method: "POST", body: { execution_mode: "dry_run" } }),
+  ]);
+  assertStatus(claimA, 200, "first concurrent claim response");
+  assertStatus(claimB, 200, "second concurrent claim response");
+  const competingClaims = [claimA.payload, claimB.payload];
+  const winners = competingClaims.filter(item => item.task?.id === contentionTask.payload.task.id);
+  const losers = competingClaims.filter(item => item.task === null);
+  assert.equal(winners.length, 1, "exactly one concurrent D1 claimant owns the task");
+  assert.equal(losers.length, 1, "the competing D1 claimant sees no claimable task");
+  assert.equal(typeof winners[0].lease_token, "string");
+  const contentionReadback = await api("/v1/tasks?limit=100");
+  assertStatus(contentionReadback, 200, "concurrent-claim durable readback");
+  const contentionRow = contentionReadback.payload.tasks.find(
+    item => item.id === contentionTask.payload.task.id,
+  );
+  assert.equal(contentionRow.status, "running");
+  assert.equal(contentionRow.attempts, 1, "a race must not increment attempts twice");
+  assertStatus(await api("/v1/tasks/" + contentionTask.payload.task.id + "/finish", {
+    method: "POST",
+    body: {
+      lease_token: winners[0].lease_token,
+      status: "succeeded",
+      result: { mode: "dry_run", concurrent_claim_winner_count: 1 },
+    },
+  }), 200, "finish the single winning D1 lease");
+  const contentionAudit = await api("/v1/audit?limit=20&task_id=" + contentionTask.payload.task.id);
+  assertStatus(contentionAudit, 200, "concurrent-claim audit readback");
+  assert.equal(
+    contentionAudit.payload.events.filter(item => item.event === "task_claimed").length,
+    1,
+    "one concurrent claim produces exactly one durable claim event",
+  );
+
   const taskPayload = {
     task_type: "system_audit",
     title: "Local D1 integration smoke",
