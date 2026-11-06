@@ -177,7 +177,7 @@ def main() -> int:
         graph = json.loads(graph_path.read_text(encoding="utf-8"))
         project_map = json.loads(map_path.read_text(encoding="utf-8"))
         stats = merge_project_map(graph, project_map, map_path=map_path.as_posix())
-        graph_path.write_text(json.dumps(graph, ensure_ascii=False, indent=2) + "\\n", encoding="utf-8")
+        graph_path.write_text(json.dumps(graph, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     except (OSError, json.JSONDecodeError, ValueError) as exc:
         raise SystemExit(f"project map graph merge failed: {type(exc).__name__}: {exc}")
     print("Project/agent map merged into Graphify graph: " + json.dumps(stats, sort_keys=True))
