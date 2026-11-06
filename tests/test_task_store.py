@@ -197,5 +197,68 @@ class TaskStoreTests(unittest.TestCase):
         self.assertEqual(events[0]["event"], "task_enqueued")
 
 
+    def test_generic_and_specialist_consumers_are_isolated(self):
+        general = self.store.enqueue("research_brief", "General", idempotency_key="lane-general")
+        specialist = self.store.enqueue(
+            "research_brief", "Specialist", idempotency_key="lane-specialist",
+            execution_lane="specialist:researcher",
+        )
+        claimed = self.store.claim_next(execution_mode="dry_run")
+        self.assertEqual(claimed["id"], general["id"])
+        self.assertEqual(claimed["execution_lane"], "general")
+        self.store.finish(general["id"], "succeeded", result={"mode": "dry_run"},
+                          lease_token=claimed["lease_token"])
+        self.assertIsNone(self.store.claim_next(execution_mode="dry_run"))
+        specialist_claim = self.store.claim_next(
+            execution_mode="dry_run", worker_lane="specialist:researcher"
+        )
+        self.assertEqual(specialist_claim["id"], specialist["id"])
+        self.assertEqual(specialist_claim["execution_lane"], "specialist:researcher")
+
+    def test_lane_is_part_of_idempotency_identity(self):
+        self.store.enqueue("research_brief", "Same key", idempotency_key="lane-replay",
+                           execution_lane="general")
+        with self.assertRaisesRegex(ValueError, "idempotency key conflicts"):
+            self.store.enqueue("research_brief", "Same key", idempotency_key="lane-replay",
+                               execution_lane="specialist:researcher")
+
+    def test_wrong_lane_cannot_heartbeat_finish_or_retry(self):
+        task = self.store.enqueue("research_brief", "Owned", execution_lane="specialist:researcher")
+        claim = self.store.claim_next(execution_mode="dry_run", worker_lane="specialist:researcher")
+        with self.assertRaisesRegex(ValueError, "worker lane ownership lost"):
+            self.store.heartbeat(task["id"], claim["lease_token"], 60, worker_lane="general")
+        with self.assertRaisesRegex(ValueError, "worker lane ownership lost"):
+            self.store.finish(task["id"], "succeeded", result={"mode": "dry_run"},
+                              lease_token=claim["lease_token"], worker_lane="general")
+        with self.assertRaisesRegex(ValueError, "worker lane ownership lost"):
+            self.store.retry_or_fail(task["id"], "wrong owner", claim["lease_token"],
+                                     worker_lane="general")
+        self.store.finish(task["id"], "succeeded", result={"mode": "dry_run"},
+                          lease_token=claim["lease_token"], worker_lane="specialist:researcher")
+
+    def test_failed_specialist_dependency_does_not_block_general_claim_path(self):
+        parent = self.store.enqueue("research_brief", "Parent", max_attempts=1,
+                                    execution_lane="specialist:researcher")
+        child = self.store.enqueue("research_brief", "Child",
+                                   execution_lane="specialist:researcher", depends_on=[parent["id"]])
+        parent_claim = self.store.claim_next(execution_mode="dry_run",
+                                             worker_lane="specialist:researcher")
+        self.store.finish(parent["id"], "failed", error="expected",
+                          lease_token=parent_claim["lease_token"],
+                          worker_lane="specialist:researcher")
+        self.assertIsNone(self.store.claim_next(execution_mode="dry_run", worker_lane="general"))
+        stored = {task["id"]: task for task in self.store.list_tasks()}
+        self.assertEqual(stored[child["id"]]["status"], "pending")
+        self.assertIsNone(self.store.claim_next(execution_mode="dry_run",
+                                                worker_lane="specialist:researcher"))
+        self.assertEqual({task["id"]: task for task in self.store.list_tasks()}[child["id"]]["status"],
+                         "blocked")
+
+    def test_specialist_lane_must_match_task_contract(self):
+        with self.assertRaisesRegex(ValueError, "does not match task_type"):
+            self.store.enqueue("content_draft", "Wrong lane",
+                               execution_lane="specialist:researcher")
+
+
 if __name__ == "__main__":
     unittest.main()
