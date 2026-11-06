@@ -168,7 +168,7 @@
     {
       "id": "component:agent_runtime",
       "kind": "component",
-      "status": "deterministic_contract_only_no_model_dispatch",
+      "status": "deterministic_task_role_contract; worker_has_separate_default_off_quota_gated_provider_path",
       "evidence": [
         "engine/agent_runtime.py"
       ]
@@ -305,6 +305,53 @@
         "config/agents.json",
         "docs/research-and-development-operating-system.ar.md"
       ]
+    },
+    {
+      "id": "component:process_supervisor",
+      "kind": "component",
+      "status": "implemented_and_integrated_opt_in_only_two_read_only_local_operations",
+      "evidence": [
+        "engine/process_supervisor.py",
+        "engine/supervised_task.py",
+        "tests/test_process_supervisor.py",
+        "engine/worker.py"
+      ]
+    },
+    {
+      "id": "component:sandbox_policy",
+      "kind": "component",
+      "status": "implemented_policy_builder_not_proven_wired_to_supervised_task_runner",
+      "evidence": [
+        "engine/sandbox_policy.py",
+        "tests/test_sandbox_policy.py"
+      ]
+    },
+    {
+      "id": "gap:general_agent_cli_execution",
+      "kind": "capability_gap",
+      "status": "no_general_multi_cli_agent_execution_registry_or_runtime_dispatch; current supervisor supports two fixed read_only_probes_only",
+      "evidence": [
+        "engine/supervised_task.py",
+        "docs/operations/multi-cli-execution-plan.md"
+      ]
+    },
+    {
+      "id": "gap:gvisor_execution_integration",
+      "kind": "capability_gap",
+      "status": "sandbox_policy_builder_exists_but_not_connected_to_process_supervisor_worker_path",
+      "evidence": [
+        "engine/sandbox_policy.py",
+        "engine/supervised_task.py"
+      ]
+    },
+    {
+      "id": "gap:independent_reviewer",
+      "kind": "capability_gap",
+      "status": "no_separate_read_only_reviewer_runtime_or_diff_verdict_loop",
+      "evidence": [
+        "engine/agent_runtime.py",
+        "docs/operations/multi-cli-execution-plan.md"
+      ]
     }
   ],
   "edges": [
@@ -388,12 +435,6 @@
     },
     {
       "from": "component:task_store",
-      "to": "gap:agent_process_supervision",
-      "relation": "needs",
-      "status": "verified_architecture_gap"
-    },
-    {
-      "from": "component:task_store",
       "to": "gap:independent_runtime_reviewer",
       "relation": "needs",
       "status": "verified_architecture_gap"
@@ -469,6 +510,36 @@
       "to": "component:research_memory",
       "relation": "persists_metadata_to",
       "status": "artifacts_30day_optional_d1_persistence"
+    },
+    {
+      "from": "component:task_store",
+      "to": "component:process_supervisor",
+      "relation": "executes_opt_in_supervised_probe_tasks_through",
+      "status": "implemented_via_engine_supervised_task"
+    },
+    {
+      "from": "component:process_supervisor",
+      "to": "component:sandbox_policy",
+      "relation": "should_be_backed_by",
+      "status": "not_integrated_in_current_worker_path"
+    },
+    {
+      "from": "component:process_supervisor",
+      "to": "gap:general_agent_cli_execution",
+      "relation": "does_not_yet_cover",
+      "status": "limited_to_two_fixed_read_only_operations"
+    },
+    {
+      "from": "component:sandbox_policy",
+      "to": "gap:gvisor_execution_integration",
+      "relation": "not_connected_to_runtime",
+      "status": "verified_by_current_supervised_task_path"
+    },
+    {
+      "from": "agent:reviewer",
+      "to": "gap:independent_reviewer",
+      "relation": "declared_role_without_runtime",
+      "status": "no_separate_review_worker"
     }
   ]
 }
