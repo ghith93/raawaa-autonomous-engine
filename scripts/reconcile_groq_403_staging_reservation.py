@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import time
 import urllib.error
 import urllib.request
@@ -70,6 +71,32 @@ def api_readonly(path: str, timeout_seconds: int = 90) -> tuple[int, dict]:
         time.sleep(2)
 
 
+def safe_error_code(body: dict) -> str:
+    value = body.get("error")
+    return value if isinstance(value, str) and re.fullmatch(r"[a-z0-9_]{1,80}", value) else "unknown"
+
+
+def quarantine_route(payload: dict, timeout_seconds: int = 90) -> dict:
+    """Retry the idempotent cooldown while a freshly installed admin secret propagates."""
+    deadline = time.monotonic() + timeout_seconds
+    retryable_statuses = {401, 403, 500, 502, 503, 504}
+    while True:
+        status, response = api("POST", "/v1/quota", payload)
+        if status == 200 and response.get("ok") is True:
+            return response
+        error_code = safe_error_code(response)
+        if status not in retryable_statuses:
+            raise RuntimeError(
+                f"Route quarantine failed (HTTP {status}; error={error_code})"
+            )
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise RuntimeError(
+                f"Route quarantine capability did not become ready (HTTP {status}; error={error_code})"
+            )
+        time.sleep(min(2, remaining))
+
+
 def run() -> None:
     parsed = urlsplit(BASE_URL)
     if (
@@ -130,14 +157,22 @@ def run() -> None:
         if status != 200 or settled.get("settled") is not True:
             raise RuntimeError("Could not reconcile the verified rejected request at zero spend")
 
-    status, cooled = api("POST", "/v1/quota", {
+    cooled = quarantine_route({
         "action": "cool_down",
         "route_id": ROUTE_ID,
         "seconds": 86400,
         "reason": "manual_reconcile_http_403",
     })
-    if status != 200 or cooled.get("ok") is not True:
-        raise RuntimeError("Zero-cost reconciliation succeeded but route quarantine failed")
+    status, persisted_quota = api_readonly(
+        "/v1/quota?route_id=" + quote(ROUTE_ID, safe="") + "&task_id=" + quote(TASK_ID, safe=""),
+    )
+    persisted_cooldown = persisted_quota.get("cooldown") if status == 200 else None
+    if (
+        not isinstance(persisted_cooldown, dict)
+        or not isinstance(persisted_cooldown.get("until_at"), str)
+        or persisted_cooldown.get("until_at") != cooled.get("until_at")
+    ):
+        raise RuntimeError("Route quarantine was not durably confirmed in Staging D1")
 
     status, after = api_readonly("/v1/monetary-ledger?task_id=" + quote(TASK_ID, safe=""))
     if status != 200 or int(after.get("snapshot", {}).get("task_pending_count", -1)) != 0:
