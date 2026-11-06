@@ -13,7 +13,6 @@ separate continuously scheduled process.
 | `specialist:reviewer` | `code_review` |
 | `specialist:marketer` | `content_draft` |
 | `specialist:operator` | `system_audit` |
-| `specialist:mobile_tester` | `mobile_test` |
 
 Existing SQLite and D1 rows migrate to `general`; no existing task is silently
 reclassified. Enqueue idempotency includes the lane. A task type cannot be
@@ -30,7 +29,6 @@ capability token in `X-Engine-Lane-Token`. Configure a distinct random token of 
 - `ENGINE_REVIEWER_LANE_TOKEN`
 - `ENGINE_MARKETER_LANE_TOKEN`
 - `ENGINE_OPERATOR_LANE_TOKEN`
-- `ENGINE_MOBILE_TESTER_LANE_TOKEN`
 
 Each token must be different from `ENGINE_API_TOKEN` and from the other lane
 tokens. Never put these values in the repository or logs. A lane without its
