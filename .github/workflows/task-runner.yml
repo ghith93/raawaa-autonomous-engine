@@ -329,7 +329,4 @@ jobs:
           RAAWAA_ENGINE_MARKETER_LANE_TOKEN: ${{ secrets.ENGINE_MARKETER_LANE_TOKEN }}
           RAAWAA_ENGINE_OPERATOR_LANE_TOKEN: ${{ secrets.ENGINE_OPERATOR_LANE_TOKEN }}
           RAAWAA_ENGINE_MOBILE_TESTER_LANE_TOKEN: ${{ secrets.ENGINE_MOBILE_TESTER_LANE_TOKEN }}
-          RAAWAA_ENGINE_LIVE_INFERENCE: disabled
-          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
-          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
         run: python scripts/run_specialist_lanes.py
