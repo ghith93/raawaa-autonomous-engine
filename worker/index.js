@@ -672,7 +672,7 @@ export default {
         return json({ error: error.message === "body_too_large" ? "body_too_large" : "invalid_json" }, 400);
       }
       if (!recoveryInput || typeof recoveryInput !== "object" || Array.isArray(recoveryInput) ||
-          Object.keys(recoveryInput).length !== 0) {
+          Object.keys(recoveryInput).some(key => key !== "worker_lane")) {
         return json({ error: "invalid_recovery_request" }, 400);
       }
       const taskId = supervisedProbeRecovery[1];
