@@ -44,9 +44,6 @@ class FakeStore:
             self.audit.append({"task_id": task_id, "event": "task_claimed"})
             return {**self.task, "lease_token": "lease-test"}
 
-    def list_tasks(self, _limit):
-        return [dict(self.task)]
-
     def finish(self, task_id, status, result=None, error=None, lease_token=None, execution_mode=None):
         assert task_id == self.task["id"]
         assert lease_token == "lease-test"
@@ -98,6 +95,14 @@ class StagingContentionProofTests(unittest.TestCase):
                         "status": "pending",
                     },
                     {
+                        "id": "lookalike",
+                        "task_type": "supervised_probe",
+                        "title": "Remote Staging D1 concurrent claim contention proof",
+                        "idempotency_key": "staging-d1-contention:lookalike:1",
+                        "payload_json": '{"operation": "different_operation"}',
+                        "status": "pending",
+                    },
+                    {
                         "id": "unrelated",
                         "task_type": "research_brief",
                         "title": "Unrelated Staging task",
@@ -124,7 +129,7 @@ class StagingContentionProofTests(unittest.TestCase):
         self.assertEqual(store.finished[0][0:2], ("stale-proof", "blocked"))
         self.assertEqual(
             [row["id"] for row in store.rows if row["status"] == "pending"],
-            ["unrelated"],
+            ["lookalike", "unrelated"],
         )
 
     def test_two_concurrent_claims_have_one_winner_and_durable_completion(self):
