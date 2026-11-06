@@ -18,10 +18,12 @@ def main() -> None:
     if not os.environ.get("RAAWAA_ENGINE_LANE_TOKEN"):
         raise SystemExit("Missing ephemeral researcher lane token")
     store = RemoteTaskStore()
-    preexisting = (store.list_tasks(100) +
-                   store.list_tasks(100, worker_lane="specialist:researcher"))
-    active = [task for task in preexisting if task.get("status") in {"pending", "running"}
-              and task.get("execution_lane", "general") in {"general", "specialist:researcher"}]
+    general_before = store.list_tasks(100)
+    researcher_before = store.list_tasks(100, worker_lane="specialist:researcher")
+    if len(general_before) >= 100 or len(researcher_before) >= 100:
+        raise SystemExit("Refusing lane proof because bounded queue readback may be incomplete")
+    active = [task for task in general_before + researcher_before
+              if task.get("status") in {"pending", "running"}]
     if active:
         raise SystemExit("Refusing to claim unrelated Staging work; relevant queue lanes are not idle")
     suffix = uuid.uuid4().hex
@@ -29,6 +31,11 @@ def main() -> None:
         "research_brief", "Staging general lane isolation proof",
         {"topic": "deterministic lane isolation test"},
         idempotency_key=f"staging-lane-general:{suffix}",
+    )
+    general_sentinel = store.enqueue(
+        "research_brief", "Staging general lane sentinel",
+        {"topic": "deterministic lane isolation test"},
+        idempotency_key=f"staging-lane-general-sentinel:{suffix}",
     )
     specialist = store.enqueue(
         "research_brief", "Staging researcher lane isolation proof",
@@ -42,9 +49,6 @@ def main() -> None:
         raise SystemExit("General consumer claimed the wrong task")
     store.finish(general_claim["id"], "succeeded", {"mode": "dry_run", "proof": "general"},
                  lease_token=general_claim["lease_token"], worker_lane="general")
-
-    if store.claim_next(execution_mode="dry_run", worker_lane="general") is not None:
-        raise SystemExit("General consumer claimed a specialist-lane task")
 
     specialist_claim = store.claim_next(
         execution_mode="dry_run", worker_lane="specialist:researcher"
@@ -74,12 +78,27 @@ def main() -> None:
         specialist_claim["id"], "succeeded", {"mode": "dry_run", "proof": "researcher"},
         lease_token=specialist_claim["lease_token"], worker_lane="specialist:researcher",
     )
-    tasks = {task["id"]: task for task in store.list_tasks(100)}
-    if tasks[general["id"]]["status"] != "succeeded":
-        raise SystemExit("General task did not complete")
-    if tasks[specialist["id"]]["status"] != "succeeded":
+
+    # A pending general task must remain invisible to the specialist consumer.
+    general_sentinel_claim = store.claim_next(execution_mode="dry_run", worker_lane="general")
+    if not general_sentinel_claim or general_sentinel_claim.get("id") != general_sentinel.get("id"):
+        raise SystemExit("General consumer could not claim its own pending task")
+    store.finish(general_sentinel_claim["id"], "succeeded",
+                 {"mode": "dry_run", "proof": "general-sentinel"},
+                 lease_token=general_sentinel_claim["lease_token"], worker_lane="general")
+    if store.claim_next(execution_mode="dry_run", worker_lane="general") is not None:
+        raise SystemExit("General consumer claimed an unexpected task")
+
+    general_tasks = {task["id"]: task for task in store.list_tasks(100)}
+    researcher_tasks = {
+        task["id"]: task for task in store.list_tasks(100, worker_lane="specialist:researcher")
+    }
+    for task_id in (general["id"], general_sentinel["id"]):
+        if general_tasks[task_id]["status"] != "succeeded":
+            raise SystemExit("General task did not complete")
+    if researcher_tasks[specialist["id"]]["status"] != "succeeded":
         raise SystemExit("Specialist task did not complete")
-    if tasks[specialist["id"]].get("execution_lane") != "specialist:researcher":
+    if researcher_tasks[specialist["id"]].get("execution_lane") != "specialist:researcher":
         raise SystemExit("Specialist lane was not persisted")
     print("PASS: general/specialist isolation, authenticated claim, wrong-lane lifecycle rejection, and readback")
 
