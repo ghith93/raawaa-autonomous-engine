@@ -16,14 +16,15 @@ class FakeStore:
                 "daily_spent_usd": 0,
                 "monthly_spent_usd": 0,
                 "pending_reserved_usd": 0,
-                "pending_count": 1,
-                "ambiguous_count": 1,
+                "pending_count": 0,
+                "ambiguous_count": 0,
             },
             "model_costs_usd": {"total": 0},
         }
         self.recovery = recovery or {"requeued": 0, "failed": 1}
         self.keep_running = keep_running
         self.recover_calls = []
+        self.settlement_calls = []
 
     def recover_stale(self, worker_lane):
         self.recover_calls.append(worker_lane)
@@ -36,9 +37,14 @@ class FakeStore:
     def list_tasks(self, limit, worker_lane):
         return self.rows[:limit]
 
-    def _request(self, path):
+    def _request(self, path, method="GET", payload=None):
         if path == "/v1/mobile/status":
             return self.mobile
+        if path == "/v1/monetary-ledger" and method == "POST":
+            self.settlement_calls.append(payload)
+            self.global_snapshot = {"task_pending_count": 0, "unresolved": []}
+            self.task_snapshot = {"task_pending_count": 0, "unresolved": []}
+            return {"ok": True, "settled": True, "over_budget": False}
         if path == "/v1/monetary-ledger":
             return {"snapshot": self.global_snapshot}
         if path.startswith("/v1/monetary-ledger?task_id="):
@@ -74,9 +80,16 @@ class GroqSmokeRecoveryTests(unittest.TestCase):
         store = self.store()
         result = smoke._verify_previous_ambiguous_task(store)
         self.assertEqual(result["task_status"], "failed")
-        self.assertEqual(result["reservation_status"], "ambiguous")
-        self.assertEqual(result["estimated_cost_nanos"], 0)
+        self.assertEqual(result["reservation_status"], "settled")
+        self.assertEqual(result["actual_cost_nanos"], 0)
         self.assertEqual(store.recover_calls, [smoke.EXECUTION_LANE])
+        self.assertEqual(store.settlement_calls, [{
+            "action": "settle",
+            "reservation_id": "d4d9f02e-82d4-4d3a-8f50-6fd5a5a03d41",
+            "actual_cost_nanos": 0,
+            "input_tokens": 0,
+            "output_tokens": 0,
+        }])
 
     def test_refuses_if_previous_ambiguous_task_is_still_running(self):
         store = self.store(keep_running=True)
@@ -99,23 +112,26 @@ class GroqSmokeRecoveryTests(unittest.TestCase):
         with self.assertRaisesRegex(SystemExit, "exact zero-cost record"):
             smoke._verify_previous_ambiguous_task(store)
 
-    def test_final_ledger_allows_only_the_known_zero_cost_ambiguity(self):
+    def test_final_ledger_requires_all_reservations_settled(self):
         store = self.store(rows=[{"id": smoke.PREVIOUS_AMBIGUOUS_TASK_ID, "status": "failed"}])
-        result = smoke._assert_zero_spend_preserving_known_ambiguity(store, "new-task")
-        self.assertEqual(result["known_ambiguous_reservations"], 1)
+        smoke._verify_previous_ambiguous_task(store)
+        result = smoke._assert_zero_spend(store, "new-task")
+        self.assertEqual(result["pending_reservations"], 0)
+        self.assertEqual(result["ambiguous_reservations"], 0)
         self.assertEqual(result["daily_spend_usd"], 0)
 
-    def test_final_ledger_rejects_any_additional_unresolved_reservation(self):
+    def test_final_ledger_rejects_any_unresolved_reservation(self):
         store = self.store(rows=[{"id": smoke.PREVIOUS_AMBIGUOUS_TASK_ID, "status": "failed"}])
+        smoke._verify_previous_ambiguous_task(store)
         store.global_snapshot = {
-            "unresolved": ambiguous_snapshot()["unresolved"] + [{
+            "unresolved": [{
                 "task_id": "unexpected-task", "provider": "groq",
                 "model": "openai/gpt-oss-20b", "status": "ambiguous",
                 "estimated_cost_nanos": 0,
             }]
         }
-        with self.assertRaisesRegex(SystemExit, "unexpected unresolved reservation"):
-            smoke._assert_zero_spend_preserving_known_ambiguity(store, "new-task")
+        with self.assertRaisesRegex(SystemExit, "unresolved reservations"):
+            smoke._assert_zero_spend(store, "new-task")
 
     def test_smoke_uses_a_new_idempotency_key_not_the_ambiguous_task_key(self):
         self.assertTrue(smoke.IDEMPOTENCY_KEY.endswith("-v9"))
