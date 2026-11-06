@@ -169,3 +169,47 @@ class RequestValidationTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class CloudflarePayloadSchemaTests(unittest.TestCase):
+    """The hosted endpoint rejects unsupported fields; guard the exact shape."""
+
+    def test_payload_has_no_width_or_height(self):
+        captured = {}
+
+        class FakeResponse:
+            def __enter__(self): return self
+            def __exit__(self, *a): return False
+            def read(self):
+                from engine.image_providers import encode_png
+                return encode_png(8, 8, bytes([200, 190, 180] * 64))
+
+        def fake_urlopen(request, timeout=None):
+            captured["body"] = json.loads(request.data.decode())
+            return FakeResponse()
+
+        provider = CloudflareFlux(env={"CLOUDFLARE_ACCOUNT_ID": "a",
+                                       "CLOUDFLARE_API_TOKEN": "b"})
+        with mock.patch("engine.image_providers.urllib.request.urlopen", fake_urlopen):
+            provider.generate(ImageRequest(prompt="x", width=512, height=512, steps=4))
+
+        self.assertEqual(set(captured["body"]), {"prompt", "steps"})
+        self.assertEqual(captured["body"]["steps"], 4)
+
+    def test_result_size_is_read_from_the_returned_image(self):
+        class FakeResponse:
+            def __enter__(self): return self
+            def __exit__(self, *a): return False
+            def read(self):
+                from engine.image_providers import encode_png
+                return encode_png(32, 32, bytes([10, 20, 30] * 1024))
+
+        def fake_urlopen(request, timeout=None):
+            return FakeResponse()
+
+        provider = CloudflareFlux(env={"CLOUDFLARE_ACCOUNT_ID": "a",
+                                       "CLOUDFLARE_API_TOKEN": "b"})
+        with mock.patch("engine.image_providers.urllib.request.urlopen", fake_urlopen):
+            result = provider.generate(ImageRequest(prompt="x", width=1024, height=1024))
+        self.assertEqual((result.width, result.height), (32, 32))
+        self.assertTrue(any("does not accept explicit dimensions" in n for n in result.notes))

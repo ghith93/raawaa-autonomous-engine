@@ -87,7 +87,7 @@ def probe(token: str, account: str, *, spend_neurons: bool = False) -> dict:
     for name, method, path, _description in caps:
         body = None
         if name == "ai_run":
-            body = {"prompt": "beige texture", "width": 256, "height": 256, "num_steps": 1}
+            body = {"prompt": "beige texture", "steps": 1}
         status, payload = _call(method, path.replace("{account}", account), token, body=body)
         ok = status != 0 and bool(payload.get("success", status == 200))
         if name == "token_active":

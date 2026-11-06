@@ -187,6 +187,10 @@ class CloudflareFlux:
     NEURONS_PER_TILE = 4.80
     NEURONS_PER_STEP = 9.60
     FREE_DAILY_NEURONS = 10_000.0
+    # The hosted endpoint accepts only prompt, steps, seed and negative_prompt. It
+    # rejects width/height with 'Additional or unevaluated properties', and the
+    # output is a fixed square, so dimensions are advisory rather than requested.
+    SUPPORTED_MAX_SIDE = 1024
 
     def __init__(self, env: dict[str, str] | None = None, daily_neuron_cap: float | None = None):
         self.env = dict(os.environ if env is None else env)
@@ -220,12 +224,9 @@ class CloudflareFlux:
         if not ok:
             raise ProviderUnavailable(f"{self.name}: {reason}")
 
-        payload = {
-            "prompt": request.prompt,
-            "width": request.width,
-            "height": request.height,
-            "num_steps": request.steps,
-        }
+        # Only the fields this model documents. Sending unsupported ones yields a
+        # 400 that reads like an authorisation failure, which cost a debugging cycle.
+        payload: dict[str, Any] = {"prompt": request.prompt, "steps": request.steps}
         if request.negative_prompt:
             payload["negative_prompt"] = request.negative_prompt
         if request.seed is not None:
@@ -256,17 +257,31 @@ class CloudflareFlux:
             raise ImageProviderError(f"{self.name}: transport failure {type(exc).__name__}") from exc
 
         png = _extract_png(body)
-        neurons = self.neurons_for(request.width, request.height, request.steps)
+        actual_w, actual_h = _png_size(png)
+        neurons = self.neurons_for(actual_w, actual_h, request.steps)
+        notes = ["free tier; cost expressed in neurons, not dollars"]
+        if (actual_w, actual_h) != (request.width, request.height):
+            notes.append(
+                f"model returned {actual_w}x{actual_h}; the hosted endpoint does not accept "
+                "explicit dimensions, so compose the final frame locally")
         return ImageResult(
             provider=self.name,
             model=self.model,
             png_bytes=png,
-            width=request.width,
-            height=request.height,
+            width=actual_w,
+            height=actual_h,
             cost_usd=0.0,
             neurons=neurons,
-            notes=["free tier; cost expressed in neurons, not dollars"],
+            notes=notes,
         )
+
+
+def _png_size(png: bytes) -> tuple[int, int]:
+    """Read width and height from the IHDR chunk; fall back to (0, 0) if absent."""
+    if len(png) >= 24 and png[:8] == b"\x89PNG\r\n\x1a\n" and png[12:16] == b"IHDR":
+        width, height = struct.unpack(">II", png[16:24])
+        return int(width), int(height)
+    return 0, 0
 
 
 def _extract_png(body: bytes) -> bytes:
