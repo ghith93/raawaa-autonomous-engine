@@ -769,7 +769,7 @@ export default {
         if (CODESPACE_TASK_TYPES.has(current.task_type) !== codespaceAction) {
           return json({ error: "executor_mismatch" }, 403);
         }
-        if (current.execution_lane !== workerLane) return json({ error: "lane_ownership_lost" }, 403);
+        if ((current.execution_lane || "general") !== workerLane) return json({ error: "lane_ownership_lost" }, 403);
         if (current.status !== "running" || current.lease_token !== leaseToken ||
             !current.lease_expires_at || current.lease_expires_at < nowIso) {
           return json({ error: "lease_lost" }, 409);
