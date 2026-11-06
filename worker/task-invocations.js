@@ -15,11 +15,12 @@ async function readBody(request) {
   if (new TextEncoder().encode(raw).byteLength > 8192) throw new Error("body_too_large");
   try { return JSON.parse(raw); } catch { throw new Error("invalid_json"); }
 }
-async function leaseOwned(db, taskId, leaseToken, now) {
+async function leaseOwned(db, taskId, leaseToken, now, workerLane) {
   const task = await db.prepare(
-    "SELECT id,status,lease_token,lease_expires_at FROM tasks WHERE id=?"
+    "SELECT id,status,lease_token,lease_expires_at,execution_lane FROM tasks WHERE id=?"
   ).bind(taskId).first();
   return Boolean(task && task.status === "running" &&
+    (task.execution_lane || "general") === workerLane &&
     task.lease_token === leaseToken && task.lease_expires_at && task.lease_expires_at >= now);
 }
 
@@ -38,10 +39,11 @@ export async function handleTaskInvocation(request, env, url) {
   const taskId = match[1];
   const action = input?.action;
   const leaseToken = input?.lease_token;
+  const workerLane = input?.worker_lane || "general";
   if (!validText(leaseToken,200)) return json({error:"invalid_lease"},400);
   const now = new Date().toISOString();
   try {
-    if (!(await leaseOwned(env.DB,taskId,leaseToken,now))) return json({error:"lease_lost"},409);
+    if (!(await leaseOwned(env.DB,taskId,leaseToken,now,workerLane))) return json({error:"lease_lost"},409);
 
     if (action === "prepare") {
       if (!validText(input.step_key,160) || !validText(input.task_kind,100))
