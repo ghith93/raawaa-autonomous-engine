@@ -308,6 +308,22 @@ class QuotaAwareGatewayTests(unittest.TestCase):
         self.assertEqual(limited.calls, 1)
         self.assertEqual(backup.calls, 1)
 
+    def test_unexpected_adapter_error_records_safe_failure_stage(self):
+        adapter = FakeAdapter("groq", ValueError("invalid provider response"))
+        manager = QuotaManager([self.profile()], self.quota)
+        gateway = QuotaAwareLiveGateway(
+            manager, {"groq": adapter}, self.usage, True,
+            environ={"RAAWAA_ENGINE_LIVE_INFERENCE": "enabled"},
+        )
+        with self.assertRaises(ProviderUnavailable):
+            gateway.generate(self.request)
+        event = next(item for item in self.quota.audit_events() if item["event"] == "adapter_failure")
+        details = event["details"]
+        self.assertEqual(details["failure_stage"], "adapter_generate")
+        self.assertEqual(details["error_type"], "ValueError")
+        self.assertNotIn("invalid provider response", str(details))
+        self.assertEqual(adapter.calls, 1)
+
     def test_durable_invocation_store_marks_timeout_ambiguous_and_never_retries(self):
         first = self.profile()
         second = self.profile(provider="cerebras", account="backup", priority=20)
