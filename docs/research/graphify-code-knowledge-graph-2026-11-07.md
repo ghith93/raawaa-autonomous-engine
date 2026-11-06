@@ -89,3 +89,18 @@ The provider inventory is also not an operational fallback system:
 
 Required R&D completion: a versioned capability/provider/tool adoption register with explicit `primary`, `fallback`, `standby`, `rejected`, and `disabled` states; current evidence and expiry; a tested zero-cost eligibility check; per-route kill switch and hard quota cap; canary/benchmark evidence; and a rollback test. A fallback must be exercised in a bounded staging test before it can be called operational. Until then, keep existing behavior and all disabled routes unchanged.
 
+## 9. Successful end-to-end pilot evidence — 2026-11-06/07
+
+Corrected exact-PR-head run: [42312433741](https://github.com/ghith93/raawaa-autonomous-engine/actions/runs/42312433741), PR head `4aec1b7ff428566aa2b3e7f7dc7648972b98880e`.
+
+- The Graphify job completed **successfully** and uploaded artifact `project-knowledge-graph-42312433741` (425,868 bytes, seven-day retention).
+- Downloaded and independently inspected the ZIP: `graph.json`, `graph.html`, and `GRAPH_REPORT.md) all exist.
+- Actual graph: **5,394 nodes, 11,981 edges, 255 communities**; 92% extracted, 8% inferred, 0% ambiguous; zero model tokens/cost.
+- Graph includes 18 SQL migration/schema files (97 SQL nodes) and 313 unique source files across Python, YAML, JavaScript, TypeScript, SQL, JSON and shell.
+- Path safety check found no absolute or parent-traversal source paths.
+- Graph metadata records the pull-request merge ref `0d5c4087`; the associated PR source head was `4aec1b7...`.
+- Full Engine CI run [42312433515](https://github.com/ghith93/raawaa-autonomous-engine/actions/runs/42312433515) passed: Python tests, Cloudflare Worker tests, Workflows tests, local D1 integration smoke test and local Workflows runtime smoke test. Staging migration/deploy/telemetry jobs were explicitly skipped.
+- This proves the bounded local graph build and artifact pipeline. It does **not** prove that agents are dynamically connected to this graph, that the graph is a live task orchestrator, or that R&D candidate promotion/fallback is implemented.
+
+**Decision:** Graphify passes the technical pilot acceptance gate and can be retained as a read-only code-topology artifact generator. Keep it non-blocking and independent of runtime. Do not merge to main until the repository owner/operator verifies the downstream main-push Staging workflow side effects are compatible with the active #577 zero-write/deploy boundary.
+
