@@ -269,7 +269,7 @@ async function recoverStaleTasks(env, workerLane = null) {
   return { requeued, failed };
 }
 
-const EXECUTION_LANES = new Set(["general", "specialist:researcher", "specialist:reviewer", "specialist:marketer", "specialist:operator"]);
+const EXECUTION_LANES = new Set(["general", "specialist:researcher", "specialist:reviewer", "specialist:marketer", "specialist:operator", "specialist:mobile_tester"]);
 const SPECIALIST_TASK_LANES = {
   research_brief: "specialist:researcher",
   code_review: "specialist:reviewer",
