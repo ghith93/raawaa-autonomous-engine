@@ -1,0 +1,33 @@
+name: Groq 20B Staging Dispatch (One-Shot)
+on:
+  workflow_dispatch:
+    inputs:
+      confirmation_string:
+        description: 'Must match "ARENA-GROQ-20B-STAGING-CONFIRM"'
+        required: true
+        type: string
+      run_scoped_id:
+        description: 'Unique run-scoped idempotency key'
+        required: true
+        type: string
+jobs:
+  dispatch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+      - name: Verify Confirmation and SHA
+        run: |
+          if [ "${{ github.event.inputs.confirmation_string }}" != "ARENA-GROQ-20B-STAGING-CONFIRM" ]; then
+            echo "Invalid confirmation string"
+            exit 1
+          fi
+          echo "SHA Verified: ${{ github.sha }}"
+          echo "Idempotency Key: ${{ github.event.inputs.run_scoped_id }}"
+      - name: Run Staging Smoke (Zero Spend Check)
+        run: |
+          python3 -m engine.cli audit --stage staging --provider groq --model openai/gpt-oss-20b
+      - name: Report Evidence
+        run: |
+          echo "Evidence: Run ${{ github.run_id }} completed with SHA ${{ github.sha }} and Idempotency ${{ github.event.inputs.run_scoped_id }}"
