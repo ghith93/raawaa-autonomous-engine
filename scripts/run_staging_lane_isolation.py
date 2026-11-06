@@ -1,7 +1,7 @@
 """Remote Staging proof for generic/specialist task-lane isolation.
 
 Requires a Staging-only API token and an ephemeral researcher lane token.
-Creates two harmless dry-run tasks, proves generic exclusion, verifies wrong-lane
+Creates isolated dry-run tasks in both lanes, proves bidirectional exclusion, verifies wrong-lane
 heartbeat/retry/finish are rejected, and completes the specialist task correctly.
 """
 from __future__ import annotations
@@ -37,6 +37,11 @@ def main() -> None:
         {"topic": "deterministic lane isolation test"},
         idempotency_key=f"staging-lane-general-sentinel:{suffix}",
     )
+    general_sentinel_last = store.enqueue(
+        "research_brief", "Staging general lane final sentinel",
+        {"topic": "deterministic lane isolation test"},
+        idempotency_key=f"staging-lane-general-final:{suffix}",
+    )
     specialist = store.enqueue(
         "research_brief", "Staging researcher lane isolation proof",
         {"topic": "deterministic lane isolation test"},
@@ -49,6 +54,15 @@ def main() -> None:
         raise SystemExit("General consumer claimed the wrong task")
     store.finish(general_claim["id"], "succeeded", {"mode": "dry_run", "proof": "general"},
                  lease_token=general_claim["lease_token"], worker_lane="general")
+
+    # While a specialist task is pending, the general consumer must still
+    # select only its own lane.
+    general_sentinel_claim = store.claim_next(execution_mode="dry_run", worker_lane="general")
+    if not general_sentinel_claim or general_sentinel_claim.get("id") != general_sentinel.get("id"):
+        raise SystemExit("General consumer crossed into the specialist lane")
+    store.finish(general_sentinel_claim["id"], "succeeded",
+                 {"mode": "dry_run", "proof": "general-sentinel"},
+                 lease_token=general_sentinel_claim["lease_token"], worker_lane="general")
 
     specialist_claim = store.claim_next(
         execution_mode="dry_run", worker_lane="specialist:researcher"
@@ -79,13 +93,13 @@ def main() -> None:
         lease_token=specialist_claim["lease_token"], worker_lane="specialist:researcher",
     )
 
-    # A pending general task must remain invisible to the specialist consumer.
-    general_sentinel_claim = store.claim_next(execution_mode="dry_run", worker_lane="general")
-    if not general_sentinel_claim or general_sentinel_claim.get("id") != general_sentinel.get("id"):
-        raise SystemExit("General consumer could not claim its own pending task")
-    store.finish(general_sentinel_claim["id"], "succeeded",
-                 {"mode": "dry_run", "proof": "general-sentinel"},
-                 lease_token=general_sentinel_claim["lease_token"], worker_lane="general")
+    # The researcher must not claim the final pending general task.
+    general_sentinel_last_claim = store.claim_next(execution_mode="dry_run", worker_lane="general")
+    if not general_sentinel_last_claim or general_sentinel_last_claim.get("id") != general_sentinel_last.get("id"):
+        raise SystemExit("General consumer could not claim its own final pending task")
+    store.finish(general_sentinel_last_claim["id"], "succeeded",
+                 {"mode": "dry_run", "proof": "general-final"},
+                 lease_token=general_sentinel_last_claim["lease_token"], worker_lane="general")
     if store.claim_next(execution_mode="dry_run", worker_lane="general") is not None:
         raise SystemExit("General consumer claimed an unexpected task")
 
@@ -93,7 +107,7 @@ def main() -> None:
     researcher_tasks = {
         task["id"]: task for task in store.list_tasks(100, worker_lane="specialist:researcher")
     }
-    for task_id in (general["id"], general_sentinel["id"]):
+    for task_id in (general["id"], general_sentinel["id"], general_sentinel_last["id"]):
         if general_tasks[task_id]["status"] != "succeeded":
             raise SystemExit("General task did not complete")
     if researcher_tasks[specialist["id"]]["status"] != "succeeded":
