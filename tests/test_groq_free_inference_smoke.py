@@ -43,7 +43,7 @@ class FakeStore:
         if path == "/v1/monetary-ledger" and method == "POST":
             self.settlement_calls.append(payload)
             self.global_snapshot = {"task_pending_count": 0, "unresolved": []}
-            self.task_snapshot = {"task_pending_count": 0, "unresolved": []}
+            self.task_snapshot = {"task_pending_count": 0, "task_reserved_nanos": 0, "unresolved": []}
             return {"ok": True, "settled": True, "over_budget": False}
         if path == "/v1/monetary-ledger":
             return {"snapshot": self.global_snapshot}
@@ -132,6 +132,18 @@ class GroqSmokeRecoveryTests(unittest.TestCase):
         }
         with self.assertRaisesRegex(SystemExit, "unresolved reservations"):
             smoke._assert_zero_spend(store, "new-task")
+
+    def test_prior_zero_cost_reservation_already_settled_is_rerun_safe(self):
+        store = self.store(rows=[{"id": smoke.PREVIOUS_AMBIGUOUS_TASK_ID, "status": "blocked"}])
+        store.task_snapshot = {
+            "task_pending_count": 0,
+            "task_reserved_nanos": 0,
+            "unresolved": [],
+        }
+        result = smoke._verify_previous_ambiguous_task(store)
+        self.assertEqual(result["reservation_status"], "already_settled")
+        self.assertEqual(result["actual_cost_nanos"], 0)
+        self.assertEqual(store.settlement_calls, [])
 
     def test_refuses_if_multiple_matching_ambiguous_reservations_exist(self):
         store = self.store()
