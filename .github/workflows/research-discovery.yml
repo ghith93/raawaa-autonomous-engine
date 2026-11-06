@@ -165,7 +165,7 @@ jobs:
           if not html_path.is_file():
               raise SystemExit("Graphify did not produce graph.html")
           # Preserve the full combined topology before any Graphify visualization transforms.
-          Path("graphify-out/project-agent-graph.json").write_text(json.dumps(graph, ensure_ascii=False, indent=2) + "\\n", encoding="utf-8")
+          Path("graphify-out/project-agent-graph.json").write_text(json.dumps(graph, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
           print(f"Combined graph validated: nodes={len(nodes)} links={len(links)} project_nodes={len(project_nodes)} project_links={len(project_links)} html_bytes={html_path.stat().st_size}")
           PY
       - name: Upload short-lived knowledge graph artifact
