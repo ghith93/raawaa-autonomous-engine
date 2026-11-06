@@ -58,7 +58,8 @@ def _error_detail(exc: HTTPError) -> str:
 class RemoteTaskStore:
     def __init__(self, base_url: str | None = None, token: str | None = None,
                  timeout: float = 15.0, access_client_id: str | None = None,
-                 access_client_secret: str | None = None, reject_redirects: bool = False):
+                 access_client_secret: str | None = None, reject_redirects: bool = False,
+                 lane_token: str | None = None):
         self.base_url = (base_url or os.environ.get("RAAWAA_ENGINE_API_URL", "")).rstrip("/")
         self.token = token or os.environ.get("RAAWAA_ENGINE_API_TOKEN", "")
         self.access_client_id = (
@@ -70,7 +71,10 @@ class RemoteTaskStore:
             else os.environ.get("RAAWAA_ENGINE_CF_ACCESS_CLIENT_SECRET", "")
         )
         self.timeout = timeout
-        self.lane_token = os.environ.get("RAAWAA_ENGINE_LANE_TOKEN", "")
+        self.lane_token = (
+            lane_token if lane_token is not None
+            else os.environ.get("RAAWAA_ENGINE_LANE_TOKEN", "")
+        )
         self.reject_redirects = bool(reject_redirects)
         if not self.base_url.startswith("https://") or not self.token:
             raise ValueError("Remote task store requires an HTTPS API URL and token")
