@@ -59,6 +59,8 @@ jobs:
               *"update CLOUDFLARE_ACCOUNT_ID"*) echo "::error::$line" ;;
               *"matches D1_DATABASE_ID"*)    echo "::notice::$line" ;;
               *"belongs to a different account"*) echo "::warning::$line" ;;
+              *"match: true"*)               echo "::notice::$line" ;;
+              *"match: false"*)              echo "::error::$line" ;;
             esac
           done < doctor.log
           echo "doctor_exit=$code"

@@ -104,6 +104,33 @@ def main(argv: list[str] | None = None) -> int:
     else:
         print("  skipped: no resolved account")
 
+    section("WRANGLER BINDING vs THE SECRET")
+    try:
+        import tomllib
+        cfg = tomllib.loads((ROOT / "wrangler.toml").read_text(encoding="utf-8"))
+        binding = (cfg.get("d1_databases") or [{}])[0]
+        bound_id = str(binding.get("database_id", "")).strip()
+        print(f"  wrangler.toml binds : {binding.get('database_name')} "
+              f"({bound_id[:6]}...{bound_id[-4:]})" if bound_id else "  wrangler.toml binds: none")
+        target = d1.value.strip()
+        if not target:
+            print("  no D1_DATABASE_ID secret to compare against")
+        elif bound_id == target:
+            print("  match: true — the deploy target and the secret agree")
+        else:
+            print("  match: false — wrangler.toml points at a different database than "
+                  "D1_DATABASE_ID, so a deploy would fail even though the token is fine")
+            report["next_steps"].append(
+                "set wrangler.toml database_id to the id in D1_DATABASE_ID, or update the secret")
+        report["wrangler_binding"] = {
+            "database_name": binding.get("database_name"),
+            "id_prefix": bound_id[:6] if bound_id else None,
+            "id_suffix": bound_id[-4:] if bound_id else None,
+            "matches_secret": bool(target) and bound_id == target,
+        }
+    except Exception as exc:  # noqa: BLE001
+        print(f"  could not read wrangler.toml ({type(exc).__name__})")
+
     section("IMAGE ROUTES")
     from engine.image_providers import CloudflareFlux, LocalQwenImage
     for provider in (CloudflareFlux(env=env), LocalQwenImage(env=env)):
