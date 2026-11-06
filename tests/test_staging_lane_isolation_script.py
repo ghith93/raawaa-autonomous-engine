@@ -28,6 +28,26 @@ class StagingLaneIsolationScriptTests(unittest.TestCase):
             self.assertNotIn(field, summary[0])
         self.assertEqual(summary[0]["id"], "task-0")
 
+    def test_running_tasks_are_reported_but_do_not_block_pending_lane_claims(self):
+        from scripts.run_staging_lane_isolation import _queue_state
+
+        pending, running = _queue_state([
+            {"id": "running-1", "status": "running"},
+            {"id": "pending-1", "status": "pending"},
+            {"id": "done-1", "status": "succeeded"},
+        ])
+        self.assertEqual([task["id"] for task in pending], ["pending-1"])
+        self.assertEqual([task["id"] for task in running], ["running-1"])
+
+    def test_running_only_queue_is_safe_to_claim_new_proof_tasks(self):
+        from scripts.run_staging_lane_isolation import _queue_state
+
+        pending, running = _queue_state([
+            {"id": "running-1", "status": "running"},
+        ])
+        self.assertEqual(pending, [])
+        self.assertEqual([task["id"] for task in running], ["running-1"])
+
     def test_script_imports_repository_modules_when_run_outside_repo(self):
         script = ROOT / "scripts" / "run_staging_lane_isolation.py"
         env = {
