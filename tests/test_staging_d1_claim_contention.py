@@ -6,6 +6,7 @@ from scripts.run_staging_d1_claim_contention import (
     STAGING_API_URL,
     StagingContentionProofError,
     run_proof,
+    retire_stale_pending_proof_tasks,
     validate_environment,
 )
 
@@ -31,6 +32,9 @@ class FakeStore:
         self.audit.append({"task_id": "staging-task-1", "event": "task_enqueued"})
         return dict(self.task)
 
+    def list_tasks(self, _limit):
+        return [dict(self.task)] if self.task else []
+
     def claim_supervised_probe(self, task_id):
         with self.lock:
             if task_id != self.task["id"] or self.claimed or self.task["status"] != "pending":
@@ -39,9 +43,6 @@ class FakeStore:
             self.task.update(status="running", attempts=1, execution_mode="dry_run")
             self.audit.append({"task_id": task_id, "event": "task_claimed"})
             return {**self.task, "lease_token": "lease-test"}
-
-    def list_tasks(self, _limit):
-        return [dict(self.task)]
 
     def finish(self, task_id, status, result=None, error=None, lease_token=None, execution_mode=None):
         assert task_id == self.task["id"]
@@ -80,6 +81,79 @@ class StagingContentionProofTests(unittest.TestCase):
         bad = dict(self.env, RAAWAA_ENGINE_LIVE_INFERENCE="enabled")
         with self.assertRaises(StagingContentionProofError):
             validate_environment(bad)
+
+    def test_only_exact_stale_pending_contention_proofs_are_retired(self):
+        class CleanupStore:
+            def __init__(self):
+                self.rows = [
+                    {
+                        "id": "stale-proof",
+                        "task_type": "supervised_probe",
+                        "title": "Remote Staging D1 concurrent claim contention proof",
+                        "idempotency_key": "staging-d1-contention:12345:1",
+                        "payload_json": '{"operation": "python_platform_probe"}',
+                        "status": "pending",
+                        "attempts": 0,
+                        "max_attempts": 1,
+                        "execution_mode": "not_started",
+                        "priority": 100,
+                        "dependencies_json": "[]",
+                    },
+                    {
+                        "id": "lookalike",
+                        "task_type": "supervised_probe",
+                        "title": "Remote Staging D1 concurrent claim contention proof",
+                        "idempotency_key": "staging-d1-contention:12346:1",
+                        "payload_json": '{"operation": "different_operation"}',
+                        "status": "pending",
+                        "attempts": 0,
+                        "max_attempts": 1,
+                        "execution_mode": "not_started",
+                        "priority": 100,
+                        "dependencies_json": "[]",
+                    },
+                    {
+                        "id": "lookalike-attempted",
+                        "task_type": "supervised_probe",
+                        "title": "Remote Staging D1 concurrent claim contention proof",
+                        "idempotency_key": "staging-d1-contention:12347:1",
+                        "payload_json": '{"operation": "python_platform_probe"}',
+                        "status": "pending",
+                        "attempts": 1,
+                        "max_attempts": 1,
+                        "execution_mode": "not_started",
+                        "priority": 100,
+                        "dependencies_json": "[]",
+                    },
+                    {
+                        "id": "unrelated",
+                        "task_type": "research_brief",
+                        "title": "Unrelated Staging task",
+                        "idempotency_key": "user-task-key",
+                        "status": "pending",
+                    },
+                ]
+                self.finished = []
+
+            def list_tasks(self, _limit):
+                return [dict(row) for row in self.rows]
+
+            def claim_supervised_probe(self, task_id):
+                row = next(row for row in self.rows if row["id"] == task_id)
+                row["status"] = "running"
+                return {"id": task_id, "lease_token": "lease-stale"}
+
+            def finish(self, task_id, status, **kwargs):
+                self.finished.append((task_id, status, kwargs))
+
+        store = CleanupStore()
+        self.assertEqual(retire_stale_pending_proof_tasks(store), 1)
+        self.assertEqual(len(store.finished), 1)
+        self.assertEqual(store.finished[0][0:2], ("stale-proof", "blocked"))
+        self.assertEqual(
+            [row["id"] for row in store.rows if row["status"] == "pending"],
+            ["lookalike", "lookalike-attempted", "unrelated"],
+        )
 
     def test_two_concurrent_claims_have_one_winner_and_durable_completion(self):
         result = run_proof(self.env, store_factory=FakeStore, executor_factory=ThreadPoolExecutor)
