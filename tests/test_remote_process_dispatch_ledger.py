@@ -72,7 +72,10 @@ class RemoteProcessDispatchLedgerTests(unittest.TestCase):
         self.assertEqual(call.call_args_list[0].args[2]["action"], "prepare")
         self.assertEqual(call.call_args_list[0].args[2]["step_key"], STEP_KEY)
         self.assertEqual(call.call_args_list[0].args[2]["lease_token"], LEASE)
+        self.assertEqual(call.call_args_list[0].args[2]["worker_lane"], "general")
+        self.assertEqual(call.call_args_list[0].kwargs["worker_lane"], "general")
         self.assertEqual(call.call_args_list[1].args[2]["action"], "start")
+        self.assertEqual(call.call_args_list[1].kwargs["worker_lane"], "general")
         self.assertEqual(self.ledger.get(DISPATCH_ID).status, "in_flight")
 
     def test_recovered_in_flight_is_fenced_as_ambiguous_without_starting_again(self):
