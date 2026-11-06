@@ -363,3 +363,76 @@ jobs:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         run: npx --yes wrangler@4.156.1 secret delete ENGINE_API_TOKEN --config wrangler.staging.toml
+
+  knowledge-graph:
+    name: Build code and agent topology graph (read-only)
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    permissions:
+      contents: read
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - name: Set up Python
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7
+        with:
+          python-version: "3.12"
+      - name: Validate project and agent topology
+        run: python scripts/validate_project_agent_map.py config/project-agent-map.json .
+      - name: Test project map graph overlay
+        run: python -m unittest tests.test_project_agent_map_merge -v
+      - name: Install pinned Graphify OSS
+        run: python -m pip install --disable-pip-version-check --no-input "graphifyy[sql]==0.9.103"
+      - name: Build local code and project-agent knowledge graph (no model)
+        env:
+          GRAPHIFY_OUT: graphify-out
+          GRAPHIFY_NO_TIPS: "1"
+        run: |
+          python -m graphify extract . --code-only
+          python scripts/merge_project_agent_map.py --graph graphify-out/graph.json --map config/project-agent-map.json
+          python -m graphify cluster-only . --no-label
+          python - <<'PY'
+          import json
+          from pathlib import Path, PurePosixPath
+          graph_path = Path("graphify-out/graph.json")
+          report_path = Path("graphify-out/GRAPH_REPORT.md")
+          if not graph_path.is_file() or not report_path.is_file():
+              raise SystemExit("Graphify did not produce the expected graph and report")
+          graph = json.loads(graph_path.read_text(encoding="utf-8"))
+          manifest = json.loads(Path("config/project-agent-map.json").read_text(encoding="utf-8"))
+          nodes = graph.get("nodes", [])
+          links = graph.get("links", graph.get("edges", []))
+          project_nodes = [n for n in nodes if isinstance(n, dict) and isinstance(n.get("metadata"), dict) and n["metadata"].get("map_node_id")]
+          project_edges = [e for e in links if isinstance(e, dict) and str(e.get("source_location", "")).startswith("edges[")]
+          evidence_edges = [e for e in links if isinstance(e, dict) and str(e.get("source_location", "")).startswith("evidence:")]
+          if not isinstance(nodes, list) or not nodes:
+              raise SystemExit("Graphify produced an empty or invalid node list")
+          if len(project_nodes) != len(manifest.get("nodes", [])):
+              raise SystemExit("Project/agent topology nodes are missing from the combined graph")
+          if len(project_edges) != len(manifest.get("edges", [])):
+              raise SystemExit("Project/agent topology edges are missing from the combined graph")
+          expected_evidence = sum(len(n.get("evidence", [])) for n in manifest.get("nodes", []))
+          if len(evidence_edges) != expected_evidence:
+              raise SystemExit("Project/agent evidence links are missing from the combined graph")
+          for node in nodes:
+              source = node.get("source_file") if isinstance(node, dict) else None
+              if source:
+                  path = PurePosixPath(str(source).replace("\\", "/"))
+                  if path.is_absolute() or ".." in path.parts:
+                      raise SystemExit(f"Graphify emitted an unsafe source path: {source}")
+          html_path = Path("graphify-out/graph.html")
+          if not html_path.is_file():
+              raise SystemExit("Graphify did not produce graph.html")
+          print(f"Combined graph validated: nodes={len(nodes)} links={len(links)} project_nodes={len(project_nodes)} project_edges={len(project_edges)} evidence_edges={len(evidence_edges)} html_bytes={html_path.stat().st_size}")
+          PY
+      - name: Upload short-lived knowledge graph artifact
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: project-knowledge-graph-${{ github.run_id }}
+          path: |
+            graphify-out/graph.json
+            graphify-out/graph.html
+            graphify-out/GRAPH_REPORT.md
+          if-no-files-found: error
+          retention-days: 7
