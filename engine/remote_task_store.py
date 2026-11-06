@@ -70,6 +70,7 @@ class RemoteTaskStore:
             else os.environ.get("RAAWAA_ENGINE_CF_ACCESS_CLIENT_SECRET", "")
         )
         self.timeout = timeout
+        self.lane_token = os.environ.get("RAAWAA_ENGINE_LANE_TOKEN", "")
         self.reject_redirects = bool(reject_redirects)
         if not self.base_url.startswith("https://") or not self.token:
             raise ValueError("Remote task store requires an HTTPS API URL and token")
@@ -77,7 +78,8 @@ class RemoteTaskStore:
             raise ValueError("Cloudflare Access requires both service-token credentials")
 
     def _request(self, path: str, method: str = "GET",
-                 payload: dict[str, Any] | None = None) -> dict[str, Any]:
+                 payload: dict[str, Any] | None = None,
+                 worker_lane: str = "general") -> dict[str, Any]:
         body = None if payload is None else json.dumps(payload).encode("utf-8")
         headers = {
             "Authorization": "Bearer " + self.token,
@@ -88,6 +90,8 @@ class RemoteTaskStore:
         if self.access_client_id and self.access_client_secret:
             headers["CF-Access-Client-Id"] = self.access_client_id
             headers["CF-Access-Client-Secret"] = self.access_client_secret
+        if worker_lane != "general" and self.lane_token:
+            headers["X-Engine-Lane-Token"] = self.lane_token
         request = Request(self.base_url + path, data=body, method=method, headers=headers)
         try:
             opener = build_opener(_RejectRedirects) if self.reject_redirects else None
@@ -142,12 +146,13 @@ class RemoteTaskStore:
 
     def enqueue(self, task_type: str, title: str, payload: dict[str, Any] | None = None,
                 idempotency_key: str | None = None, max_attempts: int = 2,
-                priority: int | None = None, depends_on: list[str] | None = None) -> dict[str, Any]:
+                priority: int | None = None, depends_on: list[str] | None = None,
+                execution_lane: str = "general") -> dict[str, Any]:
         import uuid
         request_payload = {
             "task_type": task_type, "title": title, "payload": payload or {},
             "idempotency_key": idempotency_key or str(uuid.uuid4()),
-            "max_attempts": max_attempts,
+            "max_attempts": max_attempts, "execution_lane": execution_lane,
         }
         if priority is not None:
             if type(priority) is not int or not 0 <= priority <= 100:
@@ -174,12 +179,14 @@ class RemoteTaskStore:
         return tasks
 
     def claim_next(self, lease_timeout_seconds: int = 900,
-                   execution_mode: str = "unknown") -> dict[str, Any] | None:
+                   execution_mode: str = "unknown", worker_lane: str = "general") -> dict[str, Any] | None:
         if not 1 <= int(lease_timeout_seconds) <= 900:
             raise ValueError("remote lease timeout must be between 1 and 900 seconds")
         if execution_mode not in {"unknown", "dry_run", "live_inference"}:
             raise ValueError("invalid execution_mode")
-        result = self._request("/v1/tasks/claim", "POST", {"execution_mode": execution_mode})
+        result = self._request("/v1/tasks/claim", "POST",
+                               {"execution_mode": execution_mode, "worker_lane": worker_lane},
+                               worker_lane=worker_lane)
         task = result.get("task")
         if task is None:
             return None
@@ -234,11 +241,12 @@ class RemoteTaskStore:
         return result
 
     def heartbeat(self, task_id: str, lease_token: str,
-                  lease_timeout_seconds: int = 900) -> str:
+                  lease_timeout_seconds: int = 900, worker_lane: str = "general") -> str:
         if not 1 <= int(lease_timeout_seconds) <= 900:
             raise ValueError("remote lease timeout must be between 1 and 900 seconds")
         result = self._request(f"/v1/tasks/{task_id}/heartbeat", "POST",
-                               {"lease_token": lease_token})
+                               {"lease_token": lease_token, "worker_lane": worker_lane},
+                               worker_lane=worker_lane)
         expiry = result.get("lease_expires_at")
         if not isinstance(expiry, str):
             raise RemoteTaskStoreError("Remote task API omitted lease expiry")
@@ -246,10 +254,11 @@ class RemoteTaskStore:
 
     def finish(self, task_id: str, status: str, result: dict[str, Any] | None = None,
                error: str | None = None, lease_token: str | None = None,
-               execution_mode: str | None = None) -> None:
+               execution_mode: str | None = None, worker_lane: str = "general") -> None:
         if status not in {"succeeded", "failed", "blocked"}:
             raise ValueError("invalid terminal status")
-        payload: dict[str, Any] = {"lease_token": lease_token, "status": status}
+        payload: dict[str, Any] = {"lease_token": lease_token, "status": status,
+                                   "worker_lane": worker_lane}
         if result is not None:
             payload["result"] = result
         if error is not None:
@@ -260,12 +269,13 @@ class RemoteTaskStore:
             payload["execution_mode"] = execution_mode
         elif result is not None and result.get("mode") in {"dry_run", "live_inference"}:
             payload["execution_mode"] = result["mode"]
-        self._request(f"/v1/tasks/{task_id}/finish", "POST", payload)
+        self._request(f"/v1/tasks/{task_id}/finish", "POST", payload, worker_lane=worker_lane)
 
     def retry_or_fail(self, task_id: str, error: str,
-                      lease_token: str | None = None) -> str:
+                      lease_token: str | None = None, worker_lane: str = "general") -> str:
         response = self._request(f"/v1/tasks/{task_id}/retry", "POST",
-                                 {"lease_token": lease_token, "error": error})
+                                 {"lease_token": lease_token, "error": error,
+                                  "worker_lane": worker_lane}, worker_lane=worker_lane)
         status = response.get("status")
         if status not in {"pending", "failed"}:
             raise RemoteTaskStoreError("Remote task API returned an invalid retry status")
