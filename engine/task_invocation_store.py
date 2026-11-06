@@ -17,8 +17,11 @@ class TaskInvocationStore:
     def _post(self, task_id: str, payload: dict[str, Any]) -> dict[str, Any]:
         if not isinstance(task_id, str) or not task_id.strip():
             raise ValueError("task_id is required")
+        worker_lane = self.task_store.worker_lane
+        request_payload = {**payload, "worker_lane": worker_lane}
         result = self.task_store._request(
-            f"/v1/tasks/{task_id}/invocations", "POST", payload
+            f"/v1/tasks/{task_id}/invocations", "POST", request_payload,
+            worker_lane=worker_lane,
         )
         if not isinstance(result, dict):
             raise RemoteTaskStoreError("Invocation API returned invalid data")
