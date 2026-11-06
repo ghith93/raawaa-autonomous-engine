@@ -224,6 +224,41 @@ class RemoteTaskStore:
         task["lease_token"] = result["lease_token"]
         return task
 
+    def claim_exact(self, task_id: str, lease_timeout_seconds: int = 900,
+                    execution_mode: str = "dry_run", worker_lane: str = "general") -> dict[str, Any] | None:
+        """Claim only a specified eligible task, lane-scoped and dry-run only."""
+        import re
+        if not isinstance(task_id, str) or not re.fullmatch(r"[A-Za-z0-9_-]{1,128}", task_id):
+            raise ValueError("invalid task_id")
+        if lease_timeout_seconds != 900:
+            raise ValueError("remote exact claim uses a fixed 900 second lease")
+        if execution_mode != "dry_run":
+            raise ValueError("exact claims are restricted to dry_run")
+        lanes = {"general", "specialist:researcher", "specialist:reviewer", "specialist:marketer",
+                 "specialist:operator", "specialist:mobile_tester"}
+        if worker_lane not in lanes:
+            raise ValueError("invalid worker_lane")
+        result = self._request(f"/v1/tasks/{task_id}/claim-exact", "POST",
+                               {"execution_mode": execution_mode, "worker_lane": worker_lane},
+                               worker_lane=worker_lane)
+        if "task" not in result:
+            raise RemoteTaskStoreError("Remote task API omitted the exact-ID claim result")
+        task, token = result.get("task"), result.get("lease_token")
+        if task is None:
+            return None
+        lane_types = {"specialist:researcher": "research_brief", "specialist:reviewer": "code_review",
+                      "specialist:marketer": "content_draft", "specialist:operator": "system_audit",
+                      "specialist:mobile_tester": "mobile_test"}
+        if (not isinstance(task, dict) or not isinstance(token, str) or not token
+                or task.get("id") != task_id or task.get("status") != "running"
+                or task.get("execution_mode") != "dry_run" or task.get("execution_lane") != worker_lane
+                or not isinstance(task.get("task_type"), str) or not task["task_type"]
+                or task.get("task_type") in {"supervised_probe", "codespace_inspect", "codespace_test"}
+                or (worker_lane != "general" and task.get("task_type") != lane_types[worker_lane])):
+            raise RemoteTaskStoreError("Remote task API returned an invalid exact-ID lease")
+        task["lease_token"] = token
+        return task
+
     def claim_supervised_probe(self, task_id: str) -> dict[str, Any] | None:
         """Claim only this exact, pending ``supervised_probe`` row in dry-run mode.
 

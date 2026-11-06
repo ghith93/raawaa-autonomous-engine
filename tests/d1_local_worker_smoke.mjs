@@ -10,6 +10,7 @@ const PORT = 8792;
 const BASE = "http://127.0.0.1:" + PORT;
 const TOKEN = "test-engine-token-local-only";
 const CODESPACE_TOKEN = "test-codespace-token-0123456789abcdef0123456789abcdef";
+const RESEARCHER_TOKEN = "local-researcher-token-0123456789abcdef0123456789";
 const WRANGLER = ["--yes", "wrangler@4.156.1"];
 const root = mkdtempSync(join(tmpdir(), "raawaa-d1-local-"));
 const stateDir = join(root, "state");
@@ -91,8 +92,9 @@ function queryLocalSql(sql) {
   return resultSets.flatMap(item => Array.isArray(item?.results) ? item.results : []);
 }
 
-async function api(path, { method = "GET", body, token = TOKEN } = {}) {
+async function api(path, { method = "GET", body, token = TOKEN, laneToken } = {}) {
   const headers = { accept: "application/json" };
+  if (laneToken) headers["x-engine-lane-token"] = laneToken;
   if (token) headers.authorization = "Bearer " + token;
   if (body !== undefined) headers["content-type"] = "application/json";
   const response = await fetch(BASE + path, {
@@ -138,6 +140,7 @@ function launchWorker() {
     "--persist-to", stateDir,
     "--var", "ENGINE_API_TOKEN:" + TOKEN,
     "--var", "ENGINE_CODESPACE_TOKEN:" + CODESPACE_TOKEN,
+    "--var", "ENGINE_RESEARCHER_LANE_TOKEN:" + RESEARCHER_TOKEN,
     "--var", "QUOTA_ROUTE_LIMITS_JSON:" + JSON.stringify({
       "d1-local:concurrency": {
         enabled: true,
@@ -536,6 +539,53 @@ try {
   });
   assertStatus(staleLease, 409, "finished task must reject stale lease");
 
+  // The specialist lane requires both its capability and exact task identity.
+  const specialistExactTask = await api("/v1/tasks/enqueue", {method: "POST", body: {
+    task_type: "research_brief", title: "Exact specialist", payload: {},
+    execution_lane: "specialist:researcher", idempotency_key: "d1-specialist-exact-" + randomUUID(),
+  }});
+  assertStatus(specialistExactTask, 201, "enqueue exact specialist");
+  const specialistExactPath = "/v1/tasks/" + specialistExactTask.payload.task.id + "/claim-exact";
+  const wrongLaneExact = await api(specialistExactPath, {method: "POST", body: {}});
+  assertStatus(wrongLaneExact, 200, "general lane refuses specialist task");
+  assert.equal(wrongLaneExact.payload.task, null);
+  const specialistClaim = await api(specialistExactPath, {method: "POST", laneToken: RESEARCHER_TOKEN,
+    body: {worker_lane: "specialist:researcher"}});
+  assertStatus(specialistClaim, 200, "specialist exact claim");
+  assert.equal(specialistClaim.payload.task.id, specialistExactTask.payload.task.id);
+  assertStatus(await api("/v1/tasks/" + specialistExactTask.payload.task.id + "/finish", {
+    method: "POST", laneToken: RESEARCHER_TOKEN, body: {worker_lane: "specialist:researcher",
+      lease_token: specialistClaim.payload.lease_token, status: "succeeded", result: {mode: "dry_run"}},
+  }), 200, "finish specialist exact fixture");
+
+  // Exact-ID and generic claimers race against the same real local D1 row.
+  const exactRaceTask = await api("/v1/tasks/enqueue", {method: "POST", body: {
+    task_type: "system_audit", title: "Exact claim contention", payload: {},
+    idempotency_key: "d1-exact-race-" + randomUUID(), max_attempts: 1,
+  }});
+  assertStatus(exactRaceTask, 201, "enqueue exact claim fixture");
+  const exactRacePath = "/v1/tasks/" + exactRaceTask.payload.task.id + "/claim-exact";
+  assertStatus(await api(exactRacePath, {method: "POST", token: null, body: {}}), 401, "exact claim requires auth");
+  assertStatus(await api(exactRacePath, {method: "POST", body: {worker_lane: "specialist:researcher"}}), 401, "exact claim requires lane token");
+  assertStatus(await api(exactRacePath, {method: "POST", body: {execution_mode: "live_inference"}}), 400, "exact claim rejects live mode");
+  const raceClaims = await Promise.all([
+    api(exactRacePath, {method: "POST", body: {execution_mode: "dry_run"}}),
+    api("/v1/tasks/claim", {method: "POST", body: {execution_mode: "dry_run"}}),
+  ]);
+  raceClaims.forEach(result => assertStatus(result, 200, "exact versus generic claim"));
+  const exactRaceWinners = raceClaims.filter(result => result.payload.task !== null);
+  assert.equal(exactRaceWinners.length, 1);
+  assert.equal(exactRaceWinners[0].payload.task.id, exactRaceTask.payload.task.id);
+  assert.equal(exactRaceWinners[0].payload.task.attempts, 1);
+  assertStatus(await api("/v1/tasks/" + exactRaceTask.payload.task.id + "/finish", {method: "POST", body: {
+    lease_token: exactRaceWinners[0].payload.lease_token, status: "succeeded", result: {mode: "dry_run"},
+  }}), 200, "finish exact claim race fixture");
+  const exactRaceAudit = await api("/v1/audit?limit=20&task_id=" + exactRaceTask.payload.task.id);
+  assert.equal(exactRaceAudit.payload.events.filter(item => item.event === "task_claimed").length, 1);
+  const missingExact = await api("/v1/tasks/missing-exact/claim-exact", {method: "POST", body: {}});
+  assertStatus(missingExact, 200, "missing exact claim");
+  assert.equal(missingExact.payload.task, null);
+
   // A narrowly scoped supervised claim targets one exact safe task and must
   // not sweep or claim unrelated D1 queue rows.
   const failedDependency = await api("/v1/tasks/enqueue", {
@@ -570,6 +620,12 @@ try {
       idempotency_key: "d1-specific-claim-probe-" + randomUUID(), priority: 1, max_attempts: 1 },
   });
   assertStatus(specificProbe, 201, "enqueue exact supervised probe");
+  const blockedExact = await api("/v1/tasks/" + untouchedDependent.payload.task.id + "/claim-exact", {method: "POST", body: {}});
+  assertStatus(blockedExact, 200, "exact claim refuses unresolved dependency");
+  assert.equal(blockedExact.payload.task, null);
+  const probeExact = await api("/v1/tasks/" + specificProbe.payload.task.id + "/claim-exact", {method: "POST", body: {}});
+  assertStatus(probeExact, 200, "generic exact claim refuses supervised probe");
+  assert.equal(probeExact.payload.task, null);
   const wrongMethodClaim = await api("/v1/tasks/" + specificProbe.payload.task.id +
     "/claim-supervised-probe", { method: "GET" });
   assertStatus(wrongMethodClaim, 405, "specific supervised claim is POST-only");
@@ -1625,7 +1681,7 @@ try {
   status = await api("/v1/mobile/status");
   assertStatus(status, 200, "mobile status after D1 writes");
   assert.equal(status.payload.paper_events.find(row => row.event_type === "candidate_detected")?.count, 1);
-  assert.equal(status.payload.tasks.find(row => row.status === "succeeded")?.count, 13,
+  assert.equal(status.payload.tasks.find(row => row.status === "succeeded")?.count, 15,
     "workflow, dependency, supervised-process, exact-claim, and concurrent-claim fixtures should be durably succeeded");
   assert.equal(status.payload.tasks.find(row => row.status === "failed")?.count, 3,
     "failed dependency roots remain visibly failed");
