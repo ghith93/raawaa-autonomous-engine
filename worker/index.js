@@ -395,6 +395,27 @@ export default {
         task_types: [...CODESPACE_TASK_TYPES], max_lease_seconds: 900 });
     }
 
+    // Invocation and supervised-process ledgers are lease-fenced task mutations.
+    // Bind them to the same consumer capability as claim/heartbeat/finish/retry.
+    const laneScopedAuxTask = url.pathname.match(
+      /^\\/v1\\/tasks\\/([A-Za-z0-9_-]+)\\/(invocations|process-dispatches|claim-supervised-probe|recover-supervised-probe)$/
+    );
+    if (request.method === "POST" && laneScopedAuxTask) {
+      let laneInput;
+      try { laneInput = await readJson(request.clone()); }
+      catch (error) { return json({ error: error.message }, 400); }
+      const workerLane = laneInput?.worker_lane || "general";
+      if (!EXECUTION_LANES.has(workerLane)) return json({ error: "invalid_worker_lane" }, 400);
+      if (!laneTokenAuthorized(request, env, workerLane)) return json({ error: "lane_unauthorized" }, 401);
+      const current = await env.DB.prepare(
+        "SELECT execution_lane FROM tasks WHERE id=?"
+      ).bind(laneScopedAuxTask[1]).first();
+      if (!current) return json({ error: "task_not_found" }, 404);
+      if ((current.execution_lane || "general") !== workerLane) {
+        return json({ error: "lane_ownership_lost" }, 403);
+      }
+    }
+
     // Only reachable after the bearer guard above: dispatch enqueues tasks, so it
     // must sit behind the same authentication as /v1/tasks/enqueue. It records
     // the run and its steps in one D1 batch and executes nothing.
