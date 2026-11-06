@@ -294,6 +294,15 @@ class TaskStoreTests(unittest.TestCase):
         self.assertEqual(self.store.recover_stale(worker_lane="specialist:researcher"),
                          {"requeued": 1, "failed": 0})
 
+    def test_task_listing_can_be_scoped_to_one_lane(self):
+        general = self.store.enqueue("research_brief", "General visible")
+        specialist = self.store.enqueue("research_brief", "Researcher visible",
+                                        execution_lane="specialist:researcher")
+        general_rows = self.store.list_tasks(50, worker_lane="general")
+        specialist_rows = self.store.list_tasks(50, worker_lane="specialist:researcher")
+        self.assertEqual([task["id"] for task in general_rows], [general["id"]])
+        self.assertEqual([task["id"] for task in specialist_rows], [specialist["id"]])
+
     def test_specialist_lane_must_match_task_contract(self):
         with self.assertRaisesRegex(ValueError, "does not match task_type"):
             self.store.enqueue("content_draft", "Wrong lane",
