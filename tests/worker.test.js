@@ -101,6 +101,35 @@ test("general stale recovery only selects general-lane leases", async () => {
   assert.deepEqual(query.values.slice(1), ["general"]);
 });
 
+test("task readback defaults to the general lane", async () => {
+  const DB = dbMock();
+  const response = await worker.fetch(request("/v1/tasks?limit=10"), { DB, ENGINE_API_TOKEN: TOKEN });
+  assert.equal(response.status, 200);
+  const query = DB.calls.find(call => call.kind === "all" && call.sql.includes("FROM tasks WHERE execution_lane"));
+  assert.match(query.sql, /execution_lane=\?/);
+  assert.deepEqual(query.values, ["general", 10]);
+});
+
+test("specialist task readback requires its lane capability", async () => {
+  const DB = dbMock();
+  const response = await worker.fetch(request("/v1/tasks?limit=10&worker_lane=specialist%3Aresearcher"), {
+    DB, ENGINE_API_TOKEN: TOKEN,
+  });
+  assert.equal(response.status, 401);
+  assert.equal(DB.calls.length, 0);
+});
+
+test("specialist task readback returns only its lane", async () => {
+  const laneToken = "researcher-lane-token-0123456789abcdef0123456789";
+  const DB = dbMock();
+  const response = await worker.fetch(request("/v1/tasks?limit=10&worker_lane=specialist%3Aresearcher", {
+    extraHeaders: { "x-engine-lane-token": laneToken },
+  }), { DB, ENGINE_API_TOKEN: TOKEN, ENGINE_RESEARCHER_LANE_TOKEN: laneToken });
+  assert.equal(response.status, 200);
+  const query = DB.calls.find(call => call.kind === "all" && call.sql.includes("FROM tasks WHERE execution_lane"));
+  assert.deepEqual(query.values, ["specialist:researcher", 10]);
+});
+
 test("specialist claim requires a dedicated lane capability token", async () => {
   const DB = dbMock();
   const response = await worker.fetch(request("/v1/tasks/claim", {
