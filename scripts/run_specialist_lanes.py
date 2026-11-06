@@ -30,7 +30,10 @@ def main() -> int:
         return 0
     enabled = 0
     failures = 0
-    seen_tokens = {base.get("RAAWAA_ENGINE_API_TOKEN", "")}
+    seen_tokens = {base.get("RAAWAA_ENGINE_API_TOKEN", ""),
+                    base.get("RAAWAA_ENGINE_QUOTA_ADMIN_TOKEN", ""),
+                    base.get("RAAWAA_ENGINE_GENERAL_LANE_TOKEN", ""),
+                    base.get("RAAWAA_ENGINE_CODESPACE_TOKEN", "")}
     for lane, token_name in LANES:
         lane_token = base.get(token_name, "")
         if len(lane_token) < 32 or lane_token in seen_tokens:
