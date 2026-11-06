@@ -277,14 +277,15 @@ const SPECIALIST_TASK_LANES = {
   system_audit: "specialist:operator",
 };
 const SPECIALIST_LANE_TOKEN_BINDINGS = {
+  general: "ENGINE_GENERAL_LANE_TOKEN",
   "specialist:researcher": "ENGINE_RESEARCHER_LANE_TOKEN",
   "specialist:reviewer": "ENGINE_REVIEWER_LANE_TOKEN",
   "specialist:marketer": "ENGINE_MARKETER_LANE_TOKEN",
   "specialist:operator": "ENGINE_OPERATOR_LANE_TOKEN",
+  "specialist:mobile_tester": "ENGINE_MOBILE_TESTER_LANE_TOKEN",
 };
 
 function laneTokenAuthorized(request, env, lane) {
-  if (lane === "general") return true;
   const binding = SPECIALIST_LANE_TOKEN_BINDINGS[lane];
   const expected = binding ? env[binding] : "";
   const supplied = request.headers.get("x-engine-lane-token") || "";
