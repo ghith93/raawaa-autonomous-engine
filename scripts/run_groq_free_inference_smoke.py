@@ -1,4 +1,7 @@
-"""One-shot, Free-only Groq inference smoke test against isolated Staging D1."""
+"""One-shot, verified Groq Free-tier inference smoke against isolated Staging D1.
+
+Never upgrade plans, use paid fallback, or send non-public task data.
+"""
 from __future__ import annotations
 
 import json
