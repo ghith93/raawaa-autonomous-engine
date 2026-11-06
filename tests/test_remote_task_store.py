@@ -86,7 +86,7 @@ class RemoteTaskStoreTests(unittest.TestCase):
         self.assertEqual(request.full_url,
                          "https://engine.example/v1/tasks/probe-123/recover-supervised-probe")
         self.assertEqual(request.get_method(), "POST")
-        self.assertEqual(json.loads(request.data), {})
+        self.assertEqual(json.loads(request.data), {"worker_lane": "general"})
 
     def test_recover_supervised_probe_rejects_unsafe_task_ids_before_network(self):
         for task_id in ("", "../tasks", "has space", "x" * 129, None):
