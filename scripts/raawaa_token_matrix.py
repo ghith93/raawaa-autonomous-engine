@@ -92,7 +92,12 @@ def probe(token: str, account: str, *, spend_neurons: bool = False) -> dict:
         ok = status != 0 and bool(payload.get("success", status == 200))
         if name == "token_active":
             ok = bool(payload.get("success")) and (payload.get("result") or {}).get("status") == "active"
-        result["capabilities"][name] = "ok" if ok else f"fail:{_code(payload) or status}"
+        code = _code(payload)
+        detail = ""
+        if not ok:
+            message = ((payload.get("errors") or [{}])[0].get("message") or "")
+            detail = f":{message[:60]}" if message else ""
+        result["capabilities"][name] = "ok" if ok else f"fail:{code or status}{detail}"
         if not ok:
             result["missing"].append(name)
 

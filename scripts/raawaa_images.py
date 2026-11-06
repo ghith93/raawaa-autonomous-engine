@@ -69,7 +69,9 @@ def main(argv: list[str] | None = None) -> int:
             print(f"FAIL {job.get('out')}: {exc}", file=sys.stderr)
             return 1
         path = result.save(ROOT / job["out"])
-        skipped = ", ".join(f"{a['provider']}:{a['outcome']}" for a in meta["attempts"])
+        skipped = ", ".join(
+            f"{a['provider']}:{a['outcome']}({a.get('reason', '')[:120]})"
+            for a in meta["attempts"])
         print(f"OK   {result.provider:<11} {path}  ({result.width}x{result.height})")
         if skipped:
             print(f"     skipped -> {skipped}")
