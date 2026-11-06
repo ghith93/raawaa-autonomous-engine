@@ -191,6 +191,7 @@ test("specialist capability cannot reuse admin or Codespace credentials", async 
   for (const env of [
     { ENGINE_RESEARCHER_LANE_TOKEN: shared, ENGINE_QUOTA_ADMIN_TOKEN: shared },
     { ENGINE_RESEARCHER_LANE_TOKEN: shared, ENGINE_CODESPACE_TOKEN: shared },
+    { ENGINE_RESEARCHER_LANE_TOKEN: shared, ENGINE_GENERAL_LANE_TOKEN: shared },
   ]) {
     const DB = dbMock();
     const response = await worker.fetch(request("/v1/tasks/claim", {
@@ -199,6 +200,32 @@ test("specialist capability cannot reuse admin or Codespace credentials", async 
     }), { DB, ENGINE_API_TOKEN: TOKEN, ...env });
     assert.equal(response.status, 401);
     assert.equal(DB.calls.length, 0);
+  }
+});
+
+test("every specialist lane has a distinct capability binding", async () => {
+  const cases = [
+    ["specialist:reviewer", "ENGINE_REVIEWER_LANE_TOKEN", "code_review"],
+    ["specialist:marketer", "ENGINE_MARKETER_LANE_TOKEN", "content_draft"],
+    ["specialist:operator", "ENGINE_OPERATOR_LANE_TOKEN", "system_audit"],
+    ["specialist:mobile_tester", "ENGINE_MOBILE_TESTER_LANE_TOKEN", "mobile_test"],
+  ];
+  for (const [lane, binding, taskType] of cases) {
+    const laneToken = binding.toLowerCase() + "-0123456789abcdef0123456789";
+    const taskId = "task-" + taskType;
+    const DB = dbMock({ normalClaim: {
+      id: taskId, task_type: taskType, execution_lane: lane,
+      status: "running", attempts: 1, lease_token: "lease-" + taskType,
+    } });
+    const response = await worker.fetch(request("/v1/tasks/claim", {
+      method: "POST", body: { execution_mode: "dry_run", worker_lane: lane },
+      extraHeaders: { "x-engine-lane-token": laneToken },
+    }), { DB, ENGINE_API_TOKEN: TOKEN, [binding]: laneToken });
+    assert.equal(response.status, 200, lane + " should authenticate");
+    const claim = DB.calls.find(call => call.kind === "first" &&
+      call.sql.includes("UPDATE tasks SET status='running'"));
+    assert.ok(claim.values.includes(lane));
+    assert.ok(claim.values.includes(taskType));
   }
 });
 
