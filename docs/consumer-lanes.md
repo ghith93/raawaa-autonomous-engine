@@ -68,3 +68,32 @@ boundary.
 
 Do not add a new queue, database, or scheduler for each lane. Use the existing
 D1 queue and bounded runner infrastructure.
+
+
+## One-shot Free-tier Staging inference proof
+
+The workflow `.github/workflows/groq-free-inference-staging-smoke.yml` is an
+explicit one-shot acceptance gate, not a production schedule. It runs only
+after an `Engine CI` push to `main` succeeds and that main commit message
+contains `[groq-specialist-smoke]`.
+
+The workflow is restricted to the isolated Staging Worker and Staging D1. It
+temporarily enables only the reviewed Groq `openai/gpt-oss-20b` Free-tier
+route, installs short-lived Staging API, quota-admin, and researcher-lane
+capabilities, and runs one bounded researcher task. The shared D1 monetary and
+token quota ledgers remain authoritative; the daily, monthly, and per-task
+monetary caps are zero, paid fallback is disabled, and external writes are
+disabled. It verifies the task outcome, provider usage, and zero-spend ledger
+before reporting success.
+
+The workflow always attempts to redeploy the fail-closed Staging defaults and
+revoke the temporary Staging credentials, including when the inference step
+fails. The Groq API key is read from the GitHub Actions secret at runtime and
+is never installed in the Worker or written to the repository. A provider
+rate-limit or authorization failure stops the proof; it does not enable a paid
+tier or switch to a paid provider.
+
+This gate does not enable live inference in Production, create a recurring
+specialist schedule, or authorize external business actions. Production
+specialist execution remains dormant until its separate capability and
+activation gates are reviewed.
