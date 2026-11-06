@@ -890,7 +890,7 @@ export default {
       max_attempts: maxAttempts, priority, dependencies_json: dependenciesJson, execution_lane: executionLane,
     };
     const matchesTask = task => task &&
-      task.execution_lane === normalizedTask.execution_lane &&
+      (task.execution_lane || "general") === normalizedTask.execution_lane &&
       (!prioritySupplied || task.priority === normalizedTask.priority) &&
       (!dependenciesSupplied || (task.dependencies_json || "[]") === normalizedTask.dependencies_json);
     const readDependencies = async taskId => {
