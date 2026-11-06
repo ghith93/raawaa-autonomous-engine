@@ -18,6 +18,19 @@ sys.path.insert(0, str(ROOT))
 from engine.remote_task_store import RemoteTaskStore, RemoteTaskStoreError
 
 
+def _active_task_summary(tasks: list[dict]) -> list[dict]:
+    """Emit bounded operational metadata only; omit task titles, keys and payloads."""
+    fields = ("id", "task_type", "status", "execution_lane", "created_at", "updated_at")
+    return [{field: task.get(field) for field in fields} for task in tasks[:10]]
+
+
+def _queue_state(tasks: list[dict]) -> tuple[list[dict], list[dict]]:
+    """Return pending rows that block a safe claim proof and running rows to leave untouched."""
+    pending = [task for task in tasks if task.get("status") == "pending"]
+    running = [task for task in tasks if task.get("status") == "running"]
+    return pending, running
+
+
 def main() -> None:
     if os.environ.get("RAAWAA_ENGINE_LIVE_INFERENCE", "disabled").lower() not in {"", "0", "false", "disabled", "off"}:
         raise SystemExit("Refusing lane proof unless live inference is disabled")
@@ -28,21 +41,23 @@ def main() -> None:
     researcher_before = store.list_tasks(100, worker_lane="specialist:researcher")
     if len(general_before) >= 100 or len(researcher_before) >= 100:
         raise SystemExit("Refusing lane proof because bounded queue readback may be incomplete")
-    active = [task for task in general_before + researcher_before
-              if task.get("status") in {"pending", "running"}]
-    if active:
-        # Emit only operational metadata; never print task titles, payloads, or keys.
-        summary = [{
-            "id": task.get("id"),
-            "task_type": task.get("task_type"),
-            "status": task.get("status"),
-            "execution_lane": task.get("execution_lane"),
-            "created_at": task.get("created_at"),
-            "updated_at": task.get("updated_at"),
-        } for task in active]
-        print(json.dumps({"status": "blocked_queue_not_idle", "active_tasks": summary},
-                         sort_keys=True))
-        raise SystemExit("Refusing to claim unrelated Staging work; relevant queue lanes are not idle")
+    queue_rows = general_before + researcher_before
+    pending, running = _queue_state(queue_rows)
+    if pending:
+        print(json.dumps({
+            "status": "blocked_unrelated_pending_staging_tasks",
+            "pending_task_metadata": _active_task_summary(pending),
+            "running_tasks_left_untouched": _active_task_summary(running),
+        }, sort_keys=True), flush=True)
+        raise SystemExit("Refusing to claim unrelated pending Staging work")
+    if running:
+        # Running leases are not candidates for claim_next. Leave them untouched;
+        # with no unrelated pending rows, the proof's own dependency-free tasks
+        # are the only claimable rows in each tested lane.
+        print(json.dumps({
+            "status": "existing_running_tasks_left_untouched",
+            "running_task_metadata": _active_task_summary(running),
+        }, sort_keys=True), flush=True)
     suffix = uuid.uuid4().hex
     general = store.enqueue(
         "research_brief", "Staging general lane isolation proof",
