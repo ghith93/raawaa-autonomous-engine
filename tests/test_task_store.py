@@ -156,6 +156,29 @@ class TaskStoreTests(unittest.TestCase):
         events = [item["event"] for item in self.store.audit_events()]
         self.assertIn("task_lease_recovered", events)
 
+    def test_stale_recovery_is_scoped_to_consumer_lane(self):
+        general = self.store.enqueue("research_brief", "General stale task")
+        specialist = self.store.enqueue(
+            "research_brief", "Researcher stale task",
+            execution_lane="specialist:researcher",
+        )
+        general_claim = self.store.claim_next(worker_lane="general")
+        specialist_claim = self.store.claim_next(worker_lane="specialist:researcher")
+        self.assertEqual(general_claim["id"], general["id"])
+        self.assertEqual(specialist_claim["id"], specialist["id"])
+        with sqlite3.connect(self.store.db_path) as db:
+            db.execute("UPDATE tasks SET lease_expires_at='2000-01-01T00:00:00+00:00' WHERE id IN (?,?)",
+                       (general["id"], specialist["id"]))
+        self.assertEqual(self.store.recover_stale(worker_lane="general"),
+                         {"requeued": 1, "failed": 0})
+        tasks = {task["id"]: task for task in self.store.list_tasks()}
+        self.assertEqual(tasks[general["id"]]["status"], "pending")
+        self.assertEqual(tasks[specialist["id"]]["status"], "running")
+        self.assertEqual(self.store.recover_stale(worker_lane="specialist:researcher"),
+                         {"requeued": 1, "failed": 0})
+        tasks = {task["id"]: task for task in self.store.list_tasks()}
+        self.assertEqual(tasks[specialist["id"]]["status"], "pending")
+
     def test_stale_task_at_attempt_limit_is_failed(self):
         task = self.store.enqueue("research_brief", "Exhausted", max_attempts=1)
         self.store.claim_next()
