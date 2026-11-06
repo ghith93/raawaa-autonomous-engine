@@ -78,12 +78,16 @@ class SpecialistLaneRunnerTests(unittest.TestCase):
             self.assertEqual(run_batch.call_args.kwargs["max_parallel"], 1)
             runner = run_batch.call_args.kwargs["runner"]
             runner(task_store)
-            run_once.assert_called_once_with(
-                task_store,
-                live_gateway=gateway_value,
-                environ=run_batch.call_args.kwargs["runner"].__closure__[0].cell_contents
-                if False else run_batch.call_args.kwargs["runner"].__closure__[0].cell_contents,
-                worker_lane="specialist:researcher",
+            run_once.assert_called_once()
+            self.assertIs(run_once.call_args.args[0], task_store)
+            self.assertIs(run_once.call_args.kwargs["live_gateway"], gateway_value)
+            self.assertEqual(
+                run_once.call_args.kwargs["environ"]["RAAWAA_ENGINE_WORKER_LANE"],
+                "specialist:researcher",
+            )
+            self.assertEqual(
+                run_once.call_args.kwargs["environ"]["RAAWAA_ENGINE_LANE_TOKEN"],
+                RESEARCHER_TOKEN,
             )
 
     def test_gateway_failure_prevents_any_task_batch_or_claim(self):
