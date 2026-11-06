@@ -128,5 +128,64 @@ class ContentTests(unittest.TestCase):
             content.week_plan(week=0)
 
 
+class FreeDeliveryPricingTests(unittest.TestCase):
+    """The post-launch phase advertises free delivery, so the cost is in the price."""
+
+    def setUp(self):
+        self.brand = econ.load_brand()
+
+    def test_free_delivery_pricing_is_still_profitable(self):
+        for sku in ("30ml", "50ml", "100ml"):
+            row = econ.contribution(self.brand, sku, free_home_delivery=True)
+            self.assertGreater(row["contribution_usd"], 9.0, sku)
+
+    def test_free_delivery_raises_the_price_not_the_discount(self):
+        for product in self.brand["products"]:
+            self.assertGreater(product["price_v2_usd"], product["price_usd"], product["sku"])
+
+    def test_refused_shipment_stays_cheap_under_v2(self):
+        row = econ.contribution(self.brand, "50ml", delivered=False, free_home_delivery=True)
+        self.assertLess(row["contribution_usd"], 0)
+        self.assertGreater(row["contribution_usd"], -10.0)
+
+
+class AssetKitTests(unittest.TestCase):
+    """The operator cannot photograph. Every visual must come from a legal source."""
+
+    def setUp(self):
+        self.kit = content.asset_kit()
+
+    def test_kit_needs_no_photographer_or_model(self):
+        for shot in self.kit["shots"]:
+            self.assertIn("هاتف", shot["needs_ar"])
+
+    def test_no_shot_requires_the_founder_on_camera(self):
+        on_camera = [s for s in self.kit["shots"] if "أنت" in s["needs_ar"]]
+        # Exactly one, and it is explicitly optional trust-building, not a requirement.
+        self.assertLessEqual(len(on_camera), 1)
+
+    def test_stock_footage_may_never_stand_in_for_a_result(self):
+        never = self.kit["stock"]["rules"]["never_ar"]
+        self.assertIn("نتيجة منتجك", never)
+        self.assertIn("يشهد", never)
+
+    def test_barter_keeps_the_right_to_dislike_the_product(self):
+        self.assertIn("لم يعجبها", self.kit["barter"]["ask_ar"])
+
+    def test_disclosure_separates_synthetic_humans_from_graphic_design(self):
+        self.assertIn("شخص واقعي مولّد بالذكاء الاصطناعي",
+                      self.kit["disclosure"]["requires_label"])
+        for safe in ("بطاقات نصية ورسوم وأيقونات", "نصوص وكابشن مكتوبة بالذكاء الاصطناعي"):
+            self.assertIn(safe, self.kit["disclosure"]["no_label_needed"])
+
+    def test_founder_is_a_pharmacist_and_may_not_claim_treatment(self):
+        self.assertTrue(any("طبيب" in pillar["why_ar"] or "علاج" in pillar["hook_ar"]
+                            for pillar in self.kit["pharmacist_pillars"]))
+
+    def test_asset_markdown_is_renderable(self):
+        text = content.render_asset_markdown(self.kit)
+        self.assertIn("اليد ليست وجهًا", text)
+
+
 if __name__ == "__main__":
     unittest.main()

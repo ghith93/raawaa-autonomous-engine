@@ -277,12 +277,207 @@ def render_markdown(plan: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
+# ---------------------------------------------------------------------------
+# Asset kit: how to get every visual with no photographer, no model and no
+# studio. The rule that unlocks all of it: a hand is not a face.
+# ---------------------------------------------------------------------------
+
+SHOT_KIT = [
+    {
+        "id": "drop-on-hand",
+        "shot_ar": "قطرة على ظهر اليد ثم فركها ببطء",
+        "time_sec": 20,
+        "needs_ar": "هاتف + يدك + نافذة",
+        "use_for_ar": "النتيجة والملمس — يبدو حقيقيًا لأنه حقيقي",
+        "risk_ar": "لا شيء: بلا وجه، بلا هوية",
+    },
+    {
+        "id": "bottle-open",
+        "shot_ar": "لقطة قريبة لفتح الغطاء وخروج أول قطرة",
+        "time_sec": 15,
+        "needs_ar": "هاتف + العبوة",
+        "use_for_ar": "افتتاحية كل ريل (٣ ثوان)",
+        "risk_ar": "لا شيء",
+    },
+    {
+        "id": "bottle-window",
+        "shot_ar": "العبوة في اليد أمام ضوء النافذة، خلفية قماش أو حائط فاتح",
+        "time_sec": 20,
+        "needs_ar": "هاتف + كرسي + نافذة عند الظهر",
+        "use_for_ar": "صورة رئيسية + بطاقة سعر",
+        "risk_ar": "لا شيء",
+    },
+    {
+        "id": "serum-texture",
+        "shot_ar": "سيروم على زجاج أو مرآة، ماكرو، حركة بطيئة",
+        "time_sec": 25,
+        "needs_ar": "هاتف + زجاج + قطرتين",
+        "use_for_ar": "خلفية تعليمية جميلة",
+        "risk_ar": "استهلاك بسيط من عبوة واحدة فقط",
+    },
+    {
+        "id": "hair-ends-only",
+        "shot_ar": "أطراف الشعر فقط (من الخلف أو الجانب) قبل وبعد، بلا وجه",
+        "time_sec": 40,
+        "needs_ar": "شخص تعرفه + هاتف + ضوء نهار",
+        "use_for_ar": "أقوى منشور ممكن: نتيجة حقيقية",
+        "risk_ar": "يحتاج موافقة الشخص، ولا يُظهر وجهه",
+    },
+    {
+        "id": "packing",
+        "shot_ar": "تجهيز الطلب: علبة، مناديل، عبوة، إغلاق",
+        "time_sec": 30,
+        "needs_ar": "هاتف + طاولة + الطلب نفسه",
+        "use_for_ar": "«صنع في سوريا» + يقلل الرفض",
+        "risk_ar": "أخفِ أسماء وعناوين العملاء",
+    },
+    {
+        "id": "pharmacist-explains",
+        "shot_ar": "أنت تتحدثين إلى الكاميرا ٢٥ ثانية عن المكوّن أو طريقة الاستخدام",
+        "time_sec": 40,
+        "needs_ar": "هاتف مثبّت + أنت",
+        "use_for_ar": "أقوى إثبات ثقة في السوق السوري",
+        "risk_ar": "لا ادعاء علاجي — شرح فقط",
+    },
+]
+
+STOCK_SEARCH_TERMS = [
+    "beige aesthetic background",
+    "marble surface natural light",
+    "silk fabric macro slow motion",
+    "dropper macro water drop",
+    "woman back view long hair soft light",
+    "bathroom shelf minimal beige",
+]
+
+STOCK_RULES = {
+    "allowed_ar": "مقاطع الجو والخلفيات فقط، وفوقها كلامك أو بطاقتك",
+    "never_ar": (
+        "لا تستخدمي مقطع شعر جاهز كأنه نتيجة منتجك، ولا مقطع شخص كأنه يشهد لك. "
+        "هذا ممنوع في الترخيص نفسه (لا يجوز الإيحاء بتأييد شخص أو علامة)، "
+        "وهو أسوأ شيء يمكن أن يحدث لحساب جديد."
+    ),
+    "license_check_ar": "Pexels وPixabay وMixkit: تجاري بلا إسناد — لكن Mixkit فيه مقاطع Restricted غير تجارية، فتحققي من وسم كل مقطع.",
+}
+
+BARTER_KIT = {
+    "target_count": 10,
+    "who_ar": ["صانعات محتوى صغيرات في حماة (١٠٠٠–٢٠٠٠٠ متابع)", "صالونات نسائية", "صيدليات ومحلات تجميل"],
+    "give_ar": "عبوة ٥٠ مل مجانًا",
+    "ask_ar": "فيديو عمودي ٢٠ ثانية، بلا فلتر، رأيها الصادق — ويحق لها أن تقول إنه لم يعجبها",
+    "why_honest_allowed_ar": "الشهادة التي فيها احتمال «لم يعجبني» تُصدَّق. الشهادة المضمونة لا تُصدَّق.",
+    "dm_template_ar": (
+        "مرحبًا [الاسم]، أنا [اسمك]، صيدلانية من حماة. "
+        "أطلقت سيروم شعر سوري اسمه رواء، وأبحث عن ١٠ أشخاص يجربونه بصدق. "
+        "أرسل لك عبوة ٥٠ مل مجانًا، وإذا أعجبك تحكي عنه بـ٢٠ ثانية، وإذا ما أعجبك تحكي هذا كمان — "
+        "مهم عندي الرأي الصادق أكثر من المدح. بتحبي أرسلها؟"
+    ),
+    "consent_ar": "قبل النشر اطلبي رسالة موافقة: «أوافق على استخدام الفيديو في حساب رواء».",
+}
+
+PHARMACIST_PILLARS = [
+    ("مكوّن واحد في ٢٠ ثانية", "اشرحي وظيفة مكوّن تصفيف واحد فقط، بلا مبالغة"),
+    ("سيروم أم بلسم؟", "الفرق في الوظيفة والتوقيت — هذا سؤال يُسأل في الصيدلية كل يوم"),
+    ("أسطورة الزيوت", "الزيوت لا تُنبت الشعر؛ تُغلف وتمنح لمعة. قول هذا يبني ثقة هائلة"),
+    ("طريقة الاستخدام الصحيحة", "قطرتان على الأطراف، لا على الفروة، ولا على شعر مبلل تمامًا"),
+    ("متى تراجعين طبيبًا", "تساقط مفاجئ أو حكة أو قشور = طبيب. هذه الجملة تبني سلطة مهنية"),
+]
+
+
+def asset_kit(brand: dict[str, Any] | None = None) -> dict[str, Any]:
+    brand = brand or load_brand()
+    return {
+        "mode": "raawaa_asset_kit_read_only",
+        "note": "No photographer, no model, no studio. Hands only.",
+        "shots": SHOT_KIT,
+        "total_minutes": 3 + sum(s["time_sec"] for s in SHOT_KIT) // 60,
+        "stock": {"terms": STOCK_SEARCH_TERMS, "rules": STOCK_RULES},
+        "barter": BARTER_KIT,
+        "pharmacist_pillars": [
+            {"hook_ar": h, "why_ar": w} for h, w in PHARMACIST_PILLARS
+        ],
+        "disclosure": brand["ai_disclosure"],
+    }
+
+
+def render_asset_markdown(kit: dict[str, Any]) -> str:
+    lines = [
+        "# أصول رواء بدون مصوّر ولا موديل",
+        "",
+        "> القاعدة التي تفتح كل شيء: **اليد ليست وجهًا.** لا تحتاج أحدًا يصوّرك، "
+        "ولا تحتاج أن يظهر وجهك.",
+        "",
+        "## ١. لقطات تصوّرها بنفسك (هاتف + نافذة) — أهم مورد عندك",
+        "",
+        "| اللقطة | الطريقة | الوقت | تُستخدم لـ |",
+        "|---|---|---|---|",
+    ]
+    for shot in kit["shots"]:
+        lines.append(f"| **{shot['shot_ar']}** | {shot['needs_ar']} | {shot['time_sec']}ث | {shot['use_for_ar']} |")
+    lines += [
+        "",
+        "## ٢. مقاطع مخزون مجانية — للجو فقط",
+        "",
+        "**مسموح:** " + kit["stock"]["rules"]["allowed_ar"],
+        "",
+        "**ممنوع تمامًا:** " + kit["stock"]["rules"]["never_ar"],
+        "",
+        "**تحقق من الترخيص:** " + kit["stock"]["rules"]["license_check_ar"],
+        "",
+        "**كلمات البحث (بالإنجليزية تعطي نتائج أفضل):**",
+    ]
+    lines += [f"- `{term}`" for term in kit["stock"]["terms"]]
+    lines += [
+        "",
+        "## ٣. المقايضة: ١٠ أشخاص حقيقيون",
+        "",
+        f"**العدد:** {kit['barter']['target_count']} · **المقابل:** {kit['barter']['give_ar']} · "
+        f"**المطلوب:** {kit['barter']['ask_ar']}",
+        "",
+        f"**لماذا نسمح لها بأن تقول «لم يعجبني»:** {kit['barter']['why_honest_allowed_ar']}",
+        "",
+        "**رسالة أولى جاهزة:**",
+        "",
+        "```",
+        kit["barter"]["dm_template_ar"],
+        "```",
+        "",
+        f"**الموافقة:** {kit['barter']['consent_ar']}",
+        "",
+        "## ٤. محتوى لا يستطيع أحد تقليده: أنتِ صيدلانية",
+        "",
+    ]
+    for pillar in kit["pharmacist_pillars"]:
+        lines += [f"- **{pillar['hook_ar']}** — {pillar['why_ar']}"]
+    lines += [
+        "",
+        "## ٥. وسم الذكاء الاصطناعي (قواعد ميتا ٢٠٢٦)",
+        "",
+        f"{kit['disclosure']['rule_ar']}",
+        "",
+        "**يحتاج وسمًا:** " + "، ".join(kit["disclosure"]["requires_label"]),
+        "",
+        "**لا يحتاج:** " + "، ".join(kit["disclosure"]["no_label_needed"]),
+        "",
+        "**محظور دائمًا:** " + "، ".join(kit["disclosure"]["hard_bans"]),
+    ]
+    return "\n".join(lines)
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Generate a deterministic Raawaa content week")
     parser.add_argument("--week", type=int, default=1)
     parser.add_argument("--start", help="ISO date, defaults to the coming Saturday")
     parser.add_argument("--format", choices=("json", "markdown"), default="json")
+    parser.add_argument("--assets", action="store_true",
+                        help="Print the no-photographer asset kit instead of a content week")
     args = parser.parse_args(argv)
+
+    if args.assets:
+        kit = asset_kit()
+        print(render_asset_markdown(kit) if args.format == "markdown"
+              else json.dumps(kit, ensure_ascii=False, indent=2))
+        return 0
 
     start = date.fromisoformat(args.start) if args.start else None
     plan = week_plan(week=args.week, start=start)

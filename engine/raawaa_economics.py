@@ -39,6 +39,12 @@ def _product(brand: dict[str, Any], sku: str) -> dict[str, Any]:
     raise KeyError(f"unknown sku: {sku}")
 
 
+def price_of(product: dict[str, Any], *, free_delivery_pricing: bool = False) -> float:
+    """Selling price. In the free-delivery phase the courier cost is baked in."""
+    key = "price_v2_usd" if free_delivery_pricing else "price_usd"
+    return float(product.get(key, product["price_usd"]))
+
+
 def delivery_cost(brand: dict[str, Any], *, delivered: bool, home: bool = True) -> float:
     """What the courier charges us.
 
@@ -59,11 +65,12 @@ def contribution(
 ) -> dict[str, Any]:
     """Contribution margin on ONE shipped order, delivered or refused."""
     product = _product(brand, sku)
-    price = float(product["price_usd"])
+    price = price_of(product, free_delivery_pricing=free_home_delivery)
     unit_cost = float(product["unit_cost_usd"])
     ship = delivery_cost(brand, delivered=delivered, home=home)
     if delivered and free_home_delivery:
-        ship = 0.0
+        # The customer pays nothing for delivery, but the courier still bills us.
+        ship = delivery_cost(brand, delivered=True, home=home)
 
     if delivered:
         revenue = price
