@@ -19,9 +19,9 @@ concurrency:
 
 jobs:
   eligibility:
-    if: >-
-      github.event.workflow_run.conclusion == 'success' &&
-      github.event.workflow_run.head_branch == 'main'
+    # This job is deliberately non-privileged and always runs for the completed
+    # Engine CI event. Evaluate event metadata in the shell and fail closed;
+    # skipped job-level expressions hid which event field was not matching.
     runs-on: ubuntu-latest
     timeout-minutes: 2
     outputs:
@@ -32,14 +32,29 @@ jobs:
         with:
           ref: ${{ github.event.workflow_run.head_sha }}
           persist-credentials: false
-      - name: Check explicit one-shot marker in the exact completed commit
+      - name: Evaluate source result and explicit one-shot marker
         id: marker
+        env:
+          SOURCE_CONCLUSION: ${{ github.event.workflow_run.conclusion }}
+          SOURCE_BRANCH: ${{ github.event.workflow_run.head_branch }}
+          SOURCE_EVENT: ${{ github.event.workflow_run.event }}
         run: |
+          marker=false
           if git log -1 --format=%B | grep -Fq '[groq-specialist-smoke]'; then
-            echo "eligible=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "eligible=false" >> "$GITHUB_OUTPUT"
+            marker=true
           fi
+          eligible=false
+          if [[ "$SOURCE_CONCLUSION" == "success" && "$SOURCE_BRANCH" == "main" && "$marker" == "true" ]]; then
+            eligible=true
+          fi
+          {
+            echo "Source workflow conclusion: ${SOURCE_CONCLUSION:-missing}"
+            echo "Source branch: ${SOURCE_BRANCH:-missing}"
+            echo "Source event: ${SOURCE_EVENT:-missing}"
+            echo "Commit marker present: $marker"
+            echo "Smoke eligible: $eligible"
+          } >> "$GITHUB_STEP_SUMMARY"
+          echo "eligible=$eligible" >> "$GITHUB_OUTPUT"
 
   smoke:
     needs: eligibility
