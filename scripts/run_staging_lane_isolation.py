@@ -24,6 +24,13 @@ def _active_task_summary(tasks: list[dict]) -> list[dict]:
     return [{field: task.get(field) for field in fields} for task in tasks[:10]]
 
 
+def _queue_state(tasks: list[dict]) -> tuple[list[dict], list[dict]]:
+    """Return pending rows that block a safe claim proof and running rows to leave untouched."""
+    pending = [task for task in tasks if task.get("status") == "pending"]
+    running = [task for task in tasks if task.get("status") == "running"]
+    return pending, running
+
+
 def main() -> None:
     if os.environ.get("RAAWAA_ENGINE_LIVE_INFERENCE", "disabled").lower() not in {"", "0", "false", "disabled", "off"}:
         raise SystemExit("Refusing lane proof unless live inference is disabled")
@@ -35,8 +42,7 @@ def main() -> None:
     if len(general_before) >= 100 or len(researcher_before) >= 100:
         raise SystemExit("Refusing lane proof because bounded queue readback may be incomplete")
     queue_rows = general_before + researcher_before
-    pending = [task for task in queue_rows if task.get("status") == "pending"]
-    running = [task for task in queue_rows if task.get("status") == "running"]
+    pending, running = _queue_state(queue_rows)
     if pending:
         print(json.dumps({
             "status": "blocked_unrelated_pending_staging_tasks",
