@@ -41,12 +41,28 @@ jobs:
           [ -n "$TOKEN" ]   || { echo "CLOUDFLARE_API_TOKEN is missing from repository secrets."; exit 1; }
           echo "Both secret names are present. Values withheld."
 
+      # Findings are emitted as annotations so the verdict is readable from
+      # `gh run view` without downloading logs, which the API does not always serve.
       - name: Verify credentials and permissions
         shell: bash
         env:
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-        run: python scripts/raawaa_verify_cloudflare.py --skip-ai
+        run: |
+          set +e
+          python scripts/raawaa_verify_cloudflare.py --skip-ai > verify.txt 2>&1
+          code=$?
+          cat verify.txt
+          while IFS= read -r line; do
+            [ -z "$line" ] && continue
+            case "$line" in
+              "[PASS]"*) echo "::notice::${line}" ;;
+              "[FAIL]"*) echo "::error::${line}" ;;
+              *fix*) echo "::warning::${line}" ;;
+              *) echo "::notice::${line}" ;;
+            esac
+          done < verify.txt
+          echo "verify_exit=$code"
 
       - name: Generate one real image through the free route
         shell: bash
