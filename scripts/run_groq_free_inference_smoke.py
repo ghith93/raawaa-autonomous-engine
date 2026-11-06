@@ -117,23 +117,36 @@ def _verify_previous_ambiguous_task(store: RemoteTaskStore) -> dict:
         and row.get("status") == "ambiguous"
         and int(row.get("estimated_cost_nanos", -1)) == 0
     ]
-    if len(matches) != 1 or int(snapshot.get("task_pending_count", -1)) != 1:
-        raise SystemExit(
-            "Refusing smoke: prior ambiguous reservation does not match the exact zero-cost record."
-        )
+    reservation_id = matches[0].get("reservation_id")
+    if not isinstance(reservation_id, str) or not reservation_id:
+        raise SystemExit("Refusing smoke: the exact ambiguous reservation has no durable ID.")
+    # Groq Free is operator-confirmed and the route profile records a hard zero
+    # estimated cost. Settle only this exact zero-dollar reservation; token quota
+    # remains consumed conservatively in the separate quota ledger.
+    settled = store._request("/v1/monetary-ledger", "POST", {
+        "action": "settle",
+        "reservation_id": reservation_id,
+        "actual_cost_nanos": 0,
+        "input_tokens": 0,
+        "output_tokens": 0,
+    })
+    if settled.get("settled") is not True:
+        raise SystemExit("Could not settle the exact verified-Free zero-cost reservation.")
+    after = store._request("/v1/monetary-ledger?" + query).get("snapshot", {})
+    if int(after.get("task_pending_count", -1)) != 0 or after.get("unresolved"):
+        raise SystemExit("The exact ambiguous reservation remains unresolved after zero-cost settlement.")
     return {
         "task_id": PREVIOUS_AMBIGUOUS_TASK_ID,
         "task_status": previous.get("status"),
         "stale_recovery": recovery,
-        "reservation_id": matches[0].get("reservation_id"),
-        "reservation_status": "ambiguous",
-        "estimated_cost_nanos": 0,
+        "reservation_id": reservation_id,
+        "reservation_status": "settled",
+        "actual_cost_nanos": 0,
+        "token_quota_estimate_preserved": True,
     }
 
 
-def _assert_zero_spend_preserving_known_ambiguity(
-    store: RemoteTaskStore, successful_task_id: str
-) -> dict:
+def _assert_zero_spend(store: RemoteTaskStore, successful_task_id: str) -> dict:
     mobile = store._request("/v1/mobile/status")
     ledger = mobile.get("monetary_ledger", {})
     if (
@@ -141,23 +154,15 @@ def _assert_zero_spend_preserving_known_ambiguity(
         or ledger.get("daily_spent_usd") != 0
         or ledger.get("monthly_spent_usd") != 0
         or ledger.get("pending_reserved_usd") != 0
-        or ledger.get("pending_count") != 1
-        or ledger.get("ambiguous_count") != 1
+        or ledger.get("pending_count") != 0
+        or ledger.get("ambiguous_count") != 0
         or mobile.get("model_costs_usd", {}).get("total") != 0
     ):
-        raise SystemExit("Monetary ledger changed beyond the one known zero-cost ambiguity.")
+        raise SystemExit("Monetary ledger did not settle with zero spend and no unresolved reservations.")
 
     global_snapshot = store._request("/v1/monetary-ledger").get("snapshot", {})
-    unresolved = global_snapshot.get("unresolved", [])
-    if (
-        len(unresolved) != 1
-        or unresolved[0].get("task_id") != PREVIOUS_AMBIGUOUS_TASK_ID
-        or unresolved[0].get("provider") != "groq"
-        or unresolved[0].get("model") != "openai/gpt-oss-20b"
-        or unresolved[0].get("status") != "ambiguous"
-        or int(unresolved[0].get("estimated_cost_nanos", -1)) != 0
-    ):
-        raise SystemExit("Global ledger contains an unexpected unresolved reservation.")
+    if global_snapshot.get("unresolved", []):
+        raise SystemExit("Global monetary ledger contains unresolved reservations.")
 
     task_snapshot = store._request(
         "/v1/monetary-ledger?" + urlencode({"task_id": successful_task_id})
@@ -170,8 +175,8 @@ def _assert_zero_spend_preserving_known_ambiguity(
     return {
         "daily_spend_usd": ledger.get("daily_spent_usd"),
         "monthly_spend_usd": ledger.get("monthly_spent_usd"),
-        "known_ambiguous_task_id": PREVIOUS_AMBIGUOUS_TASK_ID,
-        "known_ambiguous_reservations": 1,
+        "pending_reservations": 0,
+        "ambiguous_reservations": 0,
     }
 
 
@@ -225,7 +230,7 @@ def main() -> int:
 
     if task.get("status") == "succeeded":
         # Re-running this workflow must never repeat a successful model call.
-        ledger_summary = _assert_zero_spend_preserving_known_ambiguity(store, task_id)
+        ledger_summary = _assert_zero_spend(store, task_id)
         print(json.dumps({
             "status": "already_succeeded_no_replay",
             "task_id": task_id,
