@@ -8,8 +8,8 @@ const CODESPACE_TOKEN = "test-codespace-token-0123456789abcdef0123456789abcdef";
 const ADMIN_TOKEN = "test-quota-admin-token";
 const QUOTA_LIMITS = JSON.stringify({"groq:main:model":{enabled:true,minute_request_limit:5,minute_token_limit:1000,daily_request_limit:10,daily_token_limit:2000,monthly_request_limit:100,monthly_token_limit:20000,per_task_request_limit:3,per_task_token_limit:300}});
 
-function request(path, { method = "GET", token = TOKEN, body } = {}) {
-  const headers = {};
+function request(path, { method = "GET", token = TOKEN, body, extraHeaders = {} } = {}) {
+  const headers = { ...extraHeaders };
   if (token) headers.authorization = `Bearer ${token}`;
   if (body !== undefined) headers["content-type"] = "application/json";
   return new Request(`https://engine.example${path}`, {
@@ -68,7 +68,7 @@ function dbMock(options = {}) {
         insertedTask = {
           id: v[0], idempotency_key: v[1], task_type: v[2], title: v[3],
           payload_json: v[4], max_attempts: v[5], priority: v[8],
-          dependencies_json: v[9], status: "pending", attempts: 0,
+          dependencies_json: v[9], execution_lane: v[10] || "general", status: "pending", attempts: 0,
         };
         insertedDependencies = statements
           .filter(statement => statement.sql.includes("INSERT OR IGNORE INTO task_dependencies"))
