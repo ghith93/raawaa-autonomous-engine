@@ -21,6 +21,7 @@ sys.path.insert(0, str(ROOT))
 from engine.image_providers import (  # noqa: E402
     ImageChain, ImageProviderError, ImageRequest, chain_from_config,
 )
+from engine.raawaa_quality import assess, inspect  # noqa: E402
 
 
 def build_chain() -> ImageChain:
@@ -69,12 +70,20 @@ def main(argv: list[str] | None = None) -> int:
             print(f"FAIL {job.get('out')}: {exc}", file=sys.stderr)
             return 1
         path = result.save(ROOT / job["out"])
+        # The provider decides the real dimensions, so measure the file on disk
+        # rather than trust the requested size or the header the model returned.
+        measured = inspect(path)
+        if measured.width and measured.height:
+            result.width, result.height = measured.width, measured.height
+        preflight = assess(measured)
         skipped = ", ".join(
             f"{a['provider']}:{a['outcome']}({a.get('reason', '')[:120]})"
             for a in meta["attempts"])
         print(f"OK   {result.provider:<11} {path}  ({result.width}x{result.height})")
         if skipped:
             print(f"     skipped -> {skipped}")
+        if preflight:
+            print(f"     preflight -> {', '.join(preflight)}")
         if result.provider == "offline":
             fallbacks += 1
         served += 1
