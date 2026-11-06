@@ -275,6 +275,7 @@ const SPECIALIST_TASK_LANES = {
   code_review: "specialist:reviewer",
   content_draft: "specialist:marketer",
   system_audit: "specialist:operator",
+  mobile_test: "specialist:mobile_tester",
 };
 const SPECIALIST_LANE_TOKEN_BINDINGS = {
   general: "ENGINE_GENERAL_LANE_TOKEN",
