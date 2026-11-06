@@ -129,11 +129,27 @@ jobs:
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
         run: |
+          set +e
+          mkdir -p raawaa-check
           python scripts/raawaa_images.py \
             --prompt "soft beige linen fabric, natural window light, minimal, empty centre" \
-            --out raawaa-check/feed.png --width 1024 --height 1024 --steps 4
-          python scripts/raawaa_asset_check.py raawaa-check/feed.png || true
-          ls -l raawaa-check/feed.png
+            --out raawaa-check/feed.png --width 1024 --height 1024 --steps 4 \
+            > raawaa-check/generate.log 2>&1
+          code=$?
+          cat raawaa-check/generate.log
+          while IFS= read -r line; do
+            [ -z "$line" ] && continue
+            case "$line" in
+              OK*)    echo "::notice::$line" ;;
+              FAIL*)  echo "::error::$line" ;;
+              *skip*) echo "::warning::$line" ;;
+              *served*) echo "::notice::$line" ;;
+            esac
+          done < raawaa-check/generate.log
+          python scripts/raawaa_asset_check.py raawaa-check/feed.png >> raawaa-check/generate.log 2>&1 || true
+          tail -2 raawaa-check/generate.log
+          ls -l raawaa-check/ || true
+          exit $code
 
       # The founder has many tokens and does not know which one is which. This
       # prints a capability matrix for the stored credential, so "it should work"
