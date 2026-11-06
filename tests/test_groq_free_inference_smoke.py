@@ -137,7 +137,7 @@ class GroqSmokeRecoveryTests(unittest.TestCase):
         store = self.store(rows=[{
             "id": smoke.PREVIOUS_AMBIGUOUS_TASK_ID, "status": "blocked"
         }])
-        store.task_snapshot = {"task_pending_count": 0, "unresolved": []}
+        store.task_snapshot = {"task_pending_count": 0, "task_reserved_nanos": 0, "unresolved": []}
         store.global_snapshot = {"task_pending_count": 0, "unresolved": []}
         store.mobile["monetary_ledger"].update({
             "pending_count": 0, "ambiguous_count": 0,
