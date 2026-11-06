@@ -26,7 +26,7 @@ class SpecialistLaneRunnerTests(unittest.TestCase):
             "RAAWAA_ENGINE_RESEARCHER_LANE_TOKEN": token,
             "RAAWAA_ENGINE_LIVE_INFERENCE": "disabled",
         }
-        with patch.dict(os.environ, environment, clear=True), \\
+        with patch.dict(os.environ, environment, clear=True), \
              patch("scripts.run_specialist_lanes.subprocess.run") as run:
             self.assertEqual(main(), 0)
         run.assert_not_called()
