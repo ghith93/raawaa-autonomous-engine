@@ -174,7 +174,7 @@ def _build_prompt(contract: dict, operating_policy: dict) -> str:
 def run_once(store: TaskStore, live_gateway=None, environ=None, worker_lane: str | None = None) -> dict | None:
     environ = os.environ if environ is None else environ
     worker_lane = worker_lane or environ.get("RAAWAA_ENGINE_WORKER_LANE", "general")
-    allowed_lanes = {"general", "specialist:researcher", "specialist:reviewer", "specialist:marketer", "specialist:operator", "specialist:mobile_tester"}
+    allowed_lanes = {"general", "specialist:researcher", "specialist:reviewer", "specialist:marketer", "specialist:operator"}
     if worker_lane not in allowed_lanes:
         return {"status": "blocked", "reason": "invalid_worker_lane"}
     # Load repository policy before claiming work or allowing any provider I/O.
