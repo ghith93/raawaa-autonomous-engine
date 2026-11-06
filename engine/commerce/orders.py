@@ -140,7 +140,9 @@ class Order:
         self.history.append({"state": new_state, "at": utc_now().isoformat(), "reason": reason})
 
     def is_revenue(self) -> bool:
-        return self.state in REVENUE_STATES
+        """Recognise delivered COD only when cash matches the total and currency."""
+        return (self.state in REVENUE_STATES and self.cod_collected is not None
+                and self.cod_collected == self.total())
 
 
 @dataclass
@@ -183,12 +185,12 @@ class OrderBook:
             "cancel_rate": None if not submitted else counts["cancelled"] / submitted,
             "refusal_rate": None if not resolved else refused / resolved,
             "fulfilment_rate": None if not submitted else delivered / submitted,
-            "note": "requested/confirmed/prepared are pipeline, not revenue",
+            "note": "revenue requires delivery and matching COD cash settlement",
         }
 
     def unreconciled(self) -> list[str]:
         """Delivered orders whose cash does not match the expected total."""
         return [
             o.order_id for o in self.orders.values()
-            if o.state == "delivered" and (o.cod_collected is None or o.cod_collected.minor != o.total().minor)
+            if o.state == "delivered" and not o.is_revenue()
         ]

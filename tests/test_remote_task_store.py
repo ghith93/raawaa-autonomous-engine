@@ -99,6 +99,27 @@ class RemoteTaskStoreTests(unittest.TestCase):
             with self.subTest(result=result), self.assertRaises(RemoteTaskStoreError):
                 self.store.recover_supervised_probe("probe-123")
 
+    @patch("engine.remote_task_store.urlopen")
+    def test_claim_exact_validates_remote_lease_and_scope(self, open_url):
+        task = {"id": "task-1", "status": "running", "execution_lane": "general",
+                "execution_mode": "dry_run", "task_type": "system_audit"}
+        open_url.return_value = FakeResponse({"task": task, "lease_token": "lease"})
+        self.assertEqual(self.store.claim_exact("task-1")["lease_token"], "lease")
+        self.assertTrue(open_url.call_args.args[0].full_url.endswith("/v1/tasks/task-1/claim-exact"))
+        for changes in ({"id": "other"}, {"execution_lane": "specialist:researcher"},
+                        {"task_type": "supervised_probe"}, {"execution_mode": "live_inference"}):
+            open_url.return_value = FakeResponse({"task": {**task, **changes}, "lease_token": "lease"})
+            with self.subTest(changes=changes), self.assertRaises(RemoteTaskStoreError):
+                self.store.claim_exact("task-1")
+        for task_id in ("", "../bad", None):
+            with self.subTest(task_id=task_id), self.assertRaises(ValueError):
+                self.store.claim_exact(task_id)
+        with self.assertRaises(ValueError):
+            self.store.claim_exact("task-1", execution_mode="live_inference")
+        open_url.return_value = FakeResponse({})
+        with self.assertRaises(RemoteTaskStoreError):
+            self.store.claim_exact("task-1")
+
     def test_claim_supervised_probe_rejects_unsafe_task_ids_before_network(self):
         for task_id in ("", "../tasks", "has space", "x" * 129, None):
             with self.subTest(task_id=task_id), self.assertRaises(ValueError):

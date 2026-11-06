@@ -89,3 +89,14 @@ PR #621 head `4aec1b7ff428566aa2b3e7f7dc7648972b98880e` passed Graphify run [423
 ## 9. Process supervision correction
 
 The earlier wording that process supervision did not exist was too broad. `engine/process_supervisor.py` and `engine/supervised_task.py` are implemented and wired into the worker for the `supervised_probe` task type. They include an allowlisted executable registry, bounded wall time/output, process-group cleanup, durable dispatch ledger, replay classification and lease fencing. However, `RAAWAA_ENGINE_PROCESS_SUPERVISOR` defaults off and the task payload can request only `git_head_revision` or `python_platform_probe`; these are fixed read-only probes, not arbitrary coding agents. `engine/sandbox_policy.py` builds and validates a gVisor/docker argument policy but the current supervised task path does not call it. Therefore the real gap is **general agent CLI execution + sandbox integration**, not the absence of a process supervisor.
+
+## 10. Draft PR triage and guard correction
+
+| PR | Disposition | Reviewed head |
+|---|---|---|
+| #574 | Preserve useful security tests selectively after current-base review; do not merge wholesale. | `64adac66c123` |
+| #536 | Research reference for targeted identity; do not adopt the stale branch wholesale. | `e3367baca597` |
+| #523 | Extract unique documentation after current-base review. | `ca723db23711` |
+| #405 | Park the Workers AI Neuron ledger until account and quota boundaries are independently verified. | `48117a70c245` |
+
+Earlier Groq audit branch run [42309108728](https://github.com/ghith93/raawaa-autonomous-engine/actions/runs/42309108728) failed before any job. PR #619 replaces that invalid workflow with an offline default-policy audit; it does not prove account billing eligibility, idempotency, live inference or Staging deployment. Issue #577 and Runtime-004's second qualifying task lifecycle remain open.

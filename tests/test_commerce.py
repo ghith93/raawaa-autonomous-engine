@@ -107,7 +107,28 @@ class OrderTests(unittest.TestCase):
         order = self.make()
         for state in ("confirmed", "prepared", "shipped", "delivered"):
             order.transition(state)
+        self.assertFalse(order.is_revenue())
+        order.cod_collected = order.total()
         self.assertTrue(order.is_revenue())
+
+    def test_cash_settlement_gate_and_unreconciled_agree(self):
+        book = OrderBook()
+        order = self.make()
+        book.submit(order, "k1")
+        order.cod_collected = order.total()
+        self.assertFalse(order.is_revenue())  # cash alone is insufficient
+        for state in ("confirmed", "prepared", "shipped", "delivered"):
+            order.transition(state)
+        for cash in (None, Money.of(17), Money.of(19), Money.of(18, "EUR")):
+            with self.subTest(cash=cash):
+                order.cod_collected = cash
+                self.assertFalse(order.is_revenue())
+                self.assertEqual(book.funnel()["revenue_recognised"], 0)
+                self.assertEqual(book.unreconciled(), ["A1"])
+        order.cod_collected = Money.of(18)
+        self.assertTrue(order.is_revenue())
+        self.assertEqual(book.funnel()["revenue_recognised"], 18)
+        self.assertEqual(book.unreconciled(), [])
 
     def test_skipping_a_step_is_refused(self):
         with self.assertRaises(TransitionError):

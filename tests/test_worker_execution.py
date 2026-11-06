@@ -267,6 +267,32 @@ class WorkerExecutionTests(unittest.TestCase):
         self.assertEqual(saved[specialist["id"]]["status"], "pending")
         self.assertEqual(saved[specialist["id"]]["attempts"], 0)
 
+    def test_targeted_worker_executes_only_exact_task_without_recovery_or_provider(self):
+        other = self.store.enqueue("research_brief", "Other higher priority", priority=100)
+        gateway = Mock()
+        with patch.object(self.store, "recover_stale", side_effect=AssertionError("broad recovery")):
+            result = run_once(self.store, live_gateway=gateway, environ={}, task_id=self.task["id"])
+        self.assertEqual(result["id"], self.task["id"])
+        self.assertEqual(result["status"], "succeeded")
+        self.assertEqual(result["mode"], "dry_run")
+        tasks = {task["id"]: task for task in self.store.list_tasks()}
+        self.assertEqual(tasks[other["id"]]["status"], "pending")
+        self.assertEqual(tasks[other["id"]]["attempts"], 0)
+        gateway.preflight_capacity.assert_not_called()
+        gateway.generate.assert_not_called()
+        self.assertIsNone(run_once(self.store, environ={}, task_id=self.task["id"]))
+
+    def test_targeted_worker_rejects_live_or_invalid_identity_before_claim(self):
+        gateway = Mock()
+        with patch.object(self.store, "recover_stale", side_effect=AssertionError("broad recovery")):
+            result = run_once(self.store, live_gateway=gateway,
+                              environ={"RAAWAA_ENGINE_LIVE_INFERENCE": "enabled"}, task_id=self.task["id"])
+            self.assertEqual(result["reason"], "exact_live_inference_disabled")
+            self.assertEqual(run_once(self.store, environ={}, task_id="../bad")["reason"], "invalid_task_id")
+        gateway.preflight_capacity.assert_not_called()
+        gateway.generate.assert_not_called()
+        self.assertEqual(self.store.list_tasks()[0]["status"], "pending")
+
     def test_unknown_worker_lane_fails_closed(self):
         result = run_once(self.store, environ={}, worker_lane="specialist:unknown")
         self.assertEqual(result, {"status": "blocked", "reason": "invalid_worker_lane"})
