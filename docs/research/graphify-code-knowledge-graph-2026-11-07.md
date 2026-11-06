@@ -69,7 +69,7 @@ All repository facts above were inspected on 2026-11-07. Recheck upstream versio
 
 ## 7. First CI experiment and correction
 
-- First exact-head run: [research workflow #42312019469](https://github.com/ghith93/raawaa-autonomous-engine/actions/runs/42312019469).
+- First exact-head run: [Engine CI workflow #42312019469](https://github.com/ghith93/raawaa-autonomous-engine/actions/runs/42312019469).
 - The project-agent map validator passed. Graphify OSS `0.9.103` installed successfully without a model key.
 - The first extraction produced **5,297 nodes, 11,848 edges and 256 communities** from 335 code files. Four sensitive/credential-related paths were excluded by ignore rules; one sensitive workflow file was also skipped by Graphify's own safety filter.
 - The job then failed because `extract --code-only` writes the graph JSON first and the report/HTML generation requires the documented `--cluster-only` pass. It also reported 18 SQL files skipped because the optional SQL grammar was absent.
@@ -114,3 +114,6 @@ The static map is now merged into Graphify output. `scripts/merge_project_agent_
 
 The first combined overlay attempt showed that Graphify's `cluster-only` normalization maps unknown node `file_type` values to `concept` and may re-key non-AST IDs. The overlay now uses the supported `concept` type and carries stable `metadata.map_node_id` / `metadata.evidence_path` identifiers. CI validates those stable metadata fields and edge source locations after clustering, rather than relying on pre-normalization IDs or unsupported node types. This is required for the agent topology to survive into the final graph and HTML.
 
+
+
+**CI placement correction:** Graphify is executed by the existing `.github/workflows/ci.yml` on branch pushes, not by the daily research discovery workflow. This keeps candidate discovery and code-graph generation independent, avoids a second schedule, and ensures the current branch head receives a graph artifact check.
