@@ -1,4 +1,4 @@
-name: Groq 20B Staging Dispatch (One-Shot)
+name: Groq 20B Staging Audit (No Inference)
 on:
   workflow_dispatch:
     inputs:
@@ -7,7 +7,7 @@ on:
         required: true
         type: string
       run_scoped_id:
-        description: 'Run correlation identifier (not an idempotency guarantee)'
+        description: 'Correlation identifier only; not an idempotency guarantee'
         required: true
         type: string
 
@@ -15,63 +15,40 @@ permissions:
   contents: read
 
 concurrency:
-  group: groq-staging-audit-${{ github.event.inputs.run_scoped_id }}
+  group: groq-staging-audit-${{ inputs.run_scoped_id }}
   cancel-in-progress: false
 
 jobs:
-  dispatch:
+  audit:
     runs-on: ubuntu-latest
     steps:
-      - name: Check out the exact dispatch commit
-        uses: actions/checkout@506f558186918698c736336d96d4a6e6f25d4a0d # Pin to full 40-char SHA (v4.2.0)
+      - name: Check out exact event commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
-          ref: main # Binding to main ref
-          fetch-depth: 0 # Allow SHA verification
+          ref: ${{ github.sha }}
           persist-credentials: false
-
       - name: Set up Python
-        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7
         with:
-          python-version: "3.12"
-
-      - name: Verify dispatch context, branch binding, and inputs (Blockers 1-5)
+          python-version: '3.12'
+      - name: Verify dispatch context
         env:
           EVENT_REF: ${{ github.ref }}
           EVENT_SHA: ${{ github.sha }}
-          MAIN_SHA: "18addad24e29757dedbad75f2eeff71c5715d323" # Main SHA binding
-          ARENA_CONFIRMATION: ${{ inputs.confirmation_string }}
-          ARENA_SCOPED_ID: ${{ inputs.run_scoped_id }}
+          CONFIRMATION: ${{ inputs.confirmation_string }}
+          SCOPED_ID: ${{ inputs.run_scoped_id }}
         shell: bash
         run: |
           set -euo pipefail
-          # Blocker 1: Branch/SHA binding guard
-          test "$EVENT_REF" = "refs/heads/main" || { echo "ERROR: Branch binding failed ($EVENT_REF)"; exit 1; }
-          test "$EVENT_SHA" = "$MAIN_SHA" || { echo "ERROR: SHA mismatch ($EVENT_SHA != $MAIN_SHA)"; exit 1; }
-          # Blocker 2: Shell interpolation mitigation (env vars used above)
-          test "$ARENA_CONFIRMATION" = "ARENA-GROQ-20B-STAGING-CONFIRM" || { echo "ERROR: Invalid confirmation"; exit 1; }
-          # Blocker 3: Idempotency audit/preflight (validation only)
-          [[ "$ARENA_SCOPED_ID" =~ ^[a-zA-Z0-9-]{1,64}$ ]] || { echo "ERROR: Invalid scoped ID format"; exit 1; }
-          echo "Dispatch context verified for $EVENT_SHA (Main $MAIN_SHA)"
-          echo "Correlation ID format verified: $ARENA_SCOPED_ID"
-          echo "Scope: Audit/Preflight only (USD 0 spend)"
-
-      - name: Run Staging audit preflight (Blocker 4 & 5: Audit vs Inference, Payload Allowlist)
-        env:
-          ARENA_SCOPED_ID: ${{ inputs.run_scoped_id }}
+          test "$EVENT_REF" = refs/heads/main
+          test "$(git rev-parse HEAD)" = "$EVENT_SHA"
+          test "$CONFIRMATION" = ARENA-GROQ-20B-STAGING-CONFIRM
+          [[ "$SCOPED_ID" =~ ^[a-zA-Z0-9-]{1,64}$ ]]
+      - name: Check local policy and provider defaults
+        run: python3 scripts/audit_groq_defaults.py
+      - name: Run offline regression tests
         run: |
-          # Strictly read-only audit, no inference, no spend, allowlist scalars/event_names/types only
-          python3 -m engine.cli audit --stage staging --provider groq --model openai/gpt-oss-20b --allowlist-only scalars,event_names,types --dry-run
-
-      - name: Report bounded evidence (Blocker 5: Allowlist Only)
-        env:
-          ARENA_SCOPED_ID: ${{ inputs.run_scoped_id }}
-          GITHUB_RUN_ID: ${{ github.run_id }}
-          GITHUB_SHA: ${{ github.sha }}
-        run: |
-          set -euo pipefail
-          # Output only approved scalars, no payload/secret
-          printf 'Evidence: run=%s sha=%s correlation_id=%s\n' "$GITHUB_RUN_ID" "$GITHUB_SHA" "$ARENA_SCOPED_ID"
-          echo "Status: Audit preflight completed; no inference was performed; USD 0 spend."
-
-      - name: Run exact-ID read-only tests (Blocker 6)
-        run: python -m unittest discover -s tests -p "test_exact_id_reconciliation.py" -v --dry-run
+          python3 -m unittest discover -s tests -p 'test_groq_defaults_audit.py' -v
+          python3 -m unittest discover -s tests -p 'test_exact_id_reconciliation.py' -v
+      - name: Report scope
+        run: echo 'Local configuration audit only; no inference, Staging access, billing verification, or idempotency guarantee.'
