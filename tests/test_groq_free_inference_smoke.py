@@ -133,6 +133,18 @@ class GroqSmokeRecoveryTests(unittest.TestCase):
         with self.assertRaisesRegex(SystemExit, "unresolved reservations"):
             smoke._assert_zero_spend(store, "new-task")
 
+    def test_refuses_if_multiple_matching_ambiguous_reservations_exist(self):
+        store = self.store()
+        snapshot = ambiguous_snapshot()
+        snapshot["task_pending_count"] = 2
+        snapshot["unresolved"].append(dict(
+            snapshot["unresolved"][0],
+            reservation_id="9d7a9d14-03ef-4bd6-a81e-9b8c96f0a4e7",
+        ))
+        store.task_snapshot = snapshot
+        with self.assertRaisesRegex(SystemExit, "exact zero-cost record"):
+            smoke._verify_previous_ambiguous_task(store)
+
     def test_smoke_uses_a_new_idempotency_key_not_the_ambiguous_task_key(self):
         self.assertTrue(smoke.IDEMPOTENCY_KEY.endswith("-v9"))
         self.assertNotEqual(smoke.IDEMPOTENCY_KEY,
