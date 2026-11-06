@@ -191,6 +191,23 @@ class RemoteTaskStoreTests(unittest.TestCase):
                          "https://engine.example/v1/tasks/recover")
 
     @patch("engine.remote_task_store.urlopen")
+    def test_targeted_recovery_includes_exact_task_id(self, open_url):
+        open_url.return_value = FakeResponse({"requeued": 0, "failed": 1})
+        self.assertEqual(
+            self.store.recover_stale(task_id="stale-proof-123"),
+            {"requeued": 0, "failed": 1},
+        )
+        request = open_url.call_args.args[0]
+        self.assertEqual(
+            json.loads(request.data),
+            {"worker_lane": "general", "task_id": "stale-proof-123"},
+        )
+
+    def test_targeted_recovery_rejects_unsafe_task_id(self):
+        with self.assertRaises(ValueError):
+            self.store.recover_stale(task_id="../other-task")
+
+    @patch("engine.remote_task_store.urlopen")
     def test_specialist_recovery_sends_lane_capability(self, open_url):
         self.store.lane_token = "researcher-lane-token-0123456789abcdef0123456789"
         open_url.return_value = FakeResponse({"requeued": 0, "failed": 0})
