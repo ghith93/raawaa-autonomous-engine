@@ -263,3 +263,6 @@
 
 
 **تحديث تنفيذ التجربة:** لم تعد خريطة الأدوار منفصلة فقط؛ يضيف `scripts/merge_project_agent_map.py` عقد الأدوار والمكونات والفجوات والمزودين وروابط الأدلة إلى `graph.json` بعد استخراج Graphify. تُنشأ روابط مباشرة لعقد AST عندما يكون ملف المصدر مفهرساً، وإلا يُنشأ مرجع مسار صريح دون تلخيص دلالي للوثائق. الاختبار يضمن عدم تكرار العقد عند إعادة الدمج. تبقى مهام D1 الحية خارج الرسم الثابت.
+
+
+**CI placement correction:** Graphify is executed by the existing `.github/workflows/ci.yml` on branch pushes, not by the daily research discovery workflow. This keeps candidate discovery and code-graph generation independent, avoids a second schedule, and ensures the current branch head receives a graph artifact check.
