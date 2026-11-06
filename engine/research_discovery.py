@@ -56,7 +56,7 @@ def _request_json(query: str, token: str = "", timeout: int = 15) -> dict:
         headers["Authorization"] = "Bearer " + token
     request = Request(url, headers=headers, method="GET")
     try:
-        with urlopen(request, timeout=timeout) as response:
+        with _open_without_redirects(request, timeout) as response:
             if response.status != 200:
                 raise ResearchDiscoveryError(f"GitHub search returned HTTP {response.status}")
             raw = response.read(MAX_RESPONSE_BYTES + 1)
