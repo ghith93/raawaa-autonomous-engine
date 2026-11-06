@@ -260,6 +260,38 @@ def workflow_violations(path: str, content: str) -> list[str]:
     return violations
 
 
+STAGING_EFFECT_JOBS: tuple[str, ...] = (
+    "staging-migrate",
+    "staging-worker-verify",
+    "publish-staging-ops-telemetry",
+    "staging-mobile-status-verify",
+)
+
+
+def staging_gate_violations(path: str, content: str) -> list[str]:
+    """Require explicit, false-by-default dispatch opt-in for every Staging write/deploy."""
+    if Path(path).name != "ci.yml":
+        return []
+    violations: list[str] = []
+    if not re.search(r"(?m)^      enable_staging_operations:\\s*$", content):
+        violations.append(f"{path}: workflow_dispatch must declare enable_staging_operations")
+    if not re.search(r"(?m)^        default:\\s*false\\s*$", content):
+        violations.append(f"{path}: enable_staging_operations must default to false")
+    blocks = dict(job_blocks(content))
+    for job_name in STAGING_EFFECT_JOBS:
+        block = blocks.get(job_name, "")
+        if not block:
+            violations.append(f"{path}: required Staging job '{job_name}' is missing")
+            continue
+        if "github.event_name == 'workflow_dispatch'" not in block:
+            violations.append(f"{path}: Staging job '{job_name}' is not manual-dispatch-only")
+        if "inputs.enable_staging_operations == true" not in block:
+            violations.append(f"{path}: Staging job '{job_name}' lacks explicit opt-in")
+        if "github.event_name == 'push'" in block:
+            violations.append(f"{path}: Staging job '{job_name}' must not run on main push")
+    return violations
+
+
 def production_dispatch_violations(path: str, content: str) -> list[str]:
     """Reject a manual dispatch trigger on any production-effecting workflow."""
     name = Path(path).name
@@ -339,11 +371,13 @@ def main() -> int:
         violations.extend(workflow_violations(relative, content))
         violations.extend(production_dispatch_violations(relative, content))
         violations.extend(push_branch_secret_violations(relative, content))
+        violations.extend(staging_gate_violations(relative, content))
     if violations:
         print("\n".join(violations))
         return 1
     print("All secret-bearing workflow_dispatch and push/PR jobs are restricted to refs/heads/main.")
     print("No production-class workflow exposes a manual dispatch trigger.")
+    print("Staging D1 writes/deploys require an explicit workflow_dispatch opt-in; main pushes are read-only.")
     return 0
 
 
