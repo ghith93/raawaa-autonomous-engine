@@ -146,7 +146,7 @@ def _complete_ingest_task(store: TaskStore, task: dict) -> dict:
     return {"id": task["id"], "status": "succeeded", "reason": "issue_comment_recorded",
             "envelope_id": result["envelope_id"]}
 LIVE_SWITCH = "RAAWAA_ENGINE_LIVE_INFERENCE"
-LIVE_MAX_OUTPUT_TOKENS = 256
+LIVE_MAX_OUTPUT_TOKENS = 512
 
 
 def _live_requested(environ=None) -> bool:
