@@ -57,6 +57,46 @@ def validate_environment(environ: Mapping[str, str]) -> tuple[str, str]:
     return token, f"{IDEMPOTENCY_PREFIX}{run_id}:{attempt}"
 
 
+def retire_stale_pending_proof_tasks(store: Any) -> int:
+    """Retire only exact, pending contention-proof tasks left by an aborted CI run."""
+    rows = store.list_tasks(100)
+    if len(rows) >= 100:
+        raise StagingContentionProofError(
+            "Cannot safely inspect the complete bounded general queue before proof cleanup"
+        )
+    stale = [
+        row for row in rows
+        if isinstance(row, dict)
+        and row.get("task_type") == TASK_TYPE
+        and row.get("title") == TITLE
+        and isinstance(row.get("idempotency_key"), str)
+        and row["idempotency_key"].startswith(IDEMPOTENCY_PREFIX)
+        and row.get("status") == "pending"
+    ]
+    retired = 0
+    for row in stale:
+        task_id = row.get("id")
+        if not isinstance(task_id, str):
+            raise StagingContentionProofError("Stale proof task has an invalid identifier")
+        claim = store.claim_supervised_probe(task_id)
+        if not isinstance(claim, dict) or claim.get("id") != task_id:
+            raise StagingContentionProofError(
+                "Could not safely claim an exact stale proof task for retirement"
+            )
+        lease = claim.get("lease_token")
+        if not isinstance(lease, str) or not lease:
+            raise StagingContentionProofError("Stale proof task did not return a valid lease")
+        store.finish(
+            task_id,
+            "blocked",
+            error="Retired stale Staging contention proof; no process or provider work was executed.",
+            lease_token=lease,
+            execution_mode="dry_run",
+        )
+        retired += 1
+    return retired
+
+
 def run_proof(
     environ: Mapping[str, str] | None = None,
     *,
@@ -66,6 +106,7 @@ def run_proof(
     env = dict(os.environ if environ is None else environ)
     token, idempotency_key = validate_environment(env)
     store = store_factory(STAGING_API_URL, token, timeout=30, reject_redirects=True)
+    stale_proof_tasks_retired = retire_stale_pending_proof_tasks(store)
 
     task = store.enqueue(
         TASK_TYPE,
@@ -160,6 +201,7 @@ def run_proof(
             "external_writes": 0,
             "production_touched": False,
             "spend_usd": 0,
+            "stale_proof_tasks_retired": stale_proof_tasks_retired,
         }
     finally:
         # Do not leave an owned lease running if an assertion fails mid-proof.
