@@ -18,6 +18,7 @@ BASE_URL = os.environ.get(
 TOKEN = os.environ.get("RAAWAA_ENGINE_STAGING_API_TOKEN", "") or os.environ.get(
     "RAAWAA_ENGINE_API_TOKEN", ""
 )
+ADMIN_TOKEN = os.environ.get("RAAWAA_ENGINE_QUOTA_ADMIN_TOKEN", "")
 TASK_ID = "16e1b4a6-a5ec-43cf-8168-f4723e1827c3"
 PROVIDER = "groq"
 MODEL = "openai/gpt-oss-120b"
@@ -26,9 +27,12 @@ ROUTE_ID = "groq:primary:openai/gpt-oss-120b"
 
 def api(method: str, path: str, payload: dict | None = None) -> tuple[int, dict]:
     data = None if payload is None else json.dumps(payload, separators=(",", ":")).encode()
+    auth_token = ADMIN_TOKEN if method == "POST" and path == "/v1/quota" else TOKEN
+    if not auth_token:
+        raise RuntimeError("Required Staging API token scope is unavailable")
     headers = {
         "Accept": "application/json",
-        "Authorization": "Bearer " + TOKEN,
+        "Authorization": "Bearer " + auth_token,
         "User-Agent": "RaawaaAutonomousEngine/1.0",
     }
     if data is not None:
