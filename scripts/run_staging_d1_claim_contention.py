@@ -80,6 +80,14 @@ def retire_stale_pending_proof_tasks(store: Any) -> int:
             and row.get("dependencies_json") in ("[]", None)
         ):
             return False
+        if row.get("status") == "pending":
+            if row.get("attempts") != 0 or row.get("execution_mode") not in {"not_started", None}:
+                return False
+        elif row.get("status") == "running":
+            if row.get("attempts") != 1 or row.get("execution_mode") != "dry_run":
+                return False
+        else:
+            return False
         try:
             return json.loads(row.get("payload_json", "")) == {"operation": OPERATION}
         except (TypeError, ValueError):
