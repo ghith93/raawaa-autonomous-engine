@@ -786,7 +786,9 @@ test("recover endpoint is authenticated and scopes stale selection and writes to
   assert.deepEqual(await response.json(), { requeued: 0, failed: 0 });
   const selection = DB.calls.find(x => x.kind === "all" && x.sql.includes("lease_expires_at"));
   assert.match(selection.sql, /execution_lane=\?/);
-  assert.deepEqual(selection.values, ["general", "general"]);
+  assert.equal(selection.values.length, 2);
+  assert.match(selection.values[0], /^\\d{4}-\\d{2}-\\d{2}T/);
+  assert.equal(selection.values[1], "general");
   const write = DB.calls.find(x => x.kind === "batch")?.statements?.find(x => x.sql.includes("UPDATE tasks SET status=?"));
   if (write) {
     assert.match(write.sql, /execution_lane=\?/);
@@ -810,7 +812,8 @@ test("specialist stale recovery requires and applies its own capability", async 
   }), { DB, ENGINE_API_TOKEN: TOKEN, ENGINE_RESEARCHER_LANE_TOKEN: laneToken });
   assert.equal(response.status, 200);
   const selection = DB.calls.find(x => x.kind === "all" && x.sql.includes("lease_expires_at"));
-  assert.deepEqual(selection.values, ["specialist:researcher", "specialist:researcher"]);
+  assert.equal(selection.values.length, 2);
+  assert.equal(selection.values[1], "specialist:researcher");
 });
 
 test("recover endpoint rejects unauthenticated callers", async () => {
