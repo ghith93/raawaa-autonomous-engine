@@ -239,8 +239,10 @@ class QuotaAwareLiveGateway:
                 raise ProviderUnavailable(
                     "Could not confirm durable monetary reservation start; provider was not called."
                 ) from exc
+            failure_stage = "adapter_generate"
             try:
                 response = adapter.generate(profile.model, request)
+                failure_stage = "response_validation"
                 if response.provider != profile.provider or response.model != profile.model:
                     raise ValueError("adapter response route does not match reserved profile")
                 if not isinstance(response.text, str) or not response.text.strip():
@@ -332,7 +334,8 @@ class QuotaAwareLiveGateway:
                     self.invocation_store.mark_ambiguous(request.task_id, request.lease_token, request.invocation_id)
                 self._audit(
                     "adapter_failure", request, profile,
-                    error_type=type(exc).__name__, reason="ambiguous_adapter_failure",
+                    error_type=type(exc).__name__, failure_stage=failure_stage,
+                    reason="ambiguous_adapter_failure",
                 )
                 raise ProviderUnavailable(
                     "Live adapter failed unexpectedly; route rotation was stopped."
