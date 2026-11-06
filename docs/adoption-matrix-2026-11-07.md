@@ -76,3 +76,8 @@
 - Six-hour read-only development loop: `docs/operations/permanent-development-loop.md`.
 - Multi-CLI phase status: `docs/operations/multi-cli-execution-plan.md`.
 - Graphify pilot and alternatives: `docs/research/graphify-code-knowledge-graph-2026-11-07.md`.
+
+## 8. Graphify pilot outcome — verified
+
+PR #621 head `4aec1b7ff428566aa2b3e7f7dc7648972b98880e` passed Graphify run [42312433741](https://github.com/ghith93/raawaa-autonomous-engine/actions/runs/42312433741): 5,394 nodes, 11,981 edges, 255 communities, 18 SQL files, graph.json/html/report artifact, zero model tokens/cost. Engine CI [42312433515](https://github.com/ghith93/raawaa-autonomous-engine/actions/runs/42312433515) passed Python, Worker, Workflows and local D1/Workflows smoke tests; Staging side-effect jobs were skipped. Graphify is technically accepted as a read-only code graph pilot, not as an agent orchestrator or live task store. Merge remains held until the existing main-push Staging migration/deploy/telemetry side effects are reconciled with active #577 constraints.
+
