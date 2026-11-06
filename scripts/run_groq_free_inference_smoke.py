@@ -76,8 +76,17 @@ def _quota(store: RemoteTaskStore, route_id: str, task_id: str) -> dict:
 def _diagnostics(store: RemoteTaskStore, task_id: str) -> dict:
     mobile = store._request("/v1/mobile/status")
     routes = {route: _quota(store, route, task_id) for route in ROUTE_IDS}
+    rows = store.list_tasks(100, worker_lane=EXECUTION_LANE)
+    exact = next((row for row in rows if row.get("id") == task_id), None)
+    task_state = None if exact is None else {
+        key: exact.get(key)
+        for key in ("status", "attempts", "max_attempts", "execution_mode",
+                    "error", "lease_expires_at", "updated_at", "execution_lane")
+        if key in exact
+    }
     return {
         "task_id": task_id,
+        "task_state": task_state,
         "task_counts": _counts(mobile),
         "provider_usage": mobile.get("provider_usage"),
         "model_costs_usd": mobile.get("model_costs_usd"),
