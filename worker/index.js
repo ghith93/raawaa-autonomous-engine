@@ -429,7 +429,7 @@ export default {
       }
       try {
         const result = await env.DB.prepare(
-          "SELECT id,idempotency_key,task_type,title,payload_json,status,attempts,max_attempts,created_at,updated_at,execution_mode,priority,dependencies_json FROM tasks ORDER BY created_at DESC,id DESC LIMIT ?"
+          "SELECT id,idempotency_key,task_type,title,payload_json,status,attempts,max_attempts,created_at,updated_at,execution_mode,priority,dependencies_json,execution_lane FROM tasks ORDER BY created_at DESC,id DESC LIMIT ?"
         ).bind(rawLimit).all();
         const tasks = (result.results || []).map(task => {
           let dependsOn = [];
