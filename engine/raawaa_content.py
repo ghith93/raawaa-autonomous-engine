@@ -206,10 +206,75 @@ def build_llm_prompt(brand: dict[str, Any], *, pillar: str, format: str, hook: s
     )
 
 
+def production_ready(brand: dict[str, Any]) -> bool:
+    """True only when a manufactured batch actually exists."""
+    return int(brand.get("production", {}).get("stock_units", 0)) > 0
+
+
+def prelaunch_week(brand: dict[str, Any] | None = None, *, start: date | None = None) -> dict[str, Any]:
+    """What to publish BEFORE anything is manufactured.
+
+    Nothing here shows a product, because there is no product to show. This is
+    the account's first impression and the only phase where the pharmacist's
+    authority is worth more than the serum.
+    """
+    brand = brand or load_brand()
+    if start is None:
+        today = date.today()
+        start = today + timedelta(days=(5 - today.weekday()) % 7)
+    plan = [
+        ("reel", "من أنا ولماذا أفتح حسابًا", "صيدلاني من حماة يشرح لماذا بدأ"),
+        ("reel", "سيروم أم بلسم؟", "سؤال يُسأل كل يوم في الصيدلية"),
+        ("carousel", "الزيوت لا تُنبت الشعر", "تصحيح مفهوم شائع — يبني سلطة مهنية"),
+        ("reel", "٣ أخطاء في التسريح", "تعليم صرف بلا منتج"),
+        ("story", "سؤال وجواب", "اسألني عن شعرك — بلا منتج"),
+        ("carousel", "متى تراجع طبيبًا", "تساقط مفاجئ أو حكة = طبيب"),
+    ]
+    items = []
+    for i, (fmt, hook, why) in enumerate(plan):
+        day = start + timedelta(days=i)
+        items.append({
+            "id": f"raawaa-prelaunch-{day.isoformat()}-{i}",
+            "date": day.isoformat(),
+            "weekday_ar": ["الاثنين", "الثلاثاء", "الأربعاء", "الخميس", "الجمعة", "السبت", "الأحد"][day.weekday()],
+            "format": fmt,
+            "pillar_ar": "تأسيس ثقة" if fmt != "story" else "تفاعل",
+            "hook_ar": hook,
+            "why_ar": why,
+            "caption_ar": (
+                f"{hook}\n\n"
+                "أنا صيدلاني من حماة، وهشارك معلومات عن الشعر بصدق — "
+                "بدون وعود، وبدون بيع شيء لسا ما جاهز.\n\n"
+                "اسألني في التعليقات 🌿"
+            ),
+            "visual_brief_ar": "بطاقة نصية بخط عربي كبير على خلفية بلون العلامة — لا منتج، لا عبوة",
+            "real_asset_required": False,
+            "ai_visual_allowed": True,
+            "publish_mode": "auto_publish_candidate",
+            "shows_product": False,
+        })
+    return {
+        "mode": "raawaa_prelaunch_plan_read_only",
+        "note": "No product exists yet, so nothing here shows one.",
+        "phase": "prelaunch",
+        "week": 0,
+        "starts": start.isoformat(),
+        "items": items,
+        "counts": {"total": len(items), "reels": sum(1 for i in items if i["format"] == "reel"),
+                   "need_real_photo": 0, "auto_candidates": len(items)},
+    }
+
+
 def week_plan(brand: dict[str, Any] | None = None, *, week: int = 1, start: date | None = None) -> dict[str, Any]:
     brand = brand or load_brand()
     if week < 1:
         raise ValueError("week must be >= 1")
+    if not production_ready(brand) and not brand.get("_test_fixture_stock"):
+        raise ValueError(
+            "no manufactured stock yet: use prelaunch_week() until the first batch arrives. "
+            "Publishing product content for a product that does not exist is the one mistake "
+            "this engine refuses to help with."
+        )
     if start is None:
         today = date.today()
         # Snap to the coming Saturday, the first day of the content week.
@@ -251,10 +316,12 @@ def render_markdown(plan: dict[str, Any]) -> str:
         "",
     ]
     for item in plan["items"]:
+        pillar_label = item.get("pillar_ar") or ""
         lines += [
-            f"## {item['date']} ({item['weekday_ar']}) — {item['format']} / {item['pillar_ar']}",
+            f"## {item['date']} ({item.get('weekday_ar', '')}) — {item['format']}"
+            + (f" / {pillar_label}" if pillar_label else ""),
             "",
-            f"**الهدف:** {item['goal_ar']}",
+            f"**الهدف:** {item.get('goal_ar', item.get('why_ar', ''))}",
             "",
             f"**الهوك:** {item['hook_ar']}",
             "",
@@ -266,11 +333,11 @@ def render_markdown(plan: dict[str, Any]) -> str:
             "",
             f"**الصورة:** {item['visual_brief_ar']}",
             "",
-            f"**أصل حقيقي مطلوب:** {'نعم' if item['real_asset_required'] else 'لا'} · "
-            f"**وضع النشر:** `{item['publish_mode']}`",
+            f"**أصل حقيقي مطلوب:** {'نعم' if item.get('real_asset_required') else 'لا'} · "
+            f"**وضع النشر:** `{item.get('publish_mode', 'manual_review')}`",
             "",
         ]
-        if item["beats_ar"]:
+        if item.get("beats_ar"):
             lines.append("**تقسيم الريل:**")
             lines += [f"- {beat}" for beat in item["beats_ar"]]
             lines.append("")
@@ -333,7 +400,7 @@ SHOT_KIT = [
     },
     {
         "id": "pharmacist-explains",
-        "shot_ar": "أنت تتحدثين إلى الكاميرا ٢٥ ثانية عن المكوّن أو طريقة الاستخدام",
+        "shot_ar": "أنت تتحدث إلى الكاميرا ٢٥ ثانية عن المكوّن أو طريقة الاستخدام",
         "time_sec": 40,
         "needs_ar": "هاتف مثبّت + أنت",
         "use_for_ar": "أقوى إثبات ثقة في السوق السوري",
@@ -367,7 +434,7 @@ BARTER_KIT = {
     "ask_ar": "فيديو عمودي ٢٠ ثانية، بلا فلتر، رأيها الصادق — ويحق لها أن تقول إنه لم يعجبها",
     "why_honest_allowed_ar": "الشهادة التي فيها احتمال «لم يعجبني» تُصدَّق. الشهادة المضمونة لا تُصدَّق.",
     "dm_template_ar": (
-        "مرحبًا [الاسم]، أنا [اسمك]، صيدلانية من حماة. "
+        "مرحبًا [الاسم]، أنا [اسمك]، صيدلاني من حماة. "
         "أطلقت سيروم شعر سوري اسمه رواء، وأبحث عن ١٠ أشخاص يجربونه بصدق. "
         "أرسل لك عبوة ٥٠ مل مجانًا، وإذا أعجبك تحكي عنه بـ٢٠ ثانية، وإذا ما أعجبك تحكي هذا كمان — "
         "مهم عندي الرأي الصادق أكثر من المدح. بتحبي أرسلها؟"
@@ -380,7 +447,7 @@ PHARMACIST_PILLARS = [
     ("سيروم أم بلسم؟", "الفرق في الوظيفة والتوقيت — هذا سؤال يُسأل في الصيدلية كل يوم"),
     ("أسطورة الزيوت", "الزيوت لا تُنبت الشعر؛ تُغلف وتمنح لمعة. قول هذا يبني ثقة هائلة"),
     ("طريقة الاستخدام الصحيحة", "قطرتان على الأطراف، لا على الفروة، ولا على شعر مبلل تمامًا"),
-    ("متى تراجعين طبيبًا", "تساقط مفاجئ أو حكة أو قشور = طبيب. هذه الجملة تبني سلطة مهنية"),
+    ("متى تراجع طبيبًا", "تساقط مفاجئ أو حكة أو قشور = طبيب. هذه الجملة تبني سلطة مهنية"),
 ]
 
 
@@ -444,7 +511,7 @@ def render_asset_markdown(kit: dict[str, Any]) -> str:
         "",
         f"**الموافقة:** {kit['barter']['consent_ar']}",
         "",
-        "## ٤. محتوى لا يستطيع أحد تقليده: أنتِ صيدلانية",
+        "## ٤. محتوى لا يستطيع أحد تقليده: أنت صيدلاني",
         "",
     ]
     for pillar in kit["pharmacist_pillars"]:
@@ -469,9 +536,17 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--week", type=int, default=1)
     parser.add_argument("--start", help="ISO date, defaults to the coming Saturday")
     parser.add_argument("--format", choices=("json", "markdown"), default="json")
+    parser.add_argument("--prelaunch", action="store_true",
+                        help="Print the pre-manufacture content week (no product shown)")
     parser.add_argument("--assets", action="store_true",
                         help="Print the no-photographer asset kit instead of a content week")
     args = parser.parse_args(argv)
+
+    if args.prelaunch:
+        plan = prelaunch_week(start=date.fromisoformat(args.start) if args.start else None)
+        print(render_markdown(plan) if args.format == "markdown"
+              else json.dumps(plan, ensure_ascii=False, indent=2))
+        return 0
 
     if args.assets:
         kit = asset_kit()

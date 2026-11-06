@@ -64,7 +64,11 @@ class EconomicsTests(unittest.TestCase):
 
 class ContentTests(unittest.TestCase):
     def setUp(self):
-        self.plan = content.week_plan(week=1, start=date(2026, 11, 7))
+        # A manufactured batch is simulated here on purpose: the real brand file
+        # says stock_units = 0, and week_plan must refuse in that state.
+        brand = econ.load_brand()
+        brand["_test_fixture_stock"] = True
+        self.plan = content.week_plan(brand, week=1, start=date(2026, 11, 7))
 
     def test_week_has_six_posts_and_three_reels(self):
         self.assertEqual(self.plan["counts"]["total"], 6)
@@ -113,7 +117,9 @@ class ContentTests(unittest.TestCase):
         self.assertEqual(len(set(dates)), len(dates))
 
     def test_weeks_do_not_repeat_the_same_hooks(self):
-        week_two = content.week_plan(week=2, start=date(2026, 11, 14))
+        brand = econ.load_brand()
+        brand["_test_fixture_stock"] = True
+        week_two = content.week_plan(brand, week=2, start=date(2026, 11, 14))
         hooks_one = {i["hook_ar"] for i in self.plan["items"]}
         hooks_two = {i["hook_ar"] for i in week_two["items"]}
         self.assertNotEqual(hooks_one, hooks_two)
@@ -126,6 +132,43 @@ class ContentTests(unittest.TestCase):
     def test_invalid_week_rejected(self):
         with self.assertRaises(ValueError):
             content.week_plan(week=0)
+
+
+class ProductionGateTests(unittest.TestCase):
+    """Nothing has been manufactured. The engine must refuse to pretend otherwise."""
+
+    def setUp(self):
+        self.brand = econ.load_brand()
+
+    def test_brand_file_records_zero_stock(self):
+        self.assertEqual(self.brand["production"]["status"], "not_manufactured")
+        self.assertEqual(self.brand["production"]["stock_units"], 0)
+
+    def test_product_week_is_refused_before_manufacture(self):
+        with self.assertRaises(ValueError) as ctx:
+            content.week_plan(self.brand, week=1, start=date(2026, 11, 7))
+        self.assertIn("no manufactured stock", str(ctx.exception))
+
+    def test_prelaunch_week_shows_no_product(self):
+        plan = content.prelaunch_week(self.brand, start=date(2026, 11, 7))
+        self.assertEqual(plan["phase"], "prelaunch")
+        for item in plan["items"]:
+            self.assertFalse(item["shows_product"], item["id"])
+
+    def test_prelaunch_needs_no_photos_at_all(self):
+        plan = content.prelaunch_week(self.brand, start=date(2026, 11, 7))
+        self.assertEqual(plan["counts"]["need_real_photo"], 0)
+
+    def test_founder_is_addressed_as_male(self):
+        founder = self.brand["founder"]
+        self.assertEqual(founder["gender"], "male")
+        self.assertEqual(founder["role_ar"], "صيدلاني")
+        self.assertEqual(founder["address_form"], "masculine")
+
+    def test_barter_template_uses_masculine_self_description(self):
+        kit = content.asset_kit(self.brand)
+        self.assertIn("صيدلاني من حماة", kit["barter"]["dm_template_ar"])
+        self.assertNotIn("صيدلانية من حماة", kit["barter"]["dm_template_ar"])
 
 
 class FreeDeliveryPricingTests(unittest.TestCase):
