@@ -126,7 +126,12 @@ def _verify_previous_ambiguous_task(store: RemoteTaskStore) -> dict:
         and row.get("status") == "ambiguous"
         and int(row.get("estimated_cost_nanos", -1)) == 0
     ]
-    if len(matches) == 0 and int(snapshot.get("task_pending_count", -1)) == 0 and not unresolved:
+    if (
+        len(matches) == 0
+        and int(snapshot.get("task_pending_count", -1)) == 0
+        and int(snapshot.get("task_reserved_nanos", -1)) == 0
+        and not unresolved
+    ):
         # Idempotent re-run after the exact zero-cost reservation was already settled.
         # Require proof that this task really reached the provider adapter and failed
         # ambiguously; a missing reservation alone is never accepted as settlement.
