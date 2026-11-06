@@ -29,6 +29,11 @@ jobs:
           fetch-depth: 1
           persist-credentials: false
 
+      - name: Set up Python
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0
+        with:
+          python-version: "3.12"
+
       - name: Verify dispatch context and inputs
         env:
           EVENT_REF: ${{ github.ref }}
@@ -62,4 +67,4 @@ jobs:
           echo "Status: Audit preflight completed; no inference was performed."
 
       - name: Run exact-ID read-only tests
-        run: python3 -m pytest tests/test_exact_id_reconciliation.py -v
+        run: python -m unittest discover -s tests -p "test_exact_id_reconciliation.py" -v
