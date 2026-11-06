@@ -38,6 +38,9 @@ function dbMock(options = {}) {
           calls.push({ kind: "first", sql, values: this.values });
           if (sql.includes("INSERT INTO quota_cooldowns")) return { until_at: this.values[1] };
           if (sql.includes("FROM audit_log")) return null;
+          if (sql.includes("SELECT execution_lane FROM tasks WHERE id=?")) {
+            return options.laneTask || { execution_lane: options.currentTask?.execution_lane || "general" };
+          }
           // Claim SQL contains a nested SELECT 1; match the UPDATE before generic probes.
           if (sql.includes("UPDATE tasks SET status='running'")) {
             return sql.includes("task_type IN") ? (options.codespaceClaim || null) : (options.normalClaim || null);
