@@ -1,0 +1,545 @@
+{
+  "schema_version": 1,
+  "map_id": "raawaa-project-agent-topology",
+  "generated_from": [
+    "config/agents.json",
+    "config/provider_profiles.json",
+    "config/tool_permissions.json",
+    "config/research_sources.json",
+    "engine/",
+    "worker/",
+    "engine/development_cycle.py",
+    "scripts/build_development_state.py",
+    ".github/workflows/maintenance.yml"
+  ],
+  "scope_note": "Static architecture inventory only. Agent roster entries are declarative roles, not proof of live agent processes. Runtime task instances and dependency edges remain in the existing D1 Task Store and are intentionally not duplicated here.",
+  "nodes": [
+    {
+      "id": "agent:manager",
+      "kind": "agent_role",
+      "role": "orchestrator",
+      "status": "declared_only",
+      "capabilities": [
+        "plan",
+        "prioritize",
+        "delegate",
+        "report"
+      ],
+      "evidence": [
+        "config/agents.json"
+      ]
+    },
+    {
+      "id": "agent:researcher",
+      "kind": "agent_role",
+      "role": "research",
+      "status": "declared_only",
+      "capabilities": [
+        "research",
+        "compare",
+        "summarize"
+      ],
+      "evidence": [
+        "config/agents.json"
+      ]
+    },
+    {
+      "id": "agent:engineer",
+      "kind": "agent_role",
+      "role": "engineering",
+      "status": "declared_only",
+      "capabilities": [
+        "inspect_code",
+        "propose_changes",
+        "test"
+      ],
+      "evidence": [
+        "config/agents.json"
+      ]
+    },
+    {
+      "id": "agent:reviewer",
+      "kind": "agent_role",
+      "role": "quality_and_security",
+      "status": "declared_only",
+      "capabilities": [
+        "review",
+        "risk_assess",
+        "validate"
+      ],
+      "evidence": [
+        "config/agents.json"
+      ]
+    },
+    {
+      "id": "agent:marketer",
+      "kind": "agent_role",
+      "role": "marketing_and_content",
+      "status": "declared_only",
+      "capabilities": [
+        "strategy",
+        "draft_content",
+        "analyze_campaigns"
+      ],
+      "evidence": [
+        "config/agents.json"
+      ]
+    },
+    {
+      "id": "agent:operator",
+      "kind": "agent_role",
+      "role": "operations_and_monitoring",
+      "status": "declared_only",
+      "capabilities": [
+        "monitor",
+        "triage",
+        "report"
+      ],
+      "evidence": [
+        "config/agents.json"
+      ]
+    },
+    {
+      "id": "agent:mobile_tester",
+      "kind": "agent_role",
+      "role": "mobile_quality_assurance",
+      "status": "disabled",
+      "capabilities": [
+        "android_ui_testing",
+        "device_state_inspection",
+        "execution_trace_review"
+      ],
+      "evidence": [
+        "config/agents.json"
+      ]
+    },
+    {
+      "id": "agent:nemotron_specialist",
+      "kind": "agent_role",
+      "role": "independent_advisor_and_implementation_specialist",
+      "status": "disabled",
+      "capabilities": [
+        "independent_architecture_review",
+        "technical_research",
+        "code_generation",
+        "test_design",
+        "independent_critique"
+      ],
+      "evidence": [
+        "config/agents.json"
+      ]
+    },
+    {
+      "id": "component:research_discovery",
+      "kind": "component",
+      "status": "scheduled_read_only_metadata_discovery",
+      "evidence": [
+        "engine/research_discovery.py",
+        ".github/workflows/research-discovery.yml"
+      ]
+    },
+    {
+      "id": "component:capability_gap_analysis",
+      "kind": "component",
+      "status": "offline_proposal_only_no_task_store_write",
+      "evidence": [
+        "scripts/analyze_capability_gaps.py",
+        "docs/capability-gap-analysis.md"
+      ]
+    },
+    {
+      "id": "component:research_triage",
+      "kind": "component",
+      "status": "deterministic_metadata_triage",
+      "evidence": [
+        "scripts/triage_research_candidates.py"
+      ]
+    },
+    {
+      "id": "component:task_store",
+      "kind": "component",
+      "status": "implemented_task_ledger_with_dependencies_and_lanes",
+      "evidence": [
+        "engine/task_store.py",
+        "engine/remote_task_store.py",
+        "worker/index.js"
+      ]
+    },
+    {
+      "id": "component:agent_runtime",
+      "kind": "component",
+      "status": "deterministic_task_role_contract; worker_has_separate_default_off_quota_gated_provider_path",
+      "evidence": [
+        "engine/agent_runtime.py"
+      ]
+    },
+    {
+      "id": "component:tool_broker",
+      "kind": "component",
+      "status": "deny_by_default_no_external_adapters_connected",
+      "evidence": [
+        "engine/tool_broker.py",
+        "config/tool_permissions.json"
+      ]
+    },
+    {
+      "id": "component:provider_registry",
+      "kind": "component",
+      "status": "candidate_routes_disabled_by_default",
+      "evidence": [
+        "config/provider_profiles.json"
+      ]
+    },
+    {
+      "id": "component:research_memory",
+      "kind": "component",
+      "status": "artifacts_30day_optional_d1_persistence",
+      "evidence": [
+        "migrations/0002_research_candidates.sql",
+        "scripts/persist_research_candidates.py",
+        ".github/workflows/research-discovery.yml"
+      ]
+    },
+    {
+      "id": "component:project_knowledge_graph",
+      "kind": "component",
+      "status": "graphify_pilot_pending_ci_evidence",
+      "evidence": [
+        "docs/research/graphify-code-knowledge-graph-2026-11-07.md",
+        ".graphifyignore"
+      ]
+    },
+    {
+      "id": "gap:agent_process_supervision",
+      "kind": "capability_gap",
+      "status": "not_implemented_hard_process_tree_supervision",
+      "evidence": [
+        "docs/operations/multi-cli-execution-plan.md",
+        "docs/research-and-development-operating-system.ar.md"
+      ]
+    },
+    {
+      "id": "gap:independent_runtime_reviewer",
+      "kind": "capability_gap",
+      "status": "not_implemented_as_separate_runtime_agent",
+      "evidence": [
+        "docs/research-and-development-operating-system.ar.md"
+      ]
+    },
+    {
+      "id": "gap:rd_to_task_automation",
+      "kind": "capability_gap",
+      "status": "proposals_not_inserted_into_task_store",
+      "evidence": [
+        "docs/capability-gap-analysis.md",
+        "scripts/analyze_capability_gaps.py"
+      ]
+    },
+    {
+      "id": "provider:groq-gpt-oss-20b",
+      "kind": "model_route",
+      "status": "disabled_candidate",
+      "evidence": [
+        "config/provider_profiles.json"
+      ]
+    },
+    {
+      "id": "provider:groq-gpt-oss-120b",
+      "kind": "model_route",
+      "status": "disabled_candidate",
+      "evidence": [
+        "config/provider_profiles.json"
+      ]
+    },
+    {
+      "id": "provider:nvidia-nemotron",
+      "kind": "model_route",
+      "status": "disabled_research_candidate",
+      "evidence": [
+        "config/agents.json",
+        "docs/research/nvidia-nemotron-evaluation-2026-11-04.ar.md"
+      ]
+    },
+    {
+      "id": "component:development_state_collection",
+      "kind": "component",
+      "status": "scheduled_every_6h_read_only_collection",
+      "evidence": [
+        "scripts/build_development_state.py",
+        ".github/workflows/maintenance.yml",
+        "docs/operations/permanent-development-loop.md"
+      ]
+    },
+    {
+      "id": "component:development_cycle_ranker",
+      "kind": "component",
+      "status": "deterministic_read_only_ranking_no_execution",
+      "evidence": [
+        "engine/development_cycle.py",
+        "docs/operations/permanent-development-loop.md"
+      ]
+    },
+    {
+      "id": "gap:verified_active_fallback",
+      "kind": "capability_gap",
+      "status": "no_active_eligible_model_fallback_all_routes_disabled_or_ineligible",
+      "evidence": [
+        "config/provider_profiles.json",
+        "docs/operations/multi-cli-execution-plan.md"
+      ]
+    },
+    {
+      "id": "gap:benchmark_based_adoption",
+      "kind": "capability_gap",
+      "status": "candidate_scoring_is_metadata_only_no_repeatable_benchmark_promotion",
+      "evidence": [
+        "docs/capability-gap-analysis.md",
+        "docs/research-and-development-operating-system.ar.md"
+      ]
+    },
+    {
+      "id": "gap:mobile_tester_host",
+      "kind": "capability_gap",
+      "status": "mobile_tester_disabled_missing_supported_host_and_authorized_device",
+      "evidence": [
+        "config/agents.json",
+        "docs/research-and-development-operating-system.ar.md"
+      ]
+    },
+    {
+      "id": "component:process_supervisor",
+      "kind": "component",
+      "status": "implemented_and_integrated_opt_in_only_two_read_only_local_operations",
+      "evidence": [
+        "engine/process_supervisor.py",
+        "engine/supervised_task.py",
+        "tests/test_process_supervisor.py",
+        "engine/worker.py"
+      ]
+    },
+    {
+      "id": "component:sandbox_policy",
+      "kind": "component",
+      "status": "implemented_policy_builder_not_proven_wired_to_supervised_task_runner",
+      "evidence": [
+        "engine/sandbox_policy.py",
+        "tests/test_sandbox_policy.py"
+      ]
+    },
+    {
+      "id": "gap:general_agent_cli_execution",
+      "kind": "capability_gap",
+      "status": "no_general_multi_cli_agent_execution_registry_or_runtime_dispatch; current supervisor supports two fixed read_only_probes_only",
+      "evidence": [
+        "engine/supervised_task.py",
+        "docs/operations/multi-cli-execution-plan.md"
+      ]
+    },
+    {
+      "id": "gap:gvisor_execution_integration",
+      "kind": "capability_gap",
+      "status": "sandbox_policy_builder_exists_but_not_connected_to_process_supervisor_worker_path",
+      "evidence": [
+        "engine/sandbox_policy.py",
+        "engine/supervised_task.py"
+      ]
+    },
+    {
+      "id": "gap:independent_reviewer",
+      "kind": "capability_gap",
+      "status": "no_separate_read_only_reviewer_runtime_or_diff_verdict_loop",
+      "evidence": [
+        "engine/agent_runtime.py",
+        "docs/operations/multi-cli-execution-plan.md"
+      ]
+    }
+  ],
+  "edges": [
+    {
+      "from": "agent:manager",
+      "to": "agent:researcher",
+      "relation": "coordinates_role",
+      "status": "declared_topology_only_not_live_dispatch"
+    },
+    {
+      "from": "agent:manager",
+      "to": "agent:engineer",
+      "relation": "coordinates_role",
+      "status": "declared_topology_only_not_live_dispatch"
+    },
+    {
+      "from": "agent:manager",
+      "to": "agent:reviewer",
+      "relation": "coordinates_role",
+      "status": "declared_topology_only_not_live_dispatch"
+    },
+    {
+      "from": "agent:manager",
+      "to": "agent:marketer",
+      "relation": "coordinates_role",
+      "status": "declared_topology_only_not_live_dispatch"
+    },
+    {
+      "from": "agent:manager",
+      "to": "agent:operator",
+      "relation": "coordinates_role",
+      "status": "declared_topology_only_not_live_dispatch"
+    },
+    {
+      "from": "component:research_discovery",
+      "to": "component:research_triage",
+      "relation": "feeds",
+      "status": "implemented_in_daily_workflow"
+    },
+    {
+      "from": "component:research_triage",
+      "to": "component:capability_gap_analysis",
+      "relation": "feeds",
+      "status": "implemented_in_daily_workflow"
+    },
+    {
+      "from": "component:capability_gap_analysis",
+      "to": "component:task_store",
+      "relation": "proposes_tasks_to",
+      "status": "not_connected_artifact_only"
+    },
+    {
+      "from": "agent:researcher",
+      "to": "component:research_discovery",
+      "relation": "owns",
+      "status": "role_intent_only"
+    },
+    {
+      "from": "agent:researcher",
+      "to": "component:capability_gap_analysis",
+      "relation": "uses",
+      "status": "role_intent_only"
+    },
+    {
+      "from": "agent:engineer",
+      "to": "component:task_store",
+      "relation": "executes_work_from",
+      "status": "not_runtime_bound"
+    },
+    {
+      "from": "agent:reviewer",
+      "to": "agent:engineer",
+      "relation": "independently_reviews",
+      "status": "governance_intent_only"
+    },
+    {
+      "from": "component:agent_runtime",
+      "to": "component:tool_broker",
+      "relation": "authorizes_tool_calls_through",
+      "status": "not_integrated_in_live_runtime"
+    },
+    {
+      "from": "component:task_store",
+      "to": "gap:independent_runtime_reviewer",
+      "relation": "needs",
+      "status": "verified_architecture_gap"
+    },
+    {
+      "from": "component:capability_gap_analysis",
+      "to": "gap:rd_to_task_automation",
+      "relation": "exposes",
+      "status": "verified_architecture_gap"
+    },
+    {
+      "from": "component:provider_registry",
+      "to": "provider:groq-gpt-oss-20b",
+      "relation": "registers",
+      "status": "disabled"
+    },
+    {
+      "from": "component:provider_registry",
+      "to": "provider:groq-gpt-oss-120b",
+      "relation": "registers",
+      "status": "disabled"
+    },
+    {
+      "from": "component:provider_registry",
+      "to": "provider:nvidia-nemotron",
+      "relation": "registers_candidate",
+      "status": "disabled"
+    },
+    {
+      "from": "component:development_state_collection",
+      "to": "component:development_cycle_ranker",
+      "relation": "feeds",
+      "status": "implemented_in_maintenance_workflow_every_6h"
+    },
+    {
+      "from": "component:development_cycle_ranker",
+      "to": "component:task_store",
+      "relation": "ranks_next_actions_for",
+      "status": "artifact_only_no_task_claim_or_execution"
+    },
+    {
+      "from": "component:provider_registry",
+      "to": "gap:verified_active_fallback",
+      "relation": "currently_has_no_eligible_route",
+      "status": "verified_all_routes_disabled_or_ineligible"
+    },
+    {
+      "from": "component:capability_gap_analysis",
+      "to": "gap:benchmark_based_adoption",
+      "relation": "does_not_benchmark_candidates",
+      "status": "verified_limitation"
+    },
+    {
+      "from": "agent:engineer",
+      "to": "component:project_knowledge_graph",
+      "relation": "uses_for_codebase_orientation",
+      "status": "pilot_only_not_runtime_dependency"
+    },
+    {
+      "from": "agent:mobile_tester",
+      "to": "gap:mobile_tester_host",
+      "relation": "blocked_by",
+      "status": "disabled_until_host_device_and_zero_cost_route_verified"
+    },
+    {
+      "from": "agent:nemotron_specialist",
+      "to": "provider:nvidia-nemotron",
+      "relation": "candidate_model_route",
+      "status": "disabled_research_candidate"
+    },
+    {
+      "from": "component:research_discovery",
+      "to": "component:research_memory",
+      "relation": "persists_metadata_to",
+      "status": "artifacts_30day_optional_d1_persistence"
+    },
+    {
+      "from": "component:task_store",
+      "to": "component:process_supervisor",
+      "relation": "executes_opt_in_supervised_probe_tasks_through",
+      "status": "implemented_via_engine_supervised_task"
+    },
+    {
+      "from": "component:process_supervisor",
+      "to": "component:sandbox_policy",
+      "relation": "should_be_backed_by",
+      "status": "not_integrated_in_current_worker_path"
+    },
+    {
+      "from": "component:process_supervisor",
+      "to": "gap:general_agent_cli_execution",
+      "relation": "does_not_yet_cover",
+      "status": "limited_to_two_fixed_read_only_operations"
+    },
+    {
+      "from": "component:sandbox_policy",
+      "to": "gap:gvisor_execution_integration",
+      "relation": "not_connected_to_runtime",
+      "status": "verified_by_current_supervised_task_path"
+    },
+    {
+      "from": "agent:reviewer",
+      "to": "gap:independent_reviewer",
+      "relation": "declared_role_without_runtime",
+      "status": "no_separate_review_worker"
+    }
+  ]
+}
