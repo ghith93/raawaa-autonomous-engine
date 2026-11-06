@@ -64,15 +64,22 @@ def retire_stale_pending_proof_tasks(store: Any) -> int:
         raise StagingContentionProofError(
             "Cannot safely inspect the complete bounded general queue before proof cleanup"
         )
-    stale = [
-        row for row in rows
-        if isinstance(row, dict)
-        and row.get("task_type") == TASK_TYPE
-        and row.get("title") == TITLE
-        and isinstance(row.get("idempotency_key"), str)
-        and row["idempotency_key"].startswith(IDEMPOTENCY_PREFIX)
-        and row.get("status") == "pending"
-    ]
+    def is_exact_stale_proof(row: Any) -> bool:
+        if not (
+            isinstance(row, dict)
+            and row.get("task_type") == TASK_TYPE
+            and row.get("title") == TITLE
+            and isinstance(row.get("idempotency_key"), str)
+            and row["idempotency_key"].startswith(IDEMPOTENCY_PREFIX)
+            and row.get("status") == "pending"
+        ):
+            return False
+        try:
+            return json.loads(row.get("payload_json", "")) == {"operation": OPERATION}
+        except (TypeError, ValueError):
+            return False
+
+    stale = [row for row in rows if is_exact_stale_proof(row)]
     retired = 0
     for row in stale:
         task_id = row.get("id")
