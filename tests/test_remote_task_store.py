@@ -75,7 +75,7 @@ class RemoteTaskStoreTests(unittest.TestCase):
         self.assertEqual(request.full_url,
                          "https://engine.example/v1/tasks/probe-123/claim-supervised-probe")
         self.assertEqual(request.get_method(), "POST")
-        self.assertEqual(json.loads(request.data), {})
+        self.assertEqual(json.loads(request.data), {"worker_lane": "general"})
 
     @patch("engine.remote_task_store.urlopen")
     def test_recover_supervised_probe_targets_only_the_exact_task_route(self, open_url):
