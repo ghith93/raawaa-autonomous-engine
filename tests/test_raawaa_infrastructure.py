@@ -175,5 +175,38 @@ class VisualQualityTests(unittest.TestCase):
         self.assertTrue(any("الملصق" in item for item in data["acceptance"]))
 
 
+class ComposePipelineTests(unittest.TestCase):
+    """One phone photo in, every feed format out."""
+
+    def _shot(self, directory: Path) -> Path:
+        path = directory / "shot.png"
+        _png(path, 3024 // 8, 4032 // 8)  # tall portrait, cheap to build
+        return path
+
+    def test_compose_requires_imagemagick_and_says_so(self):
+        from scripts import raawaa_compose as compose
+        self.assertIsInstance(compose.have_imagemagick(), bool)
+
+    @unittest.skipUnless(__import__("shutil").which("convert"), "ImageMagick not installed")
+    def test_one_photo_becomes_three_instagram_formats(self):
+        from scripts import raawaa_compose as compose
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            shot = self._shot(root)
+            report = compose.compose(shot, root / "out")
+            self.assertTrue(report["all_ok"], report)
+            sizes = {p.name.split("__")[1].replace(".jpg", ""): p
+                     for p in (root / "out").glob("*.jpg")}
+            self.assertEqual(set(sizes), set(compose.TARGETS))
+            good = quality.assess(quality.inspect(sizes["feed_4x5"]))
+            self.assertEqual(good, [])
+
+    def test_missing_source_is_an_explicit_error(self):
+        from scripts import raawaa_compose as compose
+        with tempfile.TemporaryDirectory() as tmp:
+            with self.assertRaises(FileNotFoundError):
+                compose.compose(Path(tmp) / "nope.jpg", Path(tmp) / "out")
+
+
 if __name__ == "__main__":
     unittest.main()
