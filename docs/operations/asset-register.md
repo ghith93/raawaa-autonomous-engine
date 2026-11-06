@@ -191,3 +191,13 @@ Keep PR #459 draft until ignored-file integrity is corrected and an actual enfor
 - The current Task Runner workflow still has its existing five-minute schedule at minute offsets 2, 7, 12, 17, 22, 27, 32, 37, 42, 47, 52, and 57 UTC, plus the existing manual workflow_dispatch. Its concurrency group remains d1-task-runner.
 - A fresh repository Actions-runs query (first 100 returned runs) showed the latest Task Runner events as workflow_dispatch #41749347645 and push #41743485185; no event=schedule was visible in that result. Primary GitHub schedule liveness is therefore still unverified, not proven disabled. GitHub scheduled events are best-effort.
 - The Worker Cron heartbeat is a separate maintenance signal and was current at 00:45:34Z. The GitHub App watchdog is a separate fallback and remains not_ready because GITHUB_APP_WATCHDOG_ENABLED is missing. No schedule, watchdog, Worker variable, secret, or permissions were changed.
+
+
+## Live revalidation — 2026-11-07 (post-PR #614)
+
+- Main is now `827362368113499fdd24610e3701c88d04e139ad` after PR #614 merged. Exact-head CI #42306530677 passed on the PR head; the four remote Staging jobs were skipped, so no new remote Staging proof is claimed.
+- PR #614 added immutable workflow action pins, safer dispatch-input handling, explicit correlation semantics, allowlist-only reconciliation output, and exact-ID read-only unit tests. It did not run provider inference or Production mutations.
+- Issue #577 remains open for general exact-task identity and lifecycle guarantees. The main generic claim route is still lane-scoped; exact-ID claim is limited to the supervised-probe path.
+- Runtime-004 scheduled acceptance remains 1/2; the next qualifying evidence must be a distinct successful `event=schedule` Staging probe, not a manual dispatch.
+- Arena's plain-text issue comments were previously ignored by Issue Comment Ingest (`no_envelope`); no automatic Arena wake/ACK is established.
+- Keep USD 0 policy, inference kill switch, and Production boundaries unchanged.
