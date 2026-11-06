@@ -6,6 +6,7 @@ heartbeat/retry/finish are rejected, and completes the specialist task correctly
 """
 from __future__ import annotations
 
+import json
 import os
 import sys
 import uuid
@@ -15,6 +16,12 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from engine.remote_task_store import RemoteTaskStore, RemoteTaskStoreError
+
+
+def _active_task_summary(tasks: list[dict]) -> list[dict]:
+    """Emit only bounded task identity metadata; never include payloads or secrets."""
+    fields = ("id", "task_type", "title", "status", "execution_lane", "created_at", "updated_at")
+    return [{field: task.get(field) for field in fields} for task in tasks[:10]]
 
 
 def main() -> None:
@@ -30,6 +37,7 @@ def main() -> None:
     active = [task for task in general_before + researcher_before
               if task.get("status") in {"pending", "running"}]
     if active:
+        print("Existing active Staging task summary: " + json.dumps(_active_task_summary(active), sort_keys=True))
         raise SystemExit("Refusing to claim unrelated Staging work; relevant queue lanes are not idle")
     suffix = uuid.uuid4().hex
     general = store.enqueue(
