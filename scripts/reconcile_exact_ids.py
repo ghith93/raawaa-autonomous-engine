@@ -62,9 +62,21 @@ def _write_step_summary(line: str) -> None:
 
 def reconcile_exact_id(store: RemoteTaskStore, task_id: str) -> dict[str, Any]:
     """Read-only reconciliation for a single historical task ID."""
-    # Retrieve task details (read-only)
-    task = store.get_task(task_id)
-    if not isinstance(task, dict) or task.get("id") != task_id:
+    # Retrieve task details (read-only) using list_tasks filter
+    tasks = store.list_tasks(limit=1, task_id=task_id)
+    if not tasks:
+        return {
+            "task_id": task_id,
+            "status": "not_found",
+            "type": None,
+            "timestamps": None,
+            "lease_metadata": None,
+            "attempt_metadata": None,
+            "audit_events": [],
+            "redacted_payload": None,
+        }
+    task = tasks[0]
+    if task.get("id") != task_id:
         return {
             "task_id": task_id,
             "status": "not_found",
@@ -87,23 +99,28 @@ def reconcile_exact_id(store: RemoteTaskStore, task_id: str) -> dict[str, Any]:
     raw_payload = task.get("payload_json")
     redacted_payload = redact(str(raw_payload)) if isinstance(raw_payload, str) else None
 
+    # Timestamps and metadata extraction from task dict
+    timestamps = {
+        "enqueued_at": task.get("enqueued_at"),
+        "claimed_at": task.get("claimed_at"),
+        "finished_at": task.get("finished_at"),
+    }
+    lease_metadata = {
+        "lease_timeout": task.get("lease_timeout_seconds"),
+        "lease_expired": task.get("lease_expired", False),
+    }
+    attempt_metadata = {
+        "attempt": task.get("attempt", 1),
+        "max_attempts": task.get("max_attempts", 1),
+    }
+
     return {
         "task_id": task_id,
         "status": task.get("status"),
         "type": task.get("task_type"),
-        "timestamps": {
-            "enqueued_at": task.get("enqueued_at"),
-            "claimed_at": task.get("claimed_at"),
-            "finished_at": task.get("finished_at"),
-        },
-        "lease_metadata": {
-            "lease_timeout": task.get("lease_timeout_seconds"),
-            "lease_expired": task.get("lease_expired", False),
-        },
-        "attempt_metadata": {
-            "attempt": task.get("attempt", 1),
-            "max_attempts": task.get("max_attempts", 1),
-        },
+        "timestamps": timestamps,
+        "lease_metadata": lease_metadata,
+        "attempt_metadata": attempt_metadata,
         "audit_events": event_names,
         "redacted_payload": redacted_payload,
     }
