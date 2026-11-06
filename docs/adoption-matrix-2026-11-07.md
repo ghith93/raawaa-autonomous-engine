@@ -12,7 +12,7 @@
 | Candidate triage + capability gap analysis | `scripts/triage_research_candidates.py`, `scripts/analyze_capability_gaps.py` | Deterministic metadata scoring and offline repo-baseline proposals; no automatic task creation or adoption. | **Keep.** Add primary-source verification and benchmark stages. |
 | Research memory | GitHub Actions artifacts; optional D1 `research_candidates` persistence | Artifacts retained 30 days; D1 persistence requires the existing opt-in variable. | **Keep existing storage.** No second vector DB. |
 | Tool permissions | Tool Broker + `config/tool_permissions.json` | Deny-by-default; read-file/list-files are the only registered tools; no external adapters connected to live agents. | **Keep and connect carefully.** Do not grant tools merely because they are discovered. |
-| Agent roster/runtime | `config/agents.json`, `engine/agent_runtime.py`, `engine/worker.py` | Deterministic role/task contracts exist; worker also has a separate default-off quota-gated specialist inference path. Roster entries alone do not prove continuously running agent processes. | **Keep.** The model path remains default-off until route eligibility and live safety are verified. |
+| Agent roster/runtime | `config/agents.json`, `engine/agent_runtime.py` | Role roster is declarative; runtime validates deterministic task contracts but does not invoke models. | **Keep as contract.** Not a live multi-agent team yet. |
 | Knowledge graph | Graphify OSS pilot in PR #620 | Initial run created 5,297 nodes / 11,848 edges / 256 communities; report-generation step needed correction. Exact-head corrected CI still pending. | **Pilot only.** Does not become a task orchestrator or source of truth. |
 
 ## 2. Agent and orchestration alternatives
@@ -54,8 +54,8 @@
 ## 5. The actual missing capabilities
 
 1. **R&D promotion loop:** primary-source verification → comparable baseline → reproducible benchmark → decision record → task in existing Task Store → isolated implementation → independent review → canary → adopt/rollback.
-2. **General agent execution:** a bounded `ProcessSupervisor` and `supervised_probe` lifecycle already exist and are integrated with Task Store, D1/SQLite dispatch ledger, lease fencing, cancellation and process-tree cleanup. It is explicitly default-off and the worker allowlist currently exposes only two parameter-free local read-only probes. The missing capability is a reviewed multi-CLI agent operation registry and runtime dispatch, plus wiring the existing gVisor `sandbox_policy` contract into that execution path before running untrusted repository code.
-3. **Independent reviewer runtime:** no separate read-only reviewer worker/identity, no push-token separation, and no structured automated diff verdict loop.
+2. **Process supervisor:** spawn and supervise coding-agent CLI processes, hard timeout and process-tree reap, lease fencing, cancellation, restart and credential isolation.
+3. **Independent reviewer runtime:** read-only separate identity, no push token, structured verdict and evidence.
 4. **Tool Broker adapters:** MCP/tools must route through policy, role/task/environment allowlists, schema validation, audit and idempotency.
 5. **Live agent bridge:** declared role topology must become actual claimable task roles with acknowledgments, durable handoff and observable liveness.
 6. **Operational fallback register:** primary/standby/disabled/quarantined/rejected states, verification expiry, quotas, health, failover tests and rollback evidence.
@@ -84,8 +84,3 @@ PR #621 head `4aec1b7ff428566aa2b3e7f7dc7648972b98880e` passed Graphify run [423
 
 
 **Graphify integration update:** the pilot now merges `config/project-agent-map.json` into the code graph with explicit agent/component/gap nodes, topology relations and evidence links. D1 runtime task records remain separate and authoritative.
-
-
-## 9. Process supervision correction
-
-The earlier wording that process supervision did not exist was too broad. `engine/process_supervisor.py` and `engine/supervised_task.py` are implemented and wired into the worker for the `supervised_probe` task type. They include an allowlisted executable registry, bounded wall time/output, process-group cleanup, durable dispatch ledger, replay classification and lease fencing. However, `RAAWAA_ENGINE_PROCESS_SUPERVISOR` defaults off and the task payload can request only `git_head_revision` or `python_platform_probe`; these are fixed read-only probes, not arbitrary coding agents. `engine/sandbox_policy.py` builds and validates a gVisor/docker argument policy but the current supervised task path does not call it. Therefore the real gap is **general agent CLI execution + sandbox integration**, not the absence of a process supervisor.
