@@ -23,8 +23,8 @@ enqueued into a mismatched specialist lane.
 
 All task API calls continue to require the existing `ENGINE_API_TOKEN`.
 Specialist claim and lifecycle calls additionally require a distinct lane
-capability token in `X-Engine-Lane-Token`. Configure a random token of at least
-32 characters for each enabled lane:
+capability token in `X-Engine-Lane-Token`. Configure a distinct random token of at least
+32 characters as a GitHub repository Actions secret for each enabled lane:
 
 - `ENGINE_RESEARCHER_LANE_TOKEN`
 - `ENGINE_REVIEWER_LANE_TOKEN`
@@ -38,7 +38,8 @@ own configured token is denied; it does not fall back to the general token.
 
 The Python runner selects a lane with `RAAWAA_ENGINE_WORKER_LANE` (default
 `general`) and reads the corresponding capability from
-`RAAWAA_ENGINE_LANE_TOKEN`. The general runner needs no additional token.
+`RAAWAA_ENGINE_LANE_TOKEN`. The scheduled specialist wrapper maps each repository
+secret to that runtime variable. The general runner needs no additional token.
 Specialist claims, heartbeats, retries, and finishes carry the same lane
 identity; D1 and SQLite reject cross-lane lifecycle mutations even when a
 caller has a valid task lease token.
@@ -46,8 +47,10 @@ caller has a valid task lease token.
 ## Execution and rollout
 
 - The existing scheduled Task Runner remains on `general`.
-- Specialist lanes are dormant until their separate capability tokens and
-  dedicated runner schedules are deliberately provisioned.
+- The existing Task Runner workflow includes a separate 15-minute specialist
+  cadence. Each lane runs at most one task per invocation, in dry-run mode.
+  Lanes without their own configured repository secret are skipped and remain
+  dormant; no shared-token fallback is permitted.
 - The CI Staging proof creates temporary researcher credentials, tests generic
   exclusion and wrong-lane heartbeat/retry/finish rejection against remote
   Staging D1, then revokes the temporary credential.
