@@ -58,14 +58,14 @@ def validate_environment(environ: Mapping[str, str]) -> tuple[str, str]:
 
 
 def retire_stale_pending_proof_tasks(store: Any) -> int:
-    """Retire only exact prior contention proofs; recover running rows by exact ID."""
+    """Retire only exact, untouched pending contention proofs from aborted CI runs."""
     rows = store.list_tasks(100)
     if len(rows) >= 100:
         raise StagingContentionProofError(
             "Cannot safely inspect the complete bounded general queue before proof cleanup"
         )
 
-    def exact_proof_envelope(row: Any) -> bool:
+    def is_exact_stale_proof(row: Any) -> bool:
         if not (
             isinstance(row, dict)
             and row.get("task_type") == TASK_TYPE
@@ -73,6 +73,10 @@ def retire_stale_pending_proof_tasks(store: Any) -> int:
             and isinstance(row.get("idempotency_key"), str)
             and re.fullmatch(r"staging-d1-contention:[0-9]{1,20}:[0-9]{1,3}",
                              row["idempotency_key"])
+            and row.get("status") == "pending"
+            and row.get("attempts") == 0
+            and row.get("max_attempts") == 1
+            and row.get("execution_mode") == "not_started"
             and row.get("priority") == 100
             and row.get("dependencies_json") in ("[]", None)
         ):
@@ -82,53 +86,12 @@ def retire_stale_pending_proof_tasks(store: Any) -> int:
         except (TypeError, ValueError):
             return False
 
-    pending = [
-        row for row in rows
-        if exact_proof_envelope(row) and row.get("status") == "pending"
-        and row.get("attempts") == 0 and row.get("max_attempts") == 1
-        and row.get("execution_mode") == "not_started"
-    ]
-    running = [
-        row for row in rows
-        if exact_proof_envelope(row) and row.get("status") == "running"
-        and row.get("attempts") == 1 and row.get("max_attempts") == 1
-        and row.get("execution_mode") == "dry_run"
-    ]
-
+    stale = [row for row in rows if is_exact_stale_proof(row)]
     retired = 0
-    for row in running:
+    for row in stale:
         task_id = row.get("id")
         if not isinstance(task_id, str) or not re.fullmatch(r"[A-Za-z0-9_-]{1,128}", task_id):
-            raise StagingContentionProofError("Running stale proof has an invalid identifier")
-        # The Worker enforces the actual lease-expiry predicate and filters by
-        # this exact task ID; unrelated running work cannot be recovered here.
-        store.recover_stale(worker_lane="general", task_id=task_id)
-        refreshed = store.list_tasks(100)
-        current = next((item for item in refreshed if item.get("id") == task_id), None)
-        if not current:
-            raise StagingContentionProofError("Recovered proof task disappeared from readback")
-        if current.get("status") == "pending":
-            claim = store.claim_supervised_probe(task_id)
-            if not isinstance(claim, dict) or claim.get("id") != task_id:
-                raise StagingContentionProofError("Could not claim recovered proof for retirement")
-            lease = claim.get("lease_token")
-            if not isinstance(lease, str) or not lease:
-                raise StagingContentionProofError("Recovered proof did not return a valid lease")
-            store.finish(
-                task_id, "blocked",
-                error="Retired stale Staging contention proof; no process or provider work was executed.",
-                lease_token=lease, execution_mode="dry_run",
-            )
-        elif current.get("status") != "failed":
-            raise StagingContentionProofError(
-                "Exact proof lease is not expired or did not reach a safe terminal state"
-            )
-        retired += 1
-
-    for row in pending:
-        task_id = row.get("id")
-        if not isinstance(task_id, str) or not re.fullmatch(r"[A-Za-z0-9_-]{1,128}", task_id):
-            raise StagingContentionProofError("Pending stale proof has an invalid identifier")
+            raise StagingContentionProofError("Stale proof task has an invalid identifier")
         claim = store.claim_supervised_probe(task_id)
         if not isinstance(claim, dict) or claim.get("id") != task_id:
             raise StagingContentionProofError(
