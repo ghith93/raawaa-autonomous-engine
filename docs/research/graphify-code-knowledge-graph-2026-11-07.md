@@ -66,3 +66,13 @@ No candidate should be called an adopted replacement until a controlled experime
 - Noriq source and runner cut-over note: https://github.com/noriq-dev/noriq
 
 All repository facts above were inspected on 2026-11-07. Recheck upstream versions, licenses, security advisories and project activity before upgrading or promoting the pilot.
+
+## 7. First CI experiment and correction
+
+- First exact-head run: [research workflow #42312019469](https://github.com/ghith93/raawaa-autonomous-engine/actions/runs/42312019469).
+- The project-agent map validator passed. Graphify OSS `0.9.103` installed successfully without a model key.
+- The first extraction produced **5,297 nodes, 11,848 edges and 256 communities** from 335 code files. Four sensitive/credential-related paths were excluded by ignore rules; one sensitive workflow file was also skipped by Graphify's own safety filter.
+- The job then failed because `extract --code-only` writes the graph JSON first and the report/HTML generation requires the documented `--cluster-only` pass. It also reported 18 SQL files skipped because the optional SQL grammar was absent.
+- Corrective change on this PR: install the pinned `graphifyy[sql]==0.9.103` extra, run `python -m graphify . --cluster-only`, and validate graph/report/HTML plus relative source paths before upload.
+- This is a genuine first pilot result, not yet a passing end-to-end graph artifact. Re-run exact-head CI after the corrective commit and do not merge until the graph job and full Engine CI pass.
+
