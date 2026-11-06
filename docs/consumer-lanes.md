@@ -59,6 +59,9 @@ boundary.
   production specialist schedule is enabled yet. Keep these lanes dormant until
   the per-lane capability secrets and separate activation gates are reviewed.
   No shared-token fallback is permitted.
+- The `specialist:mobile_tester` lane is registered but its agent remains disabled
+  until a supported ARTEMIS host and authorized Android device are verified.
+  The Python runner blocks before claim, leaving mobile tasks pending.
 - The CI Staging proof creates temporary general and researcher credentials, tests bidirectional general/researcher claim isolation and wrong-lane
   heartbeat/retry/finish rejection against remote
   Staging D1, then revokes the temporary credential.
