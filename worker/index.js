@@ -269,20 +269,18 @@ async function recoverStaleTasks(env, workerLane = null) {
   return { requeued, failed };
 }
 
-const EXECUTION_LANES = new Set(["general", "specialist:researcher", "specialist:reviewer", "specialist:marketer", "specialist:operator", "specialist:mobile_tester"]);
+const EXECUTION_LANES = new Set(["general", "specialist:researcher", "specialist:reviewer", "specialist:marketer", "specialist:operator"]);
 const SPECIALIST_TASK_LANES = {
   research_brief: "specialist:researcher",
   code_review: "specialist:reviewer",
   content_draft: "specialist:marketer",
   system_audit: "specialist:operator",
-  mobile_test: "specialist:mobile_tester",
 };
 const SPECIALIST_LANE_TOKEN_BINDINGS = {
   "specialist:researcher": "ENGINE_RESEARCHER_LANE_TOKEN",
   "specialist:reviewer": "ENGINE_REVIEWER_LANE_TOKEN",
   "specialist:marketer": "ENGINE_MARKETER_LANE_TOKEN",
   "specialist:operator": "ENGINE_OPERATOR_LANE_TOKEN",
-  "specialist:mobile_tester": "ENGINE_MOBILE_TESTER_LANE_TOKEN",
 };
 
 function laneTokenAuthorized(request, env, lane) {
