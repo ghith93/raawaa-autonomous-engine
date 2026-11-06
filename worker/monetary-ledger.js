@@ -60,13 +60,16 @@ async function spendSnapshot(db, taskId, now) {
   const day = new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate())).toISOString();
   const month = new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), 1)).toISOString();
   const pendingWhere = "status IN ('reserved','in_flight','ambiguous')";
-  const [daily, monthly, pending, taskActual, taskPending, pendingRows] = await Promise.all([
+  const [daily, monthly, pending, taskActual, taskPending, pendingRows, settledRows] = await Promise.all([
     db.prepare("SELECT COALESCE(SUM(actual_cost_nanos),0) n FROM monetary_reservations WHERE status='settled' AND settled_at>=?").bind(day).first(),
     db.prepare("SELECT COALESCE(SUM(actual_cost_nanos),0) n FROM monetary_reservations WHERE status='settled' AND settled_at>=?").bind(month).first(),
     db.prepare("SELECT COALESCE(SUM(estimated_cost_nanos),0) n,COUNT(*) c FROM monetary_reservations WHERE "+pendingWhere).first(),
     taskId ? db.prepare("SELECT COALESCE(SUM(actual_cost_nanos),0) n FROM monetary_reservations WHERE task_id=? AND status='settled'").bind(taskId).first() : Promise.resolve({n:0}),
     taskId ? db.prepare("SELECT COALESCE(SUM(estimated_cost_nanos),0) n,COUNT(*) c FROM monetary_reservations WHERE task_id=? AND "+pendingWhere).bind(taskId).first() : Promise.resolve({n:0,c:0}),
-    db.prepare("SELECT reservation_id,provider,model,task_kind,task_id,status,estimated_cost_nanos,created_at,started_at FROM monetary_reservations WHERE "+pendingWhere+(taskId?" AND task_id=?":"")+" ORDER BY created_at LIMIT 100").bind(...(taskId?[taskId]:[])).all()
+    db.prepare("SELECT reservation_id,provider,model,task_kind,task_id,status,estimated_cost_nanos,created_at,started_at FROM monetary_reservations WHERE "+pendingWhere+(taskId?" AND task_id=?":"")+" ORDER BY created_at LIMIT 100").bind(...(taskId?[taskId]:[])).all(),
+    taskId
+      ? db.prepare("SELECT reservation_id,provider,model,task_kind,task_id,status,estimated_cost_nanos,actual_cost_nanos,input_tokens,output_tokens,created_at,started_at,settled_at FROM monetary_reservations WHERE task_id=? AND status='settled' ORDER BY settled_at DESC LIMIT 100").bind(taskId).all()
+      : Promise.resolve({results:[]})
   ]);
   const reserved = Number(pending?.n || 0);
   return {
@@ -86,6 +89,14 @@ async function spendSnapshot(db, taskId, now) {
       task_kind: row.task_kind, task_id: row.task_id, status: row.status,
       estimated_cost_nanos: Number(row.estimated_cost_nanos), created_at: row.created_at,
       started_at: row.started_at
+    })),
+    settled: (settledRows.results || []).map(row => ({
+      reservation_id: row.reservation_id, provider: row.provider, model: row.model,
+      task_kind: row.task_kind, task_id: row.task_id, status: row.status,
+      estimated_cost_nanos: Number(row.estimated_cost_nanos),
+      actual_cost_nanos: Number(row.actual_cost_nanos),
+      input_tokens: Number(row.input_tokens), output_tokens: Number(row.output_tokens),
+      created_at: row.created_at, started_at: row.started_at, settled_at: row.settled_at
     }))
   };
 }
