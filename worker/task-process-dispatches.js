@@ -109,10 +109,11 @@ function publicDispatch(row) {
   };
 }
 
-async function readCurrent(db, taskId, leaseToken, now) {
+async function readCurrent(db, taskId, leaseToken, now, workerLane) {
   return db.prepare(
-    "SELECT id,task_type,status,lease_token,lease_expires_at FROM tasks WHERE id=?"
+    "SELECT id,task_type,status,lease_token,lease_expires_at,execution_lane FROM tasks WHERE id=?"
   ).bind(taskId).first().then(task => Boolean(task && task.task_type === PROCESS_TASK_TYPE &&
+    (task.execution_lane || "general") === workerLane &&
     task.status === "running" && task.lease_token === leaseToken &&
     task.lease_expires_at && task.lease_expires_at >= now));
 }
@@ -129,13 +130,14 @@ export async function handleTaskProcessDispatch(request, env, url) {
   const taskId = match[1];
   const action = input?.action;
   const leaseToken = input?.lease_token;
+  const workerLane = input?.worker_lane || "general";
   if (!validText(leaseToken, 200)) return json({ error: "invalid_lease" }, 400);
   if (!["prepare", "start", "settle", "ambiguous"].includes(action))
     return json({ error: "unsupported_action" }, 400);
   const now = new Date().toISOString();
 
   try {
-    if (!(await readCurrent(env.DB, taskId, leaseToken, now)))
+    if (!(await readCurrent(env.DB, taskId, leaseToken, now, workerLane)))
       return json({ error: "lease_lost_or_wrong_task_type" }, 409);
 
     if (action === "prepare") {
