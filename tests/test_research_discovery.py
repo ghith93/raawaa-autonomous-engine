@@ -51,7 +51,7 @@ class ResearchDiscoveryTests(unittest.TestCase):
             def __enter__(self): return self
             def __exit__(self, *args): return False
             def read(self, limit): return b"x" * (MAX_RESPONSE_BYTES + 1)
-        with patch("engine.research_discovery.urlopen", return_value=OversizedResponse()):
+        with patch("engine.research_discovery._open_without_redirects", return_value=OversizedResponse()):
             with self.assertRaisesRegex(ResearchDiscoveryError, "1 MiB"):
                 _request_json("agent framework")
         with patch("engine.research_discovery.urlopen", return_value=OversizedResponse()):
@@ -64,12 +64,38 @@ class ResearchDiscoveryTests(unittest.TestCase):
             def __enter__(self): return self
             def __exit__(self, *args): return False
             def read(self, limit): return bytes([255])
-        with patch("engine.research_discovery.urlopen", return_value=InvalidUtf8Response()):
+        with patch("engine.research_discovery._open_without_redirects", return_value=InvalidUtf8Response()):
             with self.assertRaisesRegex(ResearchDiscoveryError, "UnicodeDecodeError"):
                 _request_json("agent framework")
         with patch("engine.research_discovery.urlopen", return_value=InvalidUtf8Response()):
             with self.assertRaisesRegex(ResearchDiscoveryError, "UnicodeDecodeError"):
                 _request_crossref("agent memory")
+
+    def test_authenticated_github_search_uses_redirect_rejecting_transport(self):
+        payload = b'{"items": []}'
+        class Response:
+            status = 200
+            def __enter__(self): return self
+            def __exit__(self, *args): return False
+            def read(self, limit): return payload
+        with patch("engine.research_discovery._open_without_redirects", return_value=Response()) as opened:
+            self.assertEqual(_request_json("agent framework", token="synthetic-test-token"), {"items": []})
+        self.assertEqual(opened.call_count, 1)
+        request = opened.call_args.args[0]
+        self.assertEqual(request.full_url.split("?", 1)[0], "https://api.github.com/search/repositories")
+        self.assertEqual(request.get_header("Authorization"), "Bearer synthetic-test-token")
+
+        # Both same-origin and cross-origin redirects are rejected; no second
+        # request is made and the Authorization header is never forwarded.
+        handler = _RejectRedirects()
+        for target in (
+            "https://api.github.com/another/path",
+            "https://redirect-attacker.example/collect",
+        ):
+            with self.subTest(target=target):
+                with self.assertRaises(HTTPError):
+                    handler.redirect_request(request, None, 302, "Found", {}, target)
+
     def test_query_and_limit_validation(self):
         with self.assertRaises(ValueError): discover_repositories({}, {})
         with self.assertRaises(ValueError): discover_repositories({"x": "y"}, {}, max_per_query=11)
