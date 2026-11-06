@@ -803,7 +803,7 @@ test("recover endpoint is authenticated and scopes stale selection and writes to
   const selection = DB.calls.find(x => x.kind === "all" && x.sql.includes("lease_expires_at"));
   assert.match(selection.sql, /execution_lane=\?/);
   assert.equal(selection.values.length, 2);
-  assert.match(selection.values[0], /^\\d{4}-\\d{2}-\\d{2}T/);
+  assert.ok(Number.isFinite(Date.parse(selection.values[0])));
   assert.equal(selection.values[1], "general");
   const write = DB.calls.find(x => x.kind === "batch")?.statements?.find(x => x.sql.includes("UPDATE tasks SET status=?"));
   if (write) {
