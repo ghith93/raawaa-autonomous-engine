@@ -135,19 +135,33 @@ class ContentTests(unittest.TestCase):
 
 
 class ProductionGateTests(unittest.TestCase):
-    """Nothing has been manufactured. The engine must refuse to pretend otherwise."""
+    """The founder compounds to order, so product content is honest — but only
+    under a promise the founder can actually keep."""
 
     def setUp(self):
         self.brand = econ.load_brand()
 
-    def test_brand_file_records_zero_stock(self):
-        self.assertEqual(self.brand["production"]["status"], "not_manufactured")
+    def test_brand_file_says_made_to_order_without_pretending_to_hold_stock(self):
+        self.assertEqual(self.brand["production"]["status"], "made_to_order")
         self.assertEqual(self.brand["production"]["stock_units"], 0)
+        self.assertEqual(self.brand["production"]["lead_time_hours"], 24)
 
-    def test_product_week_is_refused_before_manufacture(self):
+    def test_product_week_is_allowed_in_made_to_order_mode(self):
+        plan = content.week_plan(self.brand, week=1, start=date(2026, 11, 7))
+        self.assertEqual(plan["counts"]["total"], 6)
+
+    def test_a_zero_capacity_founder_cannot_publish_product_content(self):
+        brand = econ.load_brand()
+        brand["production"] = dict(brand["production"], capacity_per_day=0)
         with self.assertRaises(ValueError) as ctx:
-            content.week_plan(self.brand, week=1, start=date(2026, 11, 7))
+            content.week_plan(brand, week=1, start=date(2026, 11, 7))
         self.assertIn("no manufactured stock", str(ctx.exception))
+
+    def test_no_stock_and_no_made_to_order_is_refused(self):
+        brand = econ.load_brand()
+        brand["production"] = {"status": "not_manufactured", "stock_units": 0}
+        with self.assertRaises(ValueError):
+            content.week_plan(brand, week=1, start=date(2026, 11, 7))
 
     def test_prelaunch_week_shows_no_product(self):
         plan = content.prelaunch_week(self.brand, start=date(2026, 11, 7))

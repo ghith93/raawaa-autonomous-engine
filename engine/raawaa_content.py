@@ -207,8 +207,15 @@ def build_llm_prompt(brand: dict[str, Any], *, pillar: str, format: str, hook: s
 
 
 def production_ready(brand: dict[str, Any]) -> bool:
-    """True only when a manufactured batch actually exists."""
-    return int(brand.get("production", {}).get("stock_units", 0)) > 0
+    """True when product content may honestly be published.
+
+    Two honest modes: a batch exists, or the founder compounds to order and the
+    published promise says so. Both are truthful; neither invents urgency.
+    """
+    production = brand.get("production", {})
+    if str(production.get("status")) == "made_to_order":
+        return int(production.get("capacity_per_day", 0)) > 0 and bool(production.get("promise_ar"))
+    return int(production.get("stock_units", 0)) > 0
 
 
 def prelaunch_week(brand: dict[str, Any] | None = None, *, start: date | None = None) -> dict[str, Any]:
