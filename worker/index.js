@@ -295,8 +295,10 @@ function laneTokenAuthorized(request, env, lane) {
       typeof env[otherBinding] === "string" && env[otherBinding] === expected
   );
   return typeof expected === "string" && expected.length >= 32 &&
-    expected !== env.ENGINE_API_TOKEN && !reusedByAnotherLane &&
-    constantTimeEqual(supplied, expected);
+    expected !== env.ENGINE_API_TOKEN &&
+    expected !== env.ENGINE_QUOTA_ADMIN_TOKEN &&
+    expected !== env.ENGINE_CODESPACE_TOKEN &&
+    !reusedByAnotherLane && constantTimeEqual(supplied, expected);
 }
 
 function validText(value, max) {
