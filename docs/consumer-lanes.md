@@ -47,10 +47,10 @@ caller has a valid task lease token.
 ## Execution and rollout
 
 - The existing scheduled Task Runner remains on `general`.
-- The existing Task Runner workflow includes a separate 15-minute specialist
-  cadence. Each lane runs at most one task per invocation, in dry-run mode.
-  Lanes without their own configured repository secret are skipped and remain
-  dormant; no shared-token fallback is permitted.
+- The bounded specialist runner script is prepared and tested, but no
+  production specialist schedule is enabled yet. Keep these lanes dormant until
+  the per-lane capability secrets and separate activation gates are reviewed.
+  No shared-token fallback is permitted.
 - The CI Staging proof creates temporary researcher credentials, tests generic
   exclusion and wrong-lane heartbeat/retry/finish rejection against remote
   Staging D1, then revokes the temporary credential.
