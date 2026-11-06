@@ -209,6 +209,55 @@ jobs:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         run: printf '%s' "$RAAWAA_ENGINE_STAGING_RESEARCHER_LANE_TOKEN" | npx --yes wrangler@4.156.1 secret put ENGINE_RESEARCHER_LANE_TOKEN --config wrangler.staging.toml
+      - name: Wait for temporary Staging consumer capabilities to propagate
+        env:
+          RAAWAA_ENGINE_API_URL: https://raawaa-autonomous-engine-staging.ghith-shikhkhaled.workers.dev
+          RAAWAA_ENGINE_API_TOKEN: ${{ env.RAAWAA_ENGINE_STAGING_API_TOKEN }}
+          RAAWAA_ENGINE_RESEARCHER_LANE_TOKEN: ${{ env.RAAWAA_ENGINE_STAGING_RESEARCHER_LANE_TOKEN }}
+        run: |
+          python - <<'PY'
+          import os
+          import time
+          from urllib.error import HTTPError, URLError
+          from urllib.request import Request, urlopen
+
+          base = os.environ["RAAWAA_ENGINE_API_URL"].rstrip("/")
+          token = os.environ["RAAWAA_ENGINE_API_TOKEN"]
+          lane_token = os.environ["RAAWAA_ENGINE_RESEARCHER_LANE_TOKEN"]
+          deadline = time.monotonic() + 90
+          attempt = 0
+          while True:
+              attempt += 1
+              statuses = {}
+              for name, path, extra in (
+                  ("general", "/v1/tasks?limit=1", {}),
+                  ("researcher", "/v1/tasks?limit=1&worker_lane=specialist%3Aresearcher",
+                   {"X-Engine-Lane-Token": lane_token}),
+              ):
+                  headers = {
+                      "Accept": "application/json",
+                      "Authorization": "Bearer " + token,
+                      "User-Agent": "RaawaaAutonomousEngine/1.0 (+https://github.com/ghith93/raawaa-autonomous-engine)",
+                      **extra,
+                  }
+                  request = Request(base + path, headers=headers, method="GET")
+                  try:
+                      with urlopen(request, timeout=8) as response:
+                          statuses[name] = response.status
+                  except HTTPError as error:
+                      statuses[name] = error.code
+                  except (URLError, TimeoutError, OSError):
+                      statuses[name] = "request_failed"
+              print("Staging capability propagation attempt " + str(attempt) +
+                    ": general=" + str(statuses["general"]) +
+                    ", researcher=" + str(statuses["researcher"]), flush=True)
+              if statuses == {"general": 200, "researcher": 200}:
+                  print("Both temporary Staging consumer capabilities are active.")
+                  break
+              if time.monotonic() >= deadline:
+                  raise SystemExit("Staging consumer capabilities did not propagate within 90 seconds.")
+              time.sleep(5)
+          PY
       - name: Prove concurrent claims against remote Staging D1
         env:
           RAAWAA_ENGINE_API_URL: https://raawaa-autonomous-engine-staging.ghith-shikhkhaled.workers.dev

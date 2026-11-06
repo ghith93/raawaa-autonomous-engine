@@ -50,6 +50,41 @@ class ProviderWorkflowSecurityTests(unittest.TestCase):
         self.assertNotIn("    env:\n      GROQ_API_KEY:", source)
         self.assertIn("python scripts/groq_connection_check.py", step)
 
+    def test_staging_verification_waits_for_both_consumer_capabilities(self):
+        workflow = ROOT / ".github" / "workflows" / "ci.yml"
+        source = workflow.read_text(encoding="utf-8")
+        start = source.index("  staging-worker-verify:")
+        end = source.index("\n  publish-staging-ops-telemetry:", start)
+        job = source[start:end]
+        self.assertIn("Wait for temporary Staging consumer capabilities to propagate", job)
+        self.assertIn('("general", "/v1/tasks?limit=1", {})', job)
+        self.assertIn('("researcher", "/v1/tasks?limit=1&worker_lane=specialist%3Aresearcher"', job)
+        self.assertIn('"X-Engine-Lane-Token": lane_token', job)
+        self.assertIn('statuses == {"general": 200, "researcher": 200}', job)
+        self.assertIn("secret delete ENGINE_RESEARCHER_LANE_TOKEN", job)
+
+    def test_groq_free_smoke_uses_ephemeral_researcher_lane_capability(self):
+        workflow = ROOT / ".github" / "workflows" / "groq-free-inference-staging-smoke.yml"
+        source = workflow.read_text(encoding="utf-8")
+        self.assertIn('workflows: ["Engine CI"]', source)
+        self.assertIn("types: [completed]", source)
+        self.assertIn("github.event.workflow_run.conclusion == 'success'", source)
+        self.assertIn("github.event.workflow_run.head_branch == 'main'", source)
+        self.assertIn("[groq-specialist-smoke]", source)
+        self.assertIn("github.event.workflow_run.head_sha", source)
+        self.assertIn("secret put ENGINE_RESEARCHER_LANE_TOKEN", source)
+        self.assertIn("secret delete ENGINE_RESEARCHER_LANE_TOKEN", source)
+        self.assertIn("RAAWAA_ENGINE_WORKER_LANE: specialist:researcher", source)
+        self.assertIn("RAAWAA_ENGINE_LANE_TOKEN: ${{ env.RAAWAA_ENGINE_STAGING_RESEARCHER_LANE_TOKEN }}", source)
+        self.assertIn("RAAWAA_ENGINE_LIVE_INFERENCE: enabled", source)
+        self.assertIn("per_task_budget_nanos=0", source)
+        self.assertIn('mp.get("paid_fallback_enabled") is not False', source) 
+        script = (ROOT / "scripts" / "run_groq_free_inference_smoke.py").read_text(encoding="utf-8")
+        self.assertIn('EXECUTION_LANE = "specialist:researcher"', script)
+        self.assertIn("execution_lane=EXECUTION_LANE", script)
+        self.assertIn("worker_lane=EXECUTION_LANE", script)
+        self.assertIn("list_tasks(100, worker_lane=EXECUTION_LANE)", script)
+
     def test_ci_telemetry_publisher_is_main_only_and_staging_only(self):
         workflow = ROOT / ".github" / "workflows" / "ci.yml"
         source = workflow.read_text(encoding="utf-8")

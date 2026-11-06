@@ -4,10 +4,10 @@ name: One-shot Groq Free inference Staging smoke
 # Wait for Worker deployment and secret propagation before authenticated calls.
 
 on:
-  push:
+  workflow_run:
+    workflows: ["Engine CI"]
+    types: [completed]
     branches: [main]
-    paths:
-      - scripts/run_groq_free_inference_smoke.py
 
 permissions:
   contents: read
@@ -19,11 +19,18 @@ concurrency:
 
 jobs:
   smoke:
+    if: >-
+      github.event.workflow_run.event == 'push' &&
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.head_branch == 'main' &&
+      contains(github.event.workflow_run.head_commit.message, '[groq-specialist-smoke]')
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - name: Check out the reviewed candidate
+      - name: Check out the exact main commit that passed Engine CI and Staging
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
       - name: Set up Python
         uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7
         with:
@@ -74,12 +81,15 @@ jobs:
         run: |
           STAGING_TOKEN="$(python -c 'import secrets; print(secrets.token_urlsafe(48))')"
           STAGING_ADMIN_TOKEN="$(python -c 'import secrets; print(secrets.token_urlsafe(48))')"
+          RESEARCHER_LANE_TOKEN="$(python -c 'import secrets; print(secrets.token_urlsafe(48))')"
           echo "::add-mask::$STAGING_TOKEN"
           echo "::add-mask::$STAGING_ADMIN_TOKEN"
+          echo "::add-mask::$RESEARCHER_LANE_TOKEN"
           echo "RAAWAA_ENGINE_STAGING_API_TOKEN=$STAGING_TOKEN" >> "$GITHUB_ENV"
           # D1 quota and monetary adapters read the canonical API token name.
           echo "RAAWAA_ENGINE_API_TOKEN=$STAGING_TOKEN" >> "$GITHUB_ENV"
           echo "RAAWAA_ENGINE_QUOTA_ADMIN_TOKEN=$STAGING_ADMIN_TOKEN" >> "$GITHUB_ENV"
+          echo "RAAWAA_ENGINE_STAGING_RESEARCHER_LANE_TOKEN=$RESEARCHER_LANE_TOKEN" >> "$GITHUB_ENV"
       - name: Deploy isolated Staging Worker with one temporary GPT-OSS 20B quota route
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
@@ -132,6 +142,14 @@ jobs:
         run: |
           test -n "$RAAWAA_ENGINE_QUOTA_ADMIN_TOKEN" || { echo "Missing ephemeral Staging quota-admin token"; exit 1; }
           printf '%s' "$RAAWAA_ENGINE_QUOTA_ADMIN_TOKEN" | npx --yes wrangler@4.156.1 secret put ENGINE_QUOTA_ADMIN_TOKEN --config wrangler.staging.toml
+      - name: Install ephemeral Staging researcher lane capability
+        id: install_staging_researcher_lane_token
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          test -n "$RAAWAA_ENGINE_STAGING_RESEARCHER_LANE_TOKEN" || { echo "Missing ephemeral researcher lane token"; exit 1; }
+          printf '%s' "$RAAWAA_ENGINE_STAGING_RESEARCHER_LANE_TOKEN" | npx --yes wrangler@4.156.1 secret put ENGINE_RESEARCHER_LANE_TOKEN --config wrangler.staging.toml
       - name: Reconcile the previously rejected Staging HTTP 403 reservation
         env:
           RAAWAA_ENGINE_API_URL: https://raawaa-autonomous-engine-staging.ghith-shikhkhaled.workers.dev
@@ -140,6 +158,9 @@ jobs:
         env:
           RAAWAA_ENGINE_API_URL: https://raawaa-autonomous-engine-staging.ghith-shikhkhaled.workers.dev
           RAAWAA_ENGINE_LIVE_INFERENCE: enabled
+          RAAWAA_ENGINE_WORKER_LANE: specialist:researcher
+          RAAWAA_ENGINE_LANE_TOKEN: ${{ env.RAAWAA_ENGINE_STAGING_RESEARCHER_LANE_TOKEN }}
+          RAAWAA_ENGINE_STAGING_API_TOKEN: ${{ env.RAAWAA_ENGINE_STAGING_API_TOKEN }}
           GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
         run: python scripts/run_groq_free_inference_smoke.py
       - name: Restore fail-closed Staging Worker defaults
@@ -154,6 +175,12 @@ jobs:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         run: npx --yes wrangler@4.156.1 secret delete ENGINE_API_TOKEN --config wrangler.staging.toml
+      - name: Revoke ephemeral Staging researcher lane capability
+        if: ${{ always() && steps.install_staging_researcher_lane_token.outcome == 'success' }}
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: npx --yes wrangler@4.156.1 secret delete ENGINE_RESEARCHER_LANE_TOKEN --config wrangler.staging.toml
       - name: Revoke ephemeral Staging quota-admin token
         if: ${{ always() && steps.install_staging_admin_token.outcome == 'success' }}
         env:

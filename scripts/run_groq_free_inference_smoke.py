@@ -22,7 +22,8 @@ from engine.live_runtime import build_live_gateway
 from engine.remote_task_store import RemoteTaskStore
 from engine.worker import run_once
 
-IDEMPOTENCY_KEY = "groq-free-inference-staging-smoke-2026-11-06-v6"
+IDEMPOTENCY_KEY = "groq-free-inference-staging-specialist-smoke-2026-11-06-v7"
+EXECUTION_LANE = "specialist:researcher"
 ROUTE_IDS = ("groq:primary:openai/gpt-oss-20b",)
 
 
@@ -49,7 +50,11 @@ def _wait_for_authenticated_worker(store: RemoteTaskStore, timeout_seconds: int 
             with urllib.request.urlopen(request, timeout=5) as response:
                 if response.status == 200:
                     try:
-                        return store._request("/v1/mobile/status")
+                        mobile = store._request("/v1/mobile/status")
+                        if os.environ.get("RAAWAA_ENGINE_WORKER_LANE", "general") != EXECUTION_LANE:
+                            raise RuntimeError("specialist_worker_lane_not_configured")
+                        store.list_tasks(1, worker_lane=EXECUTION_LANE)
+                        return mobile
                     except Exception as exc:
                         last_error = type(exc).__name__
         except urllib.error.HTTPError as exc:
@@ -89,6 +94,10 @@ def main() -> int:
         raise SystemExit("Refusing inference: explicit one-shot live switch is missing.")
     if not os.environ.get("GROQ_API_KEY", "").strip():
         raise SystemExit("Refusing inference: Groq API credential is not configured.")
+    if os.environ.get("RAAWAA_ENGINE_WORKER_LANE") != EXECUTION_LANE:
+        raise SystemExit("Refusing inference: the dedicated researcher lane is not selected.")
+    if len(os.environ.get("RAAWAA_ENGINE_LANE_TOKEN", "")) < 32:
+        raise SystemExit("Refusing inference: the ephemeral researcher lane capability is missing.")
 
     store = RemoteTaskStore(
         base_url=os.environ.get("RAAWAA_ENGINE_API_URL"),
@@ -108,6 +117,7 @@ def main() -> int:
         },
         idempotency_key=IDEMPOTENCY_KEY,
         max_attempts=1,
+        execution_lane=EXECUTION_LANE,
     )
     task_id = task.get("id")
     if not isinstance(task_id, str) or not task_id:
@@ -139,7 +149,7 @@ def main() -> int:
     # drain unrelated Staging work or race an unrelated pending task.
     mobile = store._request("/v1/mobile/status")
     counts = _counts(mobile)
-    pending_rows = [row for row in store.list_tasks(100)
+    pending_rows = [row for row in store.list_tasks(100, worker_lane=EXECUTION_LANE)
                     if row.get("status") == "pending"]
     if (counts.get("pending", 0) != 1 or counts.get("running", 0) != 0
             or len(pending_rows) != 1 or pending_rows[0].get("id") != task_id):
@@ -157,6 +167,7 @@ def main() -> int:
         store, max_tasks=1, max_seconds=60, max_parallel=1,
         runner=lambda current_store: run_once(
             current_store, live_gateway=gateway, environ=os.environ,
+            worker_lane=EXECUTION_LANE,
         ),
     )
     result = (batch.get("results") or [{}])[0]
@@ -169,7 +180,8 @@ def main() -> int:
         }, sort_keys=True))
         raise SystemExit("Bounded batch did not complete the expected live-inference task.")
 
-    saved = next((item for item in store.list_tasks(100) if item.get("id") == task_id), None)
+    saved = next((item for item in store.list_tasks(100, worker_lane=EXECUTION_LANE)
+                  if item.get("id") == task_id), None)
     if not saved or saved.get("status") != "succeeded":
         raise SystemExit("D1 does not confirm the smoke task succeeded.")
 
@@ -197,6 +209,7 @@ def main() -> int:
         "task_id": task_id,
         "mode": result.get("mode"),
         "provider": "groq",
+        "execution_lane": EXECUTION_LANE,
         "used_routes": used_routes,
         "daily_spend_usd": ledger.get("daily_spent_usd"),
         "monthly_spend_usd": ledger.get("monthly_spent_usd"),
