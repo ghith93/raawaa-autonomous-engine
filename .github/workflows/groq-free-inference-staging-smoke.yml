@@ -4,10 +4,10 @@ name: One-shot Groq Free inference Staging smoke
 # Wait for Worker deployment and secret propagation before authenticated calls.
 
 on:
-  push:
+  workflow_run:
+    workflows: ["Engine CI"]
+    types: [completed]
     branches: [main]
-    paths:
-      - scripts/run_groq_free_inference_smoke.py
 
 permissions:
   contents: read
@@ -19,11 +19,18 @@ concurrency:
 
 jobs:
   smoke:
+    if: >-
+      github.event.workflow_run.event == 'push' &&
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.head_branch == 'main' &&
+      contains(github.event.workflow_run.head_commit.message, '[groq-specialist-smoke]')
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - name: Check out the reviewed candidate
+      - name: Check out the exact main commit that passed Engine CI and Staging
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
       - name: Set up Python
         uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7
         with:
