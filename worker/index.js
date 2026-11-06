@@ -286,8 +286,13 @@ function laneTokenAuthorized(request, env, lane) {
   const binding = SPECIALIST_LANE_TOKEN_BINDINGS[lane];
   const expected = binding ? env[binding] : "";
   const supplied = request.headers.get("x-engine-lane-token") || "";
+  const reusedByAnotherLane = Object.entries(SPECIALIST_LANE_TOKEN_BINDINGS).some(
+    ([otherLane, otherBinding]) => otherLane !== lane &&
+      typeof env[otherBinding] === "string" && env[otherBinding] === expected
+  );
   return typeof expected === "string" && expected.length >= 32 &&
-    expected !== env.ENGINE_API_TOKEN && constantTimeEqual(supplied, expected);
+    expected !== env.ENGINE_API_TOKEN && !reusedByAnotherLane &&
+    constantTimeEqual(supplied, expected);
 }
 
 function validText(value, max) {
