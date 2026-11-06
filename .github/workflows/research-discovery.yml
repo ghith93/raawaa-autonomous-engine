@@ -158,7 +158,7 @@ jobs:
           for node in nodes:
               source = node.get("source_file") if isinstance(node, dict) else None
               if source:
-                  path = PurePosixPath(str(source).replace("\\\\", "/"))
+                  path = PurePosixPath(str(source).replace("\\", "/"))
                   if path.is_absolute() or ".." in path.parts:
                       raise SystemExit(f"Graphify emitted an unsafe source path: {source}")
           html_path = Path("graphify-out/graph.html")
