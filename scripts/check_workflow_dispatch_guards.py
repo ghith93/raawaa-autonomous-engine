@@ -273,9 +273,9 @@ def staging_gate_violations(path: str, content: str) -> list[str]:
     if Path(path).name != "ci.yml":
         return []
     violations: list[str] = []
-    if not re.search(r"(?m)^      enable_staging_operations:\\s*$", content):
+    if "      enable_staging_operations:" not in content:
         violations.append(f"{path}: workflow_dispatch must declare enable_staging_operations")
-    if not re.search(r"(?m)^        default:\\s*false\\s*$", content):
+    if "        default: false" not in content:
         violations.append(f"{path}: enable_staging_operations must default to false")
     blocks = dict(job_blocks(content))
     for job_name in STAGING_EFFECT_JOBS:
