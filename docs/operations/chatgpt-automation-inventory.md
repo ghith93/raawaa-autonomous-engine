@@ -34,3 +34,10 @@
 - Activepieces project Ghith's Project has one ACTIVE GitHub connection and one ENABLED, published flow: Raawaa GitHub Workflow Control. The flow is Manual Trigger → GitHub workflow_dispatch for task-runner.yml on main. Latest TESTING run appXqFOAEJKRLnQoA8xJs succeeded and triggered GitHub Task Runner run #41749347645. No PRODUCTION flow runs were found.
 - Activepieces lists 20 model entries under its activepieces provider, but price, quota, eligibility, and billing are unknown. No inference was sent. These are not engine-runtime provider adapters.
 - The current repository main SHA is e6761d09de884d34bdc0ef7d01d7b7a8f1e1682e. Main CI #41747902547 passed all test and isolated Staging verification jobs. Production deployment workflow #41748314581 was skipped; Production Worker/D1 remain unchanged.
+
+
+## Live revalidation — 2026-11-07 (post-PR #614)
+
+The engine monitoring automation remains enabled with the saved daily schedule, but its latest recorded run failed and `next_run_time=null`. This does not prove that the next run is queued or that delivery will occur. The separate research/delivery automation and cross-project Raawaa automation were not modified. Four automations remain paused and one is completed; do not create duplicates or re-enable paused items.
+
+The saved monitoring prompt enforces the USD 0 ceiling. No paid inference or spend was initiated during this repository cycle.
