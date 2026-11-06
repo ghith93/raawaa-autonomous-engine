@@ -244,15 +244,18 @@ async function reviewResearchCandidate(request, env) {
   } catch { return json({ error: "storage_unavailable" }, 503); }
 }
 
-async function recoverStaleTasks(env, workerLane = null) {
+async function recoverStaleTasks(env, workerLane = null, taskId = null) {
   const nowIso = new Date().toISOString();
   const laneFilter = workerLane === null ? "" : " AND execution_lane=?";
+  const taskFilter = taskId === null ? "" : " AND id=?";
   const staleStatement = env.DB.prepare(
     "SELECT id,attempts,max_attempts,lease_token FROM tasks WHERE status='running' AND (lease_expires_at IS NULL OR lease_expires_at < ?)" +
-    laneFilter + " ORDER BY updated_at,id LIMIT 100"
+    laneFilter + taskFilter + " ORDER BY updated_at,id LIMIT 100"
   );
-  const stale = await (workerLane === null ? staleStatement.bind(nowIso) :
-    staleStatement.bind(nowIso, workerLane)).all();
+  const bindings = [nowIso];
+  if (workerLane !== null) bindings.push(workerLane);
+  if (taskId !== null) bindings.push(taskId);
+  const stale = await staleStatement.bind(...bindings).all();
   const statements = [];
   for (const task of stale.results || []) {
     const status = task.attempts < task.max_attempts ? "pending" : "failed";
