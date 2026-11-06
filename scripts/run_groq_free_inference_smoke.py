@@ -182,8 +182,7 @@ def _assert_zero_spend(store: RemoteTaskStore, successful_task_id: str) -> dict:
     ):
         raise SystemExit("The new smoke task did not settle at exactly zero cost.")
     return {
-        "previous_ambiguous_task": previous_ambiguous,
-            **ledger_summary,
+        "daily_spend_usd": ledger.get("daily_spent_usd"),
         "monthly_spend_usd": ledger.get("monthly_spent_usd"),
         "pending_reservations": 0,
         "ambiguous_reservations": 0,
