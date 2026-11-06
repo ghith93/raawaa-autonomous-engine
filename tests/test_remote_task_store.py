@@ -359,5 +359,17 @@ class RemoteTaskStoreTests(unittest.TestCase):
         self.assertEqual(request.get_header("X-engine-lane-token"), self.store.lane_token)
 
 
+    @patch("engine.remote_task_store.urlopen")
+    def test_explicit_lane_token_is_bound_to_this_store_instance(self, open_url):
+        open_url.return_value = FakeResponse({"tasks": [{"id": "research-1"}]})
+        explicit = "explicit-researcher-token-0123456789abcdef"
+        store = RemoteTaskStore(
+            "https://engine.example", "app-bearer", lane_token=explicit,
+        )
+        store.list_tasks(1, worker_lane="specialist:researcher")
+        request = open_url.call_args.args[0]
+        self.assertEqual(request.get_header("X-engine-lane-token"), explicit)
+
+    
 if __name__ == "__main__":
     unittest.main()
