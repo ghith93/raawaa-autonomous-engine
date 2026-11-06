@@ -6,6 +6,7 @@ heartbeat/retry/finish are rejected, and completes the specialist task correctly
 """
 from __future__ import annotations
 
+import json
 import os
 import sys
 import uuid
@@ -30,6 +31,17 @@ def main() -> None:
     active = [task for task in general_before + researcher_before
               if task.get("status") in {"pending", "running"}]
     if active:
+        # Emit only operational metadata; never print task titles, payloads, or keys.
+        summary = [{
+            "id": task.get("id"),
+            "task_type": task.get("task_type"),
+            "status": task.get("status"),
+            "execution_lane": task.get("execution_lane"),
+            "created_at": task.get("created_at"),
+            "updated_at": task.get("updated_at"),
+        } for task in active]
+        print(json.dumps({"status": "blocked_queue_not_idle", "active_tasks": summary},
+                         sort_keys=True))
         raise SystemExit("Refusing to claim unrelated Staging work; relevant queue lanes are not idle")
     suffix = uuid.uuid4().hex
     general = store.enqueue(
