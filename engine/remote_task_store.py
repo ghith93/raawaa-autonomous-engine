@@ -31,6 +31,10 @@ class _RejectRedirects(HTTPRedirectHandler):
 #: Reading it back is the difference between "temporarily unavailable" and a
 #: diagnosable cause; the body is truncated and control characters are dropped.
 MAX_ERROR_DETAIL_CHARS = 240
+VALID_WORKER_LANES = frozenset({
+    "general", "specialist:researcher", "specialist:reviewer",
+    "specialist:marketer", "specialist:operator", "specialist:mobile_tester",
+})
 
 
 def _error_detail(exc: HTTPError) -> str:
@@ -58,7 +62,8 @@ def _error_detail(exc: HTTPError) -> str:
 class RemoteTaskStore:
     def __init__(self, base_url: str | None = None, token: str | None = None,
                  timeout: float = 15.0, access_client_id: str | None = None,
-                 access_client_secret: str | None = None, reject_redirects: bool = False):
+                 access_client_secret: str | None = None, reject_redirects: bool = False,
+                 lane_token: str | None = None, worker_lane: str | None = None):
         self.base_url = (base_url or os.environ.get("RAAWAA_ENGINE_API_URL", "")).rstrip("/")
         self.token = token or os.environ.get("RAAWAA_ENGINE_API_TOKEN", "")
         self.access_client_id = (
@@ -70,7 +75,10 @@ class RemoteTaskStore:
             else os.environ.get("RAAWAA_ENGINE_CF_ACCESS_CLIENT_SECRET", "")
         )
         self.timeout = timeout
-        self.lane_token = os.environ.get("RAAWAA_ENGINE_LANE_TOKEN", "")
+        self.lane_token = lane_token if lane_token is not None else os.environ.get("RAAWAA_ENGINE_LANE_TOKEN", "")
+        self.worker_lane = worker_lane or os.environ.get("RAAWAA_ENGINE_WORKER_LANE", "general")
+        if self.worker_lane not in VALID_WORKER_LANES:
+            raise ValueError("invalid worker lane")
         self.reject_redirects = bool(reject_redirects)
         if not self.base_url.startswith("https://") or not self.token:
             raise ValueError("Remote task store requires an HTTPS API URL and token")
@@ -79,7 +87,7 @@ class RemoteTaskStore:
 
     def _request(self, path: str, method: str = "GET",
                  payload: dict[str, Any] | None = None,
-                 worker_lane: str = "general") -> dict[str, Any]:
+                 worker_lane: str | None = None) -> dict[str, Any]:
         body = None if payload is None else json.dumps(payload).encode("utf-8")
         headers = {
             "Authorization": "Bearer " + self.token,
@@ -90,8 +98,11 @@ class RemoteTaskStore:
         if self.access_client_id and self.access_client_secret:
             headers["CF-Access-Client-Id"] = self.access_client_id
             headers["CF-Access-Client-Secret"] = self.access_client_secret
-        if worker_lane != "general" and self.lane_token:
-            headers["X-Engine-Lane-Token"] = self.lane_token
+        if worker_lane is not None:
+            if worker_lane not in VALID_WORKER_LANES:
+                raise ValueError("invalid worker_lane")
+            if self.lane_token:
+                headers["X-Engine-Lane-Token"] = self.lane_token
         request = Request(self.base_url + path, data=body, method=method, headers=headers)
         try:
             opener = build_opener(_RejectRedirects) if self.reject_redirects else None
@@ -185,11 +196,14 @@ class RemoteTaskStore:
         return tasks
 
     def claim_next(self, lease_timeout_seconds: int = 900,
-                   execution_mode: str = "unknown", worker_lane: str = "general") -> dict[str, Any] | None:
+                   execution_mode: str = "unknown", worker_lane: str | None = None) -> dict[str, Any] | None:
         if not 1 <= int(lease_timeout_seconds) <= 900:
             raise ValueError("remote lease timeout must be between 1 and 900 seconds")
         if execution_mode not in {"unknown", "dry_run", "live_inference"}:
             raise ValueError("invalid execution_mode")
+        worker_lane = worker_lane or self.worker_lane
+        if worker_lane not in VALID_WORKER_LANES:
+            raise ValueError("invalid worker_lane")
         result = self._request("/v1/tasks/claim", "POST",
                                {"execution_mode": execution_mode, "worker_lane": worker_lane},
                                worker_lane=worker_lane)
@@ -212,7 +226,8 @@ class RemoteTaskStore:
         if not isinstance(task_id, str) or not re.fullmatch(r"[A-Za-z0-9_-]{1,128}", task_id):
             raise ValueError("task_id must be 1-128 safe identifier characters")
         result = self._request(
-            f"/v1/tasks/{task_id}/claim-supervised-probe", "POST", {}
+            f"/v1/tasks/{task_id}/claim-supervised-probe", "POST",
+            {"worker_lane": self.worker_lane}, worker_lane=self.worker_lane
         )
         task = result.get("task")
         if task is None:
@@ -237,7 +252,8 @@ class RemoteTaskStore:
         if not isinstance(task_id, str) or not re.fullmatch(r"[A-Za-z0-9_-]{1,128}", task_id):
             raise ValueError("task_id must be 1-128 safe identifier characters")
         result = self._request(
-            f"/v1/tasks/{task_id}/recover-supervised-probe", "POST", {}
+            f"/v1/tasks/{task_id}/recover-supervised-probe", "POST",
+            {"worker_lane": self.worker_lane}, worker_lane=self.worker_lane
         )
         status = result.get("status")
         if status not in {"pending", "failed", "succeeded", "blocked"}:
@@ -247,9 +263,10 @@ class RemoteTaskStore:
         return result
 
     def heartbeat(self, task_id: str, lease_token: str,
-                  lease_timeout_seconds: int = 900, worker_lane: str = "general") -> str:
+                  lease_timeout_seconds: int = 900, worker_lane: str | None = None) -> str:
         if not 1 <= int(lease_timeout_seconds) <= 900:
             raise ValueError("remote lease timeout must be between 1 and 900 seconds")
+        worker_lane = worker_lane or self.worker_lane
         result = self._request(f"/v1/tasks/{task_id}/heartbeat", "POST",
                                {"lease_token": lease_token, "worker_lane": worker_lane},
                                worker_lane=worker_lane)
@@ -260,9 +277,10 @@ class RemoteTaskStore:
 
     def finish(self, task_id: str, status: str, result: dict[str, Any] | None = None,
                error: str | None = None, lease_token: str | None = None,
-               execution_mode: str | None = None, worker_lane: str = "general") -> None:
+               execution_mode: str | None = None, worker_lane: str | None = None) -> None:
         if status not in {"succeeded", "failed", "blocked"}:
             raise ValueError("invalid terminal status")
+        worker_lane = worker_lane or self.worker_lane
         payload: dict[str, Any] = {"lease_token": lease_token, "status": status,
                                    "worker_lane": worker_lane}
         if result is not None:
@@ -278,7 +296,8 @@ class RemoteTaskStore:
         self._request(f"/v1/tasks/{task_id}/finish", "POST", payload, worker_lane=worker_lane)
 
     def retry_or_fail(self, task_id: str, error: str,
-                      lease_token: str | None = None, worker_lane: str = "general") -> str:
+                      lease_token: str | None = None, worker_lane: str | None = None) -> str:
+        worker_lane = worker_lane or self.worker_lane
         response = self._request(f"/v1/tasks/{task_id}/retry", "POST",
                                  {"lease_token": lease_token, "error": error,
                                   "worker_lane": worker_lane}, worker_lane=worker_lane)
@@ -288,9 +307,10 @@ class RemoteTaskStore:
         return status
 
     def recover_stale(self, lease_timeout_seconds: int = 900,
-                      worker_lane: str = "general") -> dict[str, int]:
+                      worker_lane: str | None = None) -> dict[str, int]:
         if not 1 <= int(lease_timeout_seconds) <= 900:
             raise ValueError("remote lease timeout must be between 1 and 900 seconds")
+        worker_lane = worker_lane or self.worker_lane
         result = self._request("/v1/tasks/recover", "POST",
                                {"worker_lane": worker_lane}, worker_lane=worker_lane)
         if not isinstance(result.get("requeued"), int) or not isinstance(result.get("failed"), int):
