@@ -54,10 +54,13 @@ jobs:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           ENGINE_API_TOKEN: ${{ secrets.ENGINE_API_TOKEN }}
+          ENGINE_GENERAL_LANE_TOKEN: ${{ secrets.ENGINE_GENERAL_LANE_TOKEN }}
         run: |
           test -n "$CLOUDFLARE_API_TOKEN" || { echo "Missing CLOUDFLARE_API_TOKEN"; exit 1; }
           test -n "$CLOUDFLARE_ACCOUNT_ID" || { echo "Missing CLOUDFLARE_ACCOUNT_ID"; exit 1; }
           test -n "$ENGINE_API_TOKEN" || { echo "Missing ENGINE_API_TOKEN; add a dedicated application token as a GitHub Actions secret."; exit 1; }
+          test -n "$ENGINE_GENERAL_LANE_TOKEN" || { echo "Missing ENGINE_GENERAL_LANE_TOKEN; configure the separate general-consumer capability before deploying lane-enforcing Worker code."; exit 1; }
+          test "$ENGINE_GENERAL_LANE_TOKEN" != "$ENGINE_API_TOKEN" || { echo "ENGINE_GENERAL_LANE_TOKEN must be distinct from ENGINE_API_TOKEN."; exit 1; }
       - name: Refuse to deploy with an unapplied migration
         # Worker code can reference a table that only a later migration creates.
         # On 2026-11-04 the claim SQL shipped ahead of migration 0010, every
@@ -94,6 +97,45 @@ jobs:
             *) echo "::error title=Bearer preflight failed::The deployed Worker does not accept the repository ENGINE_API_TOKEN, or the preflight produced no verdict. No secret was written and nothing was deployed."
                exit 1 ;;
           esac
+      - name: Verify the deployed Worker accepts the general consumer capability
+        env:
+          ENGINE_API_TOKEN: ${{ secrets.ENGINE_API_TOKEN }}
+          ENGINE_GENERAL_LANE_TOKEN: ${{ secrets.ENGINE_GENERAL_LANE_TOKEN }}
+          CF_ACCESS_CLIENT_ID: ${{ secrets.CF_ACCESS_CLIENT_ID }}
+          CF_ACCESS_CLIENT_SECRET: ${{ secrets.CF_ACCESS_CLIENT_SECRET }}
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          from urllib.error import HTTPError, URLError
+          from urllib.request import Request, urlopen
+
+          api_token = os.environ["ENGINE_API_TOKEN"]
+          lane_token = os.environ["ENGINE_GENERAL_LANE_TOKEN"]
+          if len(lane_token) < 32 or lane_token == api_token:
+              raise SystemExit("General lane capability is invalid or reused.")
+          headers = {
+              "Authorization": "Bearer " + api_token,
+              "X-Engine-Lane-Token": lane_token,
+              "Accept": "application/json",
+              "User-Agent": "RaawaaAutonomousEngine/1.0",
+          }
+          if os.environ.get("CF_ACCESS_CLIENT_ID") and os.environ.get("CF_ACCESS_CLIENT_SECRET"):
+              headers["CF-Access-Client-Id"] = os.environ["CF_ACCESS_CLIENT_ID"]
+              headers["CF-Access-Client-Secret"] = os.environ["CF_ACCESS_CLIENT_SECRET"]
+          request = Request(
+              "https://raawaa-autonomous-engine-control.ghith-shikhkhaled.workers.dev/v1/tasks?limit=1",
+              headers=headers,
+          )
+          try:
+              with urlopen(request, timeout=15) as response:
+                  payload = json.loads(response.read())
+                  if response.status != 200 or not isinstance(payload.get("tasks"), list):
+                      raise SystemExit("General lane capability preflight returned an invalid response.")
+          except (HTTPError, URLError, TimeoutError, OSError, ValueError) as error:
+              raise SystemExit(f"General lane capability preflight failed: {type(error).__name__}") from None
+          print("Verified: deployed Worker accepts the distinct general lane capability.")
+          PY
       - name: Deploy authenticated D1 control Worker
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
