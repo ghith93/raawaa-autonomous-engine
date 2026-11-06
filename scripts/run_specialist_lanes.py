@@ -31,11 +31,13 @@ def main() -> int:
         return 0
     enabled = 0
     failures = 0
+    seen_tokens = {base.get("RAAWAA_ENGINE_API_TOKEN", "")}
     for lane, token_name in LANES:
         lane_token = base.get(token_name, "")
-        if len(lane_token) < 32 or lane_token == base.get("RAAWAA_ENGINE_API_TOKEN"):
-            print(f"{lane}: dormant (dedicated capability not configured)")
+        if len(lane_token) < 32 or lane_token in seen_tokens:
+            print(f"{lane}: dormant (dedicated, unique capability not configured)")
             continue
+        seen_tokens.add(lane_token)
         enabled += 1
         env = base.copy()
         env["RAAWAA_ENGINE_WORKER_LANE"] = lane
