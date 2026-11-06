@@ -126,6 +126,10 @@ def _verify_previous_ambiguous_task(store: RemoteTaskStore) -> dict:
         and row.get("status") == "ambiguous"
         and int(row.get("estimated_cost_nanos", -1)) == 0
     ]
+    if len(matches) != 1 or int(snapshot.get("task_pending_count", -1)) != 1:
+        raise SystemExit(
+            "Refusing smoke: prior ambiguous reservation does not match the exact zero-cost record."
+        )
     reservation_id = matches[0].get("reservation_id")
     if not isinstance(reservation_id, str) or not reservation_id:
         raise SystemExit("Refusing smoke: the exact ambiguous reservation has no durable ID.")
