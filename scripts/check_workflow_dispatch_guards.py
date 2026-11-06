@@ -315,11 +315,25 @@ def push_branch_secret_violations(path: str, content: str) -> list[str]:
     return violations
 
 
+def iter_workflow_files(workflow_dir: Path) -> list[Path]:
+    """Return workflow files matching both ``*.yml`` and ``*.yaml`` sorted deterministically."""
+    if not workflow_dir.is_dir():
+        return []
+    return sorted(
+        (
+            path
+            for path in workflow_dir.iterdir()
+            if path.is_file() and path.suffix in {".yml", ".yaml"}
+        ),
+        key=lambda p: p.name,
+    )
+
+
 def main() -> int:
     root = Path(__file__).resolve().parent.parent
     workflow_dir = root / ".github" / "workflows"
     violations = []
-    for path in sorted(workflow_dir.glob("*.yml")):
+    for path in iter_workflow_files(workflow_dir):
         relative = str(path.relative_to(root))
         content = path.read_text(encoding="utf-8")
         violations.extend(workflow_violations(relative, content))

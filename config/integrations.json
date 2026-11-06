@@ -160,64 +160,215 @@
   },
   "external_operator_surfaces": {
     "chatgpt_session_plane": {
-      "name": "ChatGPT Operator Session Plane",
+      "name": "ChatGPT Ephemeral Session Catalog (Umbrella Surface)",
       "execution_plane": "external_operator_session",
-      "lifecycle_state": "connected",
+      "lifecycle_state": "catalogued",
       "can_engine_call_directly": false,
       "session_tool_definitions_count": 1930,
       "session_skills_count": 271,
       "session_skill_packs_count": 38,
+      "verification_facets": {
+        "present": true,
+        "authenticated": "not_applicable",
+        "read_permission_verified": false,
+        "catalog_visible": true,
+        "inference_verified": false,
+        "production_compatible": "not_applicable"
+      },
       "connectors": {
-        "github": {"state": "connected", "permission_posture": "Allow all actions", "least_privilege_review_required": true},
-        "activepieces": {"state": "connected", "permission_posture": "Allow all actions", "least_privilege_review_required": true},
-        "notion": {"state": "connected", "permission_posture": "Allow all actions", "least_privilege_review_required": true},
-        "cloudflare": {"state": "blocked", "permission_posture": "not_installed", "least_privilege_review_required": false},
-        "firecrawl": {"state": "connected", "permission_posture": "Allow low-risk actions", "credits_remaining": 418, "credits_total": 1000, "billing_period_end": "2026-11-29"},
-        "supabase": {"state": "permission_verified", "permission_posture": "Allow low-risk actions"},
-        "render": {"state": "permission_verified", "permission_posture": "Allow low-risk actions", "deployed_services": 0},
-        "slack": {"state": "unknown", "permission_posture": "workspace_list_empty"},
-        "canva": {"state": "configured", "permission_posture": "brand_kit_empty"},
-        "gsc_wizard": {"state": "blocked", "permission_posture": "no_search_console_properties"},
-        "runzumi": {"state": "blocked", "permission_posture": "no_workspace_consent"},
-        "tinyfish": {"state": "blocked", "permission_posture": "not_installed_excluded"}
+        "github": {
+          "lifecycle_state": "permission_verified",
+          "permission_posture": "Allow all actions",
+          "least_privilege_review_required": true,
+          "verification_facets": {
+            "present": true,
+            "authenticated": true,
+            "read_permission_verified": true,
+            "catalog_visible": "not_applicable",
+            "inference_verified": "not_applicable",
+            "production_compatible": "not_applicable"
+          }
+        },
+        "activepieces": {
+          "lifecycle_state": "permission_verified",
+          "permission_posture": "Allow all actions",
+          "least_privilege_review_required": true,
+          "verification_facets": {
+            "present": true,
+            "authenticated": true,
+            "read_permission_verified": true,
+            "catalog_visible": true,
+            "inference_verified": false,
+            "production_compatible": "not_applicable"
+          }
+        },
+        "notion": {
+          "lifecycle_state": "connected",
+          "permission_posture": "Allow all actions",
+          "least_privilege_review_required": true,
+          "verification_facets": {
+            "present": true,
+            "authenticated": true,
+            "read_permission_verified": "unknown",
+            "catalog_visible": "not_applicable",
+            "inference_verified": "not_applicable",
+            "production_compatible": "not_applicable"
+          }
+        },
+        "cloudflare": {
+          "lifecycle_state": "blocked",
+          "permission_posture": "not_installed",
+          "least_privilege_review_required": false,
+          "verification_facets": {
+            "present": false,
+            "authenticated": false,
+            "read_permission_verified": false,
+            "catalog_visible": false,
+            "inference_verified": "not_applicable",
+            "production_compatible": "not_applicable"
+          }
+        },
+        "firecrawl": {
+          "lifecycle_state": "connected",
+          "permission_posture": "Allow low-risk actions",
+          "credit_model": "finite_metered_plan_credits_not_permanently_free",
+          "least_privilege_review_required": false,
+          "verification_facets": {
+            "present": true,
+            "authenticated": true,
+            "read_permission_verified": true,
+            "catalog_visible": "not_applicable",
+            "inference_verified": "not_applicable",
+            "production_compatible": "not_applicable"
+          }
+        },
+        "supabase": {
+          "lifecycle_state": "permission_verified",
+          "permission_posture": "Allow low-risk actions",
+          "least_privilege_review_required": false,
+          "verification_facets": {
+            "present": true,
+            "authenticated": true,
+            "read_permission_verified": true,
+            "catalog_visible": "not_applicable",
+            "inference_verified": "not_applicable",
+            "production_compatible": "not_applicable"
+          }
+        },
+        "render": {
+          "lifecycle_state": "permission_verified",
+          "permission_posture": "Allow low-risk actions",
+          "least_privilege_review_required": false,
+          "verification_facets": {
+            "present": true,
+            "authenticated": true,
+            "read_permission_verified": true,
+            "catalog_visible": "not_applicable",
+            "inference_verified": "not_applicable",
+            "production_compatible": "not_applicable"
+          }
+        },
+        "slack": {
+          "lifecycle_state": "unknown",
+          "permission_posture": "workspace_list_empty",
+          "least_privilege_review_required": false,
+          "verification_facets": {
+            "present": true,
+            "authenticated": "unknown",
+            "read_permission_verified": "unknown",
+            "catalog_visible": "not_applicable",
+            "inference_verified": "not_applicable",
+            "production_compatible": "not_applicable"
+          }
+        },
+        "canva": {
+          "lifecycle_state": "configured",
+          "permission_posture": "brand_kit_empty",
+          "least_privilege_review_required": false,
+          "verification_facets": {
+            "present": true,
+            "authenticated": "unknown",
+            "read_permission_verified": "unknown",
+            "catalog_visible": "not_applicable",
+            "inference_verified": "not_applicable",
+            "production_compatible": "not_applicable"
+          }
+        },
+        "gsc_wizard": {
+          "lifecycle_state": "blocked",
+          "permission_posture": "no_search_console_properties",
+          "least_privilege_review_required": false,
+          "verification_facets": {
+            "present": true,
+            "authenticated": "unknown",
+            "read_permission_verified": false,
+            "catalog_visible": "not_applicable",
+            "inference_verified": "not_applicable",
+            "production_compatible": "not_applicable"
+          }
+        },
+        "runzumi": {
+          "lifecycle_state": "blocked",
+          "permission_posture": "no_workspace_consent",
+          "least_privilege_review_required": false,
+          "verification_facets": {
+            "present": true,
+            "authenticated": false,
+            "read_permission_verified": false,
+            "catalog_visible": "not_applicable",
+            "inference_verified": "not_applicable",
+            "production_compatible": "not_applicable"
+          }
+        },
+        "tinyfish": {
+          "lifecycle_state": "blocked",
+          "permission_posture": "not_installed_excluded",
+          "least_privilege_review_required": false,
+          "verification_facets": {
+            "present": false,
+            "authenticated": false,
+            "read_permission_verified": false,
+            "catalog_visible": false,
+            "inference_verified": "not_applicable",
+            "production_compatible": "not_applicable"
+          }
+        }
       },
       "automations": {
-        "raawaa_engine_daily_ops": {
+        "daily_ops_scheduled_prompt": {
           "enabled": true,
           "scheduler_liveness": "unknown",
-          "last_run_time": "2026-11-02T15:17:12Z",
-          "next_run_time": null,
-          "note": "Ephemeral ChatGPT scheduled prompt; last recorded run failed and next_run_time is null. Never count as engine runtime health."
+          "next_run_scheduled": false,
+          "note": "Ephemeral ChatGPT scheduled prompt whose latest recorded run failed; never count as engine runtime health."
         }
       },
       "provenance": {
         "source_path_or_url": "https://github.com/ghith93/raawaa-autonomous-engine/issues/464#issuecomment-6694076722",
         "verified_at": "2026-11-06T19:54:18Z",
-        "evidence_ref": "Issue #464 comment 6694076722 + docs/operations/asset-register.md",
+        "expires_at": "2026-11-13T19:54:18Z",
+        "evidence_ref": "Sanitized operator-session summary from Issue #464 comment 6694076722 (account IDs and balances withheld)",
         "confidence": "verified"
       }
     },
-    "activepieces_ghiths_project": {
-      "name": "Activepieces — Ghith's Project",
-      "project_id": "8A2qoCJNq9zlORJZMlrfw",
+    "activepieces_automation_surface": {
+      "name": "Activepieces External Workflow Dispatch Surface (Sanitized)",
       "execution_plane": "external_operator_session",
       "lifecycle_state": "permission_verified",
       "can_engine_call_directly": false,
-      "active_connections": [
-        {"external_id": "cn2iEAi2bWbLfeOVOu7D8", "piece": "github", "status": "ACTIVE"}
-      ],
-      "flows": [
-        {
-          "flow_id": "oDKKtoRanykDWtyBdkQFt",
-          "display_name": "Raawaa GitHub Workflow Control",
-          "enabled": true,
-          "trigger": "manual",
-          "target": ".github/workflows/task-runner.yml on main",
-          "production_runs_observed": 0
-        }
-      ],
+      "active_connections_count": 1,
+      "published_manual_flows_count": 1,
+      "manual_flow_target_workflow": ".github/workflows/task-runner.yml",
+      "manual_flow_target_branch": "main",
       "tables_count": 0,
       "catalog_ai_models_count": 21,
+      "verification_facets": {
+        "present": true,
+        "authenticated": true,
+        "read_permission_verified": true,
+        "catalog_visible": true,
+        "inference_verified": false,
+        "production_compatible": "not_applicable"
+      },
       "notable_catalog_only_models": [
         {
           "model_id": "x-ai/grok-4.20",
@@ -229,24 +380,32 @@
       "provenance": {
         "source_path_or_url": "https://github.com/ghith93/raawaa-autonomous-engine/issues/464#issuecomment-6694076722",
         "verified_at": "2026-11-06T19:58:42Z",
-        "evidence_ref": "Issue #464 comments 6694076722 & 6694158507 (Activepieces GitHub action invoked groq-connection-check.yml run 42284232726)",
+        "expires_at": "2026-11-13T19:58:42Z",
+        "evidence_ref": "Sanitized summary from Issue #464 comments 6694076722 & 6694158507 (project/connection/flow IDs withheld)",
         "confidence": "verified"
       }
     },
-    "supabase_ghaiooth_org": {
-      "name": "Supabase Organization Ghaiooth (External Non-Engine Projects)",
+    "external_postgres_surface": {
+      "name": "External Non-Engine Postgres Projects (Sanitized)",
       "execution_plane": "external_operator_session",
-      "lifecycle_state": "runtime_verified",
+      "lifecycle_state": "permission_verified",
       "can_engine_call_directly": false,
-      "projects": [
-        {"ref": "oyoyozdugicmnkfhjovo", "name": "Ghaioooth-core", "region": "eu-west-1", "status": "ACTIVE_HEALTHY", "rls_migration": "20261106181609"},
-        {"ref": "xuwtuhfqjjwszxqkmivj", "name": "secondary-project", "status": "ACTIVE_HEALTHY", "rls_migration": "20261106181603"}
-      ],
-      "note": "Separate external projects; canonical Raawaa Engine task/budget/quota state lives in Cloudflare D1, never Supabase.",
+      "projects_observed_count": 2,
+      "canonical_engine_state": false,
+      "verification_facets": {
+        "present": true,
+        "authenticated": true,
+        "read_permission_verified": true,
+        "catalog_visible": "not_applicable",
+        "inference_verified": "not_applicable",
+        "production_compatible": "not_applicable"
+      },
+      "note": "Separate external database projects (identifiers withheld); canonical Raawaa Engine task, quota, and monetary ledgers live exclusively in Cloudflare D1.",
       "provenance": {
         "source_path_or_url": "https://github.com/ghith93/raawaa-autonomous-engine/issues/464#issuecomment-6693664182",
         "verified_at": "2026-11-06T19:35:23Z",
-        "evidence_ref": "Issue #464 comment 6693664182",
+        "expires_at": "2026-11-13T19:35:23Z",
+        "evidence_ref": "Sanitized summary from Issue #464 comment 6693664182 (org and project refs withheld)",
         "confidence": "verified"
       }
     }
@@ -254,21 +413,12 @@
   "infrastructure_assets": {
     "cloudflare_production_control_worker": {
       "name": "Production Control Worker & Production D1",
-      "worker_name": "raawaa-autonomous-engine-control",
-      "url": "https://raawaa-autonomous-engine-control.ghith-shikhkhaled.workers.dev",
-      "d1_database_name": "raawaa-autonomous-e",
-      "d1_database_id": "f0ffbed3-940f-488d-a7d1-31cbc5fbf742",
+      "config_file": "wrangler.toml",
       "execution_plane": "cloudflare_edge",
       "lifecycle_state": "runtime_verified",
+      "production_compatible": false,
       "secret_names": ["CLOUDFLARE_API_TOKEN", "CLOUDFLARE_ACCOUNT_ID", "ENGINE_API_TOKEN", "ENGINE_QUOTA_ADMIN_TOKEN"],
       "watchdog_variable_missing": "GITHUB_APP_WATCHDOG_ENABLED",
-      "provenance": {
-        "source_path_or_url": "wrangler.toml",
-        "verified_at": "2026-11-06T20:04:44Z",
-        "expires_at": "2026-11-13T20:04:44Z",
-        "evidence_ref": "Task Runner run 42283331978 (HTTP 200, queue_idle) + d1-migration-inventory.yml run 42285058780 (2 pending migrations: 0013_task_process_dispatches.sql, 0014_task_execution_lanes.sql)",
-        "confidence": "verified"
-      },
       "pending_production_migrations": [
         "0013_task_process_dispatches.sql",
         "0014_task_execution_lanes.sql"
@@ -278,18 +428,24 @@
         "main_head_worker_compatible_with_unmigrated_d1": false,
         "migrations_0013_0014_backward_compatible_with_currently_deployed_worker": true,
         "note": "worker/index.js on main (7818cdfd) hard-requires task_process_dispatches and tasks.execution_lane across schemaProbe and queue endpoints; deploy-worker.yml preflight blocks deployment until 0013 and 0014 are applied under a separate Production migration approval gate. Do not apply them without explicit owner approval."
+      },
+      "provenance": {
+        "source_path_or_url": "wrangler.toml",
+        "verified_at": "2026-11-06T20:04:44Z",
+        "expires_at": "2026-11-13T20:04:44Z",
+        "evidence_ref": "Task Runner run 42283331978 (HTTP 200, queue_idle) + d1-migration-inventory.yml run 42285058780 (2 pending migrations: 0013, 0014)",
+        "confidence": "verified"
       }
     },
     "cloudflare_isolated_staging_worker": {
       "name": "Isolated Staging Control Worker & Staging D1",
-      "worker_name": "raawaa-autonomous-engine-staging",
-      "url": "https://raawaa-autonomous-engine-staging.ghith-shikhkhaled.workers.dev",
-      "d1_database_name": "raawaa-engine-staging",
-      "d1_database_id": "231dd948-04a0-49e3-ad73-444f77d69477",
+      "config_file": "wrangler.staging.toml",
       "execution_plane": "staging_isolated",
       "lifecycle_state": "runtime_verified",
+      "production_compatible": "not_applicable",
       "secret_names": ["CLOUDFLARE_API_TOKEN", "CLOUDFLARE_ACCOUNT_ID"],
       "pending_staging_migrations": [],
+      "note": "Strictly isolated non-production validation target; never treated as production-compatible.",
       "provenance": {
         "source_path_or_url": "wrangler.staging.toml",
         "verified_at": "2026-11-06T20:04:44Z",
@@ -299,21 +455,18 @@
       }
     },
     "cloudflare_commerce_pages_and_worker": {
-      "name": "Raawaa Clean Brand Storefront (Pages) & Multi-Store Commerce Spine",
-      "storefront_url": "https://raawaa.pages.dev",
-      "owner_dashboard_url": "https://raawaa.pages.dev/owner/",
-      "retired_worker_subdomain": "raawaa-commerce-spine.ghith-shikhkhaled.workers.dev",
-      "worker_name": "raawaa-commerce-spine",
-      "d1_database_name": "raawaa-commerce-d1",
-      "d1_database_id": "a95f8518-29c7-4908-82ca-8cb56a9255a0",
+      "name": "Commerce Pages & Worker Spine (Separate Non-Engine Surface)",
+      "config_file": "wrangler.storefront.toml",
       "execution_plane": "cloudflare_edge",
-      "lifecycle_state": "runtime_verified",
+      "lifecycle_state": "deployed",
+      "production_compatible": "unknown",
       "secret_names": ["CLOUDFLARE_API_TOKEN", "CLOUDFLARE_ACCOUNT_ID"],
+      "note": "Separate commerce Pages/Worker surface; account URLs and D1 identifiers withheld from public inventory, and engine production compatibility is not inferred.",
       "provenance": {
         "source_path_or_url": "wrangler.storefront.toml",
         "verified_at": "2026-11-06T18:55:00Z",
         "expires_at": "2026-11-13T18:55:00Z",
-        "evidence_ref": "PRs #609-#611 + deploy-commerce-storefront.yml run 42274941247",
+        "evidence_ref": "deploy-commerce-storefront.yml run 42274941247 (hostnames and database IDs withheld)",
         "confidence": "verified"
       }
     },
@@ -321,11 +474,12 @@
       "name": "Cloudflare Account Billing & Access Controls",
       "execution_plane": "cloudflare_edge",
       "lifecycle_state": "permission_verified",
-      "paid_subscriptions_count": 0,
+      "production_compatible": "unknown",
+      "paid_subscriptions_observed": 0,
       "spend_policy_hard_stop_verified": false,
       "cloudflare_access_enabled": false,
       "secret_names": ["CLOUDFLARE_API_TOKEN", "CLOUDFLARE_ACCESS_AUDIT_TOKEN", "CLOUDFLARE_ACCOUNT_ID"],
-      "note": "Subscriptions API HTTP 200 confirms read permission; Spend Policies API returned HTTP 404 (run 42285028161) so no external usage_block hard stop is verified; Cloudflare Access is not enabled (run 42285013735) so Worker bearer token auth is the active boundary.",
+      "note": "Subscriptions API HTTP 200 confirmed 0 paid subscriptions, but Spend Policies API returned HTTP 404 (run 42285028161) so no external usage_block hard stop or zero-overage guarantee is verified; Cloudflare Access is disabled (run 42285013735).",
       "provenance": {
         "source_path_or_url": "https://github.com/ghith93/raawaa-autonomous-engine/issues/464#issuecomment-6694272932",
         "verified_at": "2026-11-06T20:04:44Z",
@@ -335,19 +489,19 @@
       }
     },
     "github_main_protection_ruleset": {
-      "name": "GitHub Repository Ruleset main-protection",
-      "ruleset_id": 26464558,
+      "name": "GitHub Default-Branch Protection Ruleset",
       "execution_plane": "engine_runtime",
       "lifecycle_state": "enabled",
+      "production_compatible": "not_applicable",
       "required_status_checks": ["test"],
       "required_approving_review_count": 0,
       "secret_names": [],
-      "note": "Enforces PRs, strict up-to-date test status, resolved review threads, and blocks force-push/deletion; required approving reviews = 0.",
+      "note": "Repository governance ruleset enforcing PRs, strict up-to-date test status, resolved review threads, and force-push/deletion blocks; required approving reviews = 0.",
       "provenance": {
         "source_path_or_url": "https://github.com/ghith93/raawaa-autonomous-engine/issues/464#issuecomment-6694187249",
         "verified_at": "2026-11-06T20:00:11Z",
         "expires_at": "2026-11-13T20:00:11Z",
-        "evidence_ref": "Ruleset ID 26464558 re-verified in Issue #464 comment 6694187249",
+        "evidence_ref": "Sanitized ruleset verification in Issue #464 comment 6694187249",
         "confidence": "verified"
       }
     }
@@ -379,7 +533,7 @@
         "inference_verified": false,
         "production_compatible": "unknown"
       },
-      "scope_limitation": "Checks boolean presence of 5 repository secret names only; never proves token validity, scope, account ownership, or remaining credentials.json aliases."
+      "scope_limitation": "Checks boolean presence of 5 repository secret names only; never proves token validity, scope, account ownership, or production compatibility."
     },
     {
       "observation_id": "obs-groq-connection-42284232726",
@@ -401,7 +555,7 @@
         "inference_verified": false,
         "production_compatible": false
       },
-      "scope_limitation": "Proves GROQ_API_KEY auth and /openai/v1/models catalog visibility with 0 inference requests. Does not prove project-level inference permission (120B previously returned HTTP 403 and remains quarantined; 20B has 1 historical Staging smoke in run 42254857112 attempt 1)."
+      "scope_limitation": "Proves GROQ_API_KEY auth and /openai/v1/models catalog visibility with 0 inference requests. Does not prove project-level inference permission: 120B returned HTTP 403 and remains quarantined; 20B succeeded in historical Staging run 42218813645 and run 42254857112 attempt 1 (while attempt 2 of 42254857112 failed pre-I/O on the intentional non-replay guard)."
     },
     {
       "observation_id": "obs-cloudflare-access-42285013735",
@@ -419,9 +573,9 @@
         "read_permission_verified": true,
         "catalog_visible": "not_applicable",
         "inference_verified": "not_applicable",
-        "production_compatible": true
+        "production_compatible": "unknown"
       },
-      "scope_limitation": "Cloudflare Access is not enabled on this account; Access apps and service-token inventories are not applicable. Worker bearer token auth is the active protection boundary."
+      "scope_limitation": "Cloudflare Access is not enabled on this account; Access apps and service-token inventories are not applicable, and production compatibility is not inferred from this check."
     },
     {
       "observation_id": "obs-cloudflare-billing-42285028161",
@@ -433,15 +587,17 @@
       "evidence_type": "read_only_cloudflare_subscriptions_and_spend_policy",
       "source_url": "https://github.com/ghith93/raawaa-autonomous-engine/actions/runs/42285028161",
       "secret_names": ["CLOUDFLARE_API_TOKEN", "CLOUDFLARE_ACCOUNT_ID"],
+      "spend_policy_http_status": 404,
+      "spend_policy_hard_stop_verified": false,
       "verification_facets": {
         "present": true,
         "authenticated": true,
         "read_permission_verified": true,
         "catalog_visible": "not_applicable",
         "inference_verified": "not_applicable",
-        "production_compatible": false
+        "production_compatible": "unknown"
       },
-      "scope_limitation": "Subscriptions API returned HTTP 200; spend-policy endpoint returned HTTP 404. No external Cloudflare account-level usage_block hard stop is verified; never infer a hard spending stop from HTTP 404."
+      "scope_limitation": "Subscriptions API returned HTTP 200 (0 paid subscriptions); spend-policy endpoint returned HTTP 404. No external Cloudflare account-level usage_block hard stop or zero-overage guarantee is verified; never infer zero cost or disabled overages from HTTP 404."
     },
     {
       "observation_id": "obs-cloudflare-workers-ai-42285042447",
@@ -508,7 +664,7 @@
         "inference_verified": "not_applicable",
         "production_compatible": "not_applicable"
       },
-      "scope_limitation": "Isolated Staging D1 healthcheck ok=true, rows_read=0, 0 pending migrations (0001-0014 all applied; verified end-to-end in Engine CI run 42280889414)."
+      "scope_limitation": "Isolated Staging D1 healthcheck ok=true, rows_read=0, 0 pending migrations (0001-0014 all applied; non-production target)."
     }
   ]
 }

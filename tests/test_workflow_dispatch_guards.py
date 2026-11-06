@@ -200,7 +200,7 @@ class TriggerParsingTests(unittest.TestCase):
 
     def test_every_repository_workflow_declares_a_trigger(self):
         workflow_dir = Path(__file__).resolve().parents[1] / ".github" / "workflows"
-        for path in sorted(workflow_dir.glob("*.yml")):
+        for path in check.iter_workflow_files(workflow_dir):
             with self.subTest(workflow=path.name):
                 triggers = check.parse_triggers(path.read_text(encoding="utf-8"))
                 self.assertTrue(triggers, f"{path.name} declares no trigger the parser can see")
@@ -302,12 +302,30 @@ jobs:
 
     def test_all_repository_workflows_pass_push_and_pr_secret_guards(self):
         workflow_dir = Path(__file__).resolve().parents[1] / ".github" / "workflows"
-        for path in sorted(workflow_dir.glob("*.yml")):
+        for path in check.iter_workflow_files(workflow_dir):
             with self.subTest(workflow=path.name):
                 content = path.read_text(encoding="utf-8")
                 self.assertEqual(
                     check.push_branch_secret_violations(f".github/workflows/{path.name}", content),
                     [],
                 )
+
+    def test_iter_workflow_files_scans_both_yml_and_yaml(self):
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as tmp:
+            wf_dir = Path(tmp) / ".github" / "workflows"
+            wf_dir.mkdir(parents=True)
+            (wf_dir / "safe.yml").write_text("on:\n  push:\njobs:\n  ok:\n    steps: []\n", encoding="utf-8")
+            (wf_dir / "secret-leak.yaml").write_text(
+                "on:\n  workflow_dispatch:\njobs:\n  bad:\n    steps:\n"
+                "      - env:\n          KEY: ${{ secrets.SECRET_KEY }}\n",
+                encoding="utf-8",
+            )
+            (wf_dir / "README.md").write_text("ignore\n", encoding="utf-8")
+            found = check.iter_workflow_files(wf_dir)
+            self.assertEqual([p.name for p in found], ["safe.yml", "secret-leak.yaml"])
+            yaml_content = (wf_dir / "secret-leak.yaml").read_text(encoding="utf-8")
+            self.assertEqual(len(check.workflow_violations("secret-leak.yaml", yaml_content)), 1)
 
 

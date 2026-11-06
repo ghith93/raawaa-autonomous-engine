@@ -25,7 +25,8 @@ class RetiredTelegramTests(unittest.TestCase):
             self.assertNotIn("telegram", (ROOT / name).read_text(encoding="utf-8").lower(), name)
 
     def test_workflows_and_configs_have_no_telegram_references(self):
-        for path in sorted((ROOT / ".github" / "workflows").glob("*.yml")):
+        workflow_dir = ROOT / ".github" / "workflows"
+        for path in sorted(p for p in workflow_dir.iterdir() if p.is_file() and p.suffix in {".yml", ".yaml"}):
             rel = str(path.relative_to(ROOT))
             self.assertNotIn("telegram", path.read_text(encoding="utf-8").lower(), rel)
         for path in sorted((ROOT / "config").rglob("*.json")):

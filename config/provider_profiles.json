@@ -28,7 +28,7 @@
       "quota_source_url": "https://console.groq.com/docs/rate-limits",
       "terms_source_url": "https://console.groq.com/docs/legal/services-agreement",
       "verified_at": "2026-11-01T00:00:00Z",
-      "verification_note": "Operator-confirmed Free-plan account and model visibility. Account-console quotas supplied for this model: 30 RPM, 8,000 TPM, 1,000 RPD, 200,000 TPD. Groq lists GPT-OSS 20B as a Production Model. Model licence is Apache-2.0 subject to OpenAI gpt-oss usage policy. Free-plan use within limits is fee-free. Route remains disabled until operator-approved live inference wiring and the kill switch are explicitly enabled.",
+      "verification_note": "Operator-confirmed Free-plan account and model visibility (30 RPM, 8,000 TPM, 1,000 RPD, 200,000 TPD). Historical isolated-Staging smoke runs: run 42218813645 succeeded; run 42254857112 attempt 1 succeeded on specialist:researcher while attempt 2 failed pre-I/O on the intentional non-replay idempotency guard (overall run conclusion=failure); read-only auth/catalog check run 42284232726 on 2026-11-06 confirmed catalog visibility with 0 inference requests. Route remains disabled by default until operator-approved live inference wiring, refreshed quota verification, and the kill switch are explicitly enabled.",
       "production_use_allowed": true,
       "model_stage": "production",
       "priority": 10,
