@@ -288,21 +288,11 @@ class RemoteTaskStore:
         return status
 
     def recover_stale(self, lease_timeout_seconds: int = 900,
-                      worker_lane: str = "general",
-                      task_id: str | None = None) -> dict[str, int]:
-        import re
-
+                      worker_lane: str = "general") -> dict[str, int]:
         if not 1 <= int(lease_timeout_seconds) <= 900:
             raise ValueError("remote lease timeout must be between 1 and 900 seconds")
-        if worker_lane not in {"general", "specialist:researcher", "specialist:reviewer",
-                               "specialist:marketer", "specialist:operator", "specialist:mobile_tester"}:
-            raise ValueError("invalid worker_lane")
-        payload: dict[str, Any] = {"worker_lane": worker_lane}
-        if task_id is not None:
-            if not isinstance(task_id, str) or not re.fullmatch(r"[A-Za-z0-9_-]{1,128}", task_id):
-                raise ValueError("task_id must be 1-128 safe identifier characters")
-            payload["task_id"] = task_id
-        result = self._request("/v1/tasks/recover", "POST", payload, worker_lane=worker_lane)
+        result = self._request("/v1/tasks/recover", "POST",
+                               {"worker_lane": worker_lane}, worker_lane=worker_lane)
         if not isinstance(result.get("requeued"), int) or not isinstance(result.get("failed"), int):
             raise RemoteTaskStoreError("Remote task API returned invalid recovery counts")
         return {"requeued": result["requeued"], "failed": result["failed"]}
