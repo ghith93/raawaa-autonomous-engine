@@ -174,7 +174,7 @@ def _build_prompt(contract: dict, operating_policy: dict) -> str:
 def run_once(store: TaskStore, live_gateway=None, environ=None, worker_lane: str | None = None) -> dict | None:
     environ = os.environ if environ is None else environ
     worker_lane = worker_lane or environ.get("RAAWAA_ENGINE_WORKER_LANE", "general")
-    allowed_lanes = {"general", "specialist:researcher", "specialist:reviewer", "specialist:marketer", "specialist:operator"}
+    allowed_lanes = {"general", "specialist:researcher", "specialist:reviewer", "specialist:marketer", "specialist:operator", "specialist:mobile_tester"}
     if worker_lane not in allowed_lanes:
         return {"status": "blocked", "reason": "invalid_worker_lane"}
     # Load repository policy before claiming work or allowing any provider I/O.
@@ -234,7 +234,8 @@ def run_once(store: TaskStore, live_gateway=None, environ=None, worker_lane: str
         # heartbeat below; it is also deliberately absent from SAFE_TASKS.
         return complete_supervised_task(store, task, environ=environ)
     expected_lane = {"research_brief": "specialist:researcher", "code_review": "specialist:reviewer",
-                     "content_draft": "specialist:marketer", "system_audit": "specialist:operator"}.get(task_type)
+                     "content_draft": "specialist:marketer", "system_audit": "specialist:operator",
+                     "mobile_test": "specialist:mobile_tester"}.get(task_type)
     if worker_lane != "general" and expected_lane != worker_lane:
         store.finish(task["id"], "blocked", error=f"Task type {task_type} is not assigned to {worker_lane}.",
                      lease_token=task["lease_token"], worker_lane=worker_lane)
