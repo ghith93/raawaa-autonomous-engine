@@ -125,13 +125,14 @@ jobs:
       - name: Validate project and agent topology
         run: python scripts/validate_project_agent_map.py config/project-agent-map.json .
       - name: Install pinned Graphify OSS
-        run: python -m pip install --disable-pip-version-check --no-input "graphifyy==0.9.103"
+        run: python -m pip install --disable-pip-version-check --no-input "graphifyy[sql]==0.9.103"
       - name: Build local code and configuration knowledge graph (no model)
         env:
           GRAPHIFY_OUT: graphify-out
           GRAPHIFY_NO_TIPS: "1"
         run: |
           python -m graphify extract . --code-only
+          python -m graphify . --cluster-only
           python - <<'PY'
           import json
           from pathlib import Path
@@ -146,7 +147,17 @@ jobs:
               raise SystemExit("Graphify produced an empty or invalid node list")
           if not isinstance(edges, list):
               raise SystemExit("Graphify produced an invalid edge list")
-          print(f"Graphify artifact validated: nodes={len(nodes)} edges={len(edges)}")
+          from pathlib import PurePosixPath
+          for node in nodes:
+              source = node.get("source_file") if isinstance(node, dict) else None
+              if source:
+                  path = PurePosixPath(str(source).replace("\\", "/"))
+                  if path.is_absolute() or ".." in path.parts:
+                      raise SystemExit(f"Graphify emitted an unsafe source path: {source}")
+          html_path = Path("graphify-out/graph.html")
+          if not html_path.is_file():
+              raise SystemExit("Graphify did not produce graph.html")
+          print(f"Graphify artifact validated: nodes={len(nodes)} edges={len(edges)} html_bytes={html_path.stat().st_size}")
           PY
       - name: Upload short-lived knowledge graph artifact
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
