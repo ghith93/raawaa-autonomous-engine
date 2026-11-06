@@ -97,3 +97,53 @@ jobs:
           GITHUB_WORKFLOW: ${{ github.workflow }}
           RESEARCH_SCAN_STARTED_AT: ${{ steps.scan_clock.outputs.started_at }}
         run: python scripts/publish_research_scan_telemetry.py research-candidates.json
+
+  knowledge_graph:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    permissions:
+      contents: read
+    steps:
+      - name: Check out reviewed main
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - name: Set up Python
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7
+        with:
+          python-version: "3.12"
+      - name: Validate project and agent topology
+        run: python scripts/validate_project_agent_map.py config/project-agent-map.json .
+      - name: Install pinned Graphify OSS
+        run: python -m pip install --disable-pip-version-check --no-input "graphifyy==0.9.103"
+      - name: Build local code and configuration knowledge graph (no model)
+        env:
+          GRAPHIFY_OUT: graphify-out
+          GRAPHIFY_NO_TIPS: "1"
+        run: |
+          python -m graphify extract . --code-only
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          graph_path = Path("graphify-out/graph.json")
+          report_path = Path("graphify-out/GRAPH_REPORT.md")
+          if not graph_path.is_file() or not report_path.is_file():
+              raise SystemExit("Graphify did not produce the expected graph and report")
+          graph = json.loads(graph_path.read_text(encoding="utf-8"))
+          nodes = graph.get("nodes", [])
+          edges = graph.get("edges", graph.get("links", []))
+          if not isinstance(nodes, list) or not nodes:
+              raise SystemExit("Graphify produced an empty or invalid node list")
+          if not isinstance(edges, list):
+              raise SystemExit("Graphify produced an invalid edge list")
+          print(f"Graphify artifact validated: nodes={len(nodes)} edges={len(edges)}")
+          PY
+      - name: Upload short-lived knowledge graph artifact
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: project-knowledge-graph-${{ github.run_id }}
+          path: |
+            graphify-out/graph.json
+            graphify-out/graph.html
+            graphify-out/GRAPH_REPORT.md
+          if-no-files-found: error
+          retention-days: 7
