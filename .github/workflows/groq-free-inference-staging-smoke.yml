@@ -44,7 +44,7 @@ jobs:
             marker=true
           fi
           eligible=false
-          if [[ "$SOURCE_CONCLUSION" == "success" && "$SOURCE_BRANCH" == "main" && "$marker" == "true" ]]; then
+          if [[ "$SOURCE_CONCLUSION" == "success" && "$SOURCE_BRANCH" == "main" && "$SOURCE_EVENT" == "push" && "$marker" == "true" ]]; then
             eligible=true
           fi
           {
