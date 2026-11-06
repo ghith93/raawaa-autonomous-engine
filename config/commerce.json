@@ -1,0 +1,32 @@
+{
+  "schema_version": 1,
+  "updated": "2026-11-06",
+  "brand": "raawaa",
+  "currency": "USD",
+  "market": {
+    "country": "SY",
+    "primary_city": "Hama",
+    "payment": ["cod", "sham_cash", "syriatel_cash", "mtn_cash"]
+  },
+  "delivery": {"fee": 2, "refusal_fee": 1, "free_shipping_from": 15},
+  "honesty": {
+    "max_discount_pct": 35,
+    "banned_patterns": ["last item", "resetting countdown", "implausible discount", "unverifiable social proof"],
+    "guarantee_ar": "افحص العبوة الزجاجية والملصق وتاريخ التحضير وسلامة ختم الأمان أمام المندوب قبل الدفع. إن لم تطابق ما طلبته، لا تدفع شيئًا."
+  },
+  "catalogue_rules": {
+    "min_gross_margin_pct": 35,
+    "required_label_fields": ["ingredients", "size", "batch", "made_on", "contact"],
+    "regulated_categories": ["supplement", "medical_device", "cosmetic_medical", "food"]
+  },
+  "channels": [
+    {"id": "manual", "type": "local_file", "cost": 0, "note": "always possible"},
+    {"id": "instagram", "type": "api", "cost": 0, "available_from_syria": false,
+     "note": "Content Publishing API is rate-limited and needs a business account"}
+  ],
+  "analysis_biases": [
+    "A form submission is not a sale.",
+    "A delivered parcel with uncollected cash is a loss, not revenue.",
+    "Deleting past orders is how a COD store discovers its real refusal rate."
+  ]
+}

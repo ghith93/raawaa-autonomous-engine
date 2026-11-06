@@ -1,0 +1,18 @@
+name = "raawaa-commerce-api"
+main = "commerce-worker/index.js"
+compatibility_date = "2026-10-28"
+workers_dev = true
+
+# Isolated Commerce Worker — separate from `wrangler.toml` (`raawaa-autonomous-engine-control`)
+# so public storefront traffic and customer PII never share tokens, quotas, or D1 tables
+# with the internal autonomous control plane.
+
+[vars]
+COMMERCE_REGION = "cloudflare-edge"
+COMMERCE_ALLOWED_ORIGINS = "*"
+
+[[d1_databases]]
+binding = "COMMERCE_DB"
+database_name = "raawaa-commerce-db"
+database_id = "00000000-0000-0000-0000-000000000000" # Replaced automatically on first provision or via COMMERCE_D1_DATABASE_ID
+migrations_dir = "commerce-migrations"

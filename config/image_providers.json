@@ -1,0 +1,32 @@
+{
+  "schema_version": 1,
+  "updated": "2026-11-06",
+  "policy": {
+    "zero_spend": true,
+    "paid_routes_allowed": false,
+    "unknown_price_treated_as": "blocked",
+    "credentials_from_env_only": true
+  },
+  "daily_neuron_cap": 10000,
+  "providers": [
+    {"id": "cloudflare", "priority": 1, "cost_usd_per_image": 0,
+     "env": ["CLOUDFLARE_ACCOUNT_ID", "CLOUDFLARE_API_TOKEN"],
+     "commercial_use": true, "license": "cloudflare-self-serve",
+     "limits": "10000 neurons/day, ~173 images @1024/4steps, no rollover",
+     "source": "https://developers.cloudflare.com/workers-ai/platform/pricing/"},
+    {"id": "local_qwen", "priority": 2, "cost_usd_per_image": 0,
+     "env": ["RAAWAA_LOCAL_QWEN_ENABLED"],
+     "commercial_use": true, "license": "Apache-2.0", "model": "Qwen/Qwen-Image-2512",
+     "limits": "unlimited; needs ~13.2GB VRAM at Q4 or 24GB at FP8"},
+    {"id": "offline", "priority": 3, "cost_usd_per_image": 0,
+     "env": [], "commercial_use": true, "license": "n/a",
+     "limits": "always; renders layout only, never product imagery"}
+  ],
+  "rejected": [
+    {"id": "gemini_nano_banana", "why": "no free tier for image output; $0.034-0.134/image"},
+    {"id": "qwen_image_2_1", "why": "Qwen Research License — non-commercial"},
+    {"id": "modelscope", "why": "non-commercial + Chinese real-name verification"},
+    {"id": "huggingface_free", "why": "zero monthly inference credit for free accounts"},
+    {"id": "pollinations", "why": "now requires prepaid pollen"}
+  ]
+}

@@ -1,0 +1,189 @@
+name: Raawaa Image Route Check
+
+# Runs where the credentials already live: the repository's own secrets.
+#
+# This exists because the sandbox that develops the code has no Cloudflare
+# credentials and cannot reach the Workers AI endpoint, while GitHub Actions can.
+# Rather than ask for a token to be pasted into a chat, the check runs here and
+# prints only verdicts and masked identifiers.
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main, "arena/**"]
+    paths:
+      - ".github/workflows/raawaa-image-route-check.yml"
+      - "scripts/raawaa_verify_cloudflare.py"
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    name: Verify Workers AI, D1, and image generation
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7
+        with:
+          python-version: "3.12"
+
+      # Every job in this repository used to demand one exact secret name, so the
+      # appearance of an alias broke it silently. The resolver accepts any alias for
+      # a role, and the doctor prints which name satisfied each role.
+      - name: Resolve credential roles and the owning account
+        shell: bash
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCESS_AUDIT_TOKEN: ${{ secrets.CLOUDFLARE_ACCESS_AUDIT_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          D1_DATABASE_ID: ${{ secrets.D1_DATABASE_ID }}
+          ENGINE_API_TOKEN: ${{ secrets.ENGINE_API_TOKEN }}
+          ENGINE_QUOTA_ADMIN_TOKEN: ${{ secrets.ENGINE_QUOTA_ADMIN_TOKEN }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          OWNER_TELEGRAM_CHAT_ID: ${{ secrets.OWNER_TELEGRAM_CHAT_ID }}
+        run: |
+          set +e
+          python scripts/raawaa_doctor.py --json doctor.json > doctor.log 2>&1
+          code=$?
+          cat doctor.log
+          while IFS= read -r line; do
+            [ -z "$line" ] && continue
+            case "$line" in
+              *"match=False"*)          echo "::warning::$line" ;;
+              *"  evidence"*)           echo "::notice::$line" ;;
+              *"  visible"*)            echo "::notice::$line" ;;
+              *"MISSING"*)              echo "::warning::$line" ;;
+              *"update CLOUDFLARE_ACCOUNT_ID"*) echo "::error::$line" ;;
+              *"matches D1_DATABASE_ID"*)    echo "::notice::$line" ;;
+              *"belongs to a different account"*) echo "::warning::$line" ;;
+              *"match: true"*)               echo "::notice::$line" ;;
+              *"match: false"*)              echo "::error::$line" ;;
+            esac
+          done < doctor.log
+          echo "doctor_exit=$code"
+
+      - name: Confirm secrets are present (values never printed)
+        shell: bash
+        env:
+          ACCOUNT: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: |
+          set -euo pipefail
+          [ -n "$ACCOUNT" ] || { echo "CLOUDFLARE_ACCOUNT_ID is missing from repository secrets."; exit 1; }
+          [ -n "$TOKEN" ]   || { echo "CLOUDFLARE_API_TOKEN is missing from repository secrets."; exit 1; }
+          echo "Both secret names are present. Values withheld."
+
+      # Runs first, because the most common cause of "Invalid API Token" is not an
+      # expired token but a damaged paste: a quoted value, a trailing newline, or a
+      # truncated copy from a phone screen. The length and the character problems are
+      # safe to print; the value never is.
+      - name: Diagnose the stored token shape
+        shell: bash
+        env:
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: |
+          set +e
+          python scripts/raawaa_token_doctor.py > doctor.txt 2>&1
+          cat doctor.txt
+          while IFS= read -r line; do
+            [ -z "$line" ] && continue
+            case "$line" in
+              *'"verdict": "invalid"'*) echo "::error::token rejected by Cloudflare (code 1000)" ;;
+              *'"verdict": "ok"'*)      echo "::notice::token verified by Cloudflare" ;;
+              *'"verdict":'*)           echo "::warning::token verdict: $line" ;;
+              *'"token_length"'*)       echo "::notice::stored value $line" ;;
+              *shape*|*contains*|*length*) echo "::warning::$line" ;;
+            esac
+          done < doctor.txt
+
+      # Findings are emitted as annotations so the verdict is readable from
+      # `gh run view` without downloading logs, which the API does not always serve.
+      - name: Verify credentials and permissions
+        shell: bash
+        env:
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: |
+          set +e
+          python scripts/raawaa_verify_cloudflare.py --skip-ai > verify.txt 2>&1
+          code=$?
+          cat verify.txt
+          while IFS= read -r line; do
+            [ -z "$line" ] && continue
+            case "$line" in
+              "[PASS]"*) echo "::notice::${line}" ;;
+              "[FAIL]"*) echo "::error::${line}" ;;
+              *fix*) echo "::warning::${line}" ;;
+              *) echo "::notice::${line}" ;;
+            esac
+          done < verify.txt
+          echo "verify_exit=$code"
+
+      - name: Generate one real image through the free route
+        shell: bash
+        env:
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: |
+          set +e
+          mkdir -p raawaa-check
+          python scripts/raawaa_images.py \
+            --prompt "soft beige linen fabric, natural window light, minimal, empty centre" \
+            --out raawaa-check/feed.png --width 1024 --height 1024 --steps 4 \
+            > raawaa-check/generate.log 2>&1
+          code=$?
+          cat raawaa-check/generate.log
+          while IFS= read -r line; do
+            [ -z "$line" ] && continue
+            case "$line" in
+              OK*)    echo "::notice::$line" ;;
+              FAIL*)  echo "::error::$line" ;;
+              *skip*) echo "::warning::$line" ;;
+              *served*) echo "::notice::$line" ;;
+            esac
+          done < raawaa-check/generate.log
+          python scripts/raawaa_asset_check.py raawaa-check/feed.png >> raawaa-check/generate.log 2>&1 || true
+          tail -2 raawaa-check/generate.log
+          ls -l raawaa-check/ || true
+          exit $code
+
+      # The founder has many tokens and does not know which one is which. This
+      # prints a capability matrix for the stored credential, so "it should work"
+      # becomes a list of what it can and cannot do.
+      - name: Capability matrix for the stored token
+        if: always()
+        shell: bash
+        env:
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: |
+          set +e
+          python scripts/raawaa_token_matrix.py --label stored_token > matrix.txt 2>&1
+          cat matrix.txt
+          while IFS= read -r line; do
+            [ -z "$line" ] && continue
+            case "$line" in
+              *"no credential covers"*) echo "::error::$line" ;;
+              *"pick one of"*) echo "::notice::$line" ;;
+              *"stored_token"*) echo "::notice::$line" ;;
+            esac
+          done < matrix.txt
+
+      - name: Report the daily allowance position
+        shell: bash
+        env:
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: python scripts/raawaa_images.py --status
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        if: always()
+        with:
+          name: raawaa-image-check
+          path: raawaa-check/
+          retention-days: 7

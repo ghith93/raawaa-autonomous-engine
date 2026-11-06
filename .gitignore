@@ -11,3 +11,6 @@ coverage/
 dist/
 build/
 data/
+
+# Generated Raawaa media: large binaries stay out of git history.
+raawaa/out/

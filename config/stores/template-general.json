@@ -1,0 +1,35 @@
+{
+  "schema_version": 1,
+  "store_id": "general-demo",
+  "brand_ar": "قالب متجر عام",
+  "brand_latin": "GENERAL STORE",
+  "tagline_ar": "قالب جاهز لإطلاق أي متجر أو منتج جديد خلال دقائق",
+  "subtitle_ar": "انسخ هذا الملف باسم المتجر الجديد وعدّل الأصناف والأسعار ليشتغل تلقائيًا على نفس البنية التحتية ولوحة الطلبات.",
+  "currency": "USD",
+  "whatsapp_e164": "963997310856",
+  "whatsapp_display": "0997 310 856",
+  "primary_zone_id": "hama",
+  "prepaid_discount_pct": 5,
+  "prepaid_discount_methods": ["sham_cash"],
+  "allowed_payments": ["cod", "sham_cash", "syriatel_cash", "mtn_cash"],
+  "inspection_policy_ar": "افحص سلامة الطرد ومطابقة الصنف والختم الخارجي أمام المندوب قبل الدفع.",
+  "preparation_promise_ar": "يُجهَّز الطلب ويُسلَّم لشركة الشحن خلال ٢٤ ساعة عمل.",
+  "items": [
+    {
+      "sku": "sku-standard",
+      "title_ar": "صنف قياسي (مرتجع قابل لإعادة البيع)",
+      "short_ar": "قياسي",
+      "subtitle_ar": "مثال لمنتج غير تجميلي يعود للمخزون سليمًا عند رفض الاستلام",
+      "unit_price": 24.0,
+      "unit_cost_estimate": 11.0,
+      "free_delivery": false,
+      "spoilage_rate": 0.05,
+      "repack_cost": 0.25,
+      "badge_ar": ""
+    }
+  ],
+  "zones": [
+    {"zone_id": "hama", "label_ar": "حماة", "fee": 2.0, "courier_cost": 2.0, "refusal_cost": 1.0},
+    {"zone_id": "other_gov", "label_ar": "باقي المحافظات", "fee": 2.0, "courier_cost": 2.0, "refusal_cost": 1.0}
+  ]
+}

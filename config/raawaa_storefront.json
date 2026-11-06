@@ -1,0 +1,118 @@
+{
+  "mode": "order_request_not_payment",
+  "why_ar": "لا بوابة دفع داخل سوريا. النموذج لا يقبض مالًا: يجمع الطلب ثم يؤكده إنسان عبر واتساب. أي زر «ادفع الآن» بلا بوابة = فقدان ثقة فوري.",
+  "schema": {
+    "required": [
+      "name",
+      "phone",
+      "city",
+      "sku"
+    ],
+    "optional": [
+      "address",
+      "notes",
+      "preferred_time",
+      "delivery_type"
+    ],
+    "max_lengths": {
+      "name": 60,
+      "phone": 20,
+      "city": 40,
+      "address": 160,
+      "notes": 300
+    },
+    "sku_values": [
+      "30ml",
+      "50ml",
+      "100ml",
+      "duo-50",
+      "starter-30-50"
+    ],
+    "delivery_values": [
+      "home",
+      "governorate"
+    ]
+  },
+  "phone_rule_ar": "أرقام سورية: 09xxxxxxxx أو +9639xxxxxxxx. ارفض أي رقم لا يطابق النمط قبل الحفظ — هذا يخفض الشحنات المرفوضة أكثر من أي شيء آخر في مرحلة الإطلاق.",
+  "phone_patterns": [
+    "^09\\d{8}$",
+    "^\\+9639\\d{8}$",
+    "^009639\\d{8}$"
+  ],
+  "confirmation_ar": "لا يُعتبر الطلب مؤكدًا إلا بعد تأكيد هاتفي أو رسالة واتساب. الحالة: request → confirmed → prepared → shipped → delivered | refused",
+  "idempotency_ar": "مفتاح الطلب = hash(phone + sku + تاريخ اليوم). نفس العميلة تضغط مرتين لا تُنشئ طلبين.",
+  "capacity": {
+    "max_orders_per_day": 0,
+    "zero_means_ar": "٠ = بلا حد. لا تضع سقفًا لا تملكه.",
+    "optional_cap_note_ar": "إن أردت سقفًا حقيقيًا يومًا ما، ضعه هنا فقط إن كان صحيحًا وطبّقته فعليًا."
+  },
+  "funnel_stages": [
+    "visit",
+    "product_view",
+    "form_start",
+    "form_submit",
+    "whatsapp_open",
+    "confirmed",
+    "delivered",
+    "refused",
+    "reordered"
+  ],
+  "funnel_priority_ar": "المقياس الحقيقي هو form_submit → confirmed. أي تسرّب هناك يُصلح بنص الصفحة لا بإعلان جديد.",
+  "pages": [
+    {
+      "id": "home",
+      "sections": [
+        "هوية بسيطة",
+        "المنتج والصورة الحقيقية",
+        "الأحجام والأسعار",
+        "الحزم",
+        "كيف تطلب (٣ خطوات)",
+        "توصيل ودفع",
+        "أسئلة شائعة",
+        "زر الطلب"
+      ],
+      "rule_ar": "لا شهادات قبل وجود شهادات. لا عدّاد وهمي. لا «آخر قطعة»."
+    },
+    {
+      "id": "product",
+      "sections": [
+        "صورة رئيسية",
+        "ماذا يفعل وماذا لا يفعل",
+        "طريقة الاستخدام",
+        "المكوّنات والحجم",
+        "التوصيل",
+        "زر الطلب"
+      ],
+      "rule_ar": "قسم «ماذا لا يفعل» يرفع الثقة ويخفض الإرجاع. اكتبه بصراحة."
+    },
+    {
+      "id": "thanks",
+      "sections": [
+        "رقم الطلب",
+        "ماذا يحدث الآن",
+        "رقم واتساب",
+        "زمن التجهيز الفعلي"
+      ],
+      "rule_ar": "أخبر العميلة بالوعد الحقيقي فقط: يُجهَّز خلال ٢٤ ساعة."
+    }
+  ],
+  "trust_blockers_ar": [
+    "لا بوابة دفع → وضّح أن الدفع عند الاستلام أو شام كاش قبل الطلب لا بعده",
+    "لا شهادات بعد → عوّض بذكر أن المؤسِّس صيدلاني وبأن التجهيز عند الطلب",
+    "لا عنوان فيزيائي → إن وُجد عنوان صيدلية فاذكره، فهو أقوى من أي شعار"
+  ],
+  "analytics": {
+    "store": "D1",
+    "events_ar": [
+      "page_view",
+      "product_view",
+      "form_start",
+      "form_submit",
+      "whatsapp_click",
+      "order_confirmed",
+      "order_delivered",
+      "order_refused"
+    ],
+    "weekly_report_ar": "٥ أرقام فقط: زيارات، طلبات، مؤكدة، مُسلّمة، مرفوضة"
+  }
+}

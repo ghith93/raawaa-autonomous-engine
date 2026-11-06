@@ -1,0 +1,108 @@
+{
+  "schema_version": 1,
+  "store_id": "raawaa",
+  "brand_ar": "رواء",
+  "brand_latin": "RAWAA",
+  "tagline_ar": "لمعان يُرى، ونعومة تُلمَس",
+  "subtitle_ar": "سيروم تصفيف وعناية تجميلية بالشعر بالأرغان والبانثينول — بإشراف صيدلاني ومختصين، يُحضَّر عند الطلب خلال ٢٤ ساعة.",
+  "currency": "USD",
+  "whatsapp_e164": "963997310856",
+  "whatsapp_display": "0997 310 856",
+  "primary_zone_id": "hama",
+  "prepaid_discount_pct": 10,
+  "prepaid_discount_methods": ["sham_cash"],
+  "allowed_payments": ["cod", "sham_cash", "syriatel_cash", "mtn_cash"],
+  "inspection_policy_ar": "افحص العبوة الزجاجية والملصق وتاريخ التحضير وسلامة ختم الأمان أمام المندوب قبل الدفع. إن لم تطابق ما طلبته، لا تدفع شيئًا.",
+  "preparation_promise_ar": "تُحضَّر كل عبوة عند الطلب وتُسلَّم للشحن خلال ٢٤ ساعة.",
+  "items": [
+    {
+      "sku": "30ml",
+      "title_ar": "سيروم رواء ٣٠ مل — الحجم التجريبي",
+      "short_ar": "٣٠ مل",
+      "subtitle_ar": "للتعرّف على الملمس واللمعة أو لحقيبة السفر · التوصيل مشمول مجانًا",
+      "size_ml": 30,
+      "unit_price": 15.0,
+      "unit_cost_estimate": 3.0,
+      "free_delivery": true,
+      "spoilage_rate": 1.0,
+      "badge_ar": ""
+    },
+    {
+      "sku": "50ml",
+      "title_ar": "سيروم رواء ٥٠ مل — الحجم اليومي",
+      "short_ar": "٥٠ مل",
+      "subtitle_ar": "الحجم الأنسب للاستعمال المنتظم على الأطراف · التوصيل مشمول مجانًا",
+      "size_ml": 50,
+      "unit_price": 18.0,
+      "unit_cost_estimate": 3.5,
+      "free_delivery": true,
+      "spoilage_rate": 1.0,
+      "badge_ar": "الأكثر طلبًا",
+      "featured": true
+    },
+    {
+      "sku": "100ml",
+      "title_ar": "سيروم رواء ١٠٠ مل — العبوة الكبيرة",
+      "short_ar": "١٠٠ مل",
+      "subtitle_ar": "أفضل قيمة لكل ملليلتر للروتين المستمر · التوصيل مشمول مجانًا",
+      "size_ml": 100,
+      "unit_price": 27.0,
+      "unit_cost_estimate": 4.0,
+      "free_delivery": true,
+      "spoilage_rate": 1.0,
+      "badge_ar": "أفضل قيمة / مل"
+    },
+    {
+      "sku": "starter-30-50",
+      "title_ar": "حزمة التجربة والروتين (٣٠ مل + ٥٠ مل)",
+      "short_ar": "٣٠ + ٥٠ مل",
+      "subtitle_ar": "عبوة للمنزل وعبوة للحقيبة في طرد واحد · التوصيل مشمول مجانًا",
+      "size_ml": 80,
+      "unit_price": 30.0,
+      "unit_cost_estimate": 6.5,
+      "free_delivery": true,
+      "spoilage_rate": 1.0,
+      "badge_ar": "توفير شحنة واحدة"
+    },
+    {
+      "sku": "duo-50",
+      "title_ar": "حزمة العبوتين (٢ × ٥٠ مل)",
+      "short_ar": "٢ × ٥٠ مل",
+      "subtitle_ar": "عبوتان ٥٠ مل في شحنة واحدة لكِ أو لمشاركتها · التوصيل مشمول مجانًا",
+      "size_ml": 100,
+      "unit_price": 32.0,
+      "unit_cost_estimate": 7.0,
+      "free_delivery": true,
+      "spoilage_rate": 1.0,
+      "badge_ar": "عرض الإطلاق الصادق"
+    }
+  ],
+  "scents": [
+    {"id": "unscented", "label_ar": "بلا عطر (التركيبة النقية)"},
+    {"id": "vanilla", "label_ar": "فانيلا دافئة"},
+    {"id": "rose", "label_ar": "ورد دمشقي هادئ"},
+    {"id": "oud", "label_ar": "عود شرقي ناعم"},
+    {"id": "lavender", "label_ar": "لافندر"},
+    {"id": "rosemary", "label_ar": "إكليل الجبل"}
+  ],
+  "zones": [
+    {"zone_id": "hama", "label_ar": "حماة", "fee": 0.0, "courier_cost": 2.0, "refusal_cost": 1.0},
+    {"zone_id": "damascus", "label_ar": "دمشق وريفها", "fee": 0.0, "courier_cost": 2.0, "refusal_cost": 1.0},
+    {"zone_id": "homs", "label_ar": "حمص", "fee": 0.0, "courier_cost": 2.0, "refusal_cost": 1.0},
+    {"zone_id": "aleppo", "label_ar": "حلب", "fee": 0.0, "courier_cost": 2.0, "refusal_cost": 1.0},
+    {"zone_id": "latakia", "label_ar": "اللاذقية", "fee": 0.0, "courier_cost": 2.0, "refusal_cost": 1.0},
+    {"zone_id": "tartous", "label_ar": "طرطوس", "fee": 0.0, "courier_cost": 2.0, "refusal_cost": 1.0},
+    {"zone_id": "idlib", "label_ar": "إدلب", "fee": 0.0, "courier_cost": 2.0, "refusal_cost": 1.0},
+    {"zone_id": "other_gov", "label_ar": "باقي المحافظات", "fee": 0.0, "courier_cost": 2.0, "refusal_cost": 1.0}
+  ],
+  "what_it_does_ar": [
+    "يمنح أطراف الشعر مظهرًا أكثر نعومة وانسيابية ولمعة طبيعية غير دهنية.",
+    "يخفف مظهر التطاير والكهرباء الساكنة ويسهّل التسريح اليومي.",
+    "يُحضَّر عند الطلب ببيانات واضحة على الملصق: المكوّنات، الحجم، رقم التشغيلة، وتاريخ التحضير."
+  ],
+  "what_it_does_not_do_ar": [
+    "ليس دواءً ولا يعالج تساقط الشعر الوراثي أو المرضي ولا ينبت بصيلات جديدة.",
+    "لا يُغني عن استشارة طبيب الجلدية في حالات القشرة الشديدة أو التهاب الفروة.",
+    "لا ننشر صور قبل/بعد مولّدة بالذكاء الاصطناعي ولا شهادات مختلقة."
+  ]
+}
