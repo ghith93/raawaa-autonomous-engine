@@ -79,6 +79,28 @@ function dbMock(options = {}) {
   };
 }
 
+test("specialist stale recovery requires its own capability token", async () => {
+  const DB = dbMock();
+  const response = await worker.fetch(request("/v1/tasks/recover", {
+    method: "POST", body: { worker_lane: "specialist:researcher" },
+  }), { DB, ENGINE_API_TOKEN: TOKEN });
+  assert.equal(response.status, 401);
+  assert.deepEqual(await response.json(), { error: "lane_unauthorized" });
+  assert.equal(DB.calls.length, 0);
+});
+
+test("general stale recovery only selects general-lane leases", async () => {
+  const DB = dbMock();
+  const response = await worker.fetch(request("/v1/tasks/recover", {
+    method: "POST", body: { worker_lane: "general" },
+  }), { DB, ENGINE_API_TOKEN: TOKEN });
+  assert.equal(response.status, 200);
+  const query = DB.calls.find(call => call.kind === "all" &&
+    call.sql.includes("SELECT id,attempts,max_attempts,lease_token"));
+  assert.match(query.sql, /execution_lane=\?/);
+  assert.deepEqual(query.values.slice(1), ["general"]);
+});
+
 test("specialist claim requires a dedicated lane capability token", async () => {
   const DB = dbMock();
   const response = await worker.fetch(request("/v1/tasks/claim", {
