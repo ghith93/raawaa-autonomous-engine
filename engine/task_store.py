@@ -43,7 +43,7 @@ class TaskStore:
               priority INTEGER NOT NULL DEFAULT 50 CHECK(priority BETWEEN 0 AND 100),
               dependencies_json TEXT NOT NULL DEFAULT '[]',
               execution_lane TEXT NOT NULL DEFAULT 'general'
-                CHECK(execution_lane IN ('general','specialist:researcher','specialist:reviewer','specialist:marketer','specialist:operator'))
+                CHECK(execution_lane IN ('general','specialist:researcher','specialist:reviewer','specialist:marketer','specialist:operator','specialist:mobile_tester'))
             );
             CREATE INDEX IF NOT EXISTS idx_tasks_status_created ON tasks(status, created_at);
             CREATE TABLE IF NOT EXISTS audit_log (
@@ -99,7 +99,7 @@ class TaskStore:
             raise ValueError("task_type and title are required")
         lane_to_task = {"specialist:researcher": "research_brief", "specialist:reviewer": "code_review",
                         "specialist:marketer": "content_draft", "specialist:operator": "system_audit",
-                        }
+                        "specialist:mobile_tester": "mobile_test"}
         if execution_lane != "general" and lane_to_task.get(execution_lane) != task_type:
             raise ValueError("execution_lane does not match task_type specialist contract")
         if execution_lane not in {"general", *lane_to_task}:
@@ -162,7 +162,7 @@ class TaskStore:
             raise ValueError("lease_timeout_seconds must be positive")
         if execution_mode not in {"unknown", "dry_run", "live_inference"}:
             raise ValueError("invalid execution_mode")
-        if worker_lane not in {"general", "specialist:researcher", "specialist:reviewer", "specialist:marketer", "specialist:operator"}:
+        if worker_lane not in {"general", "specialist:researcher", "specialist:reviewer", "specialist:marketer", "specialist:operator", "specialist:mobile_tester"}:
             raise ValueError("invalid worker_lane")
         with self._connect() as db:
             db.execute("BEGIN IMMEDIATE")
@@ -297,7 +297,7 @@ class TaskStore:
             raise ValueError("lease_timeout_seconds must be positive")
         if worker_lane is not None and worker_lane not in {
             "general", "specialist:researcher", "specialist:reviewer",
-            "specialist:marketer", "specialist:operator",
+            "specialist:marketer", "specialist:operator", "specialist:mobile_tester",
         }:
             raise ValueError("invalid worker_lane")
         now = datetime.now(timezone.utc).isoformat()
