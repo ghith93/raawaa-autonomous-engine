@@ -42,8 +42,21 @@ class FakeStore:
             return self.mobile
         if path == "/v1/monetary-ledger" and method == "POST":
             self.settlement_calls.append(payload)
+            settled_row = {
+                "reservation_id": payload["reservation_id"],
+                "task_id": smoke.PREVIOUS_AMBIGUOUS_TASK_ID,
+                "provider": "groq",
+                "model": "openai/gpt-oss-20b",
+                "status": "settled",
+                "estimated_cost_nanos": 0,
+                "actual_cost_nanos": 0,
+                "input_tokens": 0,
+                "output_tokens": 0,
+            }
             self.global_snapshot = {"task_pending_count": 0, "unresolved": []}
-            self.task_snapshot = {"task_pending_count": 0, "unresolved": []}
+            self.task_snapshot = {
+                "task_pending_count": 0, "unresolved": [], "settled": [settled_row]
+            }
             return {"ok": True, "settled": True, "over_budget": False}
         if path == "/v1/monetary-ledger":
             return {"snapshot": self.global_snapshot}
@@ -90,6 +103,51 @@ class GroqSmokeRecoveryTests(unittest.TestCase):
             "input_tokens": 0,
             "output_tokens": 0,
         }])
+
+    def test_accepts_exact_previously_settled_reservation_without_mutation_or_replay(self):
+        row = {
+            "reservation_id": "d4d9f02e-82d4-4d3a-8f50-6fd5a5a03d41",
+            "task_id": smoke.PREVIOUS_AMBIGUOUS_TASK_ID,
+            "provider": "groq",
+            "model": "openai/gpt-oss-20b",
+            "status": "settled",
+            "estimated_cost_nanos": 0,
+            "actual_cost_nanos": 0,
+            "input_tokens": 0,
+            "output_tokens": 0,
+        }
+        snapshot = {"task_pending_count": 0, "unresolved": [], "settled": [row]}
+        store = FakeStore(
+            [{"id": smoke.PREVIOUS_AMBIGUOUS_TASK_ID, "status": "blocked"}],
+            snapshot,
+            global_snapshot={"task_pending_count": 0, "unresolved": []},
+        )
+        result = smoke._verify_previous_ambiguous_task(store)
+        self.assertEqual(result["reservation_status"], "already_settled")
+        self.assertEqual(result["reservation_id"], row["reservation_id"])
+        self.assertEqual(store.settlement_calls, [])
+        self.assertEqual(store.recover_calls, [smoke.EXECUTION_LANE])
+
+    def test_refuses_already_settled_reservation_with_nonzero_cost_or_tokens(self):
+        row = {
+            "reservation_id": "d4d9f02e-82d4-4d3a-8f50-6fd5a5a03d41",
+            "task_id": smoke.PREVIOUS_AMBIGUOUS_TASK_ID,
+            "provider": "groq",
+            "model": "openai/gpt-oss-20b",
+            "status": "settled",
+            "estimated_cost_nanos": 0,
+            "actual_cost_nanos": 1,
+            "input_tokens": 0,
+            "output_tokens": 0,
+        }
+        snapshot = {"task_pending_count": 0, "unresolved": [], "settled": [row]}
+        store = FakeStore(
+            [{"id": smoke.PREVIOUS_AMBIGUOUS_TASK_ID, "status": "blocked"}],
+            snapshot,
+        )
+        with self.assertRaisesRegex(SystemExit, "lacks one exact settled zero-cost reservation"):
+            smoke._verify_previous_ambiguous_task(store)
+        self.assertEqual(store.settlement_calls, [])
 
     def test_refuses_if_previous_ambiguous_task_is_still_running(self):
         store = self.store(keep_running=True)
