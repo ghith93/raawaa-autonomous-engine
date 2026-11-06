@@ -55,10 +55,7 @@ def main() -> int:
         reason = report.get("stop_reason", "invalid_or_missing_report")
         print(f"{lane}: exit={completed.returncode}, tasks_processed={processed}, stop_reason={reason}")
         if completed.returncode != 0:
-            # Emit a bounded, credential-free diagnostic; never print task payloads or env.
-            diagnostic = (completed.stderr or "").strip().splitlines()
-            if diagnostic:
-                print(f"{lane}: {diagnostic[-1][:300]}")
+            # Do not echo subprocess stderr: provider and transport exceptions may contain sensitive context.
             failures += 1
     if enabled == 0:
         print("No specialist lane capabilities are configured; no specialist tasks were claimed.")
