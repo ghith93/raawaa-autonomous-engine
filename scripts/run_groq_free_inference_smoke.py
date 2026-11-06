@@ -126,6 +126,46 @@ def _verify_previous_ambiguous_task(store: RemoteTaskStore) -> dict:
         and row.get("status") == "ambiguous"
         and int(row.get("estimated_cost_nanos", -1)) == 0
     ]
+    if len(matches) == 0 and int(snapshot.get("task_pending_count", -1)) == 0 and not unresolved:
+        # Idempotent re-run after the exact zero-cost reservation was already settled.
+        # Require proof that this task really reached the provider adapter and failed
+        # ambiguously; a missing reservation alone is never accepted as settlement.
+        quota = store._request(
+            "/v1/quota?" + urlencode({
+                "route_id": "groq:primary:openai/gpt-oss-20b",
+                "task_id": PREVIOUS_AMBIGUOUS_TASK_ID,
+            })
+        )
+        usage = quota.get("usage", {}).get("task", {})
+        events = quota.get("audit", [])
+        has_reservation = any(
+            row.get("event") == "quota_reserved" for row in events if isinstance(row, dict)
+        )
+        has_ambiguous_failure = any(
+            row.get("event") == "adapter_failure"
+            and isinstance(row.get("details"), dict)
+            and row["details"].get("reason") == "ambiguous_adapter_failure"
+            for row in events if isinstance(row, dict)
+        )
+        mobile = store._request("/v1/mobile/status")
+        ledger = mobile.get("monetary_ledger", {})
+        if (
+            int(usage.get("requests", 0)) < 1 or int(usage.get("tokens", 0)) < 1
+            or not has_reservation or not has_ambiguous_failure
+            or not ledger.get("available") or ledger.get("pending_count") != 0
+            or ledger.get("ambiguous_count") != 0 or ledger.get("daily_spent_usd") != 0
+            or ledger.get("monthly_spent_usd") != 0
+        ):
+            raise SystemExit("Refusing smoke: prior reservation is absent without verified zero-cost settlement evidence.")
+        return {
+            "task_id": PREVIOUS_AMBIGUOUS_TASK_ID,
+            "task_status": previous.get("status"),
+            "stale_recovery": recovery,
+            "reservation_id": None,
+            "reservation_status": "already_settled",
+            "actual_cost_nanos": 0,
+            "token_quota_estimate_preserved": True,
+        }
     if len(matches) != 1 or int(snapshot.get("task_pending_count", -1)) != 1:
         raise SystemExit(
             "Refusing smoke: prior ambiguous reservation does not match the exact zero-cost record."
