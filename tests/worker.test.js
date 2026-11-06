@@ -404,6 +404,38 @@ test("unknown routes are not exposed", async () => {
   assert.equal(response.status, 404);
 });
 
+test("general task invocation requires the general lane capability", async () => {
+  const DB = dbMock();
+  const response = await rawWorker.fetch(request("/v1/tasks/task-1/invocations", {
+    method: "POST", body: { action: "prepare", lease_token: "lease-1", worker_lane: "general" },
+    extraHeaders: { "x-engine-lane-token": "" },
+  }), { DB, ENGINE_API_TOKEN: TOKEN });
+  assert.equal(response.status, 401);
+  assert.equal(DB.calls.length, 0);
+});
+
+test("specialist capability cannot mutate a general task invocation", async () => {
+  const researcherToken = "researcher-lane-token-0123456789abcdef0123456789";
+  const DB = dbMock({ laneTask: { execution_lane: "general" } });
+  const response = await worker.fetch(request("/v1/tasks/task-1/invocations", {
+    method: "POST", body: { action: "prepare", lease_token: "lease-1",
+      step_key: "step", task_kind: "research_brief", worker_lane: "specialist:researcher" },
+    extraHeaders: { "x-engine-lane-token": researcherToken },
+  }), { DB, ENGINE_API_TOKEN: TOKEN, ENGINE_RESEARCHER_LANE_TOKEN: researcherToken });
+  assert.equal(response.status, 403);
+  assert.equal(DB.calls.some(call => call.kind === "run"), false);
+});
+
+test("general capability cannot mutate a specialist task invocation", async () => {
+  const DB = dbMock({ laneTask: { execution_lane: "specialist:researcher" } });
+  const response = await worker.fetch(request("/v1/tasks/task-1/invocations", {
+    method: "POST", body: { action: "prepare", lease_token: "lease-1",
+      step_key: "step", task_kind: "research_brief", worker_lane: "general" },
+  }), { DB, ENGINE_API_TOKEN: TOKEN });
+  assert.equal(response.status, 403);
+  assert.equal(DB.calls.some(call => call.kind === "run"), false);
+});
+
 test("task invocation lifecycle route is authenticated", async () => {
   const response = await worker.fetch(request("/v1/tasks/task-1/invocations", {
     method: "POST", token: null, body: { action: "prepare" },
