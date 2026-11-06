@@ -5,8 +5,6 @@ on:
     # Primary GitHub cadence; the Cloudflare watchdog is a separately gated fallback.
     # Refresh the schedule registration without changing the five-minute cadence; avoid minute 0 load.
     - cron: "2,7,12,17,22,27,32,37,42,47,52,57 * * * *"
-    # Separate specialist cadence; consumers have isolated capability tokens and remain dry-run only.
-    - cron: "*/15 * * * *"
   workflow_dispatch:
     inputs:
       run_public_research_once:
@@ -25,7 +23,7 @@ concurrency:
 
 jobs:
   run-batch:
-    if: github.ref == 'refs/heads/main' && (github.event_name != 'schedule' || github.event.schedule != '*/15 * * * *')
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 3
     steps:
@@ -303,30 +301,3 @@ jobs:
               });
             }
 
-  run-specialist-lanes:
-    if: github.ref == 'refs/heads/main' && github.event_name == 'schedule' && github.event.schedule == '*/15 * * * *'
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    concurrency:
-      group: d1-specialist-lane-runner
-      cancel-in-progress: false
-    steps:
-      - name: Check out reviewed main
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-      - name: Set up Python
-        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7
-        with:
-          python-version: "3.11"
-      - name: Run configured specialist consumers (bounded dry-run only)
-        env:
-          RAAWAA_ENGINE_API_URL: https://raawaa-autonomous-engine-control.ghith-shikhkhaled.workers.dev
-          RAAWAA_ENGINE_API_TOKEN: ${{ secrets.ENGINE_API_TOKEN }}
-          RAAWAA_ENGINE_QUOTA_ADMIN_TOKEN: ${{ secrets.ENGINE_QUOTA_ADMIN_TOKEN }}
-          RAAWAA_ENGINE_CF_ACCESS_CLIENT_ID: ${{ secrets.CF_ACCESS_CLIENT_ID }}
-          RAAWAA_ENGINE_CF_ACCESS_CLIENT_SECRET: ${{ secrets.CF_ACCESS_CLIENT_SECRET }}
-          RAAWAA_ENGINE_RESEARCHER_LANE_TOKEN: ${{ secrets.ENGINE_RESEARCHER_LANE_TOKEN }}
-          RAAWAA_ENGINE_REVIEWER_LANE_TOKEN: ${{ secrets.ENGINE_REVIEWER_LANE_TOKEN }}
-          RAAWAA_ENGINE_MARKETER_LANE_TOKEN: ${{ secrets.ENGINE_MARKETER_LANE_TOKEN }}
-          RAAWAA_ENGINE_OPERATOR_LANE_TOKEN: ${{ secrets.ENGINE_OPERATOR_LANE_TOKEN }}
-          RAAWAA_ENGINE_MOBILE_TESTER_LANE_TOKEN: ${{ secrets.ENGINE_MOBILE_TESTER_LANE_TOKEN }}
-        run: python scripts/run_specialist_lanes.py
