@@ -7,7 +7,6 @@ from scripts.run_staging_d1_claim_contention import (
     StagingContentionProofError,
     run_proof,
     retire_stale_pending_proof_tasks,
-    retire_stale_running_proof_tasks,
     validate_environment,
 )
 
