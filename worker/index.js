@@ -257,8 +257,8 @@ async function recoverStaleTasks(env, workerLane = null) {
   for (const task of stale.results || []) {
     const status = task.attempts < task.max_attempts ? "pending" : "failed";
     statements.push(env.DB.prepare(
-      "UPDATE tasks SET status=?,error=?,updated_at=?,lease_token=NULL,lease_expires_at=NULL WHERE id=? AND status='running' AND lease_token IS ? AND (lease_expires_at IS NULL OR lease_expires_at < ?)"
-    ).bind(status, "Recovered expired worker lease.", nowIso, task.id, task.lease_token, nowIso));
+      "UPDATE tasks SET status=?,error=?,updated_at=?,lease_token=NULL,lease_expires_at=NULL WHERE id=? AND status='running' AND lease_token IS ? AND (lease_expires_at IS NULL OR lease_expires_at < ?) AND (? IS NULL OR execution_lane=?)"
+    ).bind(status, "Recovered expired worker lease.", nowIso, task.id, task.lease_token, nowIso, workerLane, workerLane));
     statements.push(env.DB.prepare(
       "INSERT INTO audit_log(task_id,event,details_json,created_at) SELECT id,'task_lease_recovered',?,? FROM tasks WHERE id=? AND status=? AND updated_at=?"
     ).bind(JSON.stringify({ new_status: status, attempt: task.attempts, max_attempts: task.max_attempts }), nowIso, task.id, status, nowIso));
