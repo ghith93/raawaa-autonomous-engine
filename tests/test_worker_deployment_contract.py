@@ -26,6 +26,7 @@ TEST_STEP_NAMES = [
     "Validate deployment secrets",
     "Refuse to deploy with an unapplied migration",
     "Verify the deployed Worker already accepts the repository bearer token",
+    "Verify the deployed Worker accepts the general consumer capability",
     "Deploy authenticated D1 control Worker",
     "Verify authenticated watchdog readiness without exposing secrets",
     "Verify the deployed Worker can see the schema it depends on",
