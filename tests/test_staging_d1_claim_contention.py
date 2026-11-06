@@ -7,6 +7,7 @@ from scripts.run_staging_d1_claim_contention import (
     StagingContentionProofError,
     run_proof,
     retire_stale_pending_proof_tasks,
+    retire_stale_running_proof_tasks,
     validate_environment,
 )
 
@@ -183,16 +184,16 @@ class StagingContentionProofTests(unittest.TestCase):
             def list_tasks(self, _limit):
                 return [dict(row) for row in self.rows]
 
-            def recover_stale(self, lease_timeout_seconds=900, worker_lane="general"):
+            def recover_stale(self, lease_timeout_seconds=900, worker_lane="general", task_id=None):
                 self.recovery_calls += 1
-                self.assertions = (lease_timeout_seconds, worker_lane)
+                self.assertions = (lease_timeout_seconds, worker_lane, task_id)
                 self.rows[0]["status"] = "failed"
                 return {"requeued": 0, "failed": 1}
 
         store = RecoveryStore()
-        self.assertEqual(retire_stale_pending_proof_tasks(store), 1)
+        self.assertEqual(retire_stale_running_proof_tasks(store), 1)
         self.assertEqual(store.recovery_calls, 1)
-        self.assertEqual(store.assertions, (900, "general"))
+        self.assertEqual(store.assertions, (900, "general", "stale-running-proof"))
         self.assertEqual(store.rows[0]["status"], "failed")
         self.assertEqual(store.rows[1]["status"], "pending")
 
@@ -217,8 +218,7 @@ class StagingContentionProofTests(unittest.TestCase):
                 return {"requeued": 1, "failed": 0}
 
         store = RecoveryStore()
-        with self.assertRaises(StagingContentionProofError):
-            retire_stale_pending_proof_tasks(store)
+        self.assertEqual(retire_stale_running_proof_tasks(store), 0)
         self.assertEqual(store.recovery_calls, 0)
         self.assertEqual(store.rows[0]["status"], "running")
 
@@ -253,7 +253,7 @@ class StagingContentionProofTests(unittest.TestCase):
 
         store = RecoveryStore()
         with self.assertRaises(StagingContentionProofError):
-            retire_stale_pending_proof_tasks(store)
+            retire_stale_running_proof_tasks(store)
         self.assertEqual(store.recovery_calls, 0)
 
     def test_only_exact_running_contention_proof_is_recovered_by_task_id(self):
@@ -272,6 +272,7 @@ class StagingContentionProofTests(unittest.TestCase):
                         "execution_mode": "dry_run",
                         "priority": 100,
                         "dependencies_json": "[]",
+                        "lease_expires_at": "2020-01-01T00:00:00Z",
                     },
                     {
                         "id": "unrelated-running",
@@ -285,14 +286,14 @@ class StagingContentionProofTests(unittest.TestCase):
             def list_tasks(self, _limit):
                 return [dict(row) for row in self.rows]
 
-            def recover_stale(self, worker_lane="general", task_id=None):
+            def recover_stale(self, worker_lane="general", task_id=None, lease_timeout_seconds=900):
                 self.recovery_calls.append((worker_lane, task_id))
                 row = next(row for row in self.rows if row["id"] == task_id)
                 row["status"] = "failed"
                 return {"requeued": 0, "failed": 1}
 
         store = CleanupStore()
-        self.assertEqual(retire_stale_pending_proof_tasks(store), 1)
+        self.assertEqual(retire_stale_running_proof_tasks(store), 1)
         self.assertEqual(store.recovery_calls, [("general", "expired-proof")])
         states = {row["id"]: row["status"] for row in store.rows}
         self.assertEqual(states["expired-proof"], "failed")
@@ -321,8 +322,8 @@ class StagingContentionProofTests(unittest.TestCase):
             def recover_stale(self, worker_lane="general", task_id=None):
                 return {"requeued": 0, "failed": 0}
 
-        with self.assertRaisesRegex(StagingContentionProofError, "not expired"):
-            retire_stale_pending_proof_tasks(CleanupStore())
+        with self.assertRaisesRegex(StagingContentionProofError, "live lease"):
+            retire_stale_running_proof_tasks(CleanupStore())
 
     def test_two_concurrent_claims_have_one_winner_and_durable_completion(self):
         result = run_proof(self.env, store_factory=FakeStore, executor_factory=ThreadPoolExecutor)
