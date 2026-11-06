@@ -18,12 +18,32 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  smoke:
+  eligibility:
     if: >-
-      github.event.workflow_run.event == 'push' &&
       github.event.workflow_run.conclusion == 'success' &&
-      github.event.workflow_run.head_branch == 'main' &&
-      contains(github.event.workflow_run.head_commit.message, '[groq-specialist-smoke]')
+      github.event.workflow_run.head_branch == 'main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    outputs:
+      eligible: ${{ steps.marker.outputs.eligible }}
+    steps:
+      - name: Check out the exact completed main commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+          persist-credentials: false
+      - name: Check explicit one-shot marker in the exact completed commit
+        id: marker
+        run: |
+          if git log -1 --format=%B | grep -Fq '[groq-specialist-smoke]'; then
+            echo "eligible=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "eligible=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  smoke:
+    needs: eligibility
+    if: needs.eligibility.outputs.eligible == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -31,6 +51,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           ref: ${{ github.event.workflow_run.head_sha }}
+          persist-credentials: false
       - name: Set up Python
         uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7
         with:
