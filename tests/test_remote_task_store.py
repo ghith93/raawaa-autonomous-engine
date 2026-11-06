@@ -53,7 +53,7 @@ class RemoteTaskStoreTests(unittest.TestCase):
         })
         task = self.store.claim_next(execution_mode="dry_run")
         self.assertEqual(task["lease_token"], "lease-1")
-        self.assertEqual(json.loads(open_url.call_args.args[0].data), {"execution_mode": "dry_run"})
+        self.assertEqual(json.loads(open_url.call_args.args[0].data), {"execution_mode": "dry_run", "worker_lane": "general"})
         request = open_url.call_args.args[0]
         self.assertEqual(request.full_url, "https://engine.example/v1/tasks/claim")
         self.assertEqual(request.get_method(), "POST")
