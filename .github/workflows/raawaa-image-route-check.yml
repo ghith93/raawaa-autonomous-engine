@@ -30,6 +30,33 @@ jobs:
         with:
           python-version: "3.11"
 
+      # Every job in this repository used to demand one exact secret name, so the
+      # appearance of an alias broke it silently. The resolver accepts any alias for
+      # a role, and the doctor prints which name satisfied each role.
+      - name: Resolve credential roles and the owning account
+        shell: bash
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCESS_AUDIT_TOKEN: ${{ secrets.CLOUDFLARE_ACCESS_AUDIT_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          D1_DATABASE_ID: ${{ secrets.D1_DATABASE_ID }}
+        run: |
+          set +e
+          python scripts/raawaa_doctor.py --json doctor.json > doctor.log 2>&1
+          code=$?
+          cat doctor.log
+          while IFS= read -r line; do
+            [ -z "$line" ] && continue
+            case "$line" in
+              *"match=False"*)          echo "::warning::$line" ;;
+              *"  evidence"*)           echo "::notice::$line" ;;
+              *"  visible"*)            echo "::notice::$line" ;;
+              *"MISSING"*)              echo "::warning::$line" ;;
+              *"update CLOUDFLARE_ACCOUNT_ID"*) echo "::error::$line" ;;
+            esac
+          done < doctor.log
+          echo "doctor_exit=$code"
+
       - name: Confirm secrets are present (values never printed)
         shell: bash
         env:
