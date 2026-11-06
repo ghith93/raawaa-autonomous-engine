@@ -290,17 +290,24 @@ class TaskStore:
                         {"attempt": row["attempts"], "max_attempts": row["max_attempts"], "error": error})
             return status
 
-    def recover_stale(self, lease_timeout_seconds: int = 900) -> dict[str, int]:
-        """Requeue expired leases; the old worker is fenced by clearing its ownership token."""
+    def recover_stale(self, lease_timeout_seconds: int = 900,
+                     worker_lane: str | None = None) -> dict[str, int]:
+        """Requeue expired leases; optional lane scope keeps consumers in their ownership boundary."""
         if lease_timeout_seconds < 1:
             raise ValueError("lease_timeout_seconds must be positive")
+        if worker_lane is not None and worker_lane not in {
+            "general", "specialist:researcher", "specialist:reviewer",
+            "specialist:marketer", "specialist:operator", "specialist:mobile_tester",
+        }:
+            raise ValueError("invalid worker_lane")
         now = datetime.now(timezone.utc).isoformat()
         recovered = failed = 0
         with self._connect() as db:
             db.execute("BEGIN IMMEDIATE")
             rows = db.execute("""SELECT * FROM tasks WHERE status='running'
-                AND (lease_expires_at IS NULL OR lease_expires_at < ?) ORDER BY updated_at,id""",
-                (now,)).fetchall()
+                AND (lease_expires_at IS NULL OR lease_expires_at < ?)
+                AND (? IS NULL OR execution_lane=?) ORDER BY updated_at,id""",
+                (now, worker_lane, worker_lane)).fetchall()
             for row in rows:
                 status = "pending" if row["attempts"] < row["max_attempts"] else "failed"
                 db.execute("""UPDATE tasks SET status=?,error=?,updated_at=?,lease_token=NULL,
