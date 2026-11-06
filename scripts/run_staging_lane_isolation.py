@@ -30,17 +30,17 @@ def main() -> None:
     general = store.enqueue(
         "research_brief", "Staging general lane isolation proof",
         {"topic": "deterministic lane isolation test"},
-        idempotency_key=f"staging-lane-general:{suffix}",
+        idempotency_key=f"staging-lane-general:{suffix}", priority=100,
     )
     general_sentinel = store.enqueue(
         "research_brief", "Staging general lane sentinel",
         {"topic": "deterministic lane isolation test"},
-        idempotency_key=f"staging-lane-general-sentinel:{suffix}",
+        idempotency_key=f"staging-lane-general-sentinel:{suffix}", priority=90,
     )
     general_sentinel_last = store.enqueue(
         "research_brief", "Staging general lane final sentinel",
         {"topic": "deterministic lane isolation test"},
-        idempotency_key=f"staging-lane-general-final:{suffix}",
+        idempotency_key=f"staging-lane-general-final:{suffix}", priority=80,
     )
     specialist = store.enqueue(
         "research_brief", "Staging researcher lane isolation proof",
