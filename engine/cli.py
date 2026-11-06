@@ -211,7 +211,7 @@ def build_parser() -> argparse.ArgumentParser:
     enqueue.add_argument("--payload", default="{}")
     enqueue.add_argument("--key")
     enqueue.add_argument("--max-attempts", type=int, default=2)
-    enqueue.add_argument("--lane", choices=["general", "specialist:researcher", "specialist:reviewer", "specialist:marketer", "specialist:operator", "specialist:mobile_tester"], default="general")
+    enqueue.add_argument("--lane", choices=["general", "specialist:researcher", "specialist:reviewer", "specialist:marketer", "specialist:operator"], default="general")
 
     listing = sub.add_parser("list")
     listing.add_argument("--limit", type=int, default=50)
