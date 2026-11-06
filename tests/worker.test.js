@@ -1,15 +1,21 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import worker from "../worker/index.js";
+import rawWorker from "../worker/index.js";
 import { generateKeyPairSync } from "node:crypto";
 
 const TOKEN = "test-worker-token";
+const GENERAL_LANE_TOKEN = "test-general-lane-token-0123456789abcdef0123456789";
+const worker = {
+  fetch(request, env = {}) {
+    return rawWorker.fetch(request, { ENGINE_GENERAL_LANE_TOKEN: GENERAL_LANE_TOKEN, ...env });
+  },
+};
 const CODESPACE_TOKEN = "test-codespace-token-0123456789abcdef0123456789abcdef";
 const ADMIN_TOKEN = "test-quota-admin-token";
 const QUOTA_LIMITS = JSON.stringify({"groq:main:model":{enabled:true,minute_request_limit:5,minute_token_limit:1000,daily_request_limit:10,daily_token_limit:2000,monthly_request_limit:100,monthly_token_limit:20000,per_task_request_limit:3,per_task_token_limit:300}});
 
 function request(path, { method = "GET", token = TOKEN, body, extraHeaders = {} } = {}) {
-  const headers = { ...extraHeaders };
+  const headers = { "x-engine-lane-token": GENERAL_LANE_TOKEN, ...extraHeaders };
   if (token) headers.authorization = `Bearer ${token}`;
   if (body !== undefined) headers["content-type"] = "application/json";
   return new Request(`https://engine.example${path}`, {
@@ -128,6 +134,29 @@ test("specialist task readback returns only its lane", async () => {
   assert.equal(response.status, 200);
   const query = DB.calls.find(call => call.kind === "all" && call.sql.includes("FROM tasks WHERE execution_lane"));
   assert.deepEqual(query.values, ["specialist:researcher", 10]);
+});
+
+test("general task consumers require a dedicated general-lane capability", async () => {
+  const DB = dbMock();
+  const response = await rawWorker.fetch(request("/v1/tasks/claim", {
+    method: "POST", body: { execution_mode: "dry_run", worker_lane: "general" },
+    extraHeaders: { "x-engine-lane-token": "" },
+  }), { DB, ENGINE_API_TOKEN: TOKEN });
+  assert.equal(response.status, 401);
+  assert.equal(DB.calls.length, 0);
+});
+
+test("a specialist capability cannot be used to claim the general lane", async () => {
+  const researcherToken = "researcher-lane-token-0123456789abcdef0123456789";
+  const DB = dbMock();
+  const response = await worker.fetch(request("/v1/tasks/claim", {
+    method: "POST", body: { execution_mode: "dry_run", worker_lane: "general" },
+    extraHeaders: { "x-engine-lane-token": researcherToken },
+  }), {
+    DB, ENGINE_API_TOKEN: TOKEN, ENGINE_RESEARCHER_LANE_TOKEN: researcherToken,
+  });
+  assert.equal(response.status, 401);
+  assert.equal(DB.calls.length, 0);
 });
 
 test("specialist claim requires a dedicated lane capability token", async () => {
