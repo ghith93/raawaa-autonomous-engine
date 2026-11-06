@@ -33,7 +33,7 @@ class _RejectRedirects(HTTPRedirectHandler):
 MAX_ERROR_DETAIL_CHARS = 240
 VALID_WORKER_LANES = frozenset({
     "general", "specialist:researcher", "specialist:reviewer",
-    "specialist:marketer", "specialist:operator", "specialist:mobile_tester",
+    "specialist:marketer", "specialist:operator",
 })
 
 
