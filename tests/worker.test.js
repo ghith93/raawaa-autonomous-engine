@@ -777,14 +777,40 @@ test("finish rejects invalid and not-started execution modes without mutating ta
   }
 });
 
-test("recover endpoint is authenticated and bounded to stale task selection", async () => {
+test("recover endpoint is authenticated and scopes stale selection and writes to the general lane", async () => {
   const DB = dbMock();
   const response = await worker.fetch(request("/v1/tasks/recover", { method: "POST", body: {} }), {
     DB, ENGINE_API_TOKEN: TOKEN,
   });
   assert.equal(response.status, 200);
   assert.deepEqual(await response.json(), { requeued: 0, failed: 0 });
-  assert.ok(DB.calls.some(x => x.kind === "all" && x.sql.includes("lease_expires_at")));
+  const selection = DB.calls.find(x => x.kind === "all" && x.sql.includes("lease_expires_at"));
+  assert.match(selection.sql, /execution_lane=\?/);
+  assert.deepEqual(selection.values, ["general", "general"]);
+  const write = DB.calls.find(x => x.kind === "batch")?.statements?.find(x => x.sql.includes("UPDATE tasks SET status=?"));
+  if (write) {
+    assert.match(write.sql, /execution_lane=\?/);
+    assert.deepEqual(write.values.slice(-2), ["general", "general"]);
+  }
+});
+
+test("specialist stale recovery requires and applies its own capability", async () => {
+  const laneToken = "researcher-lane-token-0123456789abcdef0123456789";
+  const deniedDB = dbMock();
+  const denied = await worker.fetch(request("/v1/tasks/recover", {
+    method: "POST", body: { worker_lane: "specialist:researcher" },
+  }), { DB: deniedDB, ENGINE_API_TOKEN: TOKEN });
+  assert.equal(denied.status, 401);
+  assert.equal(deniedDB.calls.length, 0);
+
+  const DB = dbMock();
+  const response = await worker.fetch(request("/v1/tasks/recover", {
+    method: "POST", body: { worker_lane: "specialist:researcher" },
+    extraHeaders: { "x-engine-lane-token": laneToken },
+  }), { DB, ENGINE_API_TOKEN: TOKEN, ENGINE_RESEARCHER_LANE_TOKEN: laneToken });
+  assert.equal(response.status, 200);
+  const selection = DB.calls.find(x => x.kind === "all" && x.sql.includes("lease_expires_at"));
+  assert.deepEqual(selection.values, ["specialist:researcher", "specialist:researcher"]);
 });
 
 test("recover endpoint rejects unauthenticated callers", async () => {
