@@ -532,6 +532,8 @@ class QuotaAwareGatewayTests(unittest.TestCase):
             row["daily_tokens_used"],
             len(self.request.prompt.encode("utf-8")) + self.request.max_output_tokens,
         )
+        event = self.quota.audit_events()[0]
+        self.assertEqual(event["details"]["error_code"], "response_route_mismatch")
         self.assertEqual(self.usage.totals()["daily_usd"], 0.0)
 
     def test_empty_completion_is_rejected_by_live_gateway(self):
@@ -547,6 +549,9 @@ class QuotaAwareGatewayTests(unittest.TestCase):
         with self.assertRaisesRegex(ProviderUnavailable, "failed unexpectedly"):
             gateway.generate(self.request)
         self.assertEqual(manager.snapshot()[0]["daily_requests_used"], 1)
+        event = self.quota.audit_events()[0]
+        self.assertEqual(event["event"], "adapter_failure")
+        self.assertEqual(event["details"]["error_code"], "empty_completion")
 
     def test_mismatched_provider_response_is_rejected_before_accounting(self):
         class WrongProvider:
