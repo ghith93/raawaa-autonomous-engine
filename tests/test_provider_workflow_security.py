@@ -50,6 +50,19 @@ class ProviderWorkflowSecurityTests(unittest.TestCase):
         self.assertNotIn("    env:\n      GROQ_API_KEY:", source)
         self.assertIn("python scripts/groq_connection_check.py", step)
 
+    def test_staging_verification_waits_for_both_consumer_capabilities(self):
+        workflow = ROOT / ".github" / "workflows" / "ci.yml"
+        source = workflow.read_text(encoding="utf-8")
+        start = source.index("  staging-worker-verify:")
+        end = source.index("\n  publish-staging-ops-telemetry:", start)
+        job = source[start:end]
+        self.assertIn("Wait for temporary Staging consumer capabilities to propagate", job)
+        self.assertIn('("general", "/v1/tasks?limit=1", {})', job)
+        self.assertIn('("researcher", "/v1/tasks?limit=1&worker_lane=specialist%3Aresearcher"', job)
+        self.assertIn('"X-Engine-Lane-Token": lane_token', job)
+        self.assertIn('statuses == {"general": 200, "researcher": 200}', job)
+        self.assertIn("secret delete ENGINE_RESEARCHER_LANE_TOKEN", job)
+
     def test_groq_free_smoke_uses_ephemeral_researcher_lane_capability(self):
         workflow = ROOT / ".github" / "workflows" / "groq-free-inference-staging-smoke.yml"
         source = workflow.read_text(encoding="utf-8")
