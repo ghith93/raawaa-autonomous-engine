@@ -101,6 +101,29 @@ test("general stale recovery only selects general-lane leases", async () => {
   assert.deepEqual(query.values.slice(1), ["general"]);
 });
 
+test("targeted stale recovery filters one exact task within its lane", async () => {
+  const DB = dbMock();
+  const response = await worker.fetch(request("/v1/tasks/recover", {
+    method: "POST", body: { worker_lane: "general", task_id: "stale-proof-123" },
+  }), { DB, ENGINE_API_TOKEN: TOKEN });
+  assert.equal(response.status, 200);
+  const query = DB.calls.find(call => call.kind === "all" &&
+    call.sql.includes("SELECT id,attempts,max_attempts,lease_token"));
+  assert.match(query.sql, /execution_lane=\?/);
+  assert.match(query.sql, /id=\?/);
+  assert.deepEqual(query.values.slice(1), ["general", "stale-proof-123"]);
+});
+
+test("targeted stale recovery rejects unsafe task identifiers before database access", async () => {
+  const DB = dbMock();
+  const response = await worker.fetch(request("/v1/tasks/recover", {
+    method: "POST", body: { worker_lane: "general", task_id: "../other-task" },
+  }), { DB, ENGINE_API_TOKEN: TOKEN });
+  assert.equal(response.status, 400);
+  assert.deepEqual(await response.json(), { error: "invalid_task_id" });
+  assert.equal(DB.calls.length, 0);
+});
+
 test("task readback defaults to the general lane", async () => {
   const DB = dbMock();
   const response = await worker.fetch(request("/v1/tasks?limit=10"), { DB, ENGINE_API_TOKEN: TOKEN });
