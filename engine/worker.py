@@ -186,7 +186,7 @@ def run_once(store: TaskStore, live_gateway=None, environ=None, worker_lane: str
 
 
     # Recover abandoned work before claiming another item.
-    recovery = store.recover_stale()
+    recovery = store.recover_stale(worker_lane=worker_lane)
 
     # In live mode, check current free-route capacity before consuming a task lease.
     # This is read-only and deliberately does not reserve quota; generate() repeats
