@@ -447,10 +447,29 @@ export default {
       const workerLane = url.searchParams.get("worker_lane") || "general";
       if (!EXECUTION_LANES.has(workerLane)) return json({ error: "invalid_worker_lane" }, 400);
       if (!laneTokenAuthorized(request, env, workerLane)) return json({ error: "lane_unauthorized" }, 401);
+      const statusFilter = url.searchParams.get("status");
+      if (statusFilter !== null && !["pending", "running", "succeeded", "failed", "blocked"].includes(statusFilter)) {
+        return json({ error: "invalid_status" }, 400);
+      }
+      const taskIdFilter = url.searchParams.get("task_id");
+      if (taskIdFilter !== null && !/^[A-Za-z0-9_-]{1,128}$/.test(taskIdFilter)) {
+        return json({ error: "invalid_task_id" }, 400);
+      }
       try {
+        const clauses = ["execution_lane=?"];
+        const params = [workerLane];
+        if (statusFilter !== null) {
+          clauses.push("status=?");
+          params.push(statusFilter);
+        }
+        if (taskIdFilter !== null) {
+          clauses.push("id=?");
+          params.push(taskIdFilter);
+        }
+        params.push(rawLimit);
         const result = await env.DB.prepare(
-          "SELECT id,idempotency_key,task_type,title,payload_json,status,attempts,max_attempts,created_at,updated_at,execution_mode,priority,dependencies_json,execution_lane FROM tasks WHERE execution_lane=? ORDER BY created_at DESC,id DESC LIMIT ?"
-        ).bind(workerLane, rawLimit).all();
+          `SELECT id,idempotency_key,task_type,title,payload_json,status,attempts,max_attempts,created_at,updated_at,execution_mode,priority,dependencies_json,execution_lane FROM tasks WHERE ${clauses.join(" AND ")} ORDER BY created_at DESC,id DESC LIMIT ?`
+        ).bind(...params).all();
         const tasks = (result.results || []).map(task => {
           let dependsOn = [];
           try {

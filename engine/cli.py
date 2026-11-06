@@ -26,6 +26,7 @@ from engine.profile_routing import build_route_plan, render_markdown as render_r
 from engine.orchestrator import validate_and_plan
 from engine.workflow_dispatch import dispatch_body, render_markdown as render_dispatch_markdown
 from engine.workflow_manifest import build_workflow_run_manifest
+from engine.resource_intelligence import build_resource_inventory, render_resource_markdown
 from engine.process_supervisor import (
     ProcessSupervisor,
     child_environment_names,
@@ -197,6 +198,12 @@ def build_parser() -> argparse.ArgumentParser:
     )
     route.add_argument("--task-kind", default="default")
     route.add_argument("--format", choices=["json", "markdown"], default="json")
+    resource_inv = sub.add_parser(
+        "resource-inventory",
+        help="Generate deterministic, read-only operational resource and capability inventory (no network/secret reads)",
+    )
+    resource_inv.add_argument("--format", choices=["json", "markdown"], default="json")
+    resource_inv.add_argument("--strict", action="store_true", help="Exit non-zero if validation_errors is non-empty")
 
     discovery = sub.add_parser(
         "free-models",
@@ -521,6 +528,14 @@ def main() -> int:
             network_calls_enabled=False,
         )
         print(json.dumps(gateway.status(), indent=2))
+    elif args.command == "resource-inventory":
+        inventory = build_resource_inventory(ROOT)
+        if args.format == "markdown":
+            print(render_resource_markdown(inventory), end="")
+        else:
+            print(json.dumps(inventory, indent=2, ensure_ascii=False))
+        if args.strict and inventory["validation_errors"]:
+            return 1
     return 0
 
 

@@ -152,6 +152,79 @@ def has_manual_dispatch(content: str) -> bool:
     return "workflow_dispatch" in parse_triggers(content)
 
 
+def parse_push_branches(content: str) -> list[str] | None:
+    """Return explicit branch patterns under ``on.push.branches`` or ``None`` if unscoped/absent.
+
+    Supports both inline flow lists (``branches: [main, "arena/**"]``) and block
+    sequences (``branches:\\n  - main``). Returns ``None`` when ``push`` has no
+    ``branches`` filter (meaning all branches trigger ``push``).
+    """
+    if "push" not in parse_triggers(content):
+        return None
+    lines = content.splitlines()
+    start: int | None = None
+    inline = ""
+    for index, raw in enumerate(lines):
+        if not raw.strip() or raw[:1].isspace():
+            continue
+        match = TOP_LEVEL_ON.match(_strip_comment(raw))
+        if match:
+            start = index
+            inline = match.group(2).strip()
+            break
+    if start is None or inline:
+        return None
+
+    push_indent: int | None = None
+    in_push = False
+    branches_indent: int | None = None
+    in_branches = False
+    collected: list[str] = []
+
+    for raw in lines[start + 1 :]:
+        line = _strip_comment(raw)
+        if not line.strip():
+            continue
+        indent = len(line) - len(line.lstrip())
+        if indent == 0:
+            break
+        body = line.strip()
+
+        if not in_push:
+            if push_indent is None:
+                push_indent = indent
+            if indent == push_indent and not body.startswith("- "):
+                key = _unquote(body.split(":", 1)[0])
+                if key == "push":
+                    in_push = True
+            continue
+
+        if indent <= (push_indent or 0):
+            break
+
+        if not in_branches:
+            key_part, sep, rest = body.partition(":")
+            if sep and _unquote(key_part) == "branches":
+                rest_str = rest.strip()
+                if rest_str.startswith("["):
+                    inner = rest_str[1 : rest_str.rfind("]")] if "]" in rest_str else rest_str[1:]
+                    return [_unquote(item) for item in _split_flow(inner) if _unquote(item)]
+                if rest_str:
+                    return [_unquote(rest_str)]
+                branches_indent = indent
+                in_branches = True
+            continue
+
+        if branches_indent is not None and indent <= branches_indent:
+            break
+        if body.startswith("- "):
+            val = _unquote(body[2:].strip())
+            if val:
+                collected.append(val)
+
+    return collected if in_branches else None
+
+
 def job_blocks(content: str) -> list[tuple[str, str]]:
     lines = content.splitlines()
     jobs_index = next((i for i, line in enumerate(lines) if line == "jobs:"), None)
@@ -200,19 +273,76 @@ def production_dispatch_violations(path: str, content: str) -> list[str]:
     return []
 
 
+def push_branch_secret_violations(path: str, content: str) -> list[str]:
+    """Reject non-main push/PR secret exposure in workflows."""
+    triggers = parse_triggers(content)
+    blocks = job_blocks(content)
+    secret_jobs = [(job_name, block) for job_name, block in blocks if SECRET.search(block)]
+    if not secret_jobs:
+        return []
+
+    violations: list[str] = []
+    if "pull_request_target" in triggers:
+        violations.append(
+            f"{path}: secret-bearing workflow must never declare pull_request_target"
+        )
+
+    if "pull_request" in triggers:
+        for job_name, block in secret_jobs:
+            if MAIN_REF_GUARD not in block:
+                violations.append(
+                    f"{path}: job '{job_name}' uses repository secrets in a pull_request "
+                    "workflow without an explicit main-ref guard"
+                )
+
+    if "push" in triggers:
+        push_branches = parse_push_branches(content)
+        if push_branches is not None:
+            non_main = [b for b in push_branches if b != "main"]
+            if non_main:
+                violations.append(
+                    f"{path}: secret-bearing workflow push.branches permits non-main "
+                    f"refs {non_main!r}; restrict push.branches to ['main'] or omit "
+                    "branches only when secret-free CI jobs require branch pushes"
+                )
+        if push_branches != ["main"]:
+            for job_name, block in secret_jobs:
+                if MAIN_REF_GUARD not in block:
+                    violations.append(
+                        f"{path}: job '{job_name}' uses repository secrets with an "
+                        "unscoped or non-main push trigger without an explicit main-ref guard"
+                    )
+    return violations
+
+
+def iter_workflow_files(workflow_dir: Path) -> list[Path]:
+    """Return workflow files matching both ``*.yml`` and ``*.yaml`` sorted deterministically."""
+    if not workflow_dir.is_dir():
+        return []
+    return sorted(
+        (
+            path
+            for path in workflow_dir.iterdir()
+            if path.is_file() and path.suffix in {".yml", ".yaml"}
+        ),
+        key=lambda p: p.name,
+    )
+
+
 def main() -> int:
     root = Path(__file__).resolve().parent.parent
     workflow_dir = root / ".github" / "workflows"
     violations = []
-    for path in sorted(workflow_dir.glob("*.yml")):
+    for path in iter_workflow_files(workflow_dir):
         relative = str(path.relative_to(root))
         content = path.read_text(encoding="utf-8")
         violations.extend(workflow_violations(relative, content))
         violations.extend(production_dispatch_violations(relative, content))
+        violations.extend(push_branch_secret_violations(relative, content))
     if violations:
         print("\n".join(violations))
         return 1
-    print("All secret-bearing workflow_dispatch jobs are restricted to refs/heads/main.")
+    print("All secret-bearing workflow_dispatch and push/PR jobs are restricted to refs/heads/main.")
     print("No production-class workflow exposes a manual dispatch trigger.")
     return 0
 

@@ -1836,3 +1836,29 @@ test("schema diagnostics reject a non-GET method and an unauthenticated caller",
   }), { DB: dbMock(), ENGINE_API_TOKEN: TOKEN });
   assert.equal(unauthenticated.status, 401);
 });
+
+test("GET /v1/tasks supports optional status and task_id filters and rejects invalid filter values", async () => {
+  const db = dbMock();
+  const filtered = await worker.fetch(request("/v1/tasks?limit=25&status=pending&task_id=task-abc_123", {
+    method: "GET", token: TOKEN,
+  }), { DB: db, ENGINE_API_TOKEN: TOKEN });
+  assert.equal(filtered.status, 200);
+  const query = db.calls.find(c => c.kind === "all" && c.sql.includes("FROM tasks WHERE"));
+  assert.ok(query, "expected filtered tasks SELECT");
+  assert.ok(query.sql.includes("status=?"));
+  assert.ok(query.sql.includes("id=?"));
+  assert.deepEqual(query.values, ["general", "pending", "task-abc_123", 25]);
+
+  const badStatus = await worker.fetch(request("/v1/tasks?status=invalid", {
+    method: "GET", token: TOKEN,
+  }), { DB: dbMock(), ENGINE_API_TOKEN: TOKEN });
+  assert.equal(badStatus.status, 400);
+  assert.deepEqual(await badStatus.json(), { error: "invalid_status" });
+
+  const badTaskId = await worker.fetch(request("/v1/tasks?task_id=bad%20id!", {
+    method: "GET", token: TOKEN,
+  }), { DB: dbMock(), ENGINE_API_TOKEN: TOKEN });
+  assert.equal(badTaskId.status, 400);
+  assert.deepEqual(await badTaskId.json(), { error: "invalid_task_id" });
+});
+

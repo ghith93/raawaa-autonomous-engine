@@ -10,7 +10,7 @@ name: Raawaa Image Route Check
 on:
   workflow_dispatch:
   push:
-    branches: [main, "arena/**"]
+    branches: [main]
     paths:
       - ".github/workflows/raawaa-image-route-check.yml"
       - "scripts/raawaa_verify_cloudflare.py"
@@ -26,6 +26,8 @@ jobs:
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
 
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7
         with:
@@ -43,8 +45,6 @@ jobs:
           D1_DATABASE_ID: ${{ secrets.D1_DATABASE_ID }}
           ENGINE_API_TOKEN: ${{ secrets.ENGINE_API_TOKEN }}
           ENGINE_QUOTA_ADMIN_TOKEN: ${{ secrets.ENGINE_QUOTA_ADMIN_TOKEN }}
-          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          OWNER_TELEGRAM_CHAT_ID: ${{ secrets.OWNER_TELEGRAM_CHAT_ID }}
         run: |
           set +e
           python scripts/raawaa_doctor.py --json doctor.json > doctor.log 2>&1

@@ -100,7 +100,11 @@ def reconstruct_repo_capabilities(root: Path = ROOT) -> dict[str, Any]:
     tool_perms = json.loads((root / "config" / "tool_permissions.json").read_text(encoding="utf-8"))
 
     workflow_dir = root / ".github" / "workflows"
-    workflow_files = sorted(p.name for p in workflow_dir.glob("*.yml")) if workflow_dir.is_dir() else []
+    workflow_files = (
+        sorted(p.name for p in workflow_dir.iterdir() if p.is_file() and p.suffix in {".yml", ".yaml"})
+        if workflow_dir.is_dir()
+        else []
+    )
 
     raw_profiles = profiles.get("routes", profiles.get("profiles", []))
     enabled_profiles = [

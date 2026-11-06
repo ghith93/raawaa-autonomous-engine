@@ -57,12 +57,36 @@ def validate_environment(environ: Mapping[str, str]) -> tuple[str, str]:
     return token, f"{IDEMPOTENCY_PREFIX}{run_id}:{attempt}"
 
 
+def _list_tasks(
+    store: Any,
+    limit: int = 100,
+    *,
+    status: str | None = None,
+    task_id: str | None = None,
+) -> list[dict[str, Any]]:
+    """Query bounded tasks using server-side status/task_id filters when supported."""
+    kwargs: dict[str, Any] = {}
+    if status is not None:
+        kwargs["status"] = status
+    if task_id is not None:
+        kwargs["task_id"] = task_id
+    try:
+        rows = store.list_tasks(limit, **kwargs) if kwargs else store.list_tasks(limit)
+    except TypeError:
+        rows = store.list_tasks(limit)
+        if status is not None:
+            rows = [r for r in rows if isinstance(r, dict) and r.get("status") == status]
+        if task_id is not None:
+            rows = [r for r in rows if isinstance(r, dict) and r.get("id") == task_id]
+    return [r for r in rows if isinstance(r, dict)]
+
+
 def retire_stale_pending_proof_tasks(store: Any) -> int:
     """Retire only exact, untouched pending contention proofs from aborted CI runs."""
-    rows = store.list_tasks(100)
+    rows = _list_tasks(store, 100, status="pending")
     if len(rows) >= 100:
         raise StagingContentionProofError(
-            "Cannot safely inspect the complete bounded general queue before proof cleanup"
+            "Cannot safely inspect the complete bounded pending general queue before proof cleanup"
         )
 
     def is_exact_stale_proof(row: Any) -> bool:
@@ -148,9 +172,25 @@ def run_proof(
     try:
         # Both requests target the same exact task. The Worker uses one atomic
         # conditional UPDATE ... WHERE id=? AND status='pending' ... RETURNING.
+        # Inspect both futures before raising so a winning lease on future[1] is
+        # never orphaned when future[0] raises a transient transport exception.
+        claims: list[dict[str, Any] | None] = []
+        claim_errors: list[BaseException] = []
         with executor_factory(max_workers=2) as pool:
             futures = [pool.submit(store.claim_supervised_probe, task_id) for _ in range(2)]
-            claims = [future.result() for future in futures]
+            for future in futures:
+                try:
+                    claim = future.result()
+                except BaseException as exc:  # noqa: BLE001 - bind winner before re-raising
+                    claim_errors.append(exc)
+                    continue
+                claims.append(claim)
+                if isinstance(claim, dict) and winner is None:
+                    winner = claim
+        if claim_errors:
+            raise StagingContentionProofError(
+                f"Concurrent Staging claim transport error ({type(claim_errors[0]).__name__})"
+            ) from claim_errors[0]
         winners = [claim for claim in claims if claim is not None]
         losers = [claim for claim in claims if claim is None]
         if len(winners) != 1 or len(losers) != 1:
@@ -161,8 +201,8 @@ def run_proof(
                 or not isinstance(winner.get("lease_token"), str) or not winner["lease_token"]):
             raise StagingContentionProofError("The winning Staging lease failed identity or mode checks")
 
-        rows = [row for row in store.list_tasks(100)
-                if isinstance(row, dict) and row.get("id") == task_id]
+        rows = [row for row in _list_tasks(store, 100, task_id=task_id)
+                if row.get("id") == task_id]
         if len(rows) != 1 or rows[0].get("status") != "running" or rows[0].get("attempts") != 1:
             raise StagingContentionProofError("Remote D1 readback did not show one running attempt")
 
@@ -181,8 +221,8 @@ def run_proof(
         )
         settled = True
 
-        terminal = [row for row in store.list_tasks(100)
-                    if isinstance(row, dict) and row.get("id") == task_id]
+        terminal = [row for row in _list_tasks(store, 100, task_id=task_id)
+                    if row.get("id") == task_id]
         if (len(terminal) != 1 or terminal[0].get("status") != "succeeded"
                 or terminal[0].get("attempts") != 1):
             raise StagingContentionProofError("Remote D1 terminal readback failed")
