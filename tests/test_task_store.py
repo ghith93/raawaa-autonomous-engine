@@ -303,6 +303,20 @@ class TaskStoreTests(unittest.TestCase):
         self.assertEqual([task["id"] for task in general_rows], [general["id"]])
         self.assertEqual([task["id"] for task in specialist_rows], [specialist["id"]])
 
+    def test_mobile_tester_lane_is_valid_and_scoped(self):
+        task = self.store.enqueue(
+            "mobile_test", "Mobile test task",
+            execution_lane="specialist:mobile_tester",
+        )
+        self.assertEqual(task["execution_lane"], "specialist:mobile_tester")
+        self.assertEqual(
+            [row["id"] for row in self.store.list_tasks(50, worker_lane="specialist:mobile_tester")],
+            [task["id"]],
+        )
+        self.assertIsNone(self.store.claim_next(worker_lane="general"))
+        claimed = self.store.claim_next(worker_lane="specialist:mobile_tester")
+        self.assertEqual(claimed["id"], task["id"])
+
     def test_specialist_lane_must_match_task_contract(self):
         with self.assertRaisesRegex(ValueError, "does not match task_type"):
             self.store.enqueue("content_draft", "Wrong lane",
