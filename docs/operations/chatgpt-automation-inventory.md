@@ -55,3 +55,19 @@ The live Automations inventory returned **8 records: 3 enabled, 4 paused, and 1 
 - The separate cross-project `متابعة رواء` automation remains outside this repository-only task's scope. Do not modify or re-enable paused automations, and do not create duplicates.
 - No automation schedule, enabled state, or prompt was changed during this revalidation.
 
+
+
+## Live revalidation — 2026-11-07 01:10 Asia/Damascus
+
+The live Automations inventory returned **8 records: 3 enabled, 4 paused, and 1 completed**. This supersedes the 2026-11-06 inventory table above.
+
+| Automation | State | Schedule / timezone | Latest verified run metadata | Scope |
+|---|---|---|---|---|
+| مراقبة تقدم المحرك يومياً | Enabled | Daily 19:00, Asia/Damascus; DTSTART 2026-11-07 | Last run 2026-11-06 17:45:41Z; recorded **failed** with generic failure message; `next_run_time=null`. Prompt now enforces USD 0 hard ceiling. | Engine-only daily engineering/research cycle and progress report. |
+| Raawaa Engine research and delivery cycle | Enabled | Daily 09:00, Asia/Damascus | Last run 2026-11-06 06:42:01Z; `next_run_time=null`. | Engine R&D and delivery cycle. |
+| متابعة رواء | Enabled | Daily 13:00, America/New_York | Last run 2026-11-06 18:54:12Z; `next_run_time=null`. | Separate cross-project automation; not modified by this engine-only work. |
+
+- Four automations remain paused and one is completed. No paused automation was re-enabled.
+- The daily monitoring task was updated in place (same automation ID); no duplicate was created. Its schedule and zero-dollar cost ceiling were saved successfully.
+- **Scheduler liveness remains unproven:** all three enabled records currently report `next_run_time=null`; the monitoring task's last recorded run failed. The saved recurring schedule is not evidence that the next run is queued or that delivery will occur.
+- Do not claim daily report delivery is reliable until a scheduled run completes successfully and a subsequent next-run value or later scheduled execution is observed.
