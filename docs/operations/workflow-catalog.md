@@ -1,32 +1,34 @@
 # Raawaa Autonomous Engine — GitHub Actions Workflow Catalog
 
-**Manual-dispatch list source:** Activepieces GitHub `trigger_workflow_dispatch` workflow selector for repository `ghith93/raawaa-autonomous-engine`, checked 2026-11-03 21:50 UTC. The catalog also records scheduled-only repository workflows that intentionally do not appear in that selector. Listing a workflow is not proof that it has run or is safe to run.
+**Source:** Exact `.github/workflows/` tree on `main` at `ca61019682a222559a339ad7e4c3c78b13d2a373`, checked 2026-11-06. This catalog lists the 23 repository workflow YAML files; generated platform workflows are excluded. Presence in the tree is not proof that a workflow has run or is safe to dispatch.
 
 ## Catalog
 
 | Workflow | File | Initial classification | Use / caution |
 |---|---|---|---|
-| Microsoft Agent Framework Isolated Evaluation | `agent-framework-eval.yml` | Evaluation | Inspect full YAML and cost/network scope before running. |
-| Engine CI | `ci.yml` | Test/CI | Required status context is `test`; PR and main CI evidence. |
-| Cloudflare Access Audit | `cloudflare-access-audit.yml` | Read-only account audit | Uses dedicated read-only Access audit token. |
+| Microsoft Agent Framework Isolated Evaluation | `agent-framework-eval.yml` | PR-scoped evaluation | Installs pinned optional dependencies and runs deterministic evaluation; not a production runtime. |
+| Engine CI | `ci.yml` | Test/CI + Staging verification | PRs run tests; main pushes may apply Staging migrations and deploy the isolated Staging Worker. Production deploy is separate. |
+| Cloudflare Access Audit | `cloudflare-access-audit.yml` | Read-only account audit | Uses a dedicated read-only Access audit token. |
 | Cloudflare Access Inventory | `cloudflare-access-inventory.yml` | Read-only account inventory | Access may not be enabled on the account. |
-| Cloudflare Billing Spend-Policy Inventory | `cloudflare-billing-inventory.yml` | Read-only billing inventory | No spend policy hard stop should be inferred from a 404. |
-| Cloudflare Worker Inventory | `cloudflare-worker-inventory.yml` | Read-only Worker inventory | Check Worker scripts, routes and health. |
-| Cloudflare Workers AI Read-only Catalog Check | `cloudflare-workers-ai-inventory.yml` | Read-only catalog | Does not perform inference or verify model billing eligibility. |
-| Coding Agent CLI Installation Smoke | `coding-agent-cli-smoke.yml` | Installation/evaluation | Installs CLI tooling; inspect downloads and permissions before use. |
+| Cloudflare Billing Spend-Policy Inventory | `cloudflare-billing-inventory.yml` | Read-only billing inventory | Bounded retries; current spend-policy endpoint returned HTTP 503, so no external `usage_block` is verified. |
+| Cloudflare Worker Inventory | `cloudflare-worker-inventory.yml` | Read-only Worker inventory | Inspects Worker scripts, routes, and health; no configuration change. |
+| Cloudflare Workers AI Read-only Catalog Check | `cloudflare-workers-ai-inventory.yml` | Read-only model catalog | Does not perform inference or verify account billing eligibility. |
+| Coding Agent CLI Installation Smoke | `coding-agent-cli-smoke.yml` | Tool installation/evaluation | Installs optional CLIs; inspect downloads and permissions before manual dispatch. |
 | D1 Connectivity Check | `d1-healthcheck.yml` | Read-only health check | Connectivity only; not migration or data-write proof. |
-| Apply D1 Migrations | `d1-migrate.yml` | **Database write** | Inspect target and environment before use. Use Staging only for new migrations. Never assume the target from the workflow name. |
+| Apply D1 Migrations | `d1-migrate.yml` | **Database write** | Inspect exact target and environment first. Use Staging only for new migrations; never infer target from workflow name. |
 | D1 Migration Inventory (Read Only) | `d1-migration-inventory.yml` | Read-only schema inventory | Does not apply migrations. |
-| D1 Staging Inventory (Read Only) | `d1-staging-inventory.yml` | Read-only staging inventory | Verifies isolated Staging target/schema. |
-| Deploy Control Worker | `deploy-worker.yml` | **Production deployment** | No manual dispatch; authorized only by a `main` push whose commit message contains `[deploy-control-worker]`. After PR #432, preserve dashboard vars and fail if watchdog is not ready. |
-| Groq API Connection Check | `groq-connection-check.yml` | Read-only provider check | Authentication/catalog only; does not prove free inference success. |
-| One-shot Groq Free inference Staging smoke | `groq-free-inference-staging-smoke.yml` | **One-shot provider inference in Staging** | Uses isolated Staging and ephemeral bearer credentials; intended to revoke them. Run only after inspecting exact script and quota evidence. |
-| Engine Maintenance | `maintenance.yml` | Maintenance | Inspect exact actions/targets before running; may mutate task/lease state. |
-| One-shot OpenRouter Nemotron Free smoke | `openrouter-nemotron-free-smoke.yml` | **One-shot provider inference** | Verify account eligibility, hard quota, cost, paid fallback disabled and exact model before use. |
-| Scheduled Open-Source Research Discovery | `research-discovery.yml` | Scheduled public research | Existing research scheduler; do not create a duplicate. |
-| Scheduled D1 Task Runner | `task-runner.yml` | Bounded queue consumer | Existing task runner; production control Worker only. Live inference remains disabled by default; inspect the queue and policy before dispatch. |
-| Staging scheduled supervised process probe | `staging-supervised-process-probe.yml` | **Scheduled Staging-only read-only process task** | Daily at 03:47 UTC; no manual dispatch; enqueues and claims only its own `supervised_probe` ID, uses a temporary Staging token, and must never target Production. Schedule proof remains pending until a run with event `schedule` succeeds. |
-| Dependabot Updates | `dynamic/dependabot/dependabot-updates` | Dependency maintenance | Dynamic workflow ID; inspect generated PRs and exact changes before merge. |
+| D1 Staging Inventory (Read Only) | `d1-staging-inventory.yml` | Read-only Staging inventory | Verifies isolated Staging target/schema. |
+| Deploy Control Worker | `deploy-worker.yml` | **Production deployment** | Main-push marker gated; requires separate owner approval for the exact deployment. |
+| Groq API Connection Check | `groq-connection-check.yml` | Read-only provider check | Authentication/model-catalog check only; does not prove current Free-tier billing, quotas, privacy settings, or inference success. |
+| One-shot Groq Free inference Staging smoke | `groq-free-inference-staging-smoke.yml` | **One-shot provider inference in Staging** | Keep disabled until current account tier, exact quota, Data Controls, provider hard stop, and explicit authorization are verified. |
+| Issue Comment Ingest | `issue-comment-ingest.yml` | Event-triggered task enqueue | Off by default; when enabled, a valid task envelope on issue #464 can write a task to the Production D1 queue. Do not send an envelope without action-specific Production-write approval. |
+| Engine Maintenance | `maintenance.yml` | Scheduled read-only audit/test | Runs configuration audit, tests, and read-only development ranking; no merge/deploy/provider activation. |
+| Scheduled Open-Source Research Discovery | `research-discovery.yml` | Scheduled public research + optional persistence | Public metadata discovery and artifacts; optional D1 persistence/telemetry writes are separately gated. No model inference. |
+| Sandbox Adversarial Proof | `sandbox-adversarial.yml` | Manual security evaluation | Downloads gVisor and a digest-pinned image; run only for an explicitly scoped sandbox proof. |
+| Report which secrets are configured | `secret-readiness.yml` | Read-only secret-presence check | Reports booleans/names only; never reads or prints secret values. |
+| Staging P1 end-to-end task proof (manual) | `staging-p1-task-proof.yml` | **Staging D1 write** | Enqueues/claims one harmless Staging task and revokes its temporary token; not schedule acceptance. |
+| Staging scheduled supervised process probe | `staging-supervised-process-probe.yml` | **Scheduled Staging-only task** | Daily at 03:47 UTC; no manual dispatch. No qualifying 2026-11-06 run was found; Runtime-004 remains 0/2. |
+| Scheduled D1 Task Runner | `task-runner.yml` | **Bounded Production queue consumer** | Five-minute schedule plus workflow_dispatch; can claim/settle Production tasks. Do not dispatch without explicit approval for Production task operations. |
 
 ## Execution decision rules
 
@@ -40,7 +42,7 @@
 
 ## Workflow discovery method
 
-Use the connected Activepieces GitHub action `trigger_workflow_dispatch` with repository `ghith93/raawaa-autonomous-engine`; resolve the `workflow` property after selecting the repository. This returned the authoritative 25-entry list above. The existing Activepieces flow `Raawaa GitHub Workflow Control` is preconfigured for the standard Task Runner workflow only; do not mistake it for a universal workflow selector.
+The current Activepieces flow `Raawaa GitHub Workflow Control` is Manual Trigger → GitHub `trigger_workflow_dispatch` for `.github/workflows/task-runner.yml` on `main`. It is a narrow manual helper, not a universal selector or recurring scheduler. Use the checked-in workflow file and its exact trigger/guards before any dispatch. The current repository tree is the authoritative workflow inventory.
 
 
 ## Live workflow-tree reconciliation — 2026-11-04 00:51 UTC
@@ -58,3 +60,12 @@ Use the connected Activepieces GitHub action `trigger_workflow_dispatch` with re
 - The existing task-runner.yml retains its five-minute cron offsets 2, 7, 12, 17, 22, 27, 32, 37, 42, 47, 52, and 57 UTC, plus workflow_dispatch; concurrency remains grouped as d1-task-runner.
 - The latest Task Runner events visible in the first 100 repository workflow runs were workflow_dispatch #41749347645 and push #41743485185. No event=schedule appeared in that result. Treat primary GitHub cron liveness as unverified; do not create another scheduler or infer schedule health from the manual dispatch.
 - The separate Worker Cron heartbeat was recorded at 00:45:34Z. The GitHub App watchdog remains not_ready because GITHUB_APP_WATCHDOG_ENABLED is missing.
+
+## Live workflow-tree and dispatch reconciliation — 2026-11-06
+
+- Current main `ca61019682a222559a339ad7e4c3c78b13d2a373` contains exactly 23 files under `.github/workflows/`; the table above matches the live tree. The obsolete `openrouter-nemotron-free-smoke.yml` entry is removed; the actual tree includes `issue-comment-ingest.yml`, `sandbox-adversarial.yml`, `secret-readiness.yml`, and `staging-p1-task-proof.yml`.
+- The current Activepieces flow is a manual Task Runner dispatch helper. It is not a recurring trigger and has no PRODUCTION runs in the current inventory.
+- Task Runner run [#42258592425](https://github.com/ghith93/raawaa-autonomous-engine/actions/runs/42258592425) was created as `workflow_dispatch` by `raawaa-engine[bot]` after a Worker Cron heartbeat at 17:00:34Z and watchdog dispatch intent at 17:06:40Z. It completed `queue_idle` with 0 tasks processed, 0 pending, and 0 running; watchdog was ready. This verifies one automated idle poll, not task completion or 24/7 execution.
+- No Task Runner `event=schedule` or supervised-process-probe run appeared in the latest 100 Actions runs. The dedicated 2026-11-06 03:47 UTC supervised probe was absent; Runtime-004 acceptance remains 0/2. Do not count the watchdog's `workflow_dispatch` as a scheduled-probe pass.
+- Production Control Worker run [#42258067719](https://github.com/ghith93/raawaa-autonomous-engine/actions/runs/42258067719) was skipped on current main. No Production deployment was performed in this cycle.
+
