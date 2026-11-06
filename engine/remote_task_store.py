@@ -281,10 +281,12 @@ class RemoteTaskStore:
             raise RemoteTaskStoreError("Remote task API returned an invalid retry status")
         return status
 
-    def recover_stale(self, lease_timeout_seconds: int = 900) -> dict[str, int]:
+    def recover_stale(self, lease_timeout_seconds: int = 900,
+                      worker_lane: str = "general") -> dict[str, int]:
         if not 1 <= int(lease_timeout_seconds) <= 900:
             raise ValueError("remote lease timeout must be between 1 and 900 seconds")
-        result = self._request("/v1/tasks/recover", "POST", {})
+        result = self._request("/v1/tasks/recover", "POST",
+                               {"worker_lane": worker_lane}, worker_lane=worker_lane)
         if not isinstance(result.get("requeued"), int) or not isinstance(result.get("failed"), int):
             raise RemoteTaskStoreError("Remote task API returned invalid recovery counts")
         return {"requeued": result["requeued"], "failed": result["failed"]}
