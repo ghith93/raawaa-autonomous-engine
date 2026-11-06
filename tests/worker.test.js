@@ -88,6 +88,37 @@ test("specialist claim requires a dedicated lane capability token", async () => 
   assert.equal(DB.calls.length, 0);
 });
 
+test("specialist claim filters the requested lane and task type", async () => {
+  const laneToken = "researcher-lane-token-0123456789abcdef0123456789";
+  const DB = dbMock({ normalClaim: {
+    id: "research-task", task_type: "research_brief", execution_lane: "specialist:researcher",
+    status: "running", attempts: 1, lease_token: "lease-r",
+  } });
+  const response = await worker.fetch(request("/v1/tasks/claim", {
+    method: "POST", body: { execution_mode: "dry_run", worker_lane: "specialist:researcher" },
+    extraHeaders: { "x-engine-lane-token": laneToken },
+  }), { DB, ENGINE_API_TOKEN: TOKEN, ENGINE_RESEARCHER_LANE_TOKEN: laneToken });
+  assert.equal(response.status, 200);
+  const claim = DB.calls.find(call => call.kind === "first" &&
+    call.sql.includes("UPDATE tasks SET status='running'"));
+  assert.match(claim.sql, /execution_lane=\?/);
+  assert.match(claim.sql, /task_type=\?/);
+  assert.ok(claim.values.includes("specialist:researcher"));
+  assert.ok(claim.values.includes("research_brief"));
+});
+
+test("enqueue persists the selected specialist lane", async () => {
+  const DB = dbMock();
+  const response = await worker.fetch(request("/v1/tasks/enqueue", {
+    method: "POST", body: { task_type: "research_brief", title: "Research",
+      idempotency_key: "research-lane", execution_lane: "specialist:researcher" },
+  }), { DB, ENGINE_API_TOKEN: TOKEN });
+  assert.equal(response.status, 201);
+  const insert = DB.calls.find(call => call.kind === "batch").statements[0];
+  assert.equal(insert.values[10], "specialist:researcher");
+  assert.match(insert.sql, /execution_lane/);
+});
+
 test("generic consumer cannot heartbeat a specialist lease", async () => {
   const DB = dbMock({ currentTask: {
     id: "task-1", status: "running", attempts: 1, max_attempts: 2,
