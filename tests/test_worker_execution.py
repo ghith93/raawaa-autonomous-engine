@@ -255,6 +255,20 @@ class WorkerExecutionTests(unittest.TestCase):
         self.assertEqual(saved[general["id"]]["status"], "pending")
         self.assertEqual(saved[specialist["id"]]["execution_lane"], "specialist:researcher")
 
+    def test_mobile_tester_runner_executes_only_mobile_test_tasks(self):
+        root = Path(self.temp.name)
+        store = TaskStore(root / "mobile-lane.db")
+        general = store.enqueue("research_brief", "General task", {"topic": "general"})
+        mobile = store.enqueue(
+            "mobile_test", "Mobile task", {"target": "staging"},
+            execution_lane="specialist:mobile_tester",
+        )
+        result = run_once(store, environ={}, worker_lane="specialist:mobile_tester")
+        self.assertEqual(result["status"], "succeeded")
+        saved = {task["id"]: task for task in store.list_tasks()}
+        self.assertEqual(saved[mobile["id"]]["status"], "succeeded")
+        self.assertEqual(saved[general["id"]]["status"], "pending")
+
     def test_general_runner_never_claims_specialist_task(self):
         root = Path(self.temp.name)
         store = TaskStore(root / "general-lane.db")
