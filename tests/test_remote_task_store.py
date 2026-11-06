@@ -19,7 +19,7 @@ class FakeResponse:
 
 class RemoteTaskStoreTests(unittest.TestCase):
     def setUp(self):
-        self.store = RemoteTaskStore("https://engine.example", "secret-test-token")
+        self.store = RemoteTaskStore("https://engine.example", "secret-test-token", lane_token="general-lane-token-0123456789abcdef0123456789")
 
     @patch("engine.remote_task_store.urlopen")
     def test_audit_events_reads_bounded_task_filtered_rows(self, open_url):
@@ -58,6 +58,7 @@ class RemoteTaskStoreTests(unittest.TestCase):
         self.assertEqual(request.full_url, "https://engine.example/v1/tasks/claim")
         self.assertEqual(request.get_method(), "POST")
         self.assertEqual(request.get_header("Authorization"), "Bearer secret-test-token")
+        self.assertEqual(request.get_header("X-engine-lane-token"), self.store.lane_token)
         self.assertEqual(request.get_header("User-agent"), "RaawaaAutonomousEngine/1.0 (+https://github.com/ghith93/raawaa-autonomous-engine)")
         self.assertIsNone(request.get_header("Cf-access-client-id"))
 
@@ -146,12 +147,14 @@ class RemoteTaskStoreTests(unittest.TestCase):
             "https://engine.example", "app-bearer",
             access_client_id="access-client-id",
             access_client_secret="access-client-secret",
+            lane_token="general-lane-token-0123456789abcdef0123456789",
         )
         self.assertIsNone(store.claim_next())
         request = open_url.call_args.args[0]
         self.assertEqual(request.get_header("Cf-access-client-id"), "access-client-id")
         self.assertEqual(request.get_header("Cf-access-client-secret"), "access-client-secret")
         self.assertEqual(request.get_header("Authorization"), "Bearer app-bearer")
+        self.assertEqual(request.get_header("X-engine-lane-token"), "general-lane-token-0123456789abcdef0123456789")
 
     def test_cloudflare_access_credentials_must_be_paired(self):
         with self.assertRaisesRegex(ValueError, "both service-token credentials"):
