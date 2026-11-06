@@ -206,7 +206,8 @@
       "status": "graphify_pilot_pending_ci_evidence",
       "evidence": [
         "docs/research/graphify-code-knowledge-graph-2026-11-07.md",
-        ".graphifyignore"
+        ".graphifyignore",
+        ".github/workflows/ci.yml"
       ]
     },
     {
