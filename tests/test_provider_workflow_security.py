@@ -75,6 +75,7 @@ class ProviderWorkflowSecurityTests(unittest.TestCase):
         self.assertIn("git log -1 --format=%B | grep -Fq '[groq-specialist-smoke]'", source)
         self.assertIn("needs.eligibility.outputs.eligible == 'true'", source)
         self.assertIn("github.event.workflow_run.head_sha", source)
+        self.assertEqual(source.count("persist-credentials: false"), 2)
         self.assertIn("secret put ENGINE_RESEARCHER_LANE_TOKEN", source)
         self.assertIn("secret delete ENGINE_RESEARCHER_LANE_TOKEN", source)
         self.assertIn("RAAWAA_ENGINE_WORKER_LANE: specialist:researcher", source)
