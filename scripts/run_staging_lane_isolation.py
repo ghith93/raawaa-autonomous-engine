@@ -17,7 +17,7 @@ sys.path.insert(0, str(ROOT))
 
 from engine.remote_task_store import RemoteTaskStore, RemoteTaskStoreError
 
-SMOKE_TASK_IDEMPOTENCY_KEY = "groq-free-inference-staging-specialist-smoke-2026-11-06-v7"
+SMOKE_TASK_IDEMPOTENCY_KEY = "groq-free-inference-staging-specialist-smoke-2026-11-06-v8"
 SMOKE_TASK_TITLE = "Single public Groq Free-tier inference connectivity check"
 SMOKE_TASK_PAYLOAD = {
     "data_classification": "public",
