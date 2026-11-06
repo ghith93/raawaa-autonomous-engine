@@ -296,6 +296,15 @@
         "docs/capability-gap-analysis.md",
         "docs/research-and-development-operating-system.ar.md"
       ]
+    },
+    {
+      "id": "gap:mobile_tester_host",
+      "kind": "capability_gap",
+      "status": "mobile_tester_disabled_missing_supported_host_and_authorized_device",
+      "evidence": [
+        "config/agents.json",
+        "docs/research-and-development-operating-system.ar.md"
+      ]
     }
   ],
   "edges": [
@@ -436,6 +445,30 @@
       "to": "gap:benchmark_based_adoption",
       "relation": "does_not_benchmark_candidates",
       "status": "verified_limitation"
+    },
+    {
+      "from": "agent:engineer",
+      "to": "component:project_knowledge_graph",
+      "relation": "uses_for_codebase_orientation",
+      "status": "pilot_only_not_runtime_dependency"
+    },
+    {
+      "from": "agent:mobile_tester",
+      "to": "gap:mobile_tester_host",
+      "relation": "blocked_by",
+      "status": "disabled_until_host_device_and_zero_cost_route_verified"
+    },
+    {
+      "from": "agent:nemotron_specialist",
+      "to": "provider:nvidia-nemotron",
+      "relation": "candidate_model_route",
+      "status": "disabled_research_candidate"
+    },
+    {
+      "from": "component:research_discovery",
+      "to": "component:research_memory",
+      "relation": "persists_metadata_to",
+      "status": "artifacts_30day_optional_d1_persistence"
     }
   ]
 }
