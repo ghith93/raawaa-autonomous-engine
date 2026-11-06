@@ -90,7 +90,7 @@ jobs:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         run: |
-          printf '%s\\n' "UPDATE monetary_budget_policy SET daily_budget_nanos=0, monthly_budget_nanos=0, per_task_budget_nanos=0, updated_at=CURRENT_TIMESTAMP WHERE policy_key='default';" > /tmp/raawaa-staging-zero-budget.sql
+          printf '%s\n' "UPDATE monetary_budget_policy SET daily_budget_nanos=0, monthly_budget_nanos=0, per_task_budget_nanos=0, updated_at=CURRENT_TIMESTAMP WHERE policy_key='default';" > /tmp/raawaa-staging-zero-budget.sql
           npx --yes wrangler@4.156.1 d1 execute raawaa-engine-staging --remote --config wrangler.staging.toml --file /tmp/raawaa-staging-zero-budget.sql
           npx --yes wrangler@4.156.1 d1 execute raawaa-engine-staging --remote --config wrangler.staging.toml --command "SELECT daily_budget_nanos, monthly_budget_nanos, per_task_budget_nanos, enabled FROM monetary_budget_policy WHERE policy_key='default';"
       - name: Install ephemeral Staging API token
