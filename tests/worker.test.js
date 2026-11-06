@@ -1690,7 +1690,8 @@ test("schema diagnostics report every table the Worker depends on", async () => 
   assert.ok(body.checked.includes("task_dependencies"), "task_dependencies must be probed");
   assert.ok(body.checked.includes("workflow_runs"), "workflow_runs must be probed");
   assert.ok(body.checked.includes("task_process_dispatches"), "process dispatch ledger must be probed");
-  assert.equal(body.checked.length, 8);
+  assert.ok(body.checked.includes("tasks.execution_lane"), "execution lane migration must be probed");
+  assert.equal(body.checked.length, 9);
 });
 
 test("schema diagnostics name the table a deploy forgot to migrate", async () => {
