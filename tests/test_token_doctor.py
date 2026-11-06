@@ -145,4 +145,9 @@ class TokenMatrixTests(unittest.TestCase):
 
     def test_capability_list_covers_what_the_project_needs(self):
         names = [name for name, *_ in self.matrix.CAPABILITIES]
-        self.assertEqual(names, ["token_active", "account", "d1", "ai_models"])
+        self.assertEqual(
+            names,
+            ["token_active", "accounts", "account", "d1", "ai_models"],
+            "accounts must be probed: it reveals when the token and the account id "
+            "belong to different accounts, which looks identical to an invalid token",
+        )
