@@ -472,6 +472,18 @@ try {
   assertStatus(duplicate, 200, "idempotent task replay");
   assert.equal(duplicate.payload.task.id, enqueued.payload.task.id);
   assert.equal(duplicate.payload.created, false);
+  const reordered = await api("/v1/tasks/enqueue", { method: "POST", body: {
+    ...taskPayload, payload: { external_writes: false, purpose: "verify real local D1 persistence" },
+  } });
+  assertStatus(reordered, 200, "reordered JSON payload replay");
+  for (const change of [
+    { task_type: "research_brief" }, { title: "Different title" },
+    { payload: { purpose: "different", external_writes: false } }, { max_attempts: 2 },
+  ]) {
+    const conflict = await api("/v1/tasks/enqueue", { method: "POST", body: { ...taskPayload, ...change } });
+    assertStatus(conflict, 409, "conflicting task manifest");
+    assert.equal(conflict.payload.error, "idempotency_conflict");
+  }
   assert.equal(enqueued.payload.task.execution_mode, "not_started");
 
   // Captured before the claim: claiming is what sets execution_mode, so the

@@ -123,12 +123,21 @@ class TaskStore:
         dependencies_json = json.dumps(deps, separators=(",", ":"))
         key, task_id, now = idempotency_key or str(uuid.uuid4()), str(uuid.uuid4()), utc_now()
         with self._connect() as db:
+            db.execute("BEGIN IMMEDIATE")
             existing = db.execute("SELECT * FROM tasks WHERE idempotency_key=?", (key,)).fetchone()
             if existing:
                 existing_deps = [row["dependency_task_id"] for row in db.execute(
                     "SELECT dependency_task_id FROM task_dependencies WHERE task_id=? ORDER BY dependency_task_id",
                     (existing["id"],)).fetchall()]
+                try:
+                    stored_payload = json.dumps(json.loads(existing["payload_json"]), sort_keys=True)
+                except (TypeError, ValueError):
+                    raise ValueError("idempotency key conflicts with an existing task") from None
                 if (existing["execution_lane"] != execution_lane
+                        or existing["task_type"] != task_type
+                        or existing["title"] != title
+                        or stored_payload != payload_json
+                        or existing["max_attempts"] != max_attempts
                         or (priority_supplied and existing["priority"] != priority)
                         or (dependencies_supplied and existing_deps != deps)):
                     raise ValueError("idempotency key conflicts with an existing task")

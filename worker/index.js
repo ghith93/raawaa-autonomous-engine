@@ -939,10 +939,24 @@ export default {
       task_type: taskType.trim(), title: title.trim(), payload_json: payloadJson,
       max_attempts: maxAttempts, priority, dependencies_json: dependenciesJson, execution_lane: executionLane,
     };
-    const matchesTask = task => task &&
-      (task.execution_lane || "general") === normalizedTask.execution_lane &&
-      (!prioritySupplied || task.priority === normalizedTask.priority) &&
-      (!dependenciesSupplied || (task.dependencies_json || "[]") === normalizedTask.dependencies_json);
+    // Object key order is not part of a JSON payload's identity. Arrays remain ordered.
+    const sameJson = (a, b) => {
+      if (a === b) return true;
+      if (!a || !b || typeof a !== "object" || typeof b !== "object") return false;
+      if (Array.isArray(a) !== Array.isArray(b)) return false;
+      const ak = Object.keys(a).sort(), bk = Object.keys(b).sort();
+      return ak.length === bk.length && ak.every((key, i) => key === bk[i] && sameJson(a[key], b[key]));
+    };
+    const matchesTask = task => {
+      if (!task) return false;
+      let storedPayload;
+      try { storedPayload = JSON.parse(task.payload_json); } catch { return false; }
+      return (task.execution_lane || "general") === normalizedTask.execution_lane &&
+        task.task_type === normalizedTask.task_type && task.title === normalizedTask.title &&
+        task.max_attempts === normalizedTask.max_attempts && sameJson(storedPayload, payload) &&
+        (!prioritySupplied || task.priority === normalizedTask.priority) &&
+        (!dependenciesSupplied || (task.dependencies_json || "[]") === normalizedTask.dependencies_json);
+    };
     const readDependencies = async taskId => {
       const rows = await env.DB.prepare(
         "SELECT dependency_task_id FROM task_dependencies WHERE task_id=? ORDER BY dependency_task_id"
