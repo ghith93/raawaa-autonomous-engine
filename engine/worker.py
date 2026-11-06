@@ -177,6 +177,8 @@ def run_once(store: TaskStore, live_gateway=None, environ=None, worker_lane: str
     allowed_lanes = {"general", "specialist:researcher", "specialist:reviewer", "specialist:marketer", "specialist:operator", "specialist:mobile_tester"}
     if worker_lane not in allowed_lanes:
         return {"status": "blocked", "reason": "invalid_worker_lane"}
+    if hasattr(store, "worker_lane"):
+        store.worker_lane = worker_lane
     lane_agents = {
         "specialist:researcher": "researcher",
         "specialist:reviewer": "reviewer",
