@@ -163,7 +163,7 @@ def _verify_previous_ambiguous_task(store: RemoteTaskStore) -> dict:
         # never repeat the settlement mutation or provider call.
         if unresolved or int(snapshot.get("task_pending_count", -1)) != 0:
             raise SystemExit(
-                "Refusing smoke: prior task has unexpected unresolved monetary state."
+                "Refusing smoke: prior ambiguous reservation does not match the exact zero-cost record or has unexpected unresolved monetary state."
             )
         reservation_id = None
         settled_matches = [
