@@ -7,84 +7,60 @@ on:
         required: true
         type: string
       run_scoped_id:
-        description: 'Unique run-scoped idempotency key'
+        description: 'Run correlation identifier (not an idempotency guarantee)'
         required: true
         type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: groq-staging-audit-${{ github.event.inputs.run_scoped_id }}
+  cancel-in-progress: false
+
 jobs:
   dispatch:
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - name: Check out the exact dispatch commit
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
-          ref: main
-          fetch-depth: 0
-          # Pin to exact SHA f7a0e143f4ca721af1fcf9e0457a83916c19ffa6 (Main SHA)
-          # Note: actions/checkout@v4 is pinned to SHA 506f558186918698c736336d96d4a6e6f25d4a0d (immutable)
-          # The error #42301528344 was due to @v4 not being a full 40-char SHA pin in the workflow file.
-          # Corrected to use the full SHA of actions/checkout@v4 (506f558186918698c736336d96d4a6e6f25d4a0d)
-          # and the main ref SHA f7a0e143f4ca721af1fcf9e0457a83916c19ffa6.
-          # Using the official SHA for actions/checkout@v4 (v4.2.0): 506f558186918698c736336d96d4a6e6f25d4a0d
-          # (Verified from GitHub Actions registry)
-          # Also enforcing main SHA binding below.
-      - name: Verify Confirmation, SHA, and Branch Binding
-        run: |
-          # 1. Branch/SHA binding guard (Blocker 1)
-          if [ "${{ github.ref }}" != "refs/heads/main" ]; then
-            echo "ERROR: Dispatch must be triggered from main branch context or event SHA must match main SHA f7a0e143f4ca721af1fcf9e0457a83916c19ffa6"
-            exit 1
-          fi
-          if [ "${{ github.sha }}" != "f7a0e143f4ca721af1fcf9e0457a83916c19ffa6" ] && [ "${{ github.event.repository.default_branch }}" != "main" ]; then
-            echo "WARNING: SHA mismatch. Expected f7a0e143f4ca721af1fcf9e0457a83916c19ffa6, got ${{ github.sha }}"
-            # For workflow_dispatch, we check if the input confirmation matches and the event SHA is main
-            if [ "${{ github.event.inputs.confirmation_string }}" != "ARENA-GROQ-20B-STAGING-CONFIRM" ]; then
-              echo "Invalid confirmation string"
-              exit 1
-            fi
-          fi
-          
-          # 2. Shell interpolation risk mitigation (Blocker 2)
-          # Move inputs to environment variables and validate (no direct interpolation in shell)
-          export ARENA_CONFIRMATION="${{ github.event.inputs.confirmation_string }}"
-          export ARENA_SCOPED_ID="${{ github.event.inputs.run_scoped_id }}"
-          
-          if [ "$ARENA_CONFIRMATION" != "ARENA-GROQ-20B-STAGING-CONFIRM" ]; then
-            echo "Invalid confirmation string"
-            exit 1
-          fi
-          
-          # Validate scoped ID (alphanumeric + hyphens, max 64 chars)
-          if [[ ! "$ARENA_SCOPED_ID" =~ ^[a-zA-Z0-9-]+$ ]] || [ ${#ARENA_SCOPED_ID} -gt 64 ]; then
-            echo "Invalid run_scoped_id format"
-            exit 1
-          fi
-          
-          echo "SHA Verified: $GITHUB_SHA"
-          echo "Idempotency Key: $ARENA_SCOPED_ID"
-          echo "Branch: $GITHUB_REF"
-          
-          # 3. Idempotency claim (Blocker 3) - now implemented as audit/preflight check (not inference)
-          # 4. Audit vs Inference scope (Blocker 4) - strictly audit/preflight
-          # 5. Payload allowlist (Blocker 5) - only emit approved scalars, no payload/secret
-          
-      - name: Run Staging Smoke (Zero Spend Check - Audit Only)
+          ref: ${{ github.sha }}
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Verify dispatch context and inputs
         env:
-          ARENA_SCOPED_ID: "${{ github.event.inputs.run_scoped_id }}"
-          ARENA_CONFIRMATION: "${{ github.event.inputs.confirmation_string }}"
+          EVENT_REF: ${{ github.ref }}
+          EVENT_SHA: ${{ github.sha }}
+          ARENA_CONFIRMATION: ${{ inputs.confirmation_string }}
+          ARENA_SCOPED_ID: ${{ inputs.run_scoped_id }}
+        shell: bash
         run: |
-          # Strictly read-only audit, no inference, no spend
+          set -euo pipefail
+          test "$EVENT_REF" = "refs/heads/main"
+          test "$(git rev-parse HEAD)" = "$EVENT_SHA"
+          test "$ARENA_CONFIRMATION" = "ARENA-GROQ-20B-STAGING-CONFIRM"
+          [[ "$ARENA_SCOPED_ID" =~ ^[a-zA-Z0-9-]{1,64}$ ]]
+          echo "Dispatch context verified for $EVENT_SHA"
+          echo "Correlation ID format verified"
+
+      - name: Run Staging audit preflight (no inference)
+        env:
+          ARENA_SCOPED_ID: ${{ inputs.run_scoped_id }}
+        run: |
           python3 -m engine.cli audit --stage staging --provider groq --model openai/gpt-oss-20b --allowlist-only scalars,event_names,types --dry-run
-          
-      - name: Report Evidence (Allowlist Only)
+
+      - name: Report bounded evidence
         env:
-          ARENA_SCOPED_ID: "${{ github.event.inputs.run_scoped_id }}"
-          GITHUB_RUN_ID: "${{ github.run_id }}"
-          GITHUB_SHA: "${{ github.sha }}"
+          ARENA_SCOPED_ID: ${{ inputs.run_scoped_id }}
+          GITHUB_RUN_ID: ${{ github.run_id }}
+          GITHUB_SHA: ${{ github.sha }}
         run: |
-          # Blocker 5: Output only approved scalars (no payload/secret)
-          echo "Evidence: Run $GITHUB_RUN_ID completed with SHA $GITHUB_SHA and Idempotency $ARENA_SCOPED_ID"
-          echo "Status: Audit Preflight Completed (Zero Spend)"
-          
-      - name: Stage C Read-Only Tests (Blocker 6)
-        run: |
-          # Tests proving exact-ID reads invoke only read endpoints, reject wrong IDs, handle missing IDs, emit no payload/secret fields, call no mutation methods
-          python3 -m pytest tests/test_exact_id_reconciliation.py -v --dry-run
+          set -euo pipefail
+          printf 'Evidence: run=%s sha=%s correlation_id=%s\n' "$GITHUB_RUN_ID" "$GITHUB_SHA" "$ARENA_SCOPED_ID"
+          echo "Status: Audit preflight completed; no inference was performed."
+
+      - name: Run exact-ID read-only tests
+        run: python3 -m pytest tests/test_exact_id_reconciliation.py -v
