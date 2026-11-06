@@ -20,27 +20,30 @@ enqueued into a mismatched specialist lane.
 
 ## Worker authorization
 
-All task API calls continue to require the existing `ENGINE_API_TOKEN`.
-Specialist claim and lifecycle calls additionally require a distinct lane
-capability token in `X-Engine-Lane-Token`. Configure a distinct random token of at least
-32 characters as a GitHub repository Actions secret for each enabled lane:
+All task-consumer operations (task readback, claim, recovery, heartbeat, retry,
+finish, invocation, and process-dispatch mutations) require the existing
+`ENGINE_API_TOKEN` plus a distinct lane capability in `X-Engine-Lane-Token`.
+Configure a random token of at least 32 characters as a GitHub repository Actions
+secret for each enabled lane:
 
+- `ENGINE_GENERAL_LANE_TOKEN`
 - `ENGINE_RESEARCHER_LANE_TOKEN`
 - `ENGINE_REVIEWER_LANE_TOKEN`
 - `ENGINE_MARKETER_LANE_TOKEN`
 - `ENGINE_OPERATOR_LANE_TOKEN`
 
-Each token must be different from `ENGINE_API_TOKEN` and from the other lane
-tokens. Never put these values in the repository or logs. A lane without its
+Each token must be different from `ENGINE_API_TOKEN`, quota-admin and
+Codespaces tokens, and every other lane token. Never put these values in the
+repository or logs. Never put these values in the repository or logs. A lane without its
 own configured token is denied; it does not fall back to the general token.
 
 The Python runner selects a lane with `RAAWAA_ENGINE_WORKER_LANE` (default
-`general`) and reads the corresponding capability from
-`RAAWAA_ENGINE_LANE_TOKEN`. The prepared specialist runner maps each repository
-secret to that runtime variable. It refuses to run when live inference is disabled
+`general`) and reads its capability from `RAAWAA_ENGINE_LANE_TOKEN`. The
+production general Task Runner maps `ENGINE_GENERAL_LANE_TOKEN` to that variable;
+the prepared specialist runner maps each specialist secret to it. It refuses to run when live inference is disabled
 rather than falsely completing business work as a dry run. If explicitly enabled,
 the existing provider policy, verified-zero-cost routing, and quota ledgers remain
-mandatory. The general runner needs no additional token.
+mandatory. No consumer falls back to `ENGINE_API_TOKEN` for lane authorization.
 Remote D1 task readback, claims, stale recovery, heartbeats, retries, and finishes
 carry the same lane identity and require the lane capability. SQLite exposes the
 same lane-filtered list and lease-ownership contract to local workers; direct local
@@ -54,7 +57,7 @@ boundary.
   production specialist schedule is enabled yet. Keep these lanes dormant until
   the per-lane capability secrets and separate activation gates are reviewed.
   No shared-token fallback is permitted.
-- The CI Staging proof creates temporary researcher credentials, tests generic
+- The CI Staging proof creates temporary general and researcher credentials, tests generic
   exclusion and wrong-lane heartbeat/retry/finish rejection against remote
   Staging D1, then revokes the temporary credential.
 - Lane isolation tests use dry-run tasks only. This feature does not enable
