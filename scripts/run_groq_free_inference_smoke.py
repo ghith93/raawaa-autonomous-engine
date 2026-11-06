@@ -97,7 +97,7 @@ def _diagnostics(store: RemoteTaskStore, task_id: str) -> dict:
 
 
 def _verify_previous_ambiguous_task(store: RemoteTaskStore) -> dict:
-    """Never replay the prior ambiguous call; recover its expired one-attempt lease only."""
+    """Settle the one known zero-cost ambiguity once; accept its exact settled replay."""
     recovery = store.recover_stale(worker_lane=EXECUTION_LANE)
     rows = store.list_tasks(100, worker_lane=EXECUTION_LANE)
     if len(rows) >= 100:
@@ -115,45 +115,97 @@ def _verify_previous_ambiguous_task(store: RemoteTaskStore) -> dict:
         )
 
     query = urlencode({"task_id": PREVIOUS_AMBIGUOUS_TASK_ID})
-    response = store._request("/v1/monetary-ledger?" + query)
-    snapshot = response.get("snapshot")
-    unresolved = snapshot.get("unresolved", []) if isinstance(snapshot, dict) else []
-    matches = [
-        row for row in unresolved
-        if row.get("task_id") == PREVIOUS_AMBIGUOUS_TASK_ID
-        and row.get("provider") == "groq"
-        and row.get("model") == "openai/gpt-oss-20b"
-        and row.get("status") == "ambiguous"
-        and int(row.get("estimated_cost_nanos", -1)) == 0
-    ]
-    if len(matches) != 1 or int(snapshot.get("task_pending_count", -1)) != 1:
-        raise SystemExit(
-            "Refusing smoke: prior ambiguous reservation does not match the exact zero-cost record."
+    snapshot = store._request("/v1/monetary-ledger?" + query).get("snapshot")
+    if not isinstance(snapshot, dict):
+        raise SystemExit("Refusing smoke: previous task monetary snapshot is unavailable.")
+    unresolved = snapshot.get("unresolved", [])
+    settled = snapshot.get("settled", [])
+    if not isinstance(unresolved, list) or not isinstance(settled, list):
+        raise SystemExit("Refusing smoke: previous task monetary history is malformed.")
+
+    def exact_zero_cost(row: dict) -> bool:
+        return (
+            row.get("task_id") == PREVIOUS_AMBIGUOUS_TASK_ID
+            and row.get("provider") == "groq"
+            and row.get("model") == "openai/gpt-oss-20b"
+            and row.get("estimated_cost_nanos") == 0
         )
-    reservation_id = matches[0].get("reservation_id")
-    if not isinstance(reservation_id, str) or not reservation_id:
-        raise SystemExit("Refusing smoke: the exact ambiguous reservation has no durable ID.")
-    # Groq Free is operator-confirmed and the route profile records a hard zero
-    # estimated cost. Settle only this exact zero-dollar reservation; token quota
-    # remains consumed conservatively in the separate quota ledger.
-    settled = store._request("/v1/monetary-ledger", "POST", {
-        "action": "settle",
-        "reservation_id": reservation_id,
-        "actual_cost_nanos": 0,
-        "input_tokens": 0,
-        "output_tokens": 0,
-    })
-    if settled.get("settled") is not True:
-        raise SystemExit("Could not settle the exact verified-Free zero-cost reservation.")
-    after = store._request("/v1/monetary-ledger?" + query).get("snapshot", {})
-    if int(after.get("task_pending_count", -1)) != 0 or after.get("unresolved"):
-        raise SystemExit("The exact ambiguous reservation remains unresolved after zero-cost settlement.")
+
+    ambiguous = [
+        row for row in unresolved
+        if isinstance(row, dict) and exact_zero_cost(row)
+        and row.get("status") == "ambiguous"
+    ]
+    if ambiguous:
+        if len(ambiguous) != 1 or len(unresolved) != 1 or int(snapshot.get("task_pending_count", -1)) != 1:
+            raise SystemExit(
+                "Refusing smoke: prior ambiguous reservation does not match the exact zero-cost record."
+            )
+        reservation_id = ambiguous[0].get("reservation_id")
+        if not isinstance(reservation_id, str) or not reservation_id:
+            raise SystemExit("Refusing smoke: the exact ambiguous reservation has no durable ID.")
+        # The provider's Free tier is verified and this route has a hard zero
+        # estimate. Settle only this exact reservation; keep token quota consumed.
+        result = store._request("/v1/monetary-ledger", "POST", {
+            "action": "settle",
+            "reservation_id": reservation_id,
+            "actual_cost_nanos": 0,
+            "input_tokens": 0,
+            "output_tokens": 0,
+        })
+        if result.get("settled") is not True:
+            raise SystemExit("Could not settle the exact verified-Free zero-cost reservation.")
+        after = store._request("/v1/monetary-ledger?" + query).get("snapshot", {})
+        status = "settled"
+    else:
+        # A later invocation may encounter the exact same task after the prior
+        # run already settled it. Accept only a read-only, exact zero-cost row;
+        # never repeat the settlement mutation or provider call.
+        if unresolved or int(snapshot.get("task_pending_count", -1)) != 0:
+            raise SystemExit(
+                "Refusing smoke: prior task has unexpected unresolved monetary state."
+            )
+        reservation_id = None
+        settled_matches = [
+            row for row in settled
+            if isinstance(row, dict) and exact_zero_cost(row)
+            and row.get("status") == "settled"
+            and row.get("actual_cost_nanos") == 0
+            and row.get("input_tokens") == 0
+            and row.get("output_tokens") == 0
+            and isinstance(row.get("reservation_id"), str)
+        ]
+        if len(settled_matches) != 1 or len(settled) != 1:
+            raise SystemExit(
+                "Refusing smoke: previous task lacks one exact settled zero-cost reservation."
+            )
+        reservation_id = settled_matches[0]["reservation_id"]
+        after = snapshot
+        status = "already_settled"
+
+    after_unresolved = after.get("unresolved", [])
+    after_settled = after.get("settled", [])
+    verified = [
+        row for row in after_settled
+        if isinstance(row, dict) and exact_zero_cost(row)
+        and row.get("reservation_id") == reservation_id
+        and row.get("status") == "settled"
+        and row.get("actual_cost_nanos") == 0
+        and row.get("input_tokens") == 0
+        and row.get("output_tokens") == 0
+    ]
+    if (
+        int(after.get("task_pending_count", -1)) != 0
+        or after_unresolved
+        or len(verified) != 1
+    ):
+        raise SystemExit("The exact ambiguous reservation is not durably settled at zero cost.")
     return {
         "task_id": PREVIOUS_AMBIGUOUS_TASK_ID,
         "task_status": previous.get("status"),
         "stale_recovery": recovery,
         "reservation_id": reservation_id,
-        "reservation_status": "settled",
+        "reservation_status": status,
         "actual_cost_nanos": 0,
         "token_quota_estimate_preserved": True,
     }
