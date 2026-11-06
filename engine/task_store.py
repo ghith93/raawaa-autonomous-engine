@@ -311,8 +311,10 @@ class TaskStore:
             for row in rows:
                 status = "pending" if row["attempts"] < row["max_attempts"] else "failed"
                 db.execute("""UPDATE tasks SET status=?,error=?,updated_at=?,lease_token=NULL,
-                    lease_expires_at=NULL WHERE id=? AND status='running' AND lease_token IS ?""",
-                    (status, "Recovered expired worker lease.", now, row["id"], row["lease_token"]))
+                    lease_expires_at=NULL WHERE id=? AND status='running' AND lease_token IS ?
+                    AND (? IS NULL OR execution_lane=?)""",
+                    (status, "Recovered expired worker lease.", now, row["id"], row["lease_token"],
+                     worker_lane, worker_lane))
                 self._audit(db, row["id"], "task_lease_recovered",
                             {"new_status": status, "attempt": row["attempts"],
                              "max_attempts": row["max_attempts"]})
