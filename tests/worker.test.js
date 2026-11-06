@@ -768,10 +768,13 @@ test("a task id with underscores reaches the authenticated invocation lifecycle"
         bind(...values) { this.values = values; return this; },
         async first() {
           calls.push({ kind: "first", sql, values: this.values });
-          if (sql.includes("SELECT id,status,lease_token,lease_expires_at FROM tasks")) {
+          if (sql.includes("SELECT execution_lane FROM tasks WHERE id=?")) {
+            return { execution_lane: "general" };
+          }
+          if (sql.includes("SELECT id,status,lease_token,lease_expires_at,execution_lane FROM tasks")) {
             return {
               id: taskId, status: "running", lease_token: "lease-1",
-              lease_expires_at: "2999-01-01T00:00:00.000Z",
+              lease_expires_at: "2999-01-01T00:00:00.000Z", execution_lane: "general",
             };
           }
           if (sql.includes("SELECT invocation_id,task_id,step_key,task_kind,request_id,status,last_route_id")) {
@@ -796,7 +799,7 @@ test("a task id with underscores reaches the authenticated invocation lifecycle"
   };
   const response = await worker.fetch(request(`/v1/tasks/${taskId}/invocations`, {
     method: "POST",
-    body: { action: "prepare", lease_token: "lease-1", step_key: "model-step", task_kind: "research_brief" },
+    body: { action: "prepare", lease_token: "lease-1", step_key: "model-step", task_kind: "research_brief", worker_lane: "general" },
   }), { DB, ENGINE_API_TOKEN: TOKEN });
   assert.equal(response.status, 201);
   const payload = await response.json();
