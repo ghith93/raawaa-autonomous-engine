@@ -1,0 +1,70 @@
+name: Groq 20B Staging Dispatch (One-Shot)
+on:
+  workflow_dispatch:
+    inputs:
+      confirmation_string:
+        description: 'Must match "ARENA-GROQ-20B-STAGING-CONFIRM"'
+        required: true
+        type: string
+      run_scoped_id:
+        description: 'Run correlation identifier (not an idempotency guarantee)'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: groq-staging-audit-${{ github.event.inputs.run_scoped_id }}
+  cancel-in-progress: false
+
+jobs:
+  dispatch:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out the exact dispatch commit
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0
+        with:
+          python-version: "3.12"
+
+      - name: Verify dispatch context and inputs
+        env:
+          EVENT_REF: ${{ github.ref }}
+          EVENT_SHA: ${{ github.sha }}
+          ARENA_CONFIRMATION: ${{ inputs.confirmation_string }}
+          ARENA_SCOPED_ID: ${{ inputs.run_scoped_id }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$EVENT_REF" = "refs/heads/main"
+          test "$(git rev-parse HEAD)" = "$EVENT_SHA"
+          test "$ARENA_CONFIRMATION" = "ARENA-GROQ-20B-STAGING-CONFIRM"
+          [[ "$ARENA_SCOPED_ID" =~ ^[a-zA-Z0-9-]{1,64}$ ]]
+          echo "Dispatch context verified for $EVENT_SHA"
+          echo "Correlation ID format verified"
+
+      - name: Run Staging audit preflight (no inference)
+        env:
+          ARENA_SCOPED_ID: ${{ inputs.run_scoped_id }}
+        run: |
+          python3 -m engine.cli audit --stage staging --provider groq --model openai/gpt-oss-20b --allowlist-only scalars,event_names,types --dry-run
+
+      - name: Report bounded evidence
+        env:
+          ARENA_SCOPED_ID: ${{ inputs.run_scoped_id }}
+          GITHUB_RUN_ID: ${{ github.run_id }}
+          GITHUB_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          printf 'Evidence: run=%s sha=%s correlation_id=%s\n' "$GITHUB_RUN_ID" "$GITHUB_SHA" "$ARENA_SCOPED_ID"
+          echo "Status: Audit preflight completed; no inference was performed."
+
+      - name: Run exact-ID read-only tests
+        run: python -m unittest discover -s tests -p "test_exact_id_reconciliation.py" -v
