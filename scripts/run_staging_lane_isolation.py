@@ -18,6 +18,11 @@ def main() -> None:
     if not os.environ.get("RAAWAA_ENGINE_LANE_TOKEN"):
         raise SystemExit("Missing ephemeral researcher lane token")
     store = RemoteTaskStore()
+    preexisting = store.list_tasks(100)
+    active = [task for task in preexisting if task.get("status") in {"pending", "running"}
+              and task.get("execution_lane", "general") in {"general", "specialist:researcher"}]
+    if active:
+        raise SystemExit("Refusing to claim unrelated Staging work; relevant queue lanes are not idle")
     suffix = uuid.uuid4().hex
     general = store.enqueue(
         "research_brief", "Staging general lane isolation proof",
