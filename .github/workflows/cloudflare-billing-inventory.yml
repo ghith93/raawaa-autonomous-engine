@@ -42,6 +42,7 @@ jobs:
           trap 'rm -f "$policies_file" "$subscriptions_file"' EXIT
 
           policies_status="$(curl --silent --show-error \
+            --retry 3 --retry-delay 2 --retry-max-time 15 --connect-timeout 10 --max-time 20 \
             --output "$policies_file" \
             --write-out "%{http_code}" \
             --header "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
@@ -49,6 +50,7 @@ jobs:
             "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/billing/spend-policies")"
 
           subscriptions_status="$(curl --silent --show-error \
+            --retry 3 --retry-delay 2 --retry-max-time 15 --connect-timeout 10 --max-time 20 \
             --output "$subscriptions_file" \
             --write-out "%{http_code}" \
             --header "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
