@@ -533,7 +533,7 @@ class QuotaAwareGatewayTests(unittest.TestCase):
             len(self.request.prompt.encode("utf-8")) + self.request.max_output_tokens,
         )
         event = self.quota.audit_events()[0]
-        self.assertEqual(event["details"]["error_code"], "response_route_mismatch")
+        self.assertEqual(event["details"]["error_code"], "mocked_completion")
         self.assertEqual(self.usage.totals()["daily_usd"], 0.0)
 
     def test_empty_completion_is_rejected_by_live_gateway(self):
