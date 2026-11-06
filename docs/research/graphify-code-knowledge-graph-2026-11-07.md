@@ -76,3 +76,16 @@ All repository facts above were inspected on 2026-11-07. Recheck upstream versio
 - Corrective change on this PR: install the pinned `graphifyy[sql]==0.9.103` extra, run `python -m graphify cluster-only . --no-label` (the CLI subcommand, with community LLM labeling explicitly disabled), and validate graph/report/HTML plus relative source paths before upload.
 - This is a genuine first pilot result, not yet a passing end-to-end graph artifact. Re-run exact-head CI after the corrective commit and do not merge until the graph job and full Engine CI pass.
 
+## 8. Existing six-hour development loop and fallback reality
+
+The repository also has `scripts/build_development_state.py` and `engine/development_cycle.py` scheduled by `maintenance.yml` every six hours. They collect a read-only state snapshot and deterministically rank main CI, deploy/watchdog freshness, queue signals, PRs, issues and hygiene. They do not create, claim or execute tasks. Arena's execution round is still on-demand; ChatGPT/council review is on-demand. This is a second useful existing signal source, not a second R&D executor.
+
+The provider inventory is also not an operational fallback system:
+- Groq GPT-OSS 20B is registered as a primary candidate but `enabled=false`; its last account/quota verification is dated 2026-11-01.
+- Groq GPT-OSS 120B is labelled fallback but `free_verified=false`, `production_use_allowed=false`, `enabled=false` after an HTTP 403 permission denial.
+- Groq Qwen is preview-only and disabled.
+- NVIDIA Nemotron is a disabled candidate with unverified numeric quota and commercial/production eligibility.
+- The registry currently has no enabled eligible route. Therefore 120B is a **named fallback candidate**, not a functioning backup.
+
+Required R&D completion: a versioned capability/provider/tool adoption register with explicit `primary`, `fallback`, `standby`, `rejected`, and `disabled` states; current evidence and expiry; a tested zero-cost eligibility check; per-route kill switch and hard quota cap; canary/benchmark evidence; and a rollback test. A fallback must be exercised in a bounded staging test before it can be called operational. Until then, keep existing behavior and all disabled routes unchanged.
+
