@@ -71,6 +71,20 @@ def main() -> None:
                  {"mode": "dry_run", "proof": "general-sentinel"},
                  lease_token=general_sentinel_claim["lease_token"], worker_lane="general")
 
+    # Drain the general lane while the researcher task is still pending.
+    general_sentinel_last_claim = general_store.claim_next(
+        execution_mode="dry_run", worker_lane="general"
+    )
+    if not general_sentinel_last_claim or general_sentinel_last_claim.get("id") != general_sentinel_last.get("id"):
+        raise SystemExit("General consumer could not claim its own final pending task")
+    general_store.finish(
+        general_sentinel_last_claim["id"], "succeeded",
+        {"mode": "dry_run", "proof": "general-final"},
+        lease_token=general_sentinel_last_claim["lease_token"], worker_lane="general",
+    )
+    if general_store.claim_next(execution_mode="dry_run", worker_lane="general") is not None:
+        raise SystemExit("General consumer claimed a pending researcher task")
+
     specialist_claim = researcher_store.claim_next(
         execution_mode="dry_run", worker_lane="specialist:researcher"
     )
@@ -100,15 +114,8 @@ def main() -> None:
         lease_token=specialist_claim["lease_token"], worker_lane="specialist:researcher",
     )
 
-    # The researcher must not claim the final pending general task.
-    general_sentinel_last_claim = general_store.claim_next(execution_mode="dry_run", worker_lane="general")
-    if not general_sentinel_last_claim or general_sentinel_last_claim.get("id") != general_sentinel_last.get("id"):
-        raise SystemExit("General consumer could not claim its own final pending task")
-    general_store.finish(general_sentinel_last_claim["id"], "succeeded",
-                 {"mode": "dry_run", "proof": "general-final"},
-                 lease_token=general_sentinel_last_claim["lease_token"], worker_lane="general")
     if general_store.claim_next(execution_mode="dry_run", worker_lane="general") is not None:
-        raise SystemExit("General consumer claimed an unexpected task")
+        raise SystemExit("General consumer claimed an unexpected task after specialist completion")
 
     general_tasks = {task["id"]: task for task in general_store.list_tasks(100)}
     researcher_tasks = {
