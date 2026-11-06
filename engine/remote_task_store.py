@@ -170,9 +170,15 @@ class RemoteTaskStore:
             raise RemoteTaskStoreError("Remote task API omitted the task")
         return task
 
-    def list_tasks(self, limit: int = 50) -> list[dict[str, Any]]:
+    def list_tasks(self, limit: int = 50, worker_lane: str = "general") -> list[dict[str, Any]]:
         limit = max(1, min(int(limit), 100))
-        result = self._request(f"/v1/tasks?limit={limit}")
+        if worker_lane not in {"general", "specialist:researcher", "specialist:reviewer",
+                               "specialist:marketer", "specialist:operator", "specialist:mobile_tester"}:
+            raise ValueError("invalid worker_lane")
+        path = f"/v1/tasks?limit={limit}"
+        if worker_lane != "general":
+            path += f"&worker_lane={worker_lane}"
+        result = self._request(path, worker_lane=worker_lane)
         tasks = result.get("tasks")
         if not isinstance(tasks, list):
             raise RemoteTaskStoreError("Remote task API returned an invalid task list")
