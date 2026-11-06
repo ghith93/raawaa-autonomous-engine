@@ -7,7 +7,10 @@
     "config/tool_permissions.json",
     "config/research_sources.json",
     "engine/",
-    "worker/"
+    "worker/",
+    "engine/development_cycle.py",
+    "scripts/build_development_state.py",
+    ".github/workflows/maintenance.yml"
   ],
   "scope_note": "Static architecture inventory only. Agent roster entries are declarative roles, not proof of live agent processes. Runtime task instances and dependency edges remain in the existing D1 Task Store and are intentionally not duplicated here.",
   "nodes": [
@@ -256,6 +259,43 @@
         "config/agents.json",
         "docs/research/nvidia-nemotron-evaluation-2026-11-04.ar.md"
       ]
+    },
+    {
+      "id": "component:development_state_collection",
+      "kind": "component",
+      "status": "scheduled_every_6h_read_only_collection",
+      "evidence": [
+        "scripts/build_development_state.py",
+        ".github/workflows/maintenance.yml",
+        "docs/operations/permanent-development-loop.md"
+      ]
+    },
+    {
+      "id": "component:development_cycle_ranker",
+      "kind": "component",
+      "status": "deterministic_read_only_ranking_no_execution",
+      "evidence": [
+        "engine/development_cycle.py",
+        "docs/operations/permanent-development-loop.md"
+      ]
+    },
+    {
+      "id": "gap:verified_active_fallback",
+      "kind": "capability_gap",
+      "status": "no_active_eligible_model_fallback_all_routes_disabled_or_ineligible",
+      "evidence": [
+        "config/provider_profiles.json",
+        "docs/operations/multi-cli-execution-plan.md"
+      ]
+    },
+    {
+      "id": "gap:benchmark_based_adoption",
+      "kind": "capability_gap",
+      "status": "candidate_scoring_is_metadata_only_no_repeatable_benchmark_promotion",
+      "evidence": [
+        "docs/capability-gap-analysis.md",
+        "docs/research-and-development-operating-system.ar.md"
+      ]
     }
   ],
   "edges": [
@@ -372,6 +412,30 @@
       "to": "provider:nvidia-nemotron",
       "relation": "registers_candidate",
       "status": "disabled"
+    },
+    {
+      "from": "component:development_state_collection",
+      "to": "component:development_cycle_ranker",
+      "relation": "feeds",
+      "status": "implemented_in_maintenance_workflow_every_6h"
+    },
+    {
+      "from": "component:development_cycle_ranker",
+      "to": "component:task_store",
+      "relation": "ranks_next_actions_for",
+      "status": "artifact_only_no_task_claim_or_execution"
+    },
+    {
+      "from": "component:provider_registry",
+      "to": "gap:verified_active_fallback",
+      "relation": "currently_has_no_eligible_route",
+      "status": "verified_all_routes_disabled_or_ineligible"
+    },
+    {
+      "from": "component:capability_gap_analysis",
+      "to": "gap:benchmark_based_adoption",
+      "relation": "does_not_benchmark_candidates",
+      "status": "verified_limitation"
     }
   ]
 }
