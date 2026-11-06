@@ -211,9 +211,11 @@ def build_parser() -> argparse.ArgumentParser:
     enqueue.add_argument("--payload", default="{}")
     enqueue.add_argument("--key")
     enqueue.add_argument("--max-attempts", type=int, default=2)
+    enqueue.add_argument("--lane", choices=["general", "specialist:researcher", "specialist:reviewer", "specialist:marketer", "specialist:operator", "specialist:mobile_tester"], default="general")
 
     listing = sub.add_parser("list")
     listing.add_argument("--limit", type=int, default=50)
+    listing.add_argument("--lane", choices=["general", "specialist:researcher", "specialist:reviewer", "specialist:marketer", "specialist:operator", "specialist:mobile_tester"], default="general")
     sub.add_parser("run-once")
 
     batch = sub.add_parser("run-batch", help="Run a bounded task batch with policy-limited concurrency")
@@ -346,10 +348,11 @@ def main() -> int:
         payload = json.loads(args.payload)
         if not isinstance(payload, dict):
             raise ValueError("--payload must decode to a JSON object")
-        task = store().enqueue(args.task_type, args.title, payload, args.key, args.max_attempts)
+        task = store().enqueue(args.task_type, args.title, payload, args.key, args.max_attempts,
+                                 execution_lane=args.lane)
         print(json.dumps(task, indent=2, ensure_ascii=False))
     elif args.command == "list":
-        print(json.dumps(store().list_tasks(args.limit), indent=2, ensure_ascii=False))
+        print(json.dumps(store().list_tasks(args.limit, worker_lane=args.lane), indent=2, ensure_ascii=False))
     elif args.command == "run-once":
         task_store = store()
         gateway = build_gateway_for_task_store(task_store)

@@ -18,7 +18,7 @@ class LeaseHeartbeatTests(unittest.TestCase):
         finally:
             keeper.stop()
         self.assertGreaterEqual(store.heartbeat.call_count, 1)
-        store.heartbeat.assert_called_with("task-1", "lease-1", 1)
+        store.heartbeat.assert_called_with("task-1", "lease-1", 1, worker_lane="general")
 
     def test_heartbeat_failure_is_fail_closed(self):
         store = Mock()

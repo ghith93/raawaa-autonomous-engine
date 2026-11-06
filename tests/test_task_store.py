@@ -156,6 +156,29 @@ class TaskStoreTests(unittest.TestCase):
         events = [item["event"] for item in self.store.audit_events()]
         self.assertIn("task_lease_recovered", events)
 
+    def test_stale_recovery_is_scoped_to_consumer_lane(self):
+        general = self.store.enqueue("research_brief", "General stale task")
+        specialist = self.store.enqueue(
+            "research_brief", "Researcher stale task",
+            execution_lane="specialist:researcher",
+        )
+        general_claim = self.store.claim_next(worker_lane="general")
+        specialist_claim = self.store.claim_next(worker_lane="specialist:researcher")
+        self.assertEqual(general_claim["id"], general["id"])
+        self.assertEqual(specialist_claim["id"], specialist["id"])
+        with sqlite3.connect(self.store.db_path) as db:
+            db.execute("UPDATE tasks SET lease_expires_at='2000-01-01T00:00:00+00:00' WHERE id IN (?,?)",
+                       (general["id"], specialist["id"]))
+        self.assertEqual(self.store.recover_stale(worker_lane="general"),
+                         {"requeued": 1, "failed": 0})
+        tasks = {task["id"]: task for task in self.store.list_tasks()}
+        self.assertEqual(tasks[general["id"]]["status"], "pending")
+        self.assertEqual(tasks[specialist["id"]]["status"], "running")
+        self.assertEqual(self.store.recover_stale(worker_lane="specialist:researcher"),
+                         {"requeued": 1, "failed": 0})
+        tasks = {task["id"]: task for task in self.store.list_tasks()}
+        self.assertEqual(tasks[specialist["id"]]["status"], "pending")
+
     def test_stale_task_at_attempt_limit_is_failed(self):
         task = self.store.enqueue("research_brief", "Exhausted", max_attempts=1)
         self.store.claim_next()
@@ -195,6 +218,95 @@ class TaskStoreTests(unittest.TestCase):
         self.store.enqueue("system_audit", "Audit")
         events = self.store.audit_events()
         self.assertEqual(events[0]["event"], "task_enqueued")
+
+
+    def test_generic_and_specialist_consumers_are_isolated(self):
+        general = self.store.enqueue("research_brief", "General", idempotency_key="lane-general")
+        specialist = self.store.enqueue(
+            "research_brief", "Specialist", idempotency_key="lane-specialist",
+            execution_lane="specialist:researcher",
+        )
+        claimed = self.store.claim_next(execution_mode="dry_run")
+        self.assertEqual(claimed["id"], general["id"])
+        self.assertEqual(claimed["execution_lane"], "general")
+        self.store.finish(general["id"], "succeeded", result={"mode": "dry_run"},
+                          lease_token=claimed["lease_token"])
+        self.assertIsNone(self.store.claim_next(execution_mode="dry_run"))
+        specialist_claim = self.store.claim_next(
+            execution_mode="dry_run", worker_lane="specialist:researcher"
+        )
+        self.assertEqual(specialist_claim["id"], specialist["id"])
+        self.assertEqual(specialist_claim["execution_lane"], "specialist:researcher")
+
+    def test_lane_is_part_of_idempotency_identity(self):
+        self.store.enqueue("research_brief", "Same key", idempotency_key="lane-replay",
+                           execution_lane="general")
+        with self.assertRaisesRegex(ValueError, "idempotency key conflicts"):
+            self.store.enqueue("research_brief", "Same key", idempotency_key="lane-replay",
+                               execution_lane="specialist:researcher")
+
+    def test_wrong_lane_cannot_heartbeat_finish_or_retry(self):
+        task = self.store.enqueue("research_brief", "Owned", execution_lane="specialist:researcher")
+        claim = self.store.claim_next(execution_mode="dry_run", worker_lane="specialist:researcher")
+        with self.assertRaisesRegex(ValueError, "lease lost or expired"):
+            self.store.heartbeat(task["id"], claim["lease_token"], 60, worker_lane="general")
+        with self.assertRaisesRegex(ValueError, "worker lane ownership lost"):
+            self.store.finish(task["id"], "succeeded", result={"mode": "dry_run"},
+                              lease_token=claim["lease_token"], worker_lane="general")
+        with self.assertRaisesRegex(ValueError, "worker lane ownership lost"):
+            self.store.retry_or_fail(task["id"], "wrong owner", claim["lease_token"],
+                                     worker_lane="general")
+        self.store.finish(task["id"], "succeeded", result={"mode": "dry_run"},
+                          lease_token=claim["lease_token"], worker_lane="specialist:researcher")
+
+    def test_failed_specialist_dependency_does_not_block_general_claim_path(self):
+        parent = self.store.enqueue("research_brief", "Parent", max_attempts=1,
+                                    execution_lane="specialist:researcher")
+        child = self.store.enqueue("research_brief", "Child",
+                                   execution_lane="specialist:researcher", depends_on=[parent["id"]])
+        parent_claim = self.store.claim_next(execution_mode="dry_run",
+                                             worker_lane="specialist:researcher")
+        self.store.finish(parent["id"], "failed", error="expected",
+                          lease_token=parent_claim["lease_token"],
+                          worker_lane="specialist:researcher")
+        self.assertIsNone(self.store.claim_next(execution_mode="dry_run", worker_lane="general"))
+        stored = {task["id"]: task for task in self.store.list_tasks()}
+        self.assertEqual(stored[child["id"]]["status"], "pending")
+        self.assertIsNone(self.store.claim_next(execution_mode="dry_run",
+                                                worker_lane="specialist:researcher"))
+        self.assertEqual({task["id"]: task for task in self.store.list_tasks()}[child["id"]]["status"],
+                         "blocked")
+
+    def test_stale_recovery_is_scoped_to_the_requesting_lane(self):
+        general = self.store.enqueue("research_brief", "General stale")
+        specialist = self.store.enqueue("research_brief", "Specialist stale",
+                                        execution_lane="specialist:researcher")
+        general_claim = self.store.claim_next(worker_lane="general")
+        specialist_claim = self.store.claim_next(worker_lane="specialist:researcher")
+        with sqlite3.connect(self.store.db_path) as db:
+            db.execute("UPDATE tasks SET lease_expires_at='2000-01-01T00:00:00+00:00' WHERE id IN (?,?)",
+                       (general["id"], specialist["id"]))
+        self.assertEqual(self.store.recover_stale(worker_lane="general"),
+                         {"requeued": 1, "failed": 0})
+        saved = {task["id"]: task for task in self.store.list_tasks()}
+        self.assertEqual(saved[general["id"]]["status"], "pending")
+        self.assertEqual(saved[specialist["id"]]["status"], "running")
+        self.assertEqual(self.store.recover_stale(worker_lane="specialist:researcher"),
+                         {"requeued": 1, "failed": 0})
+
+    def test_task_listing_can_be_scoped_to_one_lane(self):
+        general = self.store.enqueue("research_brief", "General visible")
+        specialist = self.store.enqueue("research_brief", "Researcher visible",
+                                        execution_lane="specialist:researcher")
+        general_rows = self.store.list_tasks(50, worker_lane="general")
+        specialist_rows = self.store.list_tasks(50, worker_lane="specialist:researcher")
+        self.assertEqual([task["id"] for task in general_rows], [general["id"]])
+        self.assertEqual([task["id"] for task in specialist_rows], [specialist["id"]])
+
+    def test_specialist_lane_must_match_task_contract(self):
+        with self.assertRaisesRegex(ValueError, "does not match task_type"):
+            self.store.enqueue("content_draft", "Wrong lane",
+                               execution_lane="specialist:researcher")
 
 
 if __name__ == "__main__":

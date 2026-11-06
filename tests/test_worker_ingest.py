@@ -43,13 +43,13 @@ class FakeStore:
         self.task = task
         self.finished: dict | None = None
 
-    def recover_stale(self):
+    def recover_stale(self, worker_lane="general"):  # noqa: ARG002 - interface parity
         return {}
 
-    def claim_next(self, execution_mode=None):  # noqa: ARG002 - interface parity
+    def claim_next(self, execution_mode=None, worker_lane="general"):  # noqa: ARG002 - interface parity
         return self.task
 
-    def finish(self, task_id, status, result=None, error=None, lease_token=None, execution_mode=None):
+    def finish(self, task_id, status, result=None, error=None, lease_token=None, execution_mode=None, worker_lane="general"):
         self.finished = {"task_id": task_id, "status": status, "result": result,
                          "error": error, "lease_token": lease_token}
 

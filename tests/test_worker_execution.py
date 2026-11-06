@@ -239,5 +239,39 @@ class WorkerExecutionTests(unittest.TestCase):
         self.assertEqual(saved["attempts"], 1)
 
 
+    def test_specialist_runner_executes_only_its_assigned_lane_in_dry_run(self):
+        root = Path(self.temp.name)
+        store = TaskStore(root / "lanes.db")
+        general = store.enqueue("research_brief", "General task", {"topic": "general"},
+                                idempotency_key="general-lane-task")
+        specialist = store.enqueue("research_brief", "Specialist task", {"topic": "specialist"},
+                                   idempotency_key="specialist-lane-task",
+                                   execution_lane="specialist:researcher")
+        result = run_once(store, environ={}, worker_lane="specialist:researcher")
+        self.assertEqual(result["status"], "succeeded")
+        self.assertEqual(result["mode"], "dry_run")
+        saved = {task["id"]: task for task in store.list_tasks()}
+        self.assertEqual(saved[specialist["id"]]["status"], "succeeded")
+        self.assertEqual(saved[general["id"]]["status"], "pending")
+        self.assertEqual(saved[specialist["id"]]["execution_lane"], "specialist:researcher")
+
+    def test_general_runner_never_claims_specialist_task(self):
+        root = Path(self.temp.name)
+        store = TaskStore(root / "general-lane.db")
+        specialist = store.enqueue("research_brief", "Specialist task", {"topic": "specialist"},
+                                   idempotency_key="specialist-only",
+                                   execution_lane="specialist:researcher")
+        result = run_once(store, environ={}, worker_lane="general")
+        self.assertIsNone(result)
+        saved = {task["id"]: task for task in store.list_tasks()}
+        self.assertEqual(saved[specialist["id"]]["status"], "pending")
+        self.assertEqual(saved[specialist["id"]]["attempts"], 0)
+
+    def test_unknown_worker_lane_fails_closed(self):
+        result = run_once(self.store, environ={}, worker_lane="specialist:unknown")
+        self.assertEqual(result, {"status": "blocked", "reason": "invalid_worker_lane"})
+        self.assertEqual(self.store.list_tasks(1)[0]["status"], "pending")
+
+
 if __name__ == "__main__":
     unittest.main()

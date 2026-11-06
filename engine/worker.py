@@ -171,7 +171,12 @@ def _build_prompt(contract: dict, operating_policy: dict) -> str:
         f"{json.dumps(payload, ensure_ascii=False, sort_keys=True)}"
     )
 
-def run_once(store: TaskStore, live_gateway=None, environ=None) -> dict | None:
+def run_once(store: TaskStore, live_gateway=None, environ=None, worker_lane: str | None = None) -> dict | None:
+    environ = os.environ if environ is None else environ
+    worker_lane = worker_lane or environ.get("RAAWAA_ENGINE_WORKER_LANE", "general")
+    allowed_lanes = {"general", "specialist:researcher", "specialist:reviewer", "specialist:marketer", "specialist:operator", "specialist:mobile_tester"}
+    if worker_lane not in allowed_lanes:
+        return {"status": "blocked", "reason": "invalid_worker_lane"}
     # Load repository policy before claiming work or allowing any provider I/O.
     try:
         operating_policy = load_operating_policy()
@@ -181,7 +186,7 @@ def run_once(store: TaskStore, live_gateway=None, environ=None) -> dict | None:
 
 
     # Recover abandoned work before claiming another item.
-    recovery = store.recover_stale()
+    recovery = store.recover_stale(worker_lane=worker_lane)
 
     # In live mode, check current free-route capacity before consuming a task lease.
     # This is read-only and deliberately does not reserve quota; generate() repeats
@@ -208,24 +213,39 @@ def run_once(store: TaskStore, live_gateway=None, environ=None) -> dict | None:
                     "capacity_reason": reason, "recovery": recovery}
 
     execution_mode = "live_inference" if _live_requested(environ) else "dry_run"
-    task = store.claim_next(execution_mode=execution_mode)
+    task = store.claim_next(execution_mode=execution_mode, worker_lane=worker_lane)
     if task is None:
         return {"status": "idle", "recovery": recovery} if any(recovery.values()) else None
 
     task_type = task["task_type"]
     if task_type == INGEST_TASK_TYPE:
+        if worker_lane != "general":
+            store.finish(task["id"], "blocked", error="Ingest tasks belong to the general lane.",
+                         lease_token=task["lease_token"], worker_lane=worker_lane)
+            return {"id": task["id"], "status": "blocked", "reason": "lane_task_mismatch"}
         return _complete_ingest_task(store, task)
     if task_type == SUPERVISED_TASK_TYPE:
+        if worker_lane != "general":
+            store.finish(task["id"], "blocked", error="Supervised tasks belong to the general lane.",
+                         lease_token=task["lease_token"], worker_lane=worker_lane)
+            return {"id": task["id"], "status": "blocked", "reason": "lane_task_mismatch"}
         # A supervised process, not a model call. It owns its own lease fencing
         # and cancellation, so it must not be wrapped in the inference
         # heartbeat below; it is also deliberately absent from SAFE_TASKS.
         return complete_supervised_task(store, task, environ=environ)
-    if task_type not in SAFE_TASKS:
+    expected_lane = {"research_brief": "specialist:researcher", "code_review": "specialist:reviewer",
+                     "content_draft": "specialist:marketer", "system_audit": "specialist:operator",
+                     "mobile_test": "specialist:mobile_tester"}.get(task_type)
+    if worker_lane != "general" and expected_lane != worker_lane:
+        store.finish(task["id"], "blocked", error=f"Task type {task_type} is not assigned to {worker_lane}.",
+                     lease_token=task["lease_token"], worker_lane=worker_lane)
+        return {"id": task["id"], "status": "blocked", "reason": "lane_task_mismatch"}
+    if task_type not in SAFE_TASKS and task_type != "mobile_test":
         store.finish(task["id"], "blocked", error=f"Unsupported task type: {task_type}",
-                     lease_token=task["lease_token"])
+                     lease_token=task["lease_token"], worker_lane=worker_lane)
         return {"id": task["id"], "status": "blocked", "reason": "unsupported_task_type"}
 
-    heartbeat = LeaseHeartbeat(store, task["id"], task["lease_token"]).start()
+    heartbeat = LeaseHeartbeat(store, task["id"], task["lease_token"], worker_lane=worker_lane).start()
     try:
         contract = build_task_contract(task, load_agent_roster())
         if _live_requested(environ):
@@ -235,7 +255,7 @@ def run_once(store: TaskStore, live_gateway=None, environ=None) -> dict | None:
                 store.finish(
                     task["id"], "blocked",
                     error="Live inference was explicitly requested but no quota-gated gateway is configured.",
-                    lease_token=task["lease_token"],
+                    lease_token=task["lease_token"], worker_lane=worker_lane,
                 )
                 return {"id": task["id"], "status": "blocked",
                         "reason": "live_gateway_unavailable", "recovery": recovery}
@@ -256,7 +276,7 @@ def run_once(store: TaskStore, live_gateway=None, environ=None) -> dict | None:
                 store.finish(
                     task["id"], "blocked",
                     error=f"live_data_policy_blocked:{data_reason}",
-                    lease_token=task["lease_token"],
+                    lease_token=task["lease_token"], worker_lane=worker_lane,
                 )
                 return {"id": task["id"], "status": "blocked",
                         "reason": "live_data_policy_blocked", "detail": data_reason,
@@ -301,7 +321,7 @@ def run_once(store: TaskStore, live_gateway=None, environ=None) -> dict | None:
                 store.finish(
                     task["id"], "blocked",
                     error=f"live_inference_blocked:{type(exc).__name__}",
-                    lease_token=task["lease_token"],
+                    lease_token=task["lease_token"], worker_lane=worker_lane,
                 )
                 return {"id": task["id"], "status": "blocked",
                         "reason": "live_inference_failed_no_replay", "recovery": recovery}
@@ -315,7 +335,8 @@ def run_once(store: TaskStore, live_gateway=None, environ=None) -> dict | None:
         }
         heartbeat.stop()
         heartbeat.check()
-        store.finish(task["id"], "succeeded", result=result, lease_token=task["lease_token"])
+        store.finish(task["id"], "succeeded", result=result, lease_token=task["lease_token"],
+                     worker_lane=worker_lane)
         summary = {
             "id": task["id"], "status": "succeeded", "mode": result["mode"],
             "agent_id": result["agent_id"], "recovery": recovery,
@@ -343,7 +364,8 @@ def run_once(store: TaskStore, live_gateway=None, environ=None) -> dict | None:
             return {"id": task["id"], "status": "lease_lost",
                     "reason": "heartbeat_failed", "recovery": recovery}
         reason = f"worker_error:{type(exc).__name__}"
-        status = store.retry_or_fail(task["id"], reason, lease_token=task["lease_token"])
+        status = store.retry_or_fail(task["id"], reason, lease_token=task["lease_token"],
+                                     worker_lane=worker_lane)
         return {"id": task["id"], "status": status, "reason": reason,
                 "recovery": recovery}
     finally:

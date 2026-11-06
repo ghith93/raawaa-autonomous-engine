@@ -8,8 +8,8 @@ const CODESPACE_TOKEN = "test-codespace-token-0123456789abcdef0123456789abcdef";
 const ADMIN_TOKEN = "test-quota-admin-token";
 const QUOTA_LIMITS = JSON.stringify({"groq:main:model":{enabled:true,minute_request_limit:5,minute_token_limit:1000,daily_request_limit:10,daily_token_limit:2000,monthly_request_limit:100,monthly_token_limit:20000,per_task_request_limit:3,per_task_token_limit:300}});
 
-function request(path, { method = "GET", token = TOKEN, body } = {}) {
-  const headers = {};
+function request(path, { method = "GET", token = TOKEN, body, extraHeaders = {} } = {}) {
+  const headers = { ...extraHeaders };
   if (token) headers.authorization = `Bearer ${token}`;
   if (body !== undefined) headers["content-type"] = "application/json";
   return new Request(`https://engine.example${path}`, {
@@ -39,7 +39,7 @@ function dbMock(options = {}) {
           if (sql.includes("SELECT 1")) return { ok: 1 };
           if (sql.includes("SELECT id,status,attempts")) return options.currentTask || {
             id: "task-1", status: "running", attempts: 1, max_attempts: 2,
-            task_type: "research_brief", execution_mode: "not_started", lease_token: "lease-1",
+            task_type: "research_brief", execution_mode: "not_started", execution_lane: "general", lease_token: "lease-1",
             lease_expires_at: "2999-01-01T00:00:00.000Z",
           };
           if (sql.includes("WHERE idempotency_key")) return options.existingTask || insertedTask;
@@ -68,7 +68,7 @@ function dbMock(options = {}) {
         insertedTask = {
           id: v[0], idempotency_key: v[1], task_type: v[2], title: v[3],
           payload_json: v[4], max_attempts: v[5], priority: v[8],
-          dependencies_json: v[9], status: "pending", attempts: 0,
+          dependencies_json: v[9], execution_lane: v[10] || "general", status: "pending", attempts: 0,
         };
         insertedDependencies = statements
           .filter(statement => statement.sql.includes("INSERT OR IGNORE INTO task_dependencies"))
@@ -78,6 +78,154 @@ function dbMock(options = {}) {
     },
   };
 }
+
+test("specialist stale recovery requires its own capability token", async () => {
+  const DB = dbMock();
+  const response = await worker.fetch(request("/v1/tasks/recover", {
+    method: "POST", body: { worker_lane: "specialist:researcher" },
+  }), { DB, ENGINE_API_TOKEN: TOKEN });
+  assert.equal(response.status, 401);
+  assert.deepEqual(await response.json(), { error: "lane_unauthorized" });
+  assert.equal(DB.calls.length, 0);
+});
+
+test("general stale recovery only selects general-lane leases", async () => {
+  const DB = dbMock();
+  const response = await worker.fetch(request("/v1/tasks/recover", {
+    method: "POST", body: { worker_lane: "general" },
+  }), { DB, ENGINE_API_TOKEN: TOKEN });
+  assert.equal(response.status, 200);
+  const query = DB.calls.find(call => call.kind === "all" &&
+    call.sql.includes("SELECT id,attempts,max_attempts,lease_token"));
+  assert.match(query.sql, /execution_lane=\?/);
+  assert.deepEqual(query.values.slice(1), ["general"]);
+});
+
+test("task readback defaults to the general lane", async () => {
+  const DB = dbMock();
+  const response = await worker.fetch(request("/v1/tasks?limit=10"), { DB, ENGINE_API_TOKEN: TOKEN });
+  assert.equal(response.status, 200);
+  const query = DB.calls.find(call => call.kind === "all" && call.sql.includes("FROM tasks WHERE execution_lane"));
+  assert.match(query.sql, /execution_lane=\?/);
+  assert.deepEqual(query.values, ["general", 10]);
+});
+
+test("specialist task readback requires its lane capability", async () => {
+  const DB = dbMock();
+  const response = await worker.fetch(request("/v1/tasks?limit=10&worker_lane=specialist%3Aresearcher"), {
+    DB, ENGINE_API_TOKEN: TOKEN,
+  });
+  assert.equal(response.status, 401);
+  assert.equal(DB.calls.length, 0);
+});
+
+test("specialist task readback returns only its lane", async () => {
+  const laneToken = "researcher-lane-token-0123456789abcdef0123456789";
+  const DB = dbMock();
+  const response = await worker.fetch(request("/v1/tasks?limit=10&worker_lane=specialist%3Aresearcher", {
+    extraHeaders: { "x-engine-lane-token": laneToken },
+  }), { DB, ENGINE_API_TOKEN: TOKEN, ENGINE_RESEARCHER_LANE_TOKEN: laneToken });
+  assert.equal(response.status, 200);
+  const query = DB.calls.find(call => call.kind === "all" && call.sql.includes("FROM tasks WHERE execution_lane"));
+  assert.deepEqual(query.values, ["specialist:researcher", 10]);
+});
+
+test("specialist claim requires a dedicated lane capability token", async () => {
+  const DB = dbMock();
+  const response = await worker.fetch(request("/v1/tasks/claim", {
+    method: "POST", body: { execution_mode: "dry_run", worker_lane: "specialist:researcher" },
+  }), { DB, ENGINE_API_TOKEN: TOKEN });
+  assert.equal(response.status, 401);
+  assert.equal(DB.calls.length, 0);
+});
+
+test("specialist lane capability tokens cannot be reused across lanes", async () => {
+  const sharedLaneToken = "shared-specialist-token-0123456789abcdef0123456789";
+  const DB = dbMock();
+  const response = await worker.fetch(request("/v1/tasks/claim", {
+    method: "POST", body: { execution_mode: "dry_run", worker_lane: "specialist:researcher" },
+    extraHeaders: { "x-engine-lane-token": sharedLaneToken },
+  }), {
+    DB, ENGINE_API_TOKEN: TOKEN,
+    ENGINE_RESEARCHER_LANE_TOKEN: sharedLaneToken,
+    ENGINE_REVIEWER_LANE_TOKEN: sharedLaneToken,
+  });
+  assert.equal(response.status, 401);
+  assert.equal(DB.calls.length, 0);
+});
+
+test("specialist capability cannot reuse admin or Codespace credentials", async () => {
+  const shared = "shared-lane-secret-0123456789abcdef0123456789";
+  for (const env of [
+    { ENGINE_RESEARCHER_LANE_TOKEN: shared, ENGINE_QUOTA_ADMIN_TOKEN: shared },
+    { ENGINE_RESEARCHER_LANE_TOKEN: shared, ENGINE_CODESPACE_TOKEN: shared },
+  ]) {
+    const DB = dbMock();
+    const response = await worker.fetch(request("/v1/tasks/claim", {
+      method: "POST", body: { execution_mode: "dry_run", worker_lane: "specialist:researcher" },
+      extraHeaders: { "x-engine-lane-token": shared },
+    }), { DB, ENGINE_API_TOKEN: TOKEN, ...env });
+    assert.equal(response.status, 401);
+    assert.equal(DB.calls.length, 0);
+  }
+});
+
+test("specialist claim filters the requested lane and task type", async () => {
+  const laneToken = "researcher-lane-token-0123456789abcdef0123456789";
+  const DB = dbMock({ normalClaim: {
+    id: "research-task", task_type: "research_brief", execution_lane: "specialist:researcher",
+    status: "running", attempts: 1, lease_token: "lease-r",
+  } });
+  const response = await worker.fetch(request("/v1/tasks/claim", {
+    method: "POST", body: { execution_mode: "dry_run", worker_lane: "specialist:researcher" },
+    extraHeaders: { "x-engine-lane-token": laneToken },
+  }), { DB, ENGINE_API_TOKEN: TOKEN, ENGINE_RESEARCHER_LANE_TOKEN: laneToken });
+  assert.equal(response.status, 200);
+  const claim = DB.calls.find(call => call.kind === "first" &&
+    call.sql.includes("UPDATE tasks SET status='running'"));
+  assert.match(claim.sql, /execution_lane=\?/);
+  assert.match(claim.sql, /task_type=\?/);
+  assert.ok(claim.values.includes("specialist:researcher"));
+  assert.ok(claim.values.includes("research_brief"));
+});
+
+test("enqueue persists the selected specialist lane", async () => {
+  const DB = dbMock();
+  const response = await worker.fetch(request("/v1/tasks/enqueue", {
+    method: "POST", body: { task_type: "research_brief", title: "Research",
+      idempotency_key: "research-lane", execution_lane: "specialist:researcher" },
+  }), { DB, ENGINE_API_TOKEN: TOKEN });
+  assert.equal(response.status, 201);
+  const insert = DB.calls.find(call => call.kind === "batch").statements[0];
+  assert.equal(insert.values[10], "specialist:researcher");
+  assert.match(insert.sql, /execution_lane/);
+});
+
+test("generic consumer cannot heartbeat a specialist lease", async () => {
+  const DB = dbMock({ currentTask: {
+    id: "task-1", status: "running", attempts: 1, max_attempts: 2,
+    task_type: "research_brief", execution_mode: "dry_run",
+    execution_lane: "specialist:researcher", lease_token: "lease-1",
+    lease_expires_at: "2999-01-01T00:00:00.000Z",
+  } });
+  const response = await worker.fetch(request("/v1/tasks/task-1/heartbeat", {
+    method: "POST", body: { lease_token: "lease-1", worker_lane: "general" },
+  }), { DB, ENGINE_API_TOKEN: TOKEN });
+  assert.equal(response.status, 403);
+  assert.deepEqual(await response.json(), { error: "lane_ownership_lost" });
+  assert.equal(DB.calls.some(call => call.kind === "run"), false);
+});
+
+test("enqueue rejects specialist task type and lane mismatch", async () => {
+  const DB = dbMock();
+  const response = await worker.fetch(request("/v1/tasks/enqueue", {
+    method: "POST", body: { task_type: "content_draft", title: "Bad lane",
+      idempotency_key: "bad-lane", execution_lane: "specialist:researcher" },
+  }), { DB, ENGINE_API_TOKEN: TOKEN });
+  assert.equal(response.status, 400);
+  assert.deepEqual(await response.json(), { error: "task_type_lane_mismatch" });
+  assert.equal(DB.calls.length, 0);
+});
 
 test("health is read-only and does not require a token", async () => {
   const DB = dbMock();
@@ -674,14 +822,43 @@ test("finish rejects invalid and not-started execution modes without mutating ta
   }
 });
 
-test("recover endpoint is authenticated and bounded to stale task selection", async () => {
+test("recover endpoint is authenticated and scopes stale selection and writes to the general lane", async () => {
   const DB = dbMock();
   const response = await worker.fetch(request("/v1/tasks/recover", { method: "POST", body: {} }), {
     DB, ENGINE_API_TOKEN: TOKEN,
   });
   assert.equal(response.status, 200);
   assert.deepEqual(await response.json(), { requeued: 0, failed: 0 });
-  assert.ok(DB.calls.some(x => x.kind === "all" && x.sql.includes("lease_expires_at")));
+  const selection = DB.calls.find(x => x.kind === "all" && x.sql.includes("lease_expires_at"));
+  assert.match(selection.sql, /execution_lane=\?/);
+  assert.equal(selection.values.length, 2);
+  assert.ok(Number.isFinite(Date.parse(selection.values[0])));
+  assert.equal(selection.values[1], "general");
+  const write = DB.calls.find(x => x.kind === "batch")?.statements?.find(x => x.sql.includes("UPDATE tasks SET status=?"));
+  if (write) {
+    assert.match(write.sql, /execution_lane=\?/);
+    assert.deepEqual(write.values.slice(-2), ["general", "general"]);
+  }
+});
+
+test("specialist stale recovery requires and applies its own capability", async () => {
+  const laneToken = "researcher-lane-token-0123456789abcdef0123456789";
+  const deniedDB = dbMock();
+  const denied = await worker.fetch(request("/v1/tasks/recover", {
+    method: "POST", body: { worker_lane: "specialist:researcher" },
+  }), { DB: deniedDB, ENGINE_API_TOKEN: TOKEN });
+  assert.equal(denied.status, 401);
+  assert.equal(deniedDB.calls.length, 0);
+
+  const DB = dbMock();
+  const response = await worker.fetch(request("/v1/tasks/recover", {
+    method: "POST", body: { worker_lane: "specialist:researcher" },
+    extraHeaders: { "x-engine-lane-token": laneToken },
+  }), { DB, ENGINE_API_TOKEN: TOKEN, ENGINE_RESEARCHER_LANE_TOKEN: laneToken });
+  assert.equal(response.status, 200);
+  const selection = DB.calls.find(x => x.kind === "all" && x.sql.includes("lease_expires_at"));
+  assert.equal(selection.values.length, 2);
+  assert.equal(selection.values[1], "specialist:researcher");
 });
 
 test("recover endpoint rejects unauthenticated callers", async () => {
@@ -1624,7 +1801,8 @@ test("schema diagnostics report every table the Worker depends on", async () => 
   assert.ok(body.checked.includes("task_dependencies"), "task_dependencies must be probed");
   assert.ok(body.checked.includes("workflow_runs"), "workflow_runs must be probed");
   assert.ok(body.checked.includes("task_process_dispatches"), "process dispatch ledger must be probed");
-  assert.equal(body.checked.length, 8);
+  assert.ok(body.checked.includes("tasks.execution_lane"), "execution lane migration must be probed");
+  assert.equal(body.checked.length, 9);
 });
 
 test("schema diagnostics name the table a deploy forgot to migrate", async () => {

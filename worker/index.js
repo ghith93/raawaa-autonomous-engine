@@ -46,9 +46,15 @@ async function schemaProbe(env) {
       reasons[table] = storageDetail(error);
     }
   }
+  try {
+    await env.DB.prepare("SELECT execution_lane FROM tasks LIMIT 1").all();
+  } catch (error) {
+    missing.push("tasks.execution_lane");
+    reasons["tasks.execution_lane"] = storageDetail(error);
+  }
   return {
     ok: missing.length === 0,
-    checked: [...REQUIRED_SCHEMA_TABLES],
+    checked: [...REQUIRED_SCHEMA_TABLES, "tasks.execution_lane"],
     missing,
     reasons,
   };
@@ -238,17 +244,21 @@ async function reviewResearchCandidate(request, env) {
   } catch { return json({ error: "storage_unavailable" }, 503); }
 }
 
-async function recoverStaleTasks(env) {
+async function recoverStaleTasks(env, workerLane = null) {
   const nowIso = new Date().toISOString();
-  const stale = await env.DB.prepare(
-    "SELECT id,attempts,max_attempts,lease_token FROM tasks WHERE status='running' AND (lease_expires_at IS NULL OR lease_expires_at < ?) ORDER BY updated_at,id LIMIT 100"
-  ).bind(nowIso).all();
+  const laneFilter = workerLane === null ? "" : " AND execution_lane=?";
+  const staleStatement = env.DB.prepare(
+    "SELECT id,attempts,max_attempts,lease_token FROM tasks WHERE status='running' AND (lease_expires_at IS NULL OR lease_expires_at < ?)" +
+    laneFilter + " ORDER BY updated_at,id LIMIT 100"
+  );
+  const stale = await (workerLane === null ? staleStatement.bind(nowIso) :
+    staleStatement.bind(nowIso, workerLane)).all();
   const statements = [];
   for (const task of stale.results || []) {
     const status = task.attempts < task.max_attempts ? "pending" : "failed";
     statements.push(env.DB.prepare(
-      "UPDATE tasks SET status=?,error=?,updated_at=?,lease_token=NULL,lease_expires_at=NULL WHERE id=? AND status='running' AND lease_token IS ? AND (lease_expires_at IS NULL OR lease_expires_at < ?)"
-    ).bind(status, "Recovered expired worker lease.", nowIso, task.id, task.lease_token, nowIso));
+      "UPDATE tasks SET status=?,error=?,updated_at=?,lease_token=NULL,lease_expires_at=NULL WHERE id=? AND status='running' AND lease_token IS ? AND (lease_expires_at IS NULL OR lease_expires_at < ?) AND (? IS NULL OR execution_lane=?)"
+    ).bind(status, "Recovered expired worker lease.", nowIso, task.id, task.lease_token, nowIso, workerLane, workerLane));
     statements.push(env.DB.prepare(
       "INSERT INTO audit_log(task_id,event,details_json,created_at) SELECT id,'task_lease_recovered',?,? FROM tasks WHERE id=? AND status=? AND updated_at=?"
     ).bind(JSON.stringify({ new_status: status, attempt: task.attempts, max_attempts: task.max_attempts }), nowIso, task.id, status, nowIso));
@@ -257,6 +267,38 @@ async function recoverStaleTasks(env) {
   const requeued = (stale.results || []).filter(t => t.attempts < t.max_attempts).length;
   const failed = (stale.results || []).length - requeued;
   return { requeued, failed };
+}
+
+const EXECUTION_LANES = new Set(["general", "specialist:researcher", "specialist:reviewer", "specialist:marketer", "specialist:operator", "specialist:mobile_tester"]);
+const SPECIALIST_TASK_LANES = {
+  research_brief: "specialist:researcher",
+  code_review: "specialist:reviewer",
+  content_draft: "specialist:marketer",
+  system_audit: "specialist:operator",
+  mobile_test: "specialist:mobile_tester",
+};
+const SPECIALIST_LANE_TOKEN_BINDINGS = {
+  "specialist:researcher": "ENGINE_RESEARCHER_LANE_TOKEN",
+  "specialist:reviewer": "ENGINE_REVIEWER_LANE_TOKEN",
+  "specialist:marketer": "ENGINE_MARKETER_LANE_TOKEN",
+  "specialist:operator": "ENGINE_OPERATOR_LANE_TOKEN",
+  "specialist:mobile_tester": "ENGINE_MOBILE_TESTER_LANE_TOKEN",
+};
+
+function laneTokenAuthorized(request, env, lane) {
+  if (lane === "general") return true;
+  const binding = SPECIALIST_LANE_TOKEN_BINDINGS[lane];
+  const expected = binding ? env[binding] : "";
+  const supplied = request.headers.get("x-engine-lane-token") || "";
+  const reusedByAnotherLane = Object.entries(SPECIALIST_LANE_TOKEN_BINDINGS).some(
+    ([otherLane, otherBinding]) => otherLane !== lane &&
+      typeof env[otherBinding] === "string" && env[otherBinding] === expected
+  );
+  return typeof expected === "string" && expected.length >= 32 &&
+    expected !== env.ENGINE_API_TOKEN &&
+    expected !== env.ENGINE_QUOTA_ADMIN_TOKEN &&
+    expected !== env.ENGINE_CODESPACE_TOKEN &&
+    !reusedByAnotherLane && constantTimeEqual(supplied, expected);
 }
 
 function validText(value, max) {
@@ -402,10 +444,13 @@ export default {
       if (!Number.isInteger(rawLimit) || rawLimit < 1 || rawLimit > 100) {
         return json({ error: "invalid_limit" }, 400);
       }
+      const workerLane = url.searchParams.get("worker_lane") || "general";
+      if (!EXECUTION_LANES.has(workerLane)) return json({ error: "invalid_worker_lane" }, 400);
+      if (!laneTokenAuthorized(request, env, workerLane)) return json({ error: "lane_unauthorized" }, 401);
       try {
         const result = await env.DB.prepare(
-          "SELECT id,idempotency_key,task_type,title,payload_json,status,attempts,max_attempts,created_at,updated_at,execution_mode,priority,dependencies_json FROM tasks ORDER BY created_at DESC,id DESC LIMIT ?"
-        ).bind(rawLimit).all();
+          "SELECT id,idempotency_key,task_type,title,payload_json,status,attempts,max_attempts,created_at,updated_at,execution_mode,priority,dependencies_json,execution_lane FROM tasks WHERE execution_lane=? ORDER BY created_at DESC,id DESC LIMIT ?"
+        ).bind(workerLane, rawLimit).all();
         const tasks = (result.results || []).map(task => {
           let dependsOn = [];
           try {
@@ -455,7 +500,18 @@ export default {
     }
 
     if (request.method === "POST" && url.pathname === "/v1/tasks/recover") {
-      try { return json(await recoverStaleTasks(env)); }
+      let recoveryInput;
+      try { recoveryInput = await readOptionalJson(request); }
+      catch (error) {
+        return json({ error: error.message === "body_too_large" ? "body_too_large" : "invalid_json" }, 400);
+      }
+      if (!recoveryInput || typeof recoveryInput !== "object" || Array.isArray(recoveryInput)) {
+        return json({ error: "invalid_recovery_request" }, 400);
+      }
+      const workerLane = recoveryInput.worker_lane ?? "general";
+      if (!EXECUTION_LANES.has(workerLane)) return json({ error: "invalid_worker_lane" }, 400);
+      if (!laneTokenAuthorized(request, env, workerLane)) return json({ error: "lane_unauthorized" }, 401);
+      try { return json(await recoverStaleTasks(env, workerLane)); }
       catch { return json({ error: "storage_unavailable" }, 503); }
     }
 
@@ -470,12 +526,19 @@ export default {
         return json({ error: error.message === "body_too_large" ? "body_too_large" : "invalid_json" }, 400);
       }
       const executionMode = claimInput?.execution_mode ?? "unknown";
+      const workerLane = codespaceClaim ? "general" : (claimInput?.worker_lane ?? "general");
+      if (!EXECUTION_LANES.has(workerLane)) return json({ error: "invalid_worker_lane" }, 400);
+      if (!laneTokenAuthorized(request, env, workerLane)) return json({ error: "lane_unauthorized" }, 401);
       if (!["unknown", "dry_run", "live_inference"].includes(executionMode)) {
         return json({ error: "invalid_execution_mode" }, 400);
       }
       const taskTypeFilter = codespaceClaim
         ? `AND task_type IN (${CODESPACE_TASK_SQL})`
         : `AND task_type NOT IN (${CODESPACE_TASK_SQL})`;
+      const laneTaskFilter = workerLane === "general"
+        ? "AND execution_lane='general'"
+        : "AND execution_lane=? AND task_type=?";
+      const laneBindings = workerLane === "general" ? [] : [workerLane, Object.keys(SPECIALIST_TASK_LANES).find(type => SPECIALIST_TASK_LANES[type] === workerLane)];
       const leaseSeconds = 900;
       const now = new Date();
       const nowIso = now.toISOString();
@@ -487,15 +550,15 @@ export default {
             SELECT child.id FROM tasks child
             JOIN task_dependencies d ON d.task_id=child.id
             JOIN tasks dependency ON dependency.id=d.dependency_task_id
-            WHERE child.status='pending' AND dependency.status IN ('failed','blocked')
+            WHERE child.status='pending' AND child.execution_lane=? AND dependency.status IN ('failed','blocked')
             UNION
             SELECT child.id FROM tasks child
             JOIN task_dependencies d ON d.task_id=child.id
             JOIN blocked b ON b.id=d.dependency_task_id
-            WHERE child.status='pending'
+            WHERE child.status='pending' AND child.execution_lane=?
           )
           SELECT id FROM blocked ORDER BY id LIMIT 50
-        `).all();
+        `).bind(workerLane, workerLane).all();
         const blockedIds = (blockedResult.results || []).map(row => row.id);
         if (blockedIds.length) {
           const blockedStatements = [];
@@ -512,7 +575,7 @@ export default {
         const claim = await env.DB.prepare(`
           UPDATE tasks SET status='running', attempts=attempts+1, execution_mode=?, updated_at=?,
             lease_token=?, lease_expires_at=?
-          WHERE id=(SELECT candidate.id FROM tasks candidate WHERE candidate.status='pending' ${taskTypeFilter}
+          WHERE id=(SELECT candidate.id FROM tasks candidate WHERE candidate.status='pending' ${taskTypeFilter} ${laneTaskFilter}
             AND NOT EXISTS (
               SELECT 1 FROM task_dependencies d
               JOIN tasks dependency ON dependency.id=d.dependency_task_id
@@ -520,15 +583,16 @@ export default {
                 AND (dependency.status <> 'succeeded' OR dependency.execution_mode <> ?)
             )
             ORDER BY candidate.priority DESC, candidate.created_at ASC, candidate.id ASC LIMIT 1)
-            AND status='pending' ${taskTypeFilter}
+            AND status='pending' ${taskTypeFilter} ${laneTaskFilter}
           RETURNING id,idempotency_key,task_type,title,payload_json,status,attempts,
-            max_attempts,created_at,updated_at,execution_mode,priority,dependencies_json,lease_token,lease_expires_at
-        `).bind(executionMode, nowIso, leaseToken, expires, executionMode).first();
+            max_attempts,created_at,updated_at,execution_mode,priority,dependencies_json,execution_lane,lease_token,lease_expires_at
+        `).bind(executionMode, nowIso, leaseToken, expires, ...laneBindings, executionMode, ...laneBindings).first();
         if (!claim) return json({ task: null });
         await env.DB.prepare(
           "INSERT INTO audit_log(task_id,event,details_json,created_at) VALUES(?,?,?,?)"
         ).bind(claim.id, "task_claimed", JSON.stringify({
-          attempt: claim.attempts, lease_expires_at: expires, execution_mode: executionMode
+          attempt: claim.attempts, lease_expires_at: expires, execution_mode: executionMode,
+          execution_lane: workerLane
         }), nowIso).run();
         return json({ task: claim, lease_token: leaseToken, lease_expires_at: expires });
       } catch (error) {
@@ -717,16 +781,20 @@ export default {
         return json({ error: error.message === "body_too_large" ? "body_too_large" : "invalid_json" }, 400);
       }
       const leaseToken = input?.lease_token;
+      const workerLane = codespaceAction ? "general" : (input?.worker_lane ?? "general");
+      if (!EXECUTION_LANES.has(workerLane)) return json({ error: "invalid_worker_lane" }, 400);
+      if (!laneTokenAuthorized(request, env, workerLane)) return json({ error: "lane_unauthorized" }, 401);
       if (!validText(leaseToken, 200)) return json({ error: "invalid_lease" }, 400);
       const nowIso = new Date().toISOString();
       try {
         const current = await env.DB.prepare(
-          "SELECT id,status,attempts,max_attempts,task_type,execution_mode,lease_token,lease_expires_at FROM tasks WHERE id=?"
+          "SELECT id,status,attempts,max_attempts,task_type,execution_mode,execution_lane,lease_token,lease_expires_at FROM tasks WHERE id=?"
         ).bind(taskId).first();
         if (!current) return json({ error: "task_not_found" }, 404);
         if (CODESPACE_TASK_TYPES.has(current.task_type) !== codespaceAction) {
           return json({ error: "executor_mismatch" }, 403);
         }
+        if ((current.execution_lane || "general") !== workerLane) return json({ error: "lane_ownership_lost" }, 403);
         if (current.status !== "running" || current.lease_token !== leaseToken ||
             !current.lease_expires_at || current.lease_expires_at < nowIso) {
           return json({ error: "lease_lost" }, 409);
@@ -736,8 +804,8 @@ export default {
           const seconds = 900;
           const expires = new Date(Date.now() + seconds * 1000).toISOString();
           const result = await env.DB.prepare(
-            "UPDATE tasks SET updated_at=?,lease_expires_at=? WHERE id=? AND status='running' AND lease_token=? AND lease_expires_at>=?"
-          ).bind(nowIso, expires, taskId, leaseToken, nowIso).run();
+            "UPDATE tasks SET updated_at=?,lease_expires_at=? WHERE id=? AND status='running' AND execution_lane=? AND lease_token=? AND lease_expires_at>=?"
+          ).bind(nowIso, expires, taskId, workerLane, leaseToken, nowIso).run();
           if (!result.meta?.changes) return json({ error: "lease_lost" }, 409);
           await env.DB.prepare(
             "INSERT INTO audit_log(task_id,event,details_json,created_at) VALUES(?,?,?,?)"
@@ -785,8 +853,8 @@ export default {
           }
         }
         const update = await env.DB.prepare(
-          "UPDATE tasks SET status=?,result_json=?,error=?,execution_mode=?,updated_at=?,lease_token=NULL,lease_expires_at=NULL WHERE id=? AND status='running' AND lease_token=? AND lease_expires_at>=?"
-        ).bind(status, resultJson, error, executionMode, nowIso, taskId, leaseToken, nowIso).run();
+          "UPDATE tasks SET status=?,result_json=?,error=?,execution_mode=?,updated_at=?,lease_token=NULL,lease_expires_at=NULL WHERE id=? AND status='running' AND execution_lane=? AND lease_token=? AND lease_expires_at>=?"
+        ).bind(status, resultJson, error, executionMode, nowIso, taskId, workerLane, leaseToken, nowIso).run();
         if (!update.meta?.changes) return json({ error: "lease_lost" }, 409);
         await env.DB.prepare(
           "INSERT INTO audit_log(task_id,event,details_json,created_at) VALUES(?,?,?,?)"
@@ -820,6 +888,11 @@ export default {
     const dependenciesSupplied = input?.depends_on !== undefined;
     const priority = input?.priority ?? 50;
     const rawDependencies = input?.depends_on ?? [];
+    const executionLane = input?.execution_lane ?? "general";
+    if (!EXECUTION_LANES.has(executionLane)) return json({ error: "invalid_execution_lane" }, 400);
+    if (executionLane !== "general" && SPECIALIST_TASK_LANES[taskType] !== executionLane) {
+      return json({ error: "task_type_lane_mismatch" }, 400);
+    }
     if (!validText(taskType, 100) || !validText(title, 240) ||
         !validText(key, 200) || !payload || typeof payload !== "object" ||
         Array.isArray(payload) || !Number.isInteger(maxAttempts) ||
@@ -845,9 +918,10 @@ export default {
 
     const normalizedTask = {
       task_type: taskType.trim(), title: title.trim(), payload_json: payloadJson,
-      max_attempts: maxAttempts, priority, dependencies_json: dependenciesJson,
+      max_attempts: maxAttempts, priority, dependencies_json: dependenciesJson, execution_lane: executionLane,
     };
     const matchesTask = task => task &&
+      (task.execution_lane || "general") === normalizedTask.execution_lane &&
       (!prioritySupplied || task.priority === normalizedTask.priority) &&
       (!dependenciesSupplied || (task.dependencies_json || "[]") === normalizedTask.dependencies_json);
     const readDependencies = async taskId => {
@@ -861,7 +935,7 @@ export default {
     const now = new Date().toISOString();
     try {
       const existing = await env.DB.prepare(
-        "SELECT id,idempotency_key,task_type,title,payload_json,status,attempts,max_attempts,created_at,updated_at,execution_mode,priority,dependencies_json FROM tasks WHERE idempotency_key=?"
+        "SELECT id,idempotency_key,task_type,title,payload_json,status,attempts,max_attempts,created_at,updated_at,execution_mode,priority,dependencies_json,execution_lane FROM tasks WHERE idempotency_key=?"
       ).bind(key).first();
       if (existing) {
         if (!matchesTask(existing)) return json({ error: "idempotency_conflict" }, 409);
@@ -887,9 +961,9 @@ export default {
       }
 
       const insert = env.DB.prepare(
-        "INSERT OR IGNORE INTO tasks(id,idempotency_key,task_type,title,payload_json,status,attempts,max_attempts,created_at,updated_at,execution_mode,priority,dependencies_json) VALUES(?,?,?,?,?,'pending',0,?,?,?,'not_started',?,?)"
+        "INSERT OR IGNORE INTO tasks(id,idempotency_key,task_type,title,payload_json,status,attempts,max_attempts,created_at,updated_at,execution_mode,priority,dependencies_json,execution_lane) VALUES(?,?,?,?,?,'pending',0,?,?,?,'not_started',?,?,?)"
       ).bind(id, key, normalizedTask.task_type, normalizedTask.title, payloadJson,
-        maxAttempts, now, now, priority, dependenciesJson);
+        maxAttempts, now, now, priority, dependenciesJson, executionLane);
       const audit = env.DB.prepare(
         "INSERT INTO audit_log(task_id,event,details_json,created_at) SELECT id,'task_enqueued',?,? FROM tasks WHERE idempotency_key=? AND id=?"
       ).bind(JSON.stringify({ task_type: normalizedTask.task_type, priority, depends_on: dependsOn }), now, key, id);
@@ -899,7 +973,7 @@ export default {
       await env.DB.batch([insert, audit, ...edgeStatements]);
 
       const task = await env.DB.prepare(
-        "SELECT id,idempotency_key,task_type,title,payload_json,status,attempts,max_attempts,created_at,updated_at,execution_mode,priority,dependencies_json FROM tasks WHERE idempotency_key=?"
+        "SELECT id,idempotency_key,task_type,title,payload_json,status,attempts,max_attempts,created_at,updated_at,execution_mode,priority,dependencies_json,execution_lane FROM tasks WHERE idempotency_key=?"
       ).bind(key).first();
       if (!task) return json({ error: "storage_unavailable" }, 503);
       if (!matchesTask(task)) return json({ error: "idempotency_conflict" }, 409);
