@@ -223,6 +223,16 @@ class RemoteTaskStoreTests(unittest.TestCase):
         self.assertEqual(caught.exception.status_code, 403)
         self.assertFalse(caught.exception.retryable)
 
+    @patch("engine.remote_task_store.urlopen")
+    def test_specialist_task_readback_sends_lane_capability(self, open_url):
+        self.store.lane_token = "researcher-lane-token-0123456789abcdef0123456789"
+        open_url.return_value = FakeResponse({"tasks": [{"id": "research-1"}]})
+        tasks = self.store.list_tasks(25, worker_lane="specialist:researcher")
+        request = open_url.call_args.args[0]
+        self.assertEqual(tasks, [{"id": "research-1"}])
+        self.assertTrue(request.full_url.endswith("&worker_lane=specialist:researcher"))
+        self.assertEqual(request.get_header("X-engine-lane-token"), self.store.lane_token)
+
     def test_rate_limit_has_safe_retry_later_error(self):
         from urllib.error import HTTPError
         with patch("engine.remote_task_store.urlopen",
