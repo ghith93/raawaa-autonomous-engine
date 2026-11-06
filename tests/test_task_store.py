@@ -225,7 +225,7 @@ class TaskStoreTests(unittest.TestCase):
     def test_wrong_lane_cannot_heartbeat_finish_or_retry(self):
         task = self.store.enqueue("research_brief", "Owned", execution_lane="specialist:researcher")
         claim = self.store.claim_next(execution_mode="dry_run", worker_lane="specialist:researcher")
-        with self.assertRaisesRegex(ValueError, "worker lane ownership lost"):
+        with self.assertRaisesRegex(ValueError, "lease lost or expired"):
             self.store.heartbeat(task["id"], claim["lease_token"], 60, worker_lane="general")
         with self.assertRaisesRegex(ValueError, "worker lane ownership lost"):
             self.store.finish(task["id"], "succeeded", result={"mode": "dry_run"},
