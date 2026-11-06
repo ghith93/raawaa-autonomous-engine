@@ -1,6 +1,6 @@
 """Remote Staging proof for generic/specialist task-lane isolation.
 
-Requires a Staging-only API token and an ephemeral researcher lane token.
+Requires a Staging-only API token and distinct ephemeral general/researcher lane tokens.
 Creates isolated dry-run tasks in both lanes, proves bidirectional exclusion, verifies wrong-lane
 heartbeat/retry/finish are rejected, and completes the specialist task correctly.
 """
@@ -21,6 +21,8 @@ def main() -> None:
         raise SystemExit("Missing ephemeral general lane token")
     if len(researcher_token) < 32:
         raise SystemExit("Missing ephemeral researcher lane token")
+    if general_token == researcher_token:
+        raise SystemExit("General and researcher capabilities must be distinct")
     general_store = RemoteTaskStore(lane_token=general_token, worker_lane="general")
     researcher_store = RemoteTaskStore(
         lane_token=researcher_token, worker_lane="specialist:researcher"
@@ -129,6 +131,10 @@ def main() -> None:
         raise SystemExit("Specialist task did not complete")
     if researcher_tasks[specialist["id"]].get("execution_lane") != "specialist:researcher":
         raise SystemExit("Specialist lane was not persisted")
+    if specialist["id"] in general_tasks:
+        raise SystemExit("General readback exposed a specialist task")
+    if any(task_id in researcher_tasks for task_id in (general["id"], general_sentinel["id"], general_sentinel_last["id"])):
+        raise SystemExit("Researcher readback exposed a general task")
     print("PASS: general/specialist isolation, authenticated claim, wrong-lane lifecycle rejection, and readback")
 
 
