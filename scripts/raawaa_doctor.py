@@ -67,6 +67,43 @@ def main(argv: list[str] | None = None) -> int:
             report["next_steps"].append(
                 "update CLOUDFLARE_ACCOUNT_ID to the 'used' value above")
 
+    section("D1 DATABASES ON THE RESOLVED ACCOUNT")
+    d1 = resolve("d1_database_id", env, config)
+    if cf and cf.chosen_account_id:
+        import json as _json
+        import urllib.request as _url
+        request = _url.Request(
+            f"https://api.cloudflare.com/client/v4/accounts/{cf.chosen_account_id}/d1/database",
+            headers={"Authorization": f"Bearer {cf.token.value}"})
+        try:
+            with _url.urlopen(request, timeout=20) as response:
+                payload = _json.loads(response.read() or b"{}")
+        except Exception as exc:  # noqa: BLE001
+            payload = {}
+            print(f"  could not list databases ({type(exc).__name__})")
+        rows = payload.get("result") or []
+        target = d1.value.strip()
+        found = False
+        for database in rows:
+            uuid = str(database.get("uuid", ""))
+            mark = ""
+            if target and uuid == target:
+                mark = "  <- matches D1_DATABASE_ID"
+                found = True
+            print(f"  {database.get('name'):<32} {uuid[:6]}...{uuid[-4:]}{mark}")
+            report.setdefault("d1_databases", []).append(
+                {"name": database.get("name"), "uuid_prefix": uuid[:6],
+                 "uuid_suffix": uuid[-4:], "matches_secret": uuid == target})
+        if target and not found:
+            print(f"  the id in {d1.name} is not on this account")
+            report["next_steps"].append(
+                "the D1 database in the repo belongs to a different account; "
+                "pick one of the databases above and update D1_DATABASE_ID, or move the worker")
+        if not target:
+            print("  no D1 database id secret found; choose one of the databases above")
+    else:
+        print("  skipped: no resolved account")
+
     section("IMAGE ROUTES")
     from engine.image_providers import CloudflareFlux, LocalQwenImage
     for provider in (CloudflareFlux(env=env), LocalQwenImage(env=env)):

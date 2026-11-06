@@ -40,6 +40,10 @@ jobs:
           CLOUDFLARE_ACCESS_AUDIT_TOKEN: ${{ secrets.CLOUDFLARE_ACCESS_AUDIT_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           D1_DATABASE_ID: ${{ secrets.D1_DATABASE_ID }}
+          ENGINE_API_TOKEN: ${{ secrets.ENGINE_API_TOKEN }}
+          ENGINE_QUOTA_ADMIN_TOKEN: ${{ secrets.ENGINE_QUOTA_ADMIN_TOKEN }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          OWNER_TELEGRAM_CHAT_ID: ${{ secrets.OWNER_TELEGRAM_CHAT_ID }}
         run: |
           set +e
           python scripts/raawaa_doctor.py --json doctor.json > doctor.log 2>&1
@@ -53,6 +57,8 @@ jobs:
               *"  visible"*)            echo "::notice::$line" ;;
               *"MISSING"*)              echo "::warning::$line" ;;
               *"update CLOUDFLARE_ACCOUNT_ID"*) echo "::error::$line" ;;
+              *"matches D1_DATABASE_ID"*)    echo "::notice::$line" ;;
+              *"belongs to a different account"*) echo "::warning::$line" ;;
             esac
           done < doctor.log
           echo "doctor_exit=$code"
