@@ -84,3 +84,6 @@ PR #621 head `4aec1b7ff428566aa2b3e7f7dc7648972b98880e` passed Graphify run [423
 
 
 **Graphify integration update:** the pilot now merges `config/project-agent-map.json` into the code graph with explicit agent/component/gap nodes, topology relations and evidence links. D1 runtime task records remain separate and authoritative.
+
+
+**CI placement correction:** Graphify is executed by the existing `.github/workflows/ci.yml` on branch pushes, not by the daily research discovery workflow. This keeps candidate discovery and code-graph generation independent, avoids a second schedule, and ensures the current branch head receives a graph artifact check.
