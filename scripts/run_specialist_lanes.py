@@ -17,7 +17,6 @@ LANES = (
     ("specialist:reviewer", "RAAWAA_ENGINE_REVIEWER_LANE_TOKEN"),
     ("specialist:marketer", "RAAWAA_ENGINE_MARKETER_LANE_TOKEN"),
     ("specialist:operator", "RAAWAA_ENGINE_OPERATOR_LANE_TOKEN"),
-    ("specialist:mobile_tester", "RAAWAA_ENGINE_MOBILE_TESTER_LANE_TOKEN"),
 )
 
 
