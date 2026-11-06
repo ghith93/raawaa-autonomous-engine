@@ -87,3 +87,62 @@ class SafetyTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TokenAuditTests(unittest.TestCase):
+    """Cleanup planning: classify, flag staleness, never delete."""
+
+    def setUp(self):
+        import raawaa_token_audit as audit
+        self.audit = audit
+
+    def test_names_map_to_a_purpose(self):
+        self.assertEqual(self.audit.classify("Raawaa Engine Access Audit"), "read-only-inventory")
+        self.assertEqual(self.audit.classify("Workers AI"), "workers-ai")
+        self.assertEqual(self.audit.classify("Edit Cloudflare Workers"), "workers-edit")
+        self.assertEqual(self.audit.classify("raawaa-pages-deploy"), "pages-deploy")
+        self.assertEqual(self.audit.classify("something-else"), "other")
+
+    def test_the_designated_token_is_never_a_deletion_candidate(self):
+        tokens = [
+            {"name": "Edit Cloudflare Workers", "last_used_on": "2025-01-01T00:00:00Z"},
+            {"name": "Old Experiment", "last_used_on": "2025-01-01T00:00:00Z"},
+        ]
+        result = self.audit.plan(tokens, keep="Edit Cloudflare Workers")
+        self.assertNotIn("Edit Cloudflare Workers", result["delete_candidates"])
+        self.assertIn("Old Experiment", result["delete_candidates"])
+
+    def test_a_powerful_but_idle_token_is_flagged_as_risk(self):
+        tokens = [{"name": "Edit Cloudflare Workers", "last_used_on": "2024-01-01T00:00:00Z"}]
+        result = self.audit.plan(tokens)
+        self.assertIn("Edit Cloudflare Workers", result["risk"])
+
+    def test_a_recently_used_token_is_not_stale(self):
+        from datetime import datetime, timezone
+        now = datetime.now(timezone.utc)
+        tokens = [{"name": "Workers AI", "last_used_on": now.isoformat()}]
+        result = self.audit.plan(tokens, stale_days=90)
+        self.assertEqual(result["delete_candidates"], [])
+
+    def test_missing_timestamp_is_treated_as_unknown_not_as_fresh(self):
+        self.assertIsNone(self.audit.age_days(None))
+
+
+class TokenMatrixTests(unittest.TestCase):
+    def setUp(self):
+        import raawaa_token_matrix as matrix
+        self.matrix = matrix
+
+    def test_empty_token_has_no_capabilities(self):
+        result = self.matrix.probe("", "abc")
+        self.assertFalse(result["usable"])
+        self.assertEqual(result["missing"], ["no value"])
+
+    def test_probe_never_returns_the_token(self):
+        secret = "z" * 40
+        result = self.matrix.probe(secret, "abc")
+        self.assertNotIn(secret, repr(result))
+
+    def test_capability_list_covers_what_the_project_needs(self):
+        names = [name for name, *_ in self.matrix.CAPABILITIES]
+        self.assertEqual(names, ["token_active", "account", "d1", "ai_models"])
