@@ -133,6 +133,34 @@ class GroqSmokeRecoveryTests(unittest.TestCase):
         with self.assertRaisesRegex(SystemExit, "unresolved reservations"):
             smoke._assert_zero_spend(store, "new-task")
 
+    def test_accepts_exact_prior_zero_cost_settlement_on_safe_rerun(self):
+        store = self.store(rows=[{
+            "id": smoke.PREVIOUS_AMBIGUOUS_TASK_ID, "status": "blocked"
+        }])
+        store.task_snapshot = {"task_pending_count": 0, "unresolved": []}
+        store.global_snapshot = {"task_pending_count": 0, "unresolved": []}
+        store.mobile["monetary_ledger"].update({
+            "pending_count": 0, "ambiguous_count": 0,
+            "daily_spent_usd": 0, "monthly_spent_usd": 0,
+        })
+        store.quota_snapshot = {
+            "usage": {"task": {"requests": 1, "tokens": 3514}},
+            "audit": [
+                {"event": "quota_reserved"},
+                {"event": "adapter_failure", "details": {"reason": "ambiguous_adapter_failure"}},
+            ],
+        }
+        original = store._request
+        def request(path, method="GET", payload=None):
+            if path.startswith("/v1/quota?"):
+                return store.quota_snapshot
+            return original(path, method, payload)
+        store._request = request
+        result = smoke._verify_previous_ambiguous_task(store)
+        self.assertEqual(result["reservation_status"], "already_settled")
+        self.assertEqual(result["actual_cost_nanos"], 0)
+        self.assertEqual(store.settlement_calls, [])
+
     def test_refuses_if_multiple_matching_ambiguous_reservations_exist(self):
         store = self.store()
         snapshot = ambiguous_snapshot()
