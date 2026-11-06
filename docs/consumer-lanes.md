@@ -53,9 +53,10 @@ caller has a valid task lease token.
   Staging D1, then revokes the temporary credential.
 - Lane isolation tests use dry-run tasks only. This feature does not enable
   live inference, provider fallback, external writes, or paid services.
-- Stale lease recovery remains a centralized queue-maintenance operation. It
-  requeues expired leases without granting a consumer the ability to claim or
-  complete another lane's task.
+- API-triggered stale recovery is scoped to the caller's lane and requires the
+  same lane capability as claim/heartbeat/finish. The scheduled Worker Cron is
+  the separate central maintenance path that can recover expired leases across
+  lanes; it does not execute or complete tasks.
 
 Do not add a new queue, database, or scheduler for each lane. Use the existing
 D1 queue and bounded runner infrastructure.
