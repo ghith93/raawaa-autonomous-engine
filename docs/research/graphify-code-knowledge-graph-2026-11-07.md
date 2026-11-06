@@ -109,3 +109,8 @@ Corrected exact-PR-head run: [42312433741](https://github.com/ghith93/raawaa-aut
 ## 9. Combined code + agent topology graph
 
 The static map is now merged into Graphify output. `scripts/merge_project_agent_map.py` adds agent/component/gap/provider nodes, explicit topology edges, and evidence links to AST file nodes or path-only references for docs excluded by `--code-only`. The merge is idempotent and tested. The resulting graph is one navigable view of code structure plus declared roles and their evidence; it does not claim roles are live agents and does not copy live D1 tasks.
+
+## 10. Graphify overlay normalization fix
+
+The first combined overlay attempt showed that Graphify's `cluster-only` normalization maps unknown node `file_type` values to `concept` and may re-key non-AST IDs. The overlay now uses the supported `concept` type and carries stable `metadata.map_node_id` / `metadata.evidence_path` identifiers. CI validates those stable metadata fields and edge source locations after clustering, rather than relying on pre-normalization IDs or unsupported node types. This is required for the agent topology to survive into the final graph and HTML.
+
