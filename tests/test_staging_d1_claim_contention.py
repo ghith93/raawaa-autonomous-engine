@@ -256,6 +256,74 @@ class StagingContentionProofTests(unittest.TestCase):
             retire_stale_pending_proof_tasks(store)
         self.assertEqual(store.recovery_calls, 0)
 
+    def test_only_exact_running_contention_proof_is_recovered_by_task_id(self):
+        class CleanupStore:
+            def __init__(self):
+                self.rows = [
+                    {
+                        "id": "expired-proof",
+                        "task_type": "supervised_probe",
+                        "title": "Remote Staging D1 concurrent claim contention proof",
+                        "idempotency_key": "staging-d1-contention:12348:1",
+                        "payload_json": '{"operation": "python_platform_probe"}',
+                        "status": "running",
+                        "attempts": 1,
+                        "max_attempts": 1,
+                        "execution_mode": "dry_run",
+                        "priority": 100,
+                        "dependencies_json": "[]",
+                    },
+                    {
+                        "id": "unrelated-running",
+                        "task_type": "research_brief",
+                        "title": "Unrelated running task",
+                        "status": "running",
+                    },
+                ]
+                self.recovery_calls = []
+
+            def list_tasks(self, _limit):
+                return [dict(row) for row in self.rows]
+
+            def recover_stale(self, worker_lane="general", task_id=None):
+                self.recovery_calls.append((worker_lane, task_id))
+                row = next(row for row in self.rows if row["id"] == task_id)
+                row["status"] = "failed"
+                return {"requeued": 0, "failed": 1}
+
+        store = CleanupStore()
+        self.assertEqual(retire_stale_pending_proof_tasks(store), 1)
+        self.assertEqual(store.recovery_calls, [("general", "expired-proof")])
+        states = {row["id"]: row["status"] for row in store.rows}
+        self.assertEqual(states["expired-proof"], "failed")
+        self.assertEqual(states["unrelated-running"], "running")
+
+    def test_running_proof_is_not_retired_when_lease_is_not_expired(self):
+        class CleanupStore:
+            def __init__(self):
+                self.row = {
+                    "id": "active-proof",
+                    "task_type": "supervised_probe",
+                    "title": "Remote Staging D1 concurrent claim contention proof",
+                    "idempotency_key": "staging-d1-contention:12349:1",
+                    "payload_json": '{"operation": "python_platform_probe"}',
+                    "status": "running",
+                    "attempts": 1,
+                    "max_attempts": 1,
+                    "execution_mode": "dry_run",
+                    "priority": 100,
+                    "dependencies_json": "[]",
+                }
+
+            def list_tasks(self, _limit):
+                return [dict(self.row)]
+
+            def recover_stale(self, worker_lane="general", task_id=None):
+                return {"requeued": 0, "failed": 0}
+
+        with self.assertRaisesRegex(StagingContentionProofError, "not expired"):
+            retire_stale_pending_proof_tasks(CleanupStore())
+
     def test_two_concurrent_claims_have_one_winner_and_durable_completion(self):
         result = run_proof(self.env, store_factory=FakeStore, executor_factory=ThreadPoolExecutor)
         self.assertEqual(result["status"], "succeeded")
