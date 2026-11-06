@@ -102,15 +102,24 @@ class OpenAICompatibleAdapter:
         key = self.environ.get(self.api_key_env, "").strip()
         if not key:
             raise LiveAdapterError(f"Missing environment variable: {self.api_key_env}")
+        request_body = {
+            "model": model,
+            "messages": [{"role": "user", "content": request.prompt}],
+            # Groq documents max_tokens as deprecated in favor of this field.
+            "max_completion_tokens": request.max_output_tokens,
+            "stream": False,
+        }
+        if self.provider == "groq" and model in {
+            "openai/gpt-oss-20b",
+            "openai/gpt-oss-120b",
+        }:
+            # Keep the bounded research task focused on the user-facing answer.
+            request_body["reasoning_effort"] = "low"
+            request_body["include_reasoning"] = False
         payload = _post_json(
             self.base_url + "/chat/completions",
             {"Authorization": f"Bearer {key}"},
-            {
-                "model": model,
-                "messages": [{"role": "user", "content": request.prompt}],
-                "max_tokens": request.max_output_tokens,
-                "stream": False,
-            },
+            request_body,
             self.timeout,
         )
         try:
@@ -118,6 +127,11 @@ class OpenAICompatibleAdapter:
             usage = payload.get("usage", {})
             if not isinstance(text, str):
                 raise TypeError
+            if not text.strip():
+                raise LiveAdapterError(
+                    "Provider returned an empty completion",
+                    error_code="empty_completion",
+                )
             input_tokens = int(usage.get("prompt_tokens", 0))
             output_tokens = int(usage.get("completion_tokens", 0))
             if input_tokens < 0 or output_tokens < 0:
