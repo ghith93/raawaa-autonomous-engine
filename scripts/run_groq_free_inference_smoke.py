@@ -244,14 +244,15 @@ def main() -> int:
 
     if task.get("status") == "succeeded":
         # Re-running this workflow must never repeat a successful model call.
-        ledger_summary = _assert_zero_spend_preserving_known_ambiguity(store, task_id)
+        ledger_summary = _assert_zero_spend(store, task_id)
         print(json.dumps({
             "status": "already_succeeded_no_replay",
             "task_id": task_id,
             "provider": "groq",
             "model_routes": list(ROUTE_IDS),
             "new_provider_calls": 0,
-            "daily_spend_usd": ledger.get("daily_spent_usd"),
+            "previous_ambiguous_task": previous_ambiguous,
+            **ledger_summary,
         }, sort_keys=True))
         return 0
     if task.get("status") != "pending":
@@ -288,7 +289,7 @@ def main() -> int:
     if not used_routes or sum(item["tokens"] for item in used_routes) < 1:
         raise SystemExit("No durable provider token usage was recorded for the smoke task.")
 
-    ledger_summary = _assert_zero_spend_preserving_known_ambiguity(store, task_id)
+    ledger_summary = _assert_zero_spend(store, task_id)
 
     print(json.dumps({
         "status": "success",
