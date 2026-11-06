@@ -422,6 +422,68 @@ test("exact recovery fails the normal one-attempt probe without enabling a retry
   assert.equal(DB.state.auditCount, 1);
 });
 
+test("simultaneous general claims can acquire a pending D1 task only once", async () => {
+  // Model D1's atomic UPDATE ... WHERE status='pending' ... RETURNING behavior.
+  // Both HTTP requests race through the real Worker handler; the mock commits
+  // the first conditional update synchronously before the second can observe it.
+  const calls = [];
+  const state = { status: "pending", attempts: 0, auditEvents: 0 };
+  const DB = {
+    calls,
+    prepare(sql) {
+      return {
+        sql, values: [],
+        bind(...values) { this.values = values; return this; },
+        async all() {
+          calls.push({ kind: "all", sql, values: this.values });
+          return { results: [] };
+        },
+        async first() {
+          calls.push({ kind: "first", sql, values: this.values });
+          if (!sql.includes("UPDATE tasks SET status='running'")) return null;
+          if (state.status !== "pending") return null;
+          state.status = "running";
+          state.attempts += 1;
+          return {
+            id: "contended-task", idempotency_key: "contended-key",
+            task_type: "research_brief", title: "Contended task",
+            payload_json: "{}", status: "running", attempts: state.attempts,
+            max_attempts: 2, execution_mode: this.values[0],
+            priority: 50, dependencies_json: "[]",
+            lease_token: this.values[2], lease_expires_at: this.values[3],
+          };
+        },
+        async run() {
+          calls.push({ kind: "run", sql, values: this.values });
+          if (sql.includes("INSERT INTO audit_log")) state.auditEvents += 1;
+          return { meta: { changes: 1 } };
+        },
+      };
+    },
+  };
+  const env = { DB, ENGINE_API_TOKEN: TOKEN };
+  const [left, right] = await Promise.all([
+    worker.fetch(request("/v1/tasks/claim", { method: "POST", body: { execution_mode: "dry_run" } }), env),
+    worker.fetch(request("/v1/tasks/claim", { method: "POST", body: { execution_mode: "dry_run" } }), env),
+  ]);
+  assert.equal(left.status, 200);
+  assert.equal(right.status, 200);
+  const bodies = await Promise.all([left.json(), right.json()]);
+  assert.equal(bodies.filter(body => body.task?.id === "contended-task").length, 1);
+  assert.equal(bodies.filter(body => body.task === null).length, 1);
+  assert.equal(state.status, "running");
+  assert.equal(state.attempts, 1);
+  assert.equal(state.auditEvents, 1);
+  const claimStatements = calls.filter(call =>
+    call.kind === "first" && call.sql.includes("UPDATE tasks SET status='running'"));
+  assert.equal(claimStatements.length, 2);
+  for (const call of claimStatements) {
+    assert.match(call.sql, /WHERE id=\(SELECT candidate\.id FROM tasks candidate/);
+    assert.match(call.sql, /AND status='pending'/);
+    assert.match(call.sql, /RETURNING id/);
+  }
+});
+
 test("claim endpoint is authenticated and returns an empty queue safely", async () => {
   const DB = dbMock();
   const response = await worker.fetch(request("/v1/tasks/claim", { method: "POST", body: {} }), {
