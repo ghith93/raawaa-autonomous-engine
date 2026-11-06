@@ -1,6 +1,6 @@
 """One-shot, verified Groq Free-tier inference smoke against isolated Staging D1.
 
-Never upgrade plans, use paid fallback, or send non-public task data. Staging admin credentials are isolated and revoked after each run. The Staging D1 budget policy is forced to zero before every live request.
+Never upgrade plans, use paid fallback, or send non-public task data. Staging admin credentials are isolated and revoked after each run. The Staging D1 budget policy is forced to zero before every live request; the exact policy is verified by the durable ledger before provider I/O.
 """
 from __future__ import annotations
 
