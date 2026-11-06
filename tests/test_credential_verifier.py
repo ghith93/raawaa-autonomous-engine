@@ -64,3 +64,24 @@ class ReportShapeTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class UrlExtractionTests(unittest.TestCase):
+    def test_account_id_is_read_from_any_dashboard_url(self):
+        url = "https://dash.cloudflare.com/a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6/workers-and-pages"
+        self.assertEqual(verify.account_id_from_url(url),
+                         "a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6")
+
+    def test_bare_account_url_works(self):
+        url = "https://dash.cloudflare.com/a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6"
+        self.assertEqual(verify.account_id_from_url(url),
+                         "a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6")
+
+    def test_profile_page_has_no_account_id(self):
+        self.assertIsNone(verify.account_id_from_url(
+            "https://dash.cloudflare.com/profile/api-tokens"))
+
+    def test_uppercase_url_id_is_normalised(self):
+        url = "https://dash.cloudflare.com/A1B2C3D4E5F6A7B8C9D0E1F2A3B4C5D6/ai"
+        self.assertEqual(verify.account_id_from_url(url),
+                         "a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6")

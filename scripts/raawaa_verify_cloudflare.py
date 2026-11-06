@@ -37,6 +37,31 @@ sys.path.insert(0, str(ROOT))
 API = "https://api.cloudflare.com/client/v4"
 ACCOUNT_ID_RE = re.compile(r"^[0-9a-f]{32}$")
 
+def account_id_from_url(url: str) -> str | None:
+    """Any Cloudflare dashboard URL contains the account id as its first path segment.
+
+    This is the lowest-friction way to find it: the address bar already has it, so
+    nobody has to hunt for a sidebar panel that may be collapsed or renamed.
+    """
+    match = re.search(r"dash\.cloudflare\.com/([0-9a-fA-F]{32})(?:[/?#]|$)", url.strip())
+    return match.group(1).lower() if match else None
+
+
+def account_id_from_token(token: str) -> str | None:
+    """Ask the API which accounts this token can see.
+
+    A token with a single account in its scope identifies the account on its own,
+    which removes the need to copy an id at all.
+    """
+    status, payload = _request("/accounts", token)
+    if status == 0 or not payload.get("success"):
+        return None
+    accounts = payload.get("result") or []
+    if len(accounts) == 1:
+        return str(accounts[0].get("id"))
+    return None
+
+
 DASHBOARD = {
     "account_id": "https://dash.cloudflare.com/  ->  Workers & Pages  ->  Account ID (right sidebar)",
     "token": "https://dash.cloudflare.com/profile/api-tokens  ->  Create Token  ->  Create Custom Token",
@@ -186,10 +211,37 @@ def run(env: dict[str, str], *, skip_ai: bool = False) -> tuple[list[Step], dict
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Verify Cloudflare credentials")
     parser.add_argument("--skip-ai", action="store_true", help="do not spend neurons")
+    parser.add_argument("--from-url", help="any dashboard URL; the account id is extracted from it")
+    parser.add_argument("--from-token", action="store_true",
+                        help="let the token identify the account (works when it has one account)")
     parser.add_argument("--json", help="write the result to this path")
     args = parser.parse_args(argv)
 
-    steps, meta = run(dict(os.environ), skip_ai=args.skip_ai)
+    env = dict(os.environ)
+
+    if args.from_url:
+        found = account_id_from_url(args.from_url)
+        if found:
+            print(f"account id from URL: {found}")
+            env["CLOUDFLARE_ACCOUNT_ID"] = found
+        else:
+            print("no 32-character account id found in that URL")
+            return 2
+
+    if args.from_token:
+        token = env.get("CLOUDFLARE_API_TOKEN", "").strip()
+        if not token:
+            print("set CLOUDFLARE_API_TOKEN first")
+            return 2
+        found = account_id_from_token(token)
+        if found:
+            print(f"account id from token: {found}")
+            env["CLOUDFLARE_ACCOUNT_ID"] = found
+        else:
+            print("token sees more than one account (or none); use --from-url instead")
+            return 2
+
+    steps, meta = run(env, skip_ai=args.skip_ai)
     for step in steps:
         print(step.render())
 
