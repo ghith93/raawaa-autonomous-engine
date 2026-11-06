@@ -17,12 +17,23 @@ on:
   schedule:
     - cron: "31 5 * * *"
   workflow_dispatch:
+  pull_request:
+    paths:
+      - ".github/workflows/research-discovery.yml"
+      - ".graphifyignore"
+      - "config/**"
+      - "engine/**"
+      - "worker/**"
+      - "scripts/**"
+      - "tests/**"
+      - "docs/research/**"
+      - "docs/research-and-development-operating-system.ar.md"
 
 permissions:
   contents: read
 
 concurrency:
-  group: scheduled-research-discovery
+  group: scheduled-research-discovery-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -99,7 +110,7 @@ jobs:
         run: python scripts/publish_research_scan_telemetry.py research-candidates.json
 
   knowledge_graph:
-    if: github.ref == 'refs/heads/main'
+    if: github.event_name == 'pull_request' || github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 8
     permissions:
