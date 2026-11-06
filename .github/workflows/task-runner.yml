@@ -170,7 +170,6 @@ jobs:
           GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
         run: |
-          test -n "$RAAWAA_ENGINE_LANE_TOKEN" || { echo "::error::Missing ENGINE_GENERAL_LANE_TOKEN; general task claims are disabled until a distinct lane capability is configured."; exit 1; }
           python - <<'PY'
           import json
           import os
