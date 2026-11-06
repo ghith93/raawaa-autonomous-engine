@@ -34,3 +34,24 @@
 - Activepieces project Ghith's Project has one ACTIVE GitHub connection and one ENABLED, published flow: Raawaa GitHub Workflow Control. The flow is Manual Trigger → GitHub workflow_dispatch for task-runner.yml on main. Latest TESTING run appXqFOAEJKRLnQoA8xJs succeeded and triggered GitHub Task Runner run #41749347645. No PRODUCTION flow runs were found.
 - Activepieces lists 20 model entries under its activepieces provider, but price, quota, eligibility, and billing are unknown. No inference was sent. These are not engine-runtime provider adapters.
 - The current repository main SHA is e6761d09de884d34bdc0ef7d01d7b7a8f1e1682e. Main CI #41747902547 passed all test and isolated Staging verification jobs. Production deployment workflow #41748314581 was skipped; Production Worker/D1 remain unchanged.
+
+## Live revalidation — 2026-11-06
+
+The live Automations inventory returned **8 records: 3 enabled, 4 paused, and 1 completed**. This supersedes the 2026-11-04 count and names above.
+
+| Automation | State | Schedule / timezone | Latest verified run metadata | Scope |
+|---|---|---|---|---|
+| Raawaa Engine research and delivery cycle | Enabled | Daily 09:00, Asia/Damascus | Last run started 2026-11-06 06:42:01Z; `next_run_time=null` | Engine R&D cycle. |
+| Raawaa Engine Autonomous Ops | Enabled | Daily 19:00, Asia/Damascus | Current run scheduled for 2026-11-06 16:00Z and started 16:50:47Z; recorded `in_progress`; `next_run_time=null`. The start was about 50 minutes after the scheduled time. | This engine-only operations cycle. |
+| متابعة رواء | Enabled | Daily 13:00, America/New_York | No recorded last run; `next_run_time=null`. | Separate cross-project automation that includes Raawaa-store and the engine. It was not modified or used by this engine-only run. |
+| مراجعة يومية لتطوير نظام التسويق | Paused | Daily; Asia/Damascus | No next run | Separate marketing repository/project. |
+| رادار سوق مستحضرات سوريا | Paused | Weekly Monday; America/Los_Angeles | No next run | Syria cosmetics market research. |
+| مراجعة ذاكرة مشروع السيروم | Paused | Daily; Asia/Damascus | No next run | Separate serum project memory review. |
+| Review Arena Collaboration Hub | Paused | Daily 08:00, Asia/Damascus | No next run | Separate manual collaboration review. |
+| تحقق من تشغيل Raawaa المجدول | Completed | One-time, 2026-11-06 04:30 UTC | Completed 04:40:26Z; verified that the 03:47 supervised-process-probe slot was absent and Runtime-004 remained 0/2. | One-time Runtime-004 verification; no recurring schedule. |
+
+- The previous title **Raawaa Engine Daily Ops** is not present in the current inventory. Do not infer that the old title remains enabled.
+- All three enabled records currently expose `next_run_time=null`. The current 19:00 Asia/Damascus run is in progress and demonstrates one delayed scheduled invocation, not future recurrence reliability or an always-on process.
+- The separate cross-project `متابعة رواء` automation remains outside this repository-only task's scope. Do not modify or re-enable paused automations, and do not create duplicates.
+- No automation schedule, enabled state, or prompt was changed during this revalidation.
+
