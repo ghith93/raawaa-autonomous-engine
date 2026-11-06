@@ -41,6 +41,30 @@ jobs:
           [ -n "$TOKEN" ]   || { echo "CLOUDFLARE_API_TOKEN is missing from repository secrets."; exit 1; }
           echo "Both secret names are present. Values withheld."
 
+      # Runs first, because the most common cause of "Invalid API Token" is not an
+      # expired token but a damaged paste: a quoted value, a trailing newline, or a
+      # truncated copy from a phone screen. The length and the character problems are
+      # safe to print; the value never is.
+      - name: Diagnose the stored token shape
+        shell: bash
+        env:
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: |
+          set +e
+          python scripts/raawaa_token_doctor.py > doctor.txt 2>&1
+          cat doctor.txt
+          while IFS= read -r line; do
+            [ -z "$line" ] && continue
+            case "$line" in
+              *'"verdict": "invalid"'*) echo "::error::token rejected by Cloudflare (code 1000)" ;;
+              *'"verdict": "ok"'*)      echo "::notice::token verified by Cloudflare" ;;
+              *'"verdict":'*)           echo "::warning::token verdict: $line" ;;
+              *'"token_length"'*)       echo "::notice::stored value $line" ;;
+              *shape*|*contains*|*length*) echo "::warning::$line" ;;
+            esac
+          done < doctor.txt
+
       # Findings are emitted as annotations so the verdict is readable from
       # `gh run view` without downloading logs, which the API does not always serve.
       - name: Verify credentials and permissions
