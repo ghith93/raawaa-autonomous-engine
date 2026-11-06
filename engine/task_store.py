@@ -329,7 +329,7 @@ class TaskStore:
         limit = max(1, min(int(limit), 200))
         if worker_lane is not None and worker_lane not in {
             "general", "specialist:researcher", "specialist:reviewer",
-            "specialist:marketer", "specialist:operator,
+            "specialist:marketer", "specialist:operator", "specialist:mobile_tester",
         }:
             raise ValueError("invalid worker_lane")
         with self._connect() as db:
