@@ -107,6 +107,7 @@ test("task readback defaults to the general lane", async () => {
   assert.equal(response.status, 200);
   const query = DB.calls.find(call => call.kind === "all" && call.sql.includes("FROM tasks WHERE execution_lane"));
   assert.match(query.sql, /execution_lane=\?/);
+  assert.match(query.sql, /lease_expires_at/);
   assert.deepEqual(query.values, ["general", 10]);
 });
 
