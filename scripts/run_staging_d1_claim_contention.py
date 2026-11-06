@@ -57,6 +57,57 @@ def validate_environment(environ: Mapping[str, str]) -> tuple[str, str]:
     return token, f"{IDEMPOTENCY_PREFIX}{run_id}:{attempt}"
 
 
+def retire_stale_pending_proof_tasks(store: Any) -> int:
+    """Retire only exact, untouched pending contention proofs from aborted CI runs."""
+    rows = store.list_tasks(100)
+    if len(rows) >= 100:
+        raise StagingContentionProofError(
+            "Cannot safely inspect the complete bounded general queue before proof cleanup"
+        )
+
+    def is_exact_stale_proof(row: Any) -> bool:
+        if not (
+            isinstance(row, dict)
+            and row.get("task_type") == TASK_TYPE
+            and row.get("title") == TITLE
+            and isinstance(row.get("idempotency_key"), str)
+            and re.fullmatch(r"staging-d1-contention:[0-9]{1,20}:[0-9]{1,3}",
+                             row["idempotency_key"])
+            and row.get("status") == "pending"
+            and row.get("attempts") == 0
+            and row.get("max_attempts") == 1
+            and row.get("execution_mode") == "not_started"
+            and row.get("priority") == 100
+            and row.get("dependencies_json") in ("[]", None)
+        ):
+            return False
+        try:
+            return json.loads(row.get("payload_json", "")) == {"operation": OPERATION}
+        except (TypeError, ValueError):
+            return False
+
+    stale = [row for row in rows if is_exact_stale_proof(row)]
+    retired = 0
+    for row in stale:
+        task_id = row.get("id")
+        if not isinstance(task_id, str) or not re.fullmatch(r"[A-Za-z0-9_-]{1,128}", task_id):
+            raise StagingContentionProofError("Stale proof task has an invalid identifier")
+        claim = store.claim_supervised_probe(task_id)
+        if not isinstance(claim, dict) or claim.get("id") != task_id:
+            raise StagingContentionProofError(
+                "Could not safely claim an exact stale proof task for retirement"
+            )
+        lease = claim.get("lease_token")
+        if not isinstance(lease, str) or not lease:
+            raise StagingContentionProofError("Stale proof task did not return a valid lease")
+        store.finish(
+            task_id, "blocked",
+            error="Retired stale Staging contention proof; no process or provider work was executed.",
+            lease_token=lease, execution_mode="dry_run",
+        )
+        retired += 1
+    return retired
+
 def run_proof(
     environ: Mapping[str, str] | None = None,
     *,
@@ -66,6 +117,7 @@ def run_proof(
     env = dict(os.environ if environ is None else environ)
     token, idempotency_key = validate_environment(env)
     store = store_factory(STAGING_API_URL, token, timeout=30, reject_redirects=True)
+    stale_proof_tasks_retired = retire_stale_pending_proof_tasks(store)
 
     task = store.enqueue(
         TASK_TYPE,
@@ -160,6 +212,7 @@ def run_proof(
             "external_writes": 0,
             "production_touched": False,
             "spend_usd": 0,
+            "stale_proof_tasks_retired": stale_proof_tasks_retired,
         }
     finally:
         # Do not leave an owned lease running if an assertion fails mid-proof.
