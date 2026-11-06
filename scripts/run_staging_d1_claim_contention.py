@@ -70,8 +70,14 @@ def retire_stale_pending_proof_tasks(store: Any) -> int:
             and row.get("task_type") == TASK_TYPE
             and row.get("title") == TITLE
             and isinstance(row.get("idempotency_key"), str)
-            and row["idempotency_key"].startswith(IDEMPOTENCY_PREFIX)
+            and re.fullmatch(r"staging-d1-contention:[0-9]{1,20}:[0-9]{1,3}",
+                             row["idempotency_key"])
             and row.get("status") == "pending"
+            and row.get("attempts") == 0
+            and row.get("max_attempts") == 1
+            and row.get("execution_mode") == "not_started"
+            and row.get("priority") == 100
+            and row.get("dependencies_json") in ("[]", None)
         ):
             return False
         try:
