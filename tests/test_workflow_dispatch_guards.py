@@ -44,7 +44,20 @@ jobs:
             block = next((content for name, content in job_blocks(workflow) if name == job), "")
             self.assertIn("github.ref == 'refs/heads/main'", block)
             self.assertIn("github.event_name == 'workflow_dispatch'", block)
-            self.assertIn("github.event_name == 'push'", block)
+            self.assertIn("inputs.enable_staging_operations == true", block)
+            self.assertNotIn("github.event_name == 'push'", block)
+        self.assertEqual(check.staging_gate_violations(".github/workflows/ci.yml", workflow), [])
+        self.assertIn("default: false", workflow)
+
+
+
+    def test_staging_jobs_fail_closed_without_explicit_opt_in(self):
+        workflow = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+        unsafe = workflow.replace("inputs.enable_staging_operations == true", "false")
+        violations = check.staging_gate_violations(".github/workflows/ci.yml", unsafe)
+        self.assertEqual(len(violations), len(check.STAGING_EFFECT_JOBS))
+        unsafe_default = workflow.replace("default: false", "default: true")
+        self.assertTrue(check.staging_gate_violations(".github/workflows/ci.yml", unsafe_default))
 
     def test_non_secret_or_non_dispatch_workflows_are_not_restricted(self):
         no_secret = """on:
