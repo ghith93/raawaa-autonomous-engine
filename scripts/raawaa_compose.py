@@ -26,10 +26,12 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
-# Instagram feed/exports. 4:5 is the tallest feed image, so it earns the most
-# screen; 1:1 survives old placements; 9:16 is the story/reel cover.
+# Instagram feed/exports. 4:5 is the tallest classical feed image, 3:4 matches
+# Instagram's 2025+ profile grid, 1:1 survives legacy placements, and 9:16 is
+# the story/reel cover.
 TARGETS = {
     "feed_4x5": (1080, 1350),
+    "grid_3x4": (1080, 1440),
     "square_1x1": (1080, 1080),
     "story_9x16": (1080, 1920),
 }
@@ -86,6 +88,41 @@ def _fit_to_canvas(src: Path, dest: Path, size: tuple[int, int], *, bottom_pad: 
     return Result(dest.stem, dest, True)
 
 
+def _composite_over_backdrop(
+    src: Path,
+    backdrop: Path,
+    dest: Path,
+    size: tuple[int, int],
+    *,
+    bottom_pad: int = 0,
+) -> Result:
+    """Cover-crop `backdrop` to `size`, then composite `src` fitted inside it.
+
+    Earlier code resized the backdrop and discarded `src` altogether, producing
+    blank backgrounds with no product. This keeps 12% breathing room around the
+    subject and honours `bottom_pad` on stories.
+    """
+    width, height = size
+    usable_h = height - bottom_pad
+    fg_w = max(64, int(width * 0.78))
+    fg_h = max(64, int(usable_h * 0.78))
+    y_offset = -bottom_pad // 2 if bottom_pad else 0
+    offset = f"+0{y_offset:+d}" if y_offset else "+0+0"
+    ok, err = _run([
+        "convert",
+        "(", str(backdrop), "-auto-orient", "-resize", f"{width}x{height}^",
+        "-gravity", "center", "-extent", f"{width}x{height}", ")",
+        "(", str(src), "-auto-orient", "-resize", f"{fg_w}x{fg_h}", ")",
+        "-gravity", "center",
+        "-geometry", offset,
+        "-composite",
+        str(dest),
+    ])
+    if not ok:
+        return Result(dest.stem, dest, False, err[:200])
+    return Result(dest.stem, dest, True)
+
+
 def compose(src: str | Path, out_dir: str | Path, *, backdrop: str | None = None) -> dict:
     src_path = Path(src)
     out = Path(out_dir)
@@ -95,30 +132,20 @@ def compose(src: str | Path, out_dir: str | Path, *, backdrop: str | None = None
     if not have_imagemagick():
         raise RuntimeError("ImageMagick `convert` is not installed")
 
-    source = src_path
     notes = []
-    # If the shot is landscape and a backdrop exists, letterbox it onto the
-    # backdrop instead of cropping the product. This is the only "design" step.
-    if backdrop and Path(backdrop).exists():
-        composed = out / "_backdrop.png"
-        ok, err = _run([
-            "convert", str(backdrop),
-            "-resize", "1080x1350^", "-gravity", "center", "-extent", "1080x1350",
-            str(composed),
-        ])
-        if ok:
-            source = composed
-            notes.append("backdrop_applied")
+    backdrop_path = Path(backdrop) if backdrop and Path(backdrop).exists() else None
+    if backdrop_path is not None:
+        notes.append("backdrop_composited")
 
     results = []
     for name, size in TARGETS.items():
         dest = out / f"{src_path.stem}__{name}.jpg"
         bottom = SAFE_BOTTOM_PX if name == "story_9x16" else 0
-        res = _fit_to_canvas(source, dest, size, bottom_pad=bottom)
+        if backdrop_path is not None:
+            res = _composite_over_backdrop(src_path, backdrop_path, dest, size, bottom_pad=bottom)
+        else:
+            res = _fit_to_canvas(src_path, dest, size, bottom_pad=bottom)
         results.append(res)
-
-    if source != src_path:
-        source.unlink(missing_ok=True)
 
     return {
         "source": str(src_path),

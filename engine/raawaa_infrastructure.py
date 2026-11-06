@@ -13,10 +13,9 @@ Three rules shape it, and each is a reaction to a real failure mode:
    A malformed or obviously fake number becomes a refused parcel two days later,
    and a refused parcel costs money while a rejected form costs nothing.
 
-3. **Capacity is a gate, not a target.** Twenty compounds a day is a hard limit,
-   so the twentieth order is the last accepted one. Accepting order
-   twenty-one is a promise the founder cannot keep, and a late parcel is the
-   most reliable way to manufacture a refusal.
+3. **Capacity is configurable, never fabricated.** `0` means unlimited (raw
+   materials cover 10,000 units, compounded on demand). A hard daily cap is
+   enforced only when the operator sets a real one they intend to honour.
 
 Run:
     python -m engine.raawaa_infrastructure --plan

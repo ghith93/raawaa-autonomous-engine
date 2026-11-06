@@ -41,20 +41,33 @@ class Order:
     """One shipment and what it actually cost. Filled in after the courier reports."""
 
     order_id: str
-    revenue: Money                 # what the buyer pays, delivery included
+    revenue: Money                 # what the buyer pays when delivered, delivery included
     goods_cost: Money              # materials + packaging + labour
     delivery: DeliveryRate
     delivered: bool | None = None  # None = still in flight
     cod_collected: Money | None = None  # cash actually received
     attempts: int = 1
+    spoilage_rate: float = 1.0     # fraction of goods_cost lost on refusal (0.0 = returned intact)
+    repack_cost: Money | None = None
     notes: list[str] = field(default_factory=list)
 
     def contribution(self) -> Money | None:
-        """Profit after goods and delivery. None while the outcome is unknown."""
+        """Profit after goods and delivery. None while the outcome is unknown.
+
+        On a refused COD shipment (`delivered is False`), zero cash is collected
+        from the buyer; the merchant loses the refusal courier fee, any repack
+        cost, and only the spoiled/unusable fraction of `goods_cost`.
+        """
         if self.delivered is None:
             return None
-        cost = self.goods_cost + (self.delivery.fee if self.delivered else self.delivery.refusal_fee)
-        return self.revenue - cost
+        if not 0.0 <= self.spoilage_rate <= 1.0:
+            raise DeliveryError("spoilage_rate must be within 0..1")
+        zero = Money.zero(self.revenue.currency)
+        repack = self.repack_cost or zero
+        if self.delivered:
+            return self.revenue - (self.goods_cost + self.delivery.fee)
+        spoiled_goods = self.goods_cost * self.spoilage_rate
+        return zero - (spoiled_goods + self.delivery.refusal_fee + repack)
 
     def cash_reconciles(self, tolerance: Money | None = None) -> bool:
         """A delivered parcel must show cash equal to revenue, within tolerance."""
@@ -64,20 +77,35 @@ class Order:
         return abs((self.cod_collected - self.revenue).minor) <= allowed.minor
 
 
-def break_even_refusal_rate(price: Money, goods_cost: Money, delivery: DeliveryRate) -> float | None:
+def break_even_refusal_rate(
+    price: Money,
+    goods_cost: Money,
+    delivery: DeliveryRate,
+    *,
+    spoilage_rate: float = 1.0,
+    repack_cost: Money | None = None,
+) -> float | None:
     """Refusal rate above which absorbing delivery loses money.
 
     At refusal rate r, expected contribution per shipment is
-        (1-r) * (price - goods - fee) - r * (goods + refusal_fee)
+        (1-r) * (price - goods - fee) - r * (spoilage * goods + refusal_fee + repack)
     Setting that to zero gives
-        r* = (price - goods - fee) / (price - refusal_fee)
+        r* = good / (good + loss)
+    When `spoilage_rate == 1.0` and `repack_cost == 0`, this simplifies to
+        (price - goods - fee) / (price - refusal_fee).
     """
     delivery.validate()
-    numerator = price - goods_cost - delivery.fee
-    denominator = price - delivery.refusal_fee
-    if numerator.minor <= 0:
+    if not 0.0 <= spoilage_rate <= 1.0:
+        raise DeliveryError("spoilage_rate must be within 0..1")
+    repack = repack_cost or Money.zero(price.currency)
+    good = price - goods_cost - delivery.fee
+    if good.minor <= 0:
         return 0.0
-    ratio = safe_div(numerator.minor, denominator.minor)
+    loss = (goods_cost * spoilage_rate) + delivery.refusal_fee + repack
+    if loss.minor <= 0:
+        return 1.0
+    denominator = good + loss
+    ratio = safe_div(good.minor, denominator.minor)
     return None if ratio is None else ratio
 
 

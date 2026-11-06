@@ -206,16 +206,36 @@ class CloudflareFlux:
         per_image = self.neurons_for(width, height, steps)
         return 0 if per_image <= 0 else int(self.daily_neuron_cap // per_image)
 
+    def _resolved_credentials(self) -> tuple[str, str]:
+        """Accept either direct env keys or role aliases from config/credentials.json."""
+        account = self.env.get("CLOUDFLARE_ACCOUNT_ID", "").strip()
+        token = self.env.get("CLOUDFLARE_API_TOKEN", "").strip()
+        if account and token:
+            return account, token
+        try:
+            from engine.credentials import resolve
+            if not account:
+                account = resolve("cloudflare_account", self.env).value
+            if not token:
+                token = resolve("cloudflare_token", self.env).value
+        except Exception:
+            pass
+        return account, token
+
     # -- availability -------------------------------------------------------
     def available(self) -> tuple[bool, str]:
-        missing = [k for k in ("CLOUDFLARE_ACCOUNT_ID", "CLOUDFLARE_API_TOKEN")
-                   if not self.env.get(k, "").strip()]
+        account, token = self._resolved_credentials()
+        missing = []
+        if not account:
+            missing.append("CLOUDFLARE_ACCOUNT_ID")
+        if not token:
+            missing.append("CLOUDFLARE_API_TOKEN")
         if missing:
             return False, f"missing credentials: {', '.join(missing)}"
         return True, "credentials present"
 
     def _url(self) -> str:
-        account = self.env["CLOUDFLARE_ACCOUNT_ID"].strip()
+        account, _ = self._resolved_credentials()
         return f"https://api.cloudflare.com/client/v4/accounts/{account}/ai/run/{self.model}"
 
     def generate(self, request: ImageRequest) -> ImageResult:
@@ -223,6 +243,7 @@ class CloudflareFlux:
         ok, reason = self.available()
         if not ok:
             raise ProviderUnavailable(f"{self.name}: {reason}")
+        _, token = self._resolved_credentials()
 
         # Only the fields this model documents. Sending unsupported ones yields a
         # 400 that reads like an authorisation failure, which cost a debugging cycle.
@@ -236,7 +257,7 @@ class CloudflareFlux:
             self._url(),
             data=json.dumps(payload).encode("utf-8"),
             headers={
-                "Authorization": f"Bearer {self.env['CLOUDFLARE_API_TOKEN'].strip()}",
+                "Authorization": f"Bearer {token}",
                 "Content-Type": "application/json",
             },
             method="POST",

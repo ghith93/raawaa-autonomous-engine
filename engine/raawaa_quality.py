@@ -28,7 +28,12 @@ from engine.raawaa_economics import load_brand
 # Instagram accepts these; anything else fails at upload or gets recompressed.
 MIN_SQUARE_PX = 1080
 MAX_BYTES = 8 * 1024 * 1024
-IDEAL_RATIOS = {(4, 5): "عمودي 4:5 — الأفضل للفيد", (1, 1): "مربع", (9, 16): "ستوري/ريل"}
+IDEAL_RATIOS = {
+    (4, 5): "عمودي 4:5 — الأفضل للفيد",
+    (3, 4): "شبكة الحساب 3:4 — معيار إنستغرام المحدّث",
+    (1, 1): "مربع",
+    (9, 16): "ستوري/ريل",
+}
 # Below this mean luminance a photo reads as grey and dirty on a phone screen.
 MIN_MEAN_LUMA = 45
 MAX_MEAN_LUMA = 235
@@ -65,10 +70,31 @@ def _jpeg_size(data: bytes) -> tuple[int, int] | None:
 
 
 def _png_size(data: bytes) -> tuple[int, int] | None:
-    if data[:8] != b"\x89PNG\r\n\x1a\n":
+    if data[:8] != b"\x89PNG\r\n\x1a\n" or len(data) < 24:
         return None
     width, height = struct.unpack(">II", data[16:24])
     return width, height
+
+
+def _webp_size(data: bytes) -> tuple[int, int] | None:
+    """Parse RIFF/WEBP VP8, VP8L, or VP8X dimensions using stdlib only."""
+    if len(data) < 30 or data[:4] != b"RIFF" or data[8:12] != b"WEBP":
+        return None
+    chunk = data[12:16]
+    if chunk == b"VP8X" and len(data) >= 30:
+        w = 1 + int.from_bytes(data[24:27], "little")
+        h = 1 + int.from_bytes(data[27:30], "little")
+        return w, h
+    if chunk == b"VP8 " and len(data) >= 30 and data[23:26] == b"\x9d\x01\x2a":
+        w = int.from_bytes(data[26:28], "little") & 0x3FFF
+        h = int.from_bytes(data[28:30], "little") & 0x3FFF
+        return w, h
+    if chunk == b"VP8L" and len(data) >= 25 and data[20] == 0x2F:
+        bits = int.from_bytes(data[21:25], "little")
+        w = (bits & 0x3FFF) + 1
+        h = ((bits >> 14) & 0x3FFF) + 1
+        return w, h
+    return None
 
 
 def inspect(path: str | Path) -> ImageInfo:
@@ -76,8 +102,15 @@ def inspect(path: str | Path) -> ImageInfo:
     if not p.exists():
         return ImageInfo(str(p), 0, 0, "missing", 0, problem="file_not_found")
     data = p.read_bytes()
-    size = _png_size(data) if data[:4] == b"\x89PNG" else _jpeg_size(data)
-    fmt = "png" if data[:4] == b"\x89PNG" else "jpeg" if size else "unknown"
+    if data[:4] == b"\x89PNG":
+        size = _png_size(data)
+        fmt = "png"
+    elif data[:4] == b"RIFF" and data[8:12] == b"WEBP":
+        size = _webp_size(data)
+        fmt = "webp"
+    else:
+        size = _jpeg_size(data)
+        fmt = "jpeg" if size else "unknown"
     if size is None:
         return ImageInfo(str(p), 0, 0, fmt, len(data), problem="unreadable_dimensions")
     width, height = size
@@ -100,6 +133,11 @@ def assess(info: ImageInfo) -> list[str]:
         allowed = {round(a / b, 3) for a, b in IDEAL_RATIOS}
         if simplified not in allowed:
             problems.append(f"unusual_ratio:{info.width}x{info.height}")
+    if info.mean_luma is not None:
+        if info.mean_luma < MIN_MEAN_LUMA:
+            problems.append(f"too_dark:{info.mean_luma:.1f}")
+        elif info.mean_luma > MAX_MEAN_LUMA:
+            problems.append(f"too_bright:{info.mean_luma:.1f}")
     if info.fmt == "unknown":
         problems.append("unsupported_format")
     return problems

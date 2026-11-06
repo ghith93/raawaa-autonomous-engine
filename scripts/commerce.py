@@ -32,6 +32,8 @@ def cmd_sku(args) -> int:
         refusal_delivery_cost=Money.of(args.refusal),
         payment_fee_rate=args.fee_rate,
         labour_minutes=args.minutes,
+        return_spoilage_rate=args.spoilage,
+        repack_cost=Money.of(args.repack) if args.repack else None,
     )
     result = report(sku, labour_hourly=Money.of(args.labour_hourly) if args.labour_hourly else None)
     print(f"SKU {result.sku}")
@@ -115,6 +117,10 @@ def main(argv=None) -> int:
     sku.add_argument("--refusal", default="1")
     sku.add_argument("--fee-rate", type=float, default=0.0)
     sku.add_argument("--minutes", type=float, default=0.0)
+    sku.add_argument("--spoilage", type=float, default=1.0,
+                     help="fraction of COGS lost when a COD shipment is refused (0.0 = returned intact)")
+    sku.add_argument("--repack", default=None,
+                     help="repackaging cost on a refused shipment (e.g. 0.25)")
     sku.add_argument("--labour-hourly", default=None)
     sku.set_defaults(func=cmd_sku)
 
