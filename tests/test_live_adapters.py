@@ -35,6 +35,24 @@ class LiveAdapterTests(unittest.TestCase):
         self.assertNotIn("secret", request.full_url)
         self.assertEqual(request.get_header("X-goog-api-key"), "secret")
 
+    def test_groq_gpt_oss_bounds_reasoning_and_preserves_completion_budget(self):
+        body = b'{"choices":[{"message":{"content":"ready"}}],"usage":{"prompt_tokens":4,"completion_tokens":3}}'
+        adapter = OpenAICompatibleAdapter(
+            "groq", "https://api.groq.com/openai/v1", "KEY",
+            environ={"KEY": "secret"},
+        )
+        with patch("engine.live_adapters.urlopen", return_value=FakeResponse(body)) as call:
+            result = adapter.generate(
+                "openai/gpt-oss-20b",
+                GenerationRequest("test", "Confirm readiness.", 512),
+            )
+        request_body = json.loads(call.call_args.args[0].data.decode("utf-8"))
+        self.assertEqual(result.text, "ready")
+        self.assertEqual(request_body["max_completion_tokens"], 512)
+        self.assertFalse(request_body["include_reasoning"])
+        self.assertEqual(request_body["reasoning_effort"], "low")
+        self.assertNotIn("max_tokens", request_body)
+
     def test_missing_key_fails_closed(self):
         adapter=OpenAICompatibleAdapter("groq","https://api.example/v1","KEY",environ={})
         with self.assertRaises(LiveAdapterError): adapter.generate("model",GenerationRequest("test","hi"))
