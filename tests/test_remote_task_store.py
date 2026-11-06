@@ -190,6 +190,15 @@ class RemoteTaskStoreTests(unittest.TestCase):
         self.assertEqual(open_url.call_args.args[0].full_url,
                          "https://engine.example/v1/tasks/recover")
 
+    @patch("engine.remote_task_store.urlopen")
+    def test_specialist_recovery_sends_lane_capability(self, open_url):
+        self.store.lane_token = "researcher-lane-token-0123456789abcdef0123456789"
+        open_url.return_value = FakeResponse({"requeued": 0, "failed": 0})
+        self.store.recover_stale(worker_lane="specialist:researcher")
+        request = open_url.call_args.args[0]
+        self.assertEqual(json.loads(request.data), {"worker_lane": "specialist:researcher"})
+        self.assertEqual(request.get_header("X-engine-lane-token"), self.store.lane_token)
+
     def test_requires_https_and_token(self):
         with self.assertRaises(ValueError):
             RemoteTaskStore("http://engine.example", "token")
