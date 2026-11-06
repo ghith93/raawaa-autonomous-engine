@@ -1,6 +1,6 @@
 """One-shot, verified Groq Free-tier inference smoke against isolated Staging D1.
 
-Never upgrade plans, use paid fallback, or send non-public task data.
+Never upgrade plans, use paid fallback, or send non-public task data. Staging admin credentials are isolated and revoked after each run.
 """
 from __future__ import annotations
 
