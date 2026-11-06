@@ -234,13 +234,12 @@ def run_once(store: TaskStore, live_gateway=None, environ=None, worker_lane: str
         # heartbeat below; it is also deliberately absent from SAFE_TASKS.
         return complete_supervised_task(store, task, environ=environ)
     expected_lane = {"research_brief": "specialist:researcher", "code_review": "specialist:reviewer",
-                     "content_draft": "specialist:marketer", "system_audit": "specialist:operator",
-                     "mobile_test": "specialist:mobile_tester"}.get(task_type)
+                     "content_draft": "specialist:marketer", "system_audit": "specialist:operator"}.get(task_type)
     if worker_lane != "general" and expected_lane != worker_lane:
         store.finish(task["id"], "blocked", error=f"Task type {task_type} is not assigned to {worker_lane}.",
                      lease_token=task["lease_token"], worker_lane=worker_lane)
         return {"id": task["id"], "status": "blocked", "reason": "lane_task_mismatch"}
-    if task_type not in SAFE_TASKS and task_type != "mobile_test":
+    if task_type not in SAFE_TASKS:
         store.finish(task["id"], "blocked", error=f"Unsupported task type: {task_type}",
                      lease_token=task["lease_token"], worker_lane=worker_lane)
         return {"id": task["id"], "status": "blocked", "reason": "unsupported_task_type"}
