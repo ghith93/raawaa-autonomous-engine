@@ -70,7 +70,7 @@ class SpecialistLaneRunnerTests(unittest.TestCase):
             self.assertEqual(main(), 0)
             remote_store.assert_called_once()
             self.assertEqual(remote_store.call_args.kwargs["lane_token"], RESEARCHER_TOKEN)
-            invocation.assert_called_once_with(task_store)
+            invocation.assert_called_once_with(task_store, worker_lane="specialist:researcher")
             self.assertEqual(gateway.call_args.kwargs["invocation_store"], invocation_store)
             self.assertTrue(str(gateway.call_args.args[1]).endswith("policy.groq-smoke.json"))
             self.assertTrue(str(gateway.call_args.args[2]).endswith("provider_profiles.groq-smoke.json"))
