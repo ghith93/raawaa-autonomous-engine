@@ -1,12 +1,13 @@
 # Public Multi-Store Storefront & Owner Dashboard Static Hosting
-# Completely isolated from `wrangler.toml` (`raawaa-autonomous-engine-control`).
-# Served at zero Worker compute cost via Cloudflare Workers Static Assets:
-#   Storefront:      https://raawaa-storefront.ghith-shikhkhaled.workers.dev/
-#   Owner Dashboard: https://raawaa-storefront.ghith-shikhkhaled.workers.dev/owner/
+# Completely isolated from `wrangler.toml`.
+# NOTE: `workers_dev` is disabled (`false`) so the account-level `*.workers.dev`
+# subdomain (which contains the owner's personal name) is NEVER exposed publicly.
+# Public brand-only hosting is served via Cloudflare Pages (`https://<brand>.pages.dev/`)
+# managed by `scripts/publish_clean_storefront.py`.
 
 name = "raawaa-storefront"
 compatibility_date = "2026-10-28"
-workers_dev = true
+workers_dev = false
 
 [assets]
 directory = "./storefront"

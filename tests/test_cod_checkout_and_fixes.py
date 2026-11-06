@@ -334,6 +334,47 @@ class MultiStoreCodCheckoutTests(unittest.TestCase):
                 tampered, "50ml", forbidden_claims=["يعالج تساقط الشعر"]
             )
 
+    def test_clean_storefront_publisher_selects_brand_slug_and_retires_legacy_worker(self):
+        from scripts import publish_clean_storefront as pub
+
+        calls = []
+
+        def fake_req(method, url, headers, body=None):
+            calls.append((method, url, body))
+            if method == "GET" and url.endswith("/pages/projects"):
+                return 200, {"success": True, "result": []}
+            if method == "POST" and url.endswith("/pages/projects"):
+                name = body["name"]
+                return 200, {
+                    "success": True,
+                    "result": {"name": name, "subdomain": f"{name}.pages.dev"},
+                }
+            if url.endswith("/workers/scripts/raawaa-storefront/subdomain"):
+                return 200, {"success": True}
+            if method == "DELETE" and url.endswith("/workers/scripts/raawaa-storefront"):
+                return 200, {"success": True}
+            return 404, {}
+
+        # Simulate `raawaa.pages.dev` already squatted globally, `raawaa-official.pages.dev` free
+        selected = pub.select_or_create_pages_project(
+            "acc123",
+            "tok123",
+            candidates=("raawaa", "raawaa-official"),
+            request_fn=fake_req,
+            slug_free_fn=lambda slug: slug == "raawaa-official",
+        )
+        self.assertEqual(selected["project_name"], "raawaa-official")
+        self.assertEqual(selected["subdomain"], "raawaa-official.pages.dev")
+        self.assertNotIn("ghith", selected["subdomain"])
+
+        retired = pub.retire_legacy_personal_name_worker(
+            "acc123", "tok123", request_fn=fake_req
+        )
+        self.assertTrue(retired)
+        self.assertTrue(
+            any(m == "DELETE" and u.endswith("/workers/scripts/raawaa-storefront") for m, u, _ in calls)
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
