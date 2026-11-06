@@ -285,6 +285,15 @@ class WorkerExecutionTests(unittest.TestCase):
         self.assertEqual(saved[specialist["id"]]["status"], "pending")
         self.assertEqual(saved[specialist["id"]]["attempts"], 0)
 
+    def test_explicit_worker_lane_is_propagated_to_remote_store_adapters(self):
+        class LaneAwareStore(TaskStore):
+            worker_lane = "general"
+
+        root = Path(self.temp.name)
+        store = LaneAwareStore(root / "explicit-lane.db")
+        self.assertIsNone(run_once(store, environ={}, worker_lane="specialist:researcher"))
+        self.assertEqual(store.worker_lane, "specialist:researcher")
+
     def test_unknown_worker_lane_fails_closed(self):
         result = run_once(self.store, environ={}, worker_lane="specialist:unknown")
         self.assertEqual(result, {"status": "blocked", "reason": "invalid_worker_lane"})
