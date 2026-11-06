@@ -104,3 +104,8 @@ Corrected exact-PR-head run: [42312433741](https://github.com/ghith93/raawaa-aut
 
 **Decision:** Graphify passes the technical pilot acceptance gate and can be retained as a read-only code-topology artifact generator. Keep it non-blocking and independent of runtime. Do not merge to main until the repository owner/operator verifies the downstream main-push Staging workflow side effects are compatible with the active #577 zero-write/deploy boundary.
 
+
+
+## 9. Combined code + agent topology graph
+
+The static map is now merged into Graphify output. `scripts/merge_project_agent_map.py` adds agent/component/gap/provider nodes, explicit topology edges, and evidence links to AST file nodes or path-only references for docs excluded by `--code-only`. The merge is idempotent and tested. The resulting graph is one navigable view of code structure plus declared roles and their evidence; it does not claim roles are live agents and does not copy live D1 tasks.
