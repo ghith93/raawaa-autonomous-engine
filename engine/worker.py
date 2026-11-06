@@ -177,6 +177,25 @@ def run_once(store: TaskStore, live_gateway=None, environ=None, worker_lane: str
     allowed_lanes = {"general", "specialist:researcher", "specialist:reviewer", "specialist:marketer", "specialist:operator", "specialist:mobile_tester"}
     if worker_lane not in allowed_lanes:
         return {"status": "blocked", "reason": "invalid_worker_lane"}
+    lane_agents = {
+        "specialist:researcher": "researcher",
+        "specialist:reviewer": "reviewer",
+        "specialist:marketer": "marketer",
+        "specialist:operator": "operator",
+        "specialist:mobile_tester": "mobile_tester",
+    }
+    agent_id = lane_agents.get(worker_lane)
+    if agent_id:
+        try:
+            roster = load_agent_roster()
+        except Exception as exc:  # noqa: BLE001 - fail closed before claiming a lease
+            return {"status": "blocked", "reason": "agent_roster_unavailable",
+                    "detail": type(exc).__name__}
+        agent = next((item for item in roster.get("agents", [])
+                      if isinstance(item, dict) and item.get("id") == agent_id), None)
+        if not agent or agent.get("enabled") is not True:
+            return {"status": "blocked", "reason": "specialist_agent_disabled",
+                    "agent_id": agent_id}
     # Load repository policy before claiming work or allowing any provider I/O.
     try:
         operating_policy = load_operating_policy()
