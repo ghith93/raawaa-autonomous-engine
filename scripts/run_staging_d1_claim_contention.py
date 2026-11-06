@@ -58,13 +58,16 @@ def validate_environment(environ: Mapping[str, str]) -> tuple[str, str]:
 
 
 def retire_stale_pending_proof_tasks(store: Any) -> int:
-    """Retire only exact, pending contention-proof tasks left by an aborted CI run."""
+    """Retire only exact stale contention proofs; never recover unrelated queue work."""
+    from datetime import datetime, timezone
+
     rows = store.list_tasks(100)
     if len(rows) >= 100:
         raise StagingContentionProofError(
             "Cannot safely inspect the complete bounded general queue before proof cleanup"
         )
-    def is_exact_stale_proof(row: Any) -> bool:
+
+    def is_exact_proof(row: Any) -> bool:
         if not (
             isinstance(row, dict)
             and row.get("task_type") == TASK_TYPE
@@ -72,10 +75,7 @@ def retire_stale_pending_proof_tasks(store: Any) -> int:
             and isinstance(row.get("idempotency_key"), str)
             and re.fullmatch(r"staging-d1-contention:[0-9]{1,20}:[0-9]{1,3}",
                              row["idempotency_key"])
-            and row.get("status") == "pending"
-            and row.get("attempts") == 0
             and row.get("max_attempts") == 1
-            and row.get("execution_mode") == "not_started"
             and row.get("priority") == 100
             and row.get("dependencies_json") in ("[]", None)
         ):
@@ -85,9 +85,62 @@ def retire_stale_pending_proof_tasks(store: Any) -> int:
         except (TypeError, ValueError):
             return False
 
-    stale = [row for row in rows if is_exact_stale_proof(row)]
-    retired = 0
-    for row in stale:
+    active = [row for row in rows
+              if isinstance(row, dict) and row.get("status") in {"pending", "running"}]
+    unrelated = [row for row in active if not is_exact_proof(row)]
+    if unrelated:
+        raise StagingContentionProofError(
+            "Refusing stale-proof recovery because unrelated active Staging work exists"
+        )
+
+    stale_running = [row for row in active if row.get("status") == "running"]
+    if stale_running:
+        now = datetime.now(timezone.utc)
+        for row in stale_running:
+            expiry = row.get("lease_expires_at")
+            if expiry is None:
+                continue  # The Worker recovery contract treats a missing expiry as stale.
+            if not isinstance(expiry, str):
+                raise StagingContentionProofError("Stale proof lease expiry has an invalid shape")
+            try:
+                parsed = datetime.fromisoformat(expiry.replace("Z", "+00:00"))
+            except ValueError:
+                raise StagingContentionProofError("Stale proof lease expiry is not a valid timestamp") from None
+            if parsed.tzinfo is None or parsed > now:
+                raise StagingContentionProofError(
+                    "Exact Staging proof task still has a live lease; refusing recovery"
+                )
+        recovered = store.recover_stale(lease_timeout_seconds=900, worker_lane="general")
+        if (not isinstance(recovered, dict)
+                or recovered.get("requeued", 0) + recovered.get("failed", 0) < len(stale_running)):
+            raise StagingContentionProofError(
+                "Worker did not recover every exact stale Staging proof lease"
+            )
+        rows = store.list_tasks(100)
+        if len(rows) >= 100:
+            raise StagingContentionProofError(
+                "Cannot safely verify the complete general queue after stale recovery"
+            )
+        active = [row for row in rows
+                  if isinstance(row, dict) and row.get("status") in {"pending", "running"}]
+        unrelated = [row for row in active if not is_exact_proof(row)]
+        if unrelated:
+            raise StagingContentionProofError(
+                "Unrelated Staging work appeared during stale-proof recovery"
+            )
+        if any(row.get("status") == "running" for row in active):
+            raise StagingContentionProofError(
+                "An exact Staging proof lease remained running after recovery"
+            )
+
+    stale_pending = [
+        row for row in active
+        if row.get("status") == "pending"
+        and row.get("attempts") == 0
+        and row.get("execution_mode") in {"not_started", None}
+    ]
+    retired = len(stale_running)
+    for row in stale_pending:
         task_id = row.get("id")
         if not isinstance(task_id, str):
             raise StagingContentionProofError("Stale proof task has an invalid identifier")
@@ -108,7 +161,6 @@ def retire_stale_pending_proof_tasks(store: Any) -> int:
         )
         retired += 1
     return retired
-
 
 def run_proof(
     environ: Mapping[str, str] | None = None,
