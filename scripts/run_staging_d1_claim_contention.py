@@ -108,73 +108,6 @@ def retire_stale_pending_proof_tasks(store: Any) -> int:
         retired += 1
     return retired
 
-def retire_stale_running_proof_tasks(store: Any) -> int:
-    """Recover only expired running leases belonging to this exact Staging proof."""
-    from datetime import datetime, timezone
-
-    rows = store.list_tasks(100)
-    if len(rows) >= 100:
-        raise StagingContentionProofError(
-            "Cannot safely inspect the complete bounded general queue before stale recovery"
-        )
-    now = datetime.now(timezone.utc)
-    retired = 0
-    for row in rows:
-        if not isinstance(row, dict) or row.get("status") != "running":
-            continue
-        if not (
-            row.get("task_type") == TASK_TYPE
-            and row.get("title") == TITLE
-            and isinstance(row.get("idempotency_key"), str)
-            and re.fullmatch(r"staging-d1-contention:[0-9]{1,20}:[0-9]{1,3}",
-                             row["idempotency_key"])
-            and row.get("attempts") == 1
-            and row.get("max_attempts") == 1
-            and row.get("execution_mode") == "dry_run"
-            and row.get("priority") == 100
-            and row.get("dependencies_json") in ("[]", None)
-        ):
-            continue
-        try:
-            if json.loads(row.get("payload_json", "")) != {"operation": OPERATION}:
-                continue
-        except (TypeError, ValueError):
-            continue
-        task_id = row.get("id")
-        if not isinstance(task_id, str) or not re.fullmatch(r"[A-Za-z0-9_-]{1,128}", task_id):
-            raise StagingContentionProofError("Stale running proof task has an invalid identifier")
-        expiry = row.get("lease_expires_at")
-        if not isinstance(expiry, str):
-            raise StagingContentionProofError(
-                "Exact running proof task has no readable lease expiry; refusing recovery"
-            )
-        try:
-            parsed_expiry = datetime.fromisoformat(expiry.replace("Z", "+00:00"))
-        except ValueError:
-            raise StagingContentionProofError(
-                "Exact running proof task has an invalid lease expiry"
-            ) from None
-        if parsed_expiry.tzinfo is None or parsed_expiry > now:
-            raise StagingContentionProofError(
-                "Exact running proof task still has a live lease; refusing recovery"
-            )
-        result = store.recover_stale(
-            lease_timeout_seconds=900, worker_lane="general", task_id=task_id
-        )
-        if not isinstance(result, dict) or result.get("requeued", 0) + result.get("failed", 0) != 1:
-            # Another recovery may have won the race; confirm the exact row is no longer running.
-            refreshed = store.list_tasks(100)
-            current = next((item for item in refreshed
-                            if isinstance(item, dict) and item.get("id") == task_id), None)
-            if current and current.get("status") == "running":
-                raise StagingContentionProofError(
-                    "Worker did not recover the exact expired Staging proof lease"
-                )
-        else:
-            retired += 1
-    return retired
-
-
 def run_proof(
     environ: Mapping[str, str] | None = None,
     *,
@@ -184,9 +117,7 @@ def run_proof(
     env = dict(os.environ if environ is None else environ)
     token, idempotency_key = validate_environment(env)
     store = store_factory(STAGING_API_URL, token, timeout=30, reject_redirects=True)
-    stale_running_proofs_retired = retire_stale_running_proof_tasks(store)
-    stale_pending_proofs_retired = retire_stale_pending_proof_tasks(store)
-    stale_proof_tasks_retired = stale_running_proofs_retired + stale_pending_proofs_retired
+    stale_proof_tasks_retired = retire_stale_pending_proof_tasks(store)
 
     task = store.enqueue(
         TASK_TYPE,
