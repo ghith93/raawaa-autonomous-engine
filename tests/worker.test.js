@@ -88,6 +88,21 @@ test("specialist claim requires a dedicated lane capability token", async () => 
   assert.equal(DB.calls.length, 0);
 });
 
+test("specialist lane capability tokens cannot be reused across lanes", async () => {
+  const sharedLaneToken = "shared-specialist-token-0123456789abcdef0123456789";
+  const DB = dbMock();
+  const response = await worker.fetch(request("/v1/tasks/claim", {
+    method: "POST", body: { execution_mode: "dry_run", worker_lane: "specialist:researcher" },
+    extraHeaders: { "x-engine-lane-token": sharedLaneToken },
+  }), {
+    DB, ENGINE_API_TOKEN: TOKEN,
+    ENGINE_RESEARCHER_LANE_TOKEN: sharedLaneToken,
+    ENGINE_REVIEWER_LANE_TOKEN: sharedLaneToken,
+  });
+  assert.equal(response.status, 401);
+  assert.equal(DB.calls.length, 0);
+});
+
 test("specialist claim filters the requested lane and task type", async () => {
   const laneToken = "researcher-lane-token-0123456789abcdef0123456789";
   const DB = dbMock({ normalClaim: {
