@@ -134,8 +134,10 @@ jobs:
           GRAPHIFY_NO_TIPS: "1"
         run: |
           python -m graphify extract . --code-only
-          python scripts/merge_project_agent_map.py --graph graphify-out/graph.json --map config/project-agent-map.json
+          # Graphify clustering rewrites graph.json from its extraction cache.
+          # Run it before adding our deterministic agent/capability overlay.
           python -m graphify cluster-only . --no-label
+          python scripts/merge_project_agent_map.py --graph graphify-out/graph.json --map config/project-agent-map.json
           python - <<'PY'
           import json
           from pathlib import Path
