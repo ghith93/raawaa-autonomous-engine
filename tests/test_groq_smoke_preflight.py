@@ -29,15 +29,20 @@ class _Store:
         self.paths.append(path)
         return {"status": "ready"}
 
+    def list_tasks(self, limit, worker_lane="general"):
+        self.paths.append((limit, worker_lane))
+        return []
+
 
 class GroqSmokePreflightTests(unittest.TestCase):
     @patch.dict(os.environ, {
         "RAAWAA_ENGINE_API_URL": "https://raawaa-autonomous-engine-staging.example.workers.dev",
+        "RAAWAA_ENGINE_WORKER_LANE": "specialist:researcher",
         "CF_ACCESS_CLIENT_ID": "",
         "CF_ACCESS_CLIENT_SECRET": "",
     })
     @patch("urllib.request.urlopen", return_value=_Response())
-    def test_health_probe_uses_verified_worker_user_agent_without_access_secrets(
+    def test_health_probe_waits_for_researcher_lane_capability_without_access_secrets(
         self, open_url
     ):
         store = _Store()
@@ -52,7 +57,10 @@ class GroqSmokePreflightTests(unittest.TestCase):
         self.assertIsNone(request.get_header("Cf-access-client-id"))
         self.assertIsNone(request.get_header("Cf-access-client-secret"))
         self.assertEqual(result, {"status": "ready"})
-        self.assertEqual(store.paths, ["/v1/mobile/status"])
+        self.assertEqual(store.paths, [
+            "/v1/mobile/status",
+            (1, "specialist:researcher"),
+        ])
 
 
 if __name__ == "__main__":
