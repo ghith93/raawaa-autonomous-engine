@@ -307,5 +307,38 @@ class RemoteTaskStoreTests(unittest.TestCase):
             self.store.claim_next(9000)
 
 
+    @patch("engine.remote_task_store.urlopen")
+    def test_specialist_claim_sends_lane_identity_and_capability_token(self, open_url):
+        self.store.lane_token = "lane-token-" + "x" * 40
+        open_url.return_value = FakeResponse({
+            "task": {"id": "task-specialist", "execution_lane": "specialist:researcher",
+                     "status": "running"},
+            "lease_token": "lease-specialist",
+        })
+        task = self.store.claim_next(execution_mode="dry_run",
+                                     worker_lane="specialist:researcher")
+        request = open_url.call_args.args[0]
+        self.assertEqual(task["execution_lane"], "specialist:researcher")
+        self.assertEqual(json.loads(request.data), {
+            "execution_mode": "dry_run", "worker_lane": "specialist:researcher"
+        })
+        self.assertEqual(request.get_header("X-engine-lane-token"), self.store.lane_token)
+
+    @patch("engine.remote_task_store.urlopen")
+    def test_specialist_finish_and_retry_preserve_lane_identity(self, open_url):
+        self.store.lane_token = "lane-token-" + "x" * 40
+        open_url.return_value = FakeResponse({"ok": True, "status": "succeeded"})
+        self.store.finish("task-1", "succeeded", result={"mode": "dry_run"},
+                          lease_token="lease-1", worker_lane="specialist:reviewer")
+        request = open_url.call_args.args[0]
+        self.assertEqual(json.loads(request.data)["worker_lane"], "specialist:reviewer")
+        self.assertEqual(request.get_header("X-engine-lane-token"), self.store.lane_token)
+        open_url.return_value = FakeResponse({"ok": True, "status": "pending"})
+        self.store.retry_or_fail("task-1", "retry", "lease-1", worker_lane="specialist:reviewer")
+        request = open_url.call_args.args[0]
+        self.assertEqual(json.loads(request.data)["worker_lane"], "specialist:reviewer")
+        self.assertEqual(request.get_header("X-engine-lane-token"), self.store.lane_token)
+
+
 if __name__ == "__main__":
     unittest.main()
