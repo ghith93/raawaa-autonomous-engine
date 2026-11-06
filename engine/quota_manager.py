@@ -292,7 +292,7 @@ class QuotaLedger:
             "reason", "error_type", "http_status", "estimated_tokens",
             "actual_tokens", "cooldown_seconds", "cost_usd", "cost_basis",
             "profile_estimated_cost_usd", "provider_reported_cost_usd",
-            "provider_reported_cost_available", "error_code", "failure_stage",
+            "provider_reported_cost_available", "error_code", "failure_stage", "failure_stage",
         }
         safe = {}
         for key, value in (details or {}).items():
