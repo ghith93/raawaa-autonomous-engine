@@ -18,6 +18,12 @@ sys.path.insert(0, str(ROOT))
 from engine.remote_task_store import RemoteTaskStore, RemoteTaskStoreError
 
 
+def _active_task_summary(tasks: list[dict]) -> list[dict]:
+    """Emit bounded operational metadata only; omit task titles, keys and payloads."""
+    fields = ("id", "task_type", "status", "execution_lane", "created_at", "updated_at")
+    return [{field: task.get(field) for field in fields} for task in tasks[:10]]
+
+
 def main() -> None:
     if os.environ.get("RAAWAA_ENGINE_LIVE_INFERENCE", "disabled").lower() not in {"", "0", "false", "disabled", "off"}:
         raise SystemExit("Refusing lane proof unless live inference is disabled")
@@ -31,20 +37,9 @@ def main() -> None:
     active = [task for task in general_before + researcher_before
               if task.get("status") in {"pending", "running"}]
     if active:
-        safe_summary = [
-            {
-                "id": task.get("id"),
-                "task_type": task.get("task_type"),
-                "title": task.get("title"),
-                "status": task.get("status"),
-                "execution_lane": task.get("execution_lane", "general"),
-                "idempotency_key": task.get("idempotency_key"),
-            }
-            for task in active
-        ]
         print(json.dumps({
             "status": "blocked_unrelated_active_staging_tasks",
-            "active_task_metadata": safe_summary,
+            "active_task_metadata": _active_task_summary(active),
         }, sort_keys=True), flush=True)
         raise SystemExit("Refusing to claim unrelated Staging work; relevant queue lanes are not idle")
     suffix = uuid.uuid4().hex
