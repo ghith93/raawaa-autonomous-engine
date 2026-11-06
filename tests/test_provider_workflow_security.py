@@ -66,8 +66,12 @@ class ProviderWorkflowSecurityTests(unittest.TestCase):
     def test_groq_free_smoke_uses_ephemeral_researcher_lane_capability(self):
         workflow = ROOT / ".github" / "workflows" / "groq-free-inference-staging-smoke.yml"
         source = workflow.read_text(encoding="utf-8")
-        self.assertIn("branches: [main]", source)
-        self.assertIn("paths:" + chr(10) + "      - scripts/run_groq_free_inference_smoke.py", source)
+        self.assertIn('workflows: ["Engine CI"]', source)
+        self.assertIn("types: [completed]", source)
+        self.assertIn("github.event.workflow_run.conclusion == 'success'", source)
+        self.assertIn("github.event.workflow_run.head_branch == 'main'", source)
+        self.assertIn("[groq-specialist-smoke]", source)
+        self.assertIn("github.event.workflow_run.head_sha", source)
         self.assertIn("secret put ENGINE_RESEARCHER_LANE_TOKEN", source)
         self.assertIn("secret delete ENGINE_RESEARCHER_LANE_TOKEN", source)
         self.assertIn("RAAWAA_ENGINE_WORKER_LANE: specialist:researcher", source)
