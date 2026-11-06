@@ -10,6 +10,24 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class StagingLaneIsolationScriptTests(unittest.TestCase):
+    def test_active_task_summary_omits_sensitive_content_and_is_bounded(self):
+        from scripts.run_staging_lane_isolation import _active_task_summary
+
+        rows = [{
+            "id": f"task-{index}",
+            "task_type": "research_brief",
+            "title": "Potentially sensitive title",
+            "status": "pending",
+            "execution_lane": "general",
+            "idempotency_key": "private-key",
+            "payload_json": "{private payload}",
+        } for index in range(12)]
+        summary = _active_task_summary(rows)
+        self.assertEqual(len(summary), 10)
+        for field in ("title", "idempotency_key", "payload_json"):
+            self.assertNotIn(field, summary[0])
+        self.assertEqual(summary[0]["id"], "task-0")
+
     def test_script_imports_repository_modules_when_run_outside_repo(self):
         script = ROOT / "scripts" / "run_staging_lane_isolation.py"
         env = {
