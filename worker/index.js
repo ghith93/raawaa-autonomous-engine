@@ -282,7 +282,6 @@ const SPECIALIST_LANE_TOKEN_BINDINGS = {
   "specialist:reviewer": "ENGINE_REVIEWER_LANE_TOKEN",
   "specialist:marketer": "ENGINE_MARKETER_LANE_TOKEN",
   "specialist:operator": "ENGINE_OPERATOR_LANE_TOKEN",
-  "specialist:mobile_tester": "ENGINE_MOBILE_TESTER_LANE_TOKEN",
 };
 
 function laneTokenAuthorized(request, env, lane) {
