@@ -512,9 +512,14 @@ export default {
         return json({ error: "invalid_recovery_request" }, 400);
       }
       const workerLane = recoveryInput.worker_lane ?? "general";
+      const taskId = recoveryInput.task_id ?? null;
       if (!EXECUTION_LANES.has(workerLane)) return json({ error: "invalid_worker_lane" }, 400);
+      if (taskId !== null && (typeof taskId !== "string" ||
+          !/^[A-Za-z0-9_-]{1,128}$/.test(taskId))) {
+        return json({ error: "invalid_task_id" }, 400);
+      }
       if (!laneTokenAuthorized(request, env, workerLane)) return json({ error: "lane_unauthorized" }, 401);
-      try { return json(await recoverStaleTasks(env, workerLane)); }
+      try { return json(await recoverStaleTasks(env, workerLane, taskId)); }
       catch { return json({ error: "storage_unavailable" }, 503); }
     }
 
