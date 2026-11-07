@@ -4,13 +4,18 @@ import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
 GATED_WORKFLOWS = (
+    ".github/workflows/ci.yml",
     ".github/workflows/cloudflare-billing-inventory.yml",
     ".github/workflows/d1-migrate.yml",
     ".github/workflows/deploy-commerce-storefront.yml",
+    ".github/workflows/deploy-worker.yml",
     ".github/workflows/groq-free-inference-staging-smoke.yml",
+    ".github/workflows/issue-comment-ingest.yml",
     ".github/workflows/raawaa-image-route-check.yml",
+    ".github/workflows/research-discovery.yml",
     ".github/workflows/staging-p1-task-proof.yml",
     ".github/workflows/staging-supervised-process-probe.yml",
+    ".github/workflows/task-runner.yml",
 )
 ATTESTATION = "CLOUDFLARE_ZONE_READ_ALL_ZONES_CONFIRMED: ${{ vars.CLOUDFLARE_ZONE_READ_ALL_ZONES_CONFIRMED }}"
 
