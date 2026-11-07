@@ -11,6 +11,7 @@ from scripts.verify_cloudflare_zero_cost_boundary import (
     _RejectRedirects,
     assess_subscriptions,
     check_boundary,
+    fetch_subscription_inventory,
     main,
 )
 
@@ -89,48 +90,84 @@ class ZeroCostBoundaryTests(unittest.TestCase):
                 self.assertFalse(assess_subscriptions([record])["eligible"])
         self.assertFalse(assess_subscriptions([None])["eligible"])
 
-    def test_pagination_is_followed_until_the_complete_inventory_is_read(self):
+    def test_request_uses_the_documented_single_page_contract(self):
+        """The endpoint is documented as SinglePage: no page/per_page parameters.
+
+        Sending undocumented pagination parameters is the observed cause of the
+        HTTP 400 that kept zero-cost eligibility false. This locks the shape of
+        the request, not just the shape of the response handling.
+        """
+        free = {"id": "sub-free", "state": "Provisioned", "price": 0,
+                "rate_plan": {"id": "free", "public_name": "Workers Free"}}
         seen = []
-        first_page = [{"id": f"sub-{index}", "state": "Cancelled"} for index in range(50)]
-        second_page = [{"id": "sub-50", "state": "Provisioned", "price": 0,
-                        "rate_plan": {"id": "free", "public_name": "Workers Free"}}]
-        responses = [
-            page(first_page, number=1, total=51, per_page=50),
-            page(second_page, number=2, total=51, per_page=50),
-        ]
         class Response:
             status = 200
-            def __init__(self, body): self.body = body
             def __enter__(self): return self
             def __exit__(self, *args): return False
-            def read(self, limit): return json.dumps(self.body).encode()
+            def read(self, limit): return json.dumps(page([free])).encode()
         def opener(request, timeout):
             seen.append((request, timeout))
-            return Response(responses[len(seen) - 1])
+            return Response()
         result = check_boundary("synthetic-account", "synthetic-token", opener=opener)
-        self.assertEqual(result["reason"], "no_active_paid_subscriptions")
         self.assertTrue(result["eligible"])
-        self.assertEqual(len(seen), 2)
-        self.assertEqual(parse_qs(urlparse(seen[0][0].full_url).query), {"page": ["1"], "per_page": ["1000"]})
-        self.assertEqual(parse_qs(urlparse(seen[1][0].full_url).query), {"page": ["2"], "per_page": ["1000"]})
+        self.assertEqual(len(seen), 1, "a SinglePage inventory must be read in exactly one request")
+        url = seen[0][0].full_url
+        self.assertEqual(url, "https://api.cloudflare.com/client/v4/accounts/synthetic-account/subscriptions")
+        self.assertEqual(urlparse(url).query, "")
+        self.assertEqual(seen[0][0].get_method(), "GET")
         self.assertEqual(seen[0][0].get_header("Authorization"), "Bearer synthetic-token")
 
-    def test_partial_nonfinal_page_fails_closed(self):
-        partial = page(
-            [{"id": f"sub-{index}", "state": "Cancelled"} for index in range(49)],
-            number=1, total=51, per_page=50,
-        )
+    def test_absent_result_info_is_accepted_because_it_is_documented_optional(self):
+        """result_info is optional for this endpoint; the result array is the inventory."""
+        body = {"success": True, "result": [
+            {"id": "sub-free", "state": "Provisioned", "price": 0,
+             "rate_plan": {"id": "free", "public_name": "Workers Free"}},
+        ]}
         class Response:
             status = 200
             def __enter__(self): return self
             def __exit__(self, *args): return False
-            def read(self, limit): return json.dumps(partial).encode()
-        result = check_boundary(
-            "synthetic-account", "synthetic-token",
-            opener=lambda request, timeout: Response(),
-        )
-        self.assertFalse(result["eligible"])
-        self.assertEqual(result["reason"], "incomplete_subscription_page")
+            def read(self, limit): return json.dumps(body).encode()
+        result = check_boundary("account", "token", opener=lambda *_a, **_k: Response())
+        self.assertTrue(result["eligible"])
+
+    def test_metadata_that_contradicts_the_returned_inventory_fails_closed(self):
+        """A single page cannot be completed by requesting more, so inconsistency blocks."""
+        free = {"id": "sub-free", "state": "Provisioned", "price": 0,
+                "rate_plan": {"id": "free", "public_name": "Workers Free"}}
+        cancelled = {"id": "sub-cancelled", "state": "Cancelled"}
+        cases = {
+            # total_count larger than what one response returned
+            "incomplete_subscription_inventory": page([free], total=51, per_page=50),
+            # count disagrees with len(result)
+            "incomplete_subscription_inventory": {
+                "success": True, "result": [free],
+                "result_info": {"count": 49, "page": 1, "per_page": 50, "total_count": 49},
+            },
+            # a SinglePage response claiming to be a later page
+            "unexpected_subscription_page": page([free], number=2),
+        }
+        for reason, body in cases.items():
+            with self.subTest(reason=reason):
+                class Response:
+                    status = 200
+                    def __init__(self, payload): self.payload = payload
+                    def __enter__(self): return self
+                    def __exit__(self, *args): return False
+                    def read(self, limit): return json.dumps(self.payload).encode()
+                result = check_boundary("account", "token",
+                                        opener=lambda *_a, _r=Response(body), **_k: _r)
+                self.assertFalse(result["eligible"])
+                self.assertEqual(result["reason"], reason)
+        # more records than the declared page size
+        overfull = page([free, cancelled], per_page=1)
+        class OverfullResponse:
+            status = 200
+            def __enter__(self): return self
+            def __exit__(self, *args): return False
+            def read(self, limit): return json.dumps(overfull).encode()
+        self.assertFalse(check_boundary("account", "token",
+                                        opener=lambda *_a, **_k: OverfullResponse())["eligible"])
 
     def test_integer_valued_numeric_pagination_metadata_is_accepted(self):
         body = page([{"id": "sub-free", "state": "Provisioned", "price": 0,
@@ -158,24 +195,21 @@ class ZeroCostBoundaryTests(unittest.TestCase):
                 self.assertFalse(result["eligible"])
                 self.assertEqual(result["reason"], "invalid_pagination_" + field)
 
-    def test_missing_or_incomplete_pagination_fails_closed(self):
+    def test_malformed_or_missing_credentials_fail_closed(self):
         class Response:
             status = 200
             def __init__(self, body): self.body = body
             def __enter__(self): return self
             def __exit__(self, *args): return False
             def read(self, limit): return json.dumps(self.body).encode()
-        incomplete = page([{"id": "sub-1", "state": "Cancelled"}], number=1, total=2, per_page=1)
-        calls = 0
-        def opener(request, timeout):
-            nonlocal calls
-            calls += 1
-            if calls == 1:
-                return Response(incomplete)
-            raise HTTPError(request.full_url, 500, "synthetic", {}, None)
-        self.assertFalse(check_boundary("account", "token", opener=opener)["eligible"])
         self.assertFalse(check_boundary("account", "token", opener=lambda *_a, **_k: Response({
             "success": True, "result": [],
+        }))["eligible"])
+        self.assertFalse(check_boundary("account", "token", opener=lambda *_a, **_k: Response({
+            "success": True, "result": "not-a-list",
+        }))["eligible"])
+        self.assertFalse(check_boundary("account", "token", opener=lambda *_a, **_k: Response({
+            "success": True, "result": [], "result_info": "not-an-object",
         }))["eligible"])
         class InvalidJsonResponse:
             status = 200
@@ -188,27 +222,35 @@ class ZeroCostBoundaryTests(unittest.TestCase):
         self.assertNotIn("private_account_detail", json.dumps(invalid_json))
         self.assertFalse(check_boundary("", "token")["eligible"])
         self.assertFalse(check_boundary("account", "")["eligible"])
+        with self.assertRaises(ValueError):
+            fetch_subscription_inventory("", "")
+
+    def test_synthetic_http_400_keeps_the_gate_false(self):
+        """The exact historical failure: undocumented pagination produced a 400."""
+        def fail(request, timeout):
+            raise HTTPError(request.full_url, 400, "synthetic request body", {}, None)
+        result = check_boundary("synthetic-account", "synthetic-token", opener=fail)
+        self.assertFalse(result["eligible"])
+        self.assertEqual(result["reason"], "billing_http_400")
+        self.assertNotIn("synthetic", json.dumps(result))
 
     def test_duplicate_or_missing_subscription_ids_fail_closed(self):
-        duplicate_pages = [
-            page([{"id": "same", "state": "Cancelled"}], number=1, total=2, per_page=1),
-            page([{"id": "same", "state": "Expired"}], number=2, total=2, per_page=1),
-        ]
+        duplicate = page([
+            {"id": "same", "state": "Cancelled"},
+            {"id": "same", "state": "Expired"},
+        ])
         class Response:
             status = 200
             def __init__(self, body): self.body = body
             def __enter__(self): return self
             def __exit__(self, *args): return False
             def read(self, limit): return json.dumps(self.body).encode()
-        seen = 0
-        def duplicate_opener(request, timeout):
-            nonlocal seen
-            body = duplicate_pages[seen]
-            seen += 1
-            return Response(body)
-        self.assertFalse(check_boundary("account", "token", opener=duplicate_opener)["eligible"])
-        missing_id_page = page([{"state": "Cancelled"}], number=1, total=1, per_page=1)
-        self.assertFalse(check_boundary("account", "token", opener=lambda *_a, **_k: Response(missing_id_page))["eligible"])
+        result = check_boundary("account", "token", opener=lambda *_a, **_k: Response(duplicate))
+        self.assertFalse(result["eligible"])
+        self.assertEqual(result["reason"], "missing_or_duplicate_subscription_id")
+        missing_id_page = page([{"state": "Cancelled"}], total=1, per_page=1)
+        self.assertFalse(check_boundary("account", "token",
+                                        opener=lambda *_a, **_k: Response(missing_id_page))["eligible"])
 
     def test_main_fails_ci_when_zero_cost_eligibility_is_unknown(self):
         with tempfile.NamedTemporaryFile(mode="r+", encoding="utf-8") as output:

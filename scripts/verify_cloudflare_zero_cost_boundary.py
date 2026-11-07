@@ -4,6 +4,11 @@ Cloudflare documents Workers Free as the default and documents that Workers
 Free/D1 Free limits fail requests rather than converting excess use into paid
 usage. This guard only permits Staging when the complete account subscription
 inventory is positively verified to contain no active paid/unknown plan.
+
+The inventory endpoint is documented as a SinglePage list with no `page` or
+`per_page` query parameters, so exactly one request without a query string is
+sent. Sending undocumented pagination parameters produced the HTTP 400 that
+kept the gate permanently false.
 """
 from __future__ import annotations
 
@@ -11,14 +16,12 @@ import json
 import math
 import os
 from urllib.error import HTTPError, URLError
-from urllib.parse import urlencode
 from urllib.request import HTTPRedirectHandler, Request, build_opener
 
-USER_AGENT = "RaawaaAutonomousEngine-ZeroCostPreflight/2.0"
+USER_AGENT = "RaawaaAutonomousEngine-ZeroCostPreflight/3.0"
 MAX_RESPONSE_BYTES = 1024 * 1024
-PER_PAGE = 1000
-MAX_PAGES = 100
-MAX_SUBSCRIPTIONS = PER_PAGE * MAX_PAGES
+# Upper bound for a plausible SinglePage `per_page`; not a request parameter.
+MAX_SUBSCRIPTIONS = 100_000
 ACTIVE_STATES = {"Trial", "Provisioned", "Paid", "AwaitingPayment"}
 INACTIVE_STATES = {"Cancelled", "Failed", "Expired"}
 ALL_STATES = ACTIVE_STATES | INACTIVE_STATES
@@ -96,15 +99,43 @@ def assess_subscriptions(subscriptions: list) -> dict:
             "active_paid_subscriptions": 0}
 
 
-def _read_page(account_id: str, token: str, page: int, opener, timeout: int) -> tuple[list, dict]:
-    query = urlencode({"page": page, "per_page": PER_PAGE})
+def _pagination_integer(info: dict, name: str) -> int | None:
+    """Optional integer field of result_info; None when the field is absent."""
+    if name not in info:
+        return None
+    value = info[name]
+    if isinstance(value, bool):
+        raise ValueError("invalid_pagination_" + name)
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float) and math.isfinite(value) and value.is_integer():
+        return int(value)
+    raise ValueError("invalid_pagination_" + name)
+
+
+def fetch_subscription_inventory(account_id: str, token: str, opener=None, timeout: int = 15) -> list:
+    """Read the account subscription inventory in exactly one documented request.
+
+    Cloudflare documents this endpoint as a SinglePage list: the API reference
+    and the generated Python/Go SDKs declare only path parameters and return a
+    `SinglePage`/`SyncSinglePage` type. It does not document `page` or
+    `per_page`, so sending them is not a documented request and was the
+    observed cause of HTTP 400 from the previous paginating implementation.
+
+    The whole inventory therefore arrives in one response. Truncation cannot be
+    repaired by paging, so anything inconsistent is treated as unknown and
+    fails closed rather than being assumed complete.
+    """
+    if not account_id or not token:
+        raise ValueError("billing_credentials_missing")
+    open_request = opener or build_opener(_RejectRedirects).open
     request = Request(
-        f"https://api.cloudflare.com/client/v4/accounts/{account_id}/subscriptions?{query}",
+        f"https://api.cloudflare.com/client/v4/accounts/{account_id}/subscriptions",
         headers={"Authorization": "Bearer " + token, "Accept": "application/json",
                  "User-Agent": USER_AGENT},
         method="GET",
     )
-    with opener(request, timeout=timeout) as response:
+    with open_request(request, timeout=timeout) as response:
         if response.status != 200:
             raise ValueError("billing_api_unavailable")
         raw = response.read(MAX_RESPONSE_BYTES + 1)
@@ -114,68 +145,38 @@ def _read_page(account_id: str, token: str, page: int, opener, timeout: int) -> 
     if not isinstance(payload, dict) or payload.get("success") is not True:
         raise ValueError("invalid_billing_response")
     records = payload.get("result")
+    if not isinstance(records, list):
+        raise ValueError("invalid_billing_response")
     info = payload.get("result_info")
-    if not isinstance(records, list) or not isinstance(info, dict):
-        raise ValueError("missing_pagination_metadata")
-    def pagination_integer(name: str) -> int:
-        value = info.get(name)
-        if isinstance(value, bool):
-            raise ValueError("invalid_pagination_" + name)
-        if isinstance(value, int):
-            return value
-        if isinstance(value, float) and math.isfinite(value) and value.is_integer():
-            return int(value)
-        raise ValueError("invalid_pagination_" + name)
-
-    count = pagination_integer("count")
-    current_page = pagination_integer("page")
-    per_page = pagination_integer("per_page")
-    total = pagination_integer("total_count")
-    if current_page != page:
-        raise ValueError("pagination_page_mismatch")
-    if per_page < 1 or per_page > PER_PAGE:
-        raise ValueError("invalid_pagination_per_page")
-    if count != len(records) or count > per_page:
-        raise ValueError("incomplete_subscription_page")
-    if total < count or total > MAX_SUBSCRIPTIONS:
-        raise ValueError("invalid_pagination_total_count")
-    return records, info
-
-
-def fetch_all_subscriptions(account_id: str, token: str, opener=None, timeout: int = 15) -> list:
-    if not account_id or not token:
-        raise ValueError("billing_credentials_missing")
-    open_request = opener or build_opener(_RejectRedirects).open
-    collected = []
-    expected_total = None
-    expected_per_page = None
-    for page in range(1, MAX_PAGES + 1):
-        records, info = _read_page(account_id, token, page, open_request, timeout)
-        if expected_total is None:
-            expected_total = info["total_count"]
-            expected_per_page = info["per_page"]
-        elif info["total_count"] != expected_total or info["per_page"] != expected_per_page:
-            raise ValueError("subscription_inventory_changed_during_pagination")
-        expected_page_count = min(expected_per_page, expected_total - len(collected))
-        if len(records) != expected_page_count:
-            raise ValueError("incomplete_subscription_page")
-        seen_ids = {item.get("id") for item in collected if isinstance(item, dict)}
-        for item in records:
-            subscription_id = item.get("id") if isinstance(item, dict) else None
-            if not isinstance(subscription_id, str) or not subscription_id or subscription_id in seen_ids:
-                raise ValueError("missing_or_duplicate_subscription_id")
-            seen_ids.add(subscription_id)
-        collected.extend(records)
-        if len(collected) == expected_total:
-            return collected
-        if len(collected) > expected_total or not records:
+    if info is None:
+        # Documented as optional for this SinglePage endpoint. The result array
+        # is the complete inventory; there is no second page to request.
+        return records
+    if not isinstance(info, dict):
+        raise ValueError("invalid_billing_response")
+    count = _pagination_integer(info, "count")
+    page = _pagination_integer(info, "page")
+    per_page = _pagination_integer(info, "per_page")
+    total = _pagination_integer(info, "total_count")
+    if page is not None and page != 1:
+        # A SinglePage response that claims to be a later page means the
+        # inventory returned here is not the whole inventory.
+        raise ValueError("unexpected_subscription_page")
+    if count is not None and count != len(records):
+        raise ValueError("incomplete_subscription_inventory")
+    if total is not None and total != len(records):
+        raise ValueError("incomplete_subscription_inventory")
+    if per_page is not None:
+        if per_page < 1 or per_page > MAX_SUBSCRIPTIONS:
+            raise ValueError("invalid_pagination_per_page")
+        if len(records) > per_page:
             raise ValueError("incomplete_subscription_inventory")
-    raise ValueError("subscription_inventory_page_limit_exceeded")
+    return records
 
 
 def check_boundary(account_id: str, token: str, opener=None, timeout: int = 15) -> dict:
     try:
-        subscriptions = fetch_all_subscriptions(account_id, token, opener=opener, timeout=timeout)
+        subscriptions = fetch_subscription_inventory(account_id, token, opener=opener, timeout=timeout)
         return assess_subscriptions(subscriptions)
     except json.JSONDecodeError:
         return _invalid("invalid_billing_json")
@@ -187,17 +188,12 @@ def check_boundary(account_id: str, token: str, opener=None, timeout: int = 15) 
             "billing_api_unavailable",
             "billing_response_too_large",
             "invalid_billing_response",
-            "missing_pagination_metadata",
+            "unexpected_subscription_page",
             "invalid_pagination_count",
             "invalid_pagination_page",
             "invalid_pagination_per_page",
             "invalid_pagination_total_count",
-            "pagination_page_mismatch",
-            "incomplete_subscription_page",
-            "subscription_inventory_changed_during_pagination",
-            "missing_or_duplicate_subscription_id",
             "incomplete_subscription_inventory",
-            "subscription_inventory_page_limit_exceeded",
         }
         reason = str(exc)
         return _invalid(reason if reason in safe_reasons else "billing_inventory_unavailable_or_incomplete")
