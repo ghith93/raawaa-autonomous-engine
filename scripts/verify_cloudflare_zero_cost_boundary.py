@@ -111,9 +111,8 @@ def assess_subscriptions(subscriptions: list) -> dict:
         plan_name = plan.get("public_name")
         explicitly_free = (
             plan_id in FREE_ZONE_PLAN_IDS
-            and isinstance(plan_name, str)
-            and "free" in plan_name.lower()
             and price == 0
+            and (plan_name is None or isinstance(plan_name, str) and "free" in plan_name.lower())
         )
         if state in {"Trial", "AwaitingPayment"}:
             unknown += 1
