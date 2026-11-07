@@ -11,14 +11,10 @@ import json
 import math
 import os
 from urllib.error import HTTPError, URLError
-from urllib.parse import urlencode
 from urllib.request import HTTPRedirectHandler, Request, build_opener
 
 USER_AGENT = "RaawaaAutonomousEngine-ZeroCostPreflight/2.0"
 MAX_RESPONSE_BYTES = 1024 * 1024
-PER_PAGE = 1000
-MAX_PAGES = 100
-MAX_SUBSCRIPTIONS = PER_PAGE * MAX_PAGES
 ACTIVE_STATES = {"Trial", "Provisioned", "Paid", "AwaitingPayment"}
 INACTIVE_STATES = {"Cancelled", "Failed", "Expired"}
 ALL_STATES = ACTIVE_STATES | INACTIVE_STATES
@@ -96,10 +92,16 @@ def assess_subscriptions(subscriptions: list) -> dict:
             "active_paid_subscriptions": 0}
 
 
-def _read_page(account_id: str, token: str, page: int, opener, timeout: int) -> tuple[list, dict]:
-    query = urlencode({"page": page, "per_page": PER_PAGE})
+def _read_subscription_inventory(account_id: str, token: str, opener, timeout: int) -> list:
+    """Read the endpoint's documented single-page inventory without query params.
+
+    Cloudflare's List Subscriptions endpoint exposes only account_id/zone_id
+    parameters and the official SDK models it as SinglePage. If optional
+    result_info metadata is returned, require it to describe the entire result
+    array; never guess at pagination or accept a partial inventory.
+    """
     request = Request(
-        f"https://api.cloudflare.com/client/v4/accounts/{account_id}/subscriptions?{query}",
+        f"https://api.cloudflare.com/client/v4/accounts/{account_id}/subscriptions",
         headers={"Authorization": "Bearer " + token, "Accept": "application/json",
                  "User-Agent": USER_AGENT},
         method="GET",
@@ -114,63 +116,50 @@ def _read_page(account_id: str, token: str, page: int, opener, timeout: int) -> 
     if not isinstance(payload, dict) or payload.get("success") is not True:
         raise ValueError("invalid_billing_response")
     records = payload.get("result")
-    info = payload.get("result_info")
-    if not isinstance(records, list) or not isinstance(info, dict):
-        raise ValueError("missing_pagination_metadata")
-    def pagination_integer(name: str) -> int:
-        value = info.get(name)
-        if isinstance(value, bool):
-            raise ValueError("invalid_pagination_" + name)
-        if isinstance(value, int):
-            return value
-        if isinstance(value, float) and math.isfinite(value) and value.is_integer():
-            return int(value)
-        raise ValueError("invalid_pagination_" + name)
+    if not isinstance(records, list):
+        raise ValueError("invalid_subscription_list")
 
-    count = pagination_integer("count")
-    current_page = pagination_integer("page")
-    per_page = pagination_integer("per_page")
-    total = pagination_integer("total_count")
-    if current_page != page:
-        raise ValueError("pagination_page_mismatch")
-    if per_page < 1 or per_page > PER_PAGE:
-        raise ValueError("invalid_pagination_per_page")
-    if count != len(records) or count > per_page:
-        raise ValueError("incomplete_subscription_page")
-    if total < count or total > MAX_SUBSCRIPTIONS:
-        raise ValueError("invalid_pagination_total_count")
-    return records, info
+    info = payload.get("result_info")
+    if info is not None:
+        if not isinstance(info, dict):
+            raise ValueError("invalid_subscription_inventory_metadata")
+
+        def metadata_integer(name: str) -> int:
+            value = info.get(name)
+            if isinstance(value, bool):
+                raise ValueError("invalid_subscription_inventory_metadata")
+            if isinstance(value, int):
+                return value
+            if isinstance(value, float) and math.isfinite(value) and value.is_integer():
+                return int(value)
+            raise ValueError("invalid_subscription_inventory_metadata")
+
+        count = metadata_integer("count")
+        page = metadata_integer("page")
+        per_page = metadata_integer("per_page")
+        total = metadata_integer("total_count")
+        if page != 1:
+            raise ValueError("subscription_inventory_page_mismatch")
+        if count != len(records) or total != count or per_page < count:
+            raise ValueError("incomplete_subscription_inventory")
+
+    seen_ids = set()
+    for item in records:
+        if not isinstance(item, dict):
+            raise ValueError("invalid_subscription_record")
+        subscription_id = item.get("id")
+        if not isinstance(subscription_id, str) or not subscription_id or subscription_id in seen_ids:
+            raise ValueError("missing_or_duplicate_subscription_id")
+        seen_ids.add(subscription_id)
+    return records
 
 
 def fetch_all_subscriptions(account_id: str, token: str, opener=None, timeout: int = 15) -> list:
+    """Compatibility wrapper for the documented single-page subscription list."""
     if not account_id or not token:
         raise ValueError("billing_credentials_missing")
     open_request = opener or build_opener(_RejectRedirects).open
-    collected = []
-    expected_total = None
-    expected_per_page = None
-    for page in range(1, MAX_PAGES + 1):
-        records, info = _read_page(account_id, token, page, open_request, timeout)
-        if expected_total is None:
-            expected_total = info["total_count"]
-            expected_per_page = info["per_page"]
-        elif info["total_count"] != expected_total or info["per_page"] != expected_per_page:
-            raise ValueError("subscription_inventory_changed_during_pagination")
-        expected_page_count = min(expected_per_page, expected_total - len(collected))
-        if len(records) != expected_page_count:
-            raise ValueError("incomplete_subscription_page")
-        seen_ids = {item.get("id") for item in collected if isinstance(item, dict)}
-        for item in records:
-            subscription_id = item.get("id") if isinstance(item, dict) else None
-            if not isinstance(subscription_id, str) or not subscription_id or subscription_id in seen_ids:
-                raise ValueError("missing_or_duplicate_subscription_id")
-            seen_ids.add(subscription_id)
-        collected.extend(records)
-        if len(collected) == expected_total:
-            return collected
-        if len(collected) > expected_total or not records:
-            raise ValueError("incomplete_subscription_inventory")
-    raise ValueError("subscription_inventory_page_limit_exceeded")
+    return _read_subscription_inventory(account_id, token, open_request, timeout)
 
 
 def check_boundary(account_id: str, token: str, opener=None, timeout: int = 15) -> dict:
@@ -187,17 +176,12 @@ def check_boundary(account_id: str, token: str, opener=None, timeout: int = 15) 
             "billing_api_unavailable",
             "billing_response_too_large",
             "invalid_billing_response",
-            "missing_pagination_metadata",
-            "invalid_pagination_count",
-            "invalid_pagination_page",
-            "invalid_pagination_per_page",
-            "invalid_pagination_total_count",
-            "pagination_page_mismatch",
-            "incomplete_subscription_page",
-            "subscription_inventory_changed_during_pagination",
-            "missing_or_duplicate_subscription_id",
+            "invalid_subscription_list",
+            "invalid_subscription_record",
+            "invalid_subscription_inventory_metadata",
+            "subscription_inventory_page_mismatch",
             "incomplete_subscription_inventory",
-            "subscription_inventory_page_limit_exceeded",
+            "missing_or_duplicate_subscription_id",
         }
         reason = str(exc)
         return _invalid(reason if reason in safe_reasons else "billing_inventory_unavailable_or_incomplete")
