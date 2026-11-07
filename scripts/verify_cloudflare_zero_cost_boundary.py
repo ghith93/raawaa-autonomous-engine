@@ -114,9 +114,24 @@ def _read_page(account_id: str, token: str, page: int, opener, timeout: int) -> 
         raise ValueError("missing_pagination_metadata")
     count, current_page = info.get("count"), info.get("page")
     per_page, total = info.get("per_page"), info.get("total_count")
-    values = (count, current_page, per_page, total)
-    if any(not isinstance(v, int) or isinstance(v, bool) for v in values):
-        raise ValueError("invalid_pagination_metadata")
+    def pagination_integer(value):
+        # Cloudflare's OpenAPI schema declares these fields as numbers, not
+        # integers. Accept integral JSON floats while rejecting bools, NaN,
+        # infinities, fractions and negative values.
+        if (
+            isinstance(value, bool)
+            or not isinstance(value, (int, float))
+            or not math.isfinite(value)
+            or value < 0
+            or int(value) != value
+        ):
+            raise ValueError("invalid_pagination_metadata")
+        return int(value)
+
+    count, current_page, per_page, total = (
+        pagination_integer(info.get(key))
+        for key in ("count", "page", "per_page", "total_count")
+    )
     if current_page != page or per_page < 1 or per_page > PER_PAGE:
         raise ValueError("invalid_pagination_metadata")
     if count != len(records) or count > per_page or total < count or total > MAX_SUBSCRIPTIONS:
