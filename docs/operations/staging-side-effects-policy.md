@@ -10,7 +10,9 @@
 
 ## Zero-cost preflight
 
-The preflight reads the Cloudflare account subscriptions endpoint only: `GET /accounts/{account_id}/subscriptions`. It follows every page and validates the complete inventory, pagination metadata, finite nonnegative prices, subscription states and plan identity.
+The preflight reads the Cloudflare account subscriptions endpoint only: `GET /accounts/{account_id}/subscriptions`, with **no** query string, and validates the returned inventory, any pagination metadata the response does carry, finite nonnegative prices, subscription states and plan identity.
+
+Cloudflare documents this endpoint as a single-page list. The [API reference](https://developers.cloudflare.com/api/resources/accounts/subresources/subscriptions/methods/get/) declares only `account_id`/`zone_id` path parameters — no `page` or `per_page` — and marks `result_info` optional; the generated [Python SDK](https://developers.cloudflare.com/api/python/resources/accounts/subresources/subscriptions/methods/get/) returns `SyncSinglePage[Subscription]`, not a paginated array type. The earlier implementation appended `?page=1&per_page=1000` and followed pages, which sent an undocumented request; the observed effect was `billing_http_400` and a permanently ineligible gate. Because the inventory now arrives in one response, a response whose metadata contradicts its own `result` length (for example a `total_count` or `count` larger than the returned array, `page` other than 1, or more records than a declared `per_page`) is treated as unknown and blocks rather than being repaired by requesting a second page.
 
 Eligibility requires at least one active, explicitly named Free subscription and no active paid, trial, awaiting-payment or unknown subscription. Empty, inactive-only, incomplete, unavailable or malformed inventory is **not** proof of Free eligibility. The preflight publishes only a boolean and sanitized reason. HTTP diagnostics expose status codes only; response bodies, account identifiers and secrets are never logged.
 
