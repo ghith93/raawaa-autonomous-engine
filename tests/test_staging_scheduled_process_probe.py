@@ -370,7 +370,8 @@ class StagingScheduledProbeTests(unittest.TestCase):
 
         primary_factory.assert_called_once()
         oidc_factory.assert_called_once_with(
-            cron_environment(), audience=probe.SUPABASE_OIDC_AUDIENCE,
+            cron_environment(RAAWAA_ENGINE_SUPABASE_FALLBACK_ZERO_COST_VERIFIED="true"),
+            audience=probe.SUPABASE_OIDC_AUDIENCE,
         )
         fallback_factory.assert_called_once_with(
             probe.SUPABASE_FALLBACK_URL,
