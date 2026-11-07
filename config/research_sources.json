@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "max_queries_per_run": 9,
-  "max_results_per_query": 5,
+  "max_results_per_query": 8,
   "queries": {
     "agent_frameworks": "agent framework orchestration topic:agents archived:false",
     "coding_agents": "open source coding agent archived:false",
