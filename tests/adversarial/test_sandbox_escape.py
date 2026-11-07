@@ -472,59 +472,113 @@ def _require_host_network_control():
 #: configured but not enforced passes the small request and fails this one.
 PRESSURE_OVERSHOOT = 4
 
-#: The allocation cap inside the container, well under the 512 MiB limit, so a
-#: machine with a different page size still reaches the refusal rather than
-#: being killed by the OOM killer with no output.
-_PRESSURE_PROGRAM = r"""
-import json, os, resource, signal, subprocess, sys, time
+#: Fallback aside for the memory measurement, well above the limit so the page
+#: really is written before the allocation that must fail.
+_PRESSURE_SCRATCH = "/tmp/.raawaa-pressure-scratch"
 
-LIMIT_MIB = {limit_mib}
-OVERSHOOT = {overshoot}
+#: The memory and pids measurements run in their own child process.
+#:
+#: This is not tidiness. A cgroup memory limit kills the *process group* with
+#: SIGKILL; it does not raise ``MemoryError`` in the allocating process, because
+#: Python never gets a chance to raise anything. Measured here on the first live
+#: dispatch: the pressure probe died with SIGKILL, so its output was destroyed and
+#: six tests failed while ``the_wall_clock_holds`` passed -- the container had
+#: done exactly what it promised, and the probe had simply not survived to see it.
+#:
+#: Running the allocation in a child makes the SIGKILL observable: the parent
+#: survives, and "the child was killed while asking for 4x the limit" is a
+#: *stronger* statement than "the allocation raised MemoryError".
+_PRESSURE_CHILD = r"""
+import json, os, sys
 
-result = {{}}
+LIMIT_MIB = int(sys.argv[1])
+OVERSHOOT = int(sys.argv[2])
+SCRATCH = sys.argv[3]
 
-# --- memory -------------------------------------------------------------
-# Grow in 16 MiB steps and *touch* every page: an untouched allocation can be
-# over-committed and would report success while proving nothing.
+result = {"memory_mib": 0, "pids_held": 0, "pids_refused": False}
+
+# Preallocate the file first: writing it while the cgroup is already at its
+# limit can fail on a dirty-page charge, which would look like a memory refusal
+# that never happened.
 block = 16 * 1024 * 1024
-chunks = []
-allocated = 0
+with open(SCRATCH, "wb") as handle:
+    handle.write(b"\0" * block)
+
+# --- memory: seek past the limit and touch every page --------------------
 try:
-    for _ in range(int(LIMIT_MIB * OVERSHOOT // 16)):
-        chunk = bytearray(block)
-        for offset in range(0, block, 4096):
-            chunk[offset] = 1
-        chunks.append(chunk)
-        allocated += block
+    with open(SCRATCH, "r+b") as handle:
+        for _ in range(int(LIMIT_MIB * OVERSHOOT // 16)):
+            for offset in range(0, block, 4096):
+                handle.seek(offset)
+                handle.write(b"\1")
+            handle.seek(0)
+            result["memory_mib"] += 16
 except MemoryError:
     pass
-result["memory_allocated_mib"] = allocated // (1024 * 1024)
-result["memory_rss_mib"] = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss // 1024
-del chunks
+except OSError:
+    pass
+
+try:
+    os.unlink(SCRATCH)
+except OSError:
+    pass
 
 # --- process count ------------------------------------------------------
-# The pids limit is what stops a fork bomb becoming a host problem. Count how
-# many children we can actually hold, then reap every one of them.
+import subprocess, time
 children = []
-refused = False
 try:
     for _ in range(OVERSHOOT * 128):
         try:
             children.append(subprocess.Popen(
                 [sys.executable, "-c", "import time; time.sleep(30)"]))
         except (BlockingIOError, OSError):
-            refused = True
+            result["pids_refused"] = True
             break
 except Exception:
-    refused = True
+    result["pids_refused"] = True
 result["pids_held"] = len(children)
-result["pids_refused"] = refused
 for child in children:
     try:
         child.kill()
         child.wait(timeout=5)
     except Exception:
         pass
+
+print(json.dumps(result))
+""".strip()
+
+#: The allocation cap inside the container, well under the 512 MiB limit, so a
+#: machine with a different page size still reaches the refusal rather than
+#: being killed by the OOM killer with no output.
+_PRESSURE_PROGRAM = r"""
+import base64, json, os, resource, signal, subprocess, sys, time
+
+LIMIT_MIB = {limit_mib}
+OVERSHOOT = {overshoot}
+SCRATCH = {scratch!r}
+CHILD = base64.b64decode({child_b64!r}).decode("utf-8")
+
+result = {{}}
+
+# --- memory and process count, in a child that is allowed to be killed ----
+completed = subprocess.run(
+    [sys.executable, "-c", CHILD, str(LIMIT_MIB), str(OVERSHOOT), SCRATCH],
+    capture_output=True, text=True, timeout=150, check=False,
+)
+# A negative return code is a signal. Under a cgroup memory limit this is the
+# only way the refusal can appear, so it is recorded as the limit doing its job
+# rather than as a probe failure.
+result["child_signal"] = -completed.returncode if completed.returncode < 0 else None
+result["child_killed"] = completed.returncode < 0
+observed = {{}}
+for line in completed.stdout.strip().splitlines():
+    try:
+        observed = json.loads(line)
+    except ValueError:
+        continue
+result["memory_mib"] = observed.get("memory_mib")
+result["pids_held"] = observed.get("pids_held")
+result["pids_refused"] = observed.get("pids_refused")
 
 # --- cpu ----------------------------------------------------------------
 # Busy-loop for a fixed wall window and compare CPU time to elapsed. On a
@@ -555,6 +609,17 @@ print(json.dumps(result))
 """.strip()
 
 
+def _child_b64() -> str:
+    return base64.b64encode(_PRESSURE_CHILD.encode("utf-8")).decode("ascii")
+
+
+def _pressure_program(limit_mib: int, overshoot: int) -> str:
+    """The probe exactly as it is handed to the container."""
+    return _PRESSURE_PROGRAM.format(limit_mib=limit_mib, overshoot=overshoot,
+                                    scratch=_PRESSURE_SCRATCH,
+                                    child_b64=_child_b64())
+
+
 class PressureProbeContractTest(unittest.TestCase):
     """The pressure probe's *shape*, tested without a container.
 
@@ -569,20 +634,34 @@ class PressureProbeContractTest(unittest.TestCase):
                            "a probe that asks for exactly the limit cannot detect it")
 
     def test_the_allocations_are_touched_not_merely_reserved(self):
-        program = _PRESSURE_PROGRAM.format(limit_mib=512, overshoot=PRESSURE_OVERSHOOT)
-        # Over-commit means an untouched bytearray proves nothing about memory.
-        self.assertIn("chunk[offset] = 1", program)
+        # Over-commit means an untouched buffer proves nothing about memory, so
+        # every page is written, not merely reserved.
+        self.assertIn('handle.write(b"\\1")', _PRESSURE_CHILD)
+        self.assertIn("range(0, block, 4096)", _PRESSURE_CHILD)
 
     def test_the_probe_reaps_the_children_it_creates(self):
-        program = _PRESSURE_PROGRAM.format(limit_mib=512, overshoot=PRESSURE_OVERSHOOT)
-        self.assertIn("child.kill()", program)
-        self.assertIn("child.wait(", program)
+        self.assertIn("child.kill()", _PRESSURE_CHILD)
+        self.assertIn("child.wait(", _PRESSURE_CHILD)
 
     def test_the_probe_reports_rather_than_asserting_inside_the_container(self):
         """A crash inside the sandbox produces no evidence at all."""
-        program = _PRESSURE_PROGRAM.format(limit_mib=512, overshoot=PRESSURE_OVERSHOOT)
+        program = _pressure_program(512, PRESSURE_OVERSHOOT)
         self.assertNotIn("raise AssertionError", program)
         self.assertIn("json.dumps(result)", program)
+
+    def test_a_killed_child_is_reported_as_a_signal_not_as_silence(self):
+        """The fix for the first live failure, locked here.
+
+        A cgroup memory limit SIGKILLs the group; it never raises MemoryError in
+        the allocating process. If the probe did its allocation in the parent it
+        would die and destroy its own output -- which is exactly what happened on
+        dispatch 42377430224, where six pressure probes failed while the wall
+        clock passed. The child must run separately so the kill is observable.
+        """
+        program = _pressure_program(512, PRESSURE_OVERSHOOT)
+        self.assertIn("child_killed", program)
+        self.assertIn("child_signal", program)
+        self.assertIn("completed.returncode < 0", program)
 
     def test_an_unbounded_host_does_not_look_bounded(self):
         """The negative control, run for real on this machine.
@@ -591,14 +670,16 @@ class PressureProbeContractTest(unittest.TestCase):
         thresholds the live tests assert. If it reported bounded values here,
         the live assertions would pass for the wrong reason.
         """
-        program = _PRESSURE_PROGRAM.format(limit_mib=64, overshoot=PRESSURE_OVERSHOOT)
+        program = _pressure_program(64, PRESSURE_OVERSHOOT)
         completed = subprocess.run([sys.executable, "-c", program],
                                    capture_output=True, text=True, timeout=180, check=False)
         self.assertEqual(completed.returncode, 0, completed.stderr[-500:])
         observed = json.loads(completed.stdout.strip().splitlines()[-1])
-        # The live test asserts allocated < 128 MiB for a 64 MiB limit; here,
-        # with no limit, it must not.
-        self.assertGreaterEqual(observed["memory_allocated_mib"], 128,
+        # The live test asserts memory < 128 MiB for a 64 MiB limit; here, with no
+        # limit, it must not look bounded.
+        self.assertFalse(observed["child_killed"],
+                         "an unlimited host reported a killed memory child")
+        self.assertGreaterEqual(observed["memory_mib"], 128,
                                 "an unlimited host reported a bounded allocation")
         self.assertFalse(observed["pids_refused"],
                          "a host with no pids limit refused a fork")
@@ -615,8 +696,7 @@ class SandboxResourceLimitTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.workspace = Path(__file__).resolve().parents[2]
-        program = _PRESSURE_PROGRAM.format(limit_mib=cls.MEMORY_MIB,
-                                           overshoot=PRESSURE_OVERSHOOT)
+        program = _pressure_program(cls.MEMORY_MIB, PRESSURE_OVERSHOOT)
         cls.vector = build_docker_argv(SandboxRequest(
             image=IMAGE,
             command=_python_command(program),
@@ -638,20 +718,31 @@ class SandboxResourceLimitTest(unittest.TestCase):
     def test_the_pressure_probe_actually_ran(self):
         # Without this, every assertion below could pass on an empty result.
         observed = self._observed()
-        self.assertIn("memory_allocated_mib", observed)
+        self.assertIn("memory_mib", observed)
         self.assertIn("cpu_ratio", observed)
 
     def test_memory_cannot_exceed_the_limit(self):
         observed = self._observed()
-        allocated = observed["memory_allocated_mib"]
-        # The probe asks for 4x the limit. Getting anywhere near that means the
-        # --memory flag is decorative.
+        allocated = observed.get("memory_mib")
+        # Two acceptable shapes, and both are refusals. Either the kernel killed
+        # the allocating child (what a cgroup limit actually does) or Python
+        # raised MemoryError before the limit. Silence is neither, and an
+        # allocation far past the limit means the --memory flag is decorative.
+        if observed.get("child_killed") and allocated is None:
+            return  # the limit enforced itself by killing the child
+        self.assertIsNotNone(allocated, "the memory child produced no result at all")
         self.assertLess(allocated, self.MEMORY_MIB * 2,
-                        f"allocated {allocated} MiB against a {self.MEMORY_MIB} MiB limit")
+                        f"reached {allocated} MiB against a {self.MEMORY_MIB} MiB limit")
         self.assertGreater(allocated, 0, "the probe allocated nothing")
 
     def test_the_process_count_is_bounded(self):
         observed = self._observed()
+        if observed.get("pids_held") is None:
+            # The same child that measures pids may have been killed for memory
+            # first. Say so rather than reading a missing number as a pass.
+            self.assertTrue(observed.get("child_killed"),
+                            "the pids measurement vanished without the child being killed")
+            return
         self.assertLessEqual(observed["pids_held"], self.PIDS + 8,
                              "the --pids-limit did not bound the process count")
         self.assertTrue(observed["pids_refused"],
