@@ -199,8 +199,16 @@ class CloudflareZeroCostEffectWorkflowTests(unittest.TestCase):
         self.assertLess(source.index(gate), source.index(token))
         self.assertLess(source.index(gate), source.index(install))
         self.assertLess(source.index(gate), source.index(probe))
-        self.assertIn("steps.cloudflare_credentials.outputs.available != 'true'", source[source.index(required)-80:source.index(required)+500])
-        self.assertIn("steps.cloudflare_credentials.outputs.available == 'true'", source[source.index(gate)-100:source.index(gate)+600])
+        required_at = source.index(required)
+        required_start = source.rfind("      - name:", 0, required_at)
+        required_end = source.find("      - name:", required_start + 1)
+        required_block = source[required_start:required_end]
+        self.assertIn("steps.cloudflare_credentials.outputs.available != 'true'", required_block)
+        gate_at = source.index(gate)
+        gate_start = source.rfind("      - name:", 0, gate_at)
+        gate_end = source.find("      - name:", gate_start + 1)
+        gate_step = source[gate_start:gate_end]
+        self.assertIn("steps.cloudflare_credentials.outputs.available == 'true'", gate_step)
         block = source[source.index(gate):source.index(token)]
         self.assertIn("scripts/verify_cloudflare_zero_cost_boundary.py", block)
         self.assertNotIn("continue-on-error", block)
