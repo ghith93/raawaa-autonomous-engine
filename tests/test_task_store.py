@@ -17,9 +17,90 @@ class TaskStoreTests(unittest.TestCase):
 
     def test_enqueue_is_idempotent(self):
         first = self.store.enqueue("research_brief", "Market scan", idempotency_key="same")
-        second = self.store.enqueue("research_brief", "Market scan duplicate", idempotency_key="same")
+        second = self.store.enqueue("research_brief", "Market scan", idempotency_key="same")
         self.assertEqual(first["id"], second["id"])
         self.assertEqual(len(self.store.list_tasks()), 1)
+
+    def test_replay_rejects_changed_manifest_and_preserves_original(self):
+        original = self.store.enqueue("research_brief", "Stable", {"x": 1, "nested": {"a": 1, "b": 2}},
+                                      idempotency_key="manifest", max_attempts=3)
+        replay = self.store.enqueue("research_brief", "Stable", {"nested": {"b": 2, "a": 1}, "x": 1},
+                                    idempotency_key="manifest", max_attempts=3)
+        self.assertEqual(original["id"], replay["id"])
+        for task_type, title, payload, attempts in [
+            ("content_draft", "Stable", {"x": 1, "nested": {"a": 1, "b": 2}}, 3),
+            ("research_brief", "Changed", {"x": 1, "nested": {"a": 1, "b": 2}}, 3),
+            ("research_brief", "Stable", {"x": 2, "nested": {"a": 1, "b": 2}}, 3),
+            ("research_brief", "Stable", {"x": 1, "nested": {"a": 1, "b": 2}}, 2),
+        ]:
+            with self.subTest(task_type=task_type, title=title, payload=payload, attempts=attempts):
+                with self.assertRaisesRegex(ValueError, "idempotency key conflicts"):
+                    self.store.enqueue(task_type, title, payload, idempotency_key="manifest", max_attempts=attempts)
+        self.assertEqual(len(self.store.list_tasks()), 1)
+        self.assertEqual(self.store.list_tasks()[0]["id"], original["id"])
+
+    def test_concurrent_replay_creates_only_one_task(self):
+        from concurrent.futures import ThreadPoolExecutor
+        from threading import Barrier
+        barrier = Barrier(2)
+        def enqueue():
+            barrier.wait()
+            return self.store.enqueue("research_brief", "Stable", {"x": 1}, idempotency_key="race")
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            results = list(pool.map(lambda _: enqueue(), range(2)))
+        self.assertEqual(results[0]["id"], results[1]["id"])
+        self.assertEqual(len(self.store.list_tasks()), 1)
+
+    def test_concurrent_conflicting_manifests_have_one_winner(self):
+        from concurrent.futures import ThreadPoolExecutor
+        from threading import Barrier
+        barrier = Barrier(2)
+        def enqueue(title):
+            barrier.wait()
+            try:
+                return self.store.enqueue("research_brief", title, idempotency_key="conflicting-race")["id"]
+            except ValueError:
+                return None
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            results = list(pool.map(enqueue, ("First", "Second")))
+        self.assertEqual(sum(result is not None for result in results), 1)
+        self.assertEqual(len(self.store.list_tasks()), 1)
+
+    def test_exact_claim_is_lane_scoped_and_does_not_sweep(self):
+        general = self.store.enqueue("system_audit", "General")
+        specialist = self.store.enqueue("research_brief", "Specialist", execution_lane="specialist:researcher")
+        self.assertIsNone(self.store.claim_exact(specialist["id"]))
+        self.assertIsNone(self.store.claim_exact("missing", worker_lane="specialist:researcher"))
+        claim = self.store.claim_exact(specialist["id"], worker_lane="specialist:researcher")
+        self.assertEqual(claim["id"], specialist["id"])
+        self.assertIsNone(self.store.claim_exact(specialist["id"], worker_lane="specialist:researcher"))
+        self.assertEqual(next(t for t in self.store.list_tasks() if t["id"] == general["id"])["status"], "pending")
+        with self.assertRaises(ValueError):
+            self.store.claim_exact(general["id"], execution_mode="live_inference")
+
+    def test_exact_claim_respects_dependencies_and_probe_boundary(self):
+        parent = self.store.enqueue("system_audit", "Parent")
+        child = self.store.enqueue("research_brief", "Child", depends_on=[parent["id"]])
+        probe = self.store.enqueue("supervised_probe", "Probe")
+        self.assertIsNone(self.store.claim_exact(child["id"]))
+        self.assertIsNone(self.store.claim_exact(probe["id"]))
+        claim = self.store.claim_exact(parent["id"])
+        self.store.finish(parent["id"], "succeeded", lease_token=claim["lease_token"], execution_mode="dry_run")
+        self.assertEqual(self.store.claim_exact(child["id"])["id"], child["id"])
+
+    def test_exact_and_generic_claim_race_has_one_winner(self):
+        from concurrent.futures import ThreadPoolExecutor
+        from threading import Barrier
+        target = self.store.enqueue("research_brief", "Race")
+        barrier = Barrier(2)
+        def claim(exact):
+            barrier.wait()
+            return (self.store.claim_exact(target["id"]) if exact else
+                    self.store.claim_next(execution_mode="dry_run"))
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            results = list(pool.map(claim, (True, False)))
+        self.assertEqual(sum(row is not None for row in results), 1)
+        self.assertEqual(self.store.list_tasks()[0]["attempts"], 1)
 
     def test_worker_processes_safe_task_as_dry_run(self):
         self.store.enqueue("research_brief", "Test task", {"topic": "agent frameworks"})
@@ -155,6 +236,24 @@ class TaskStoreTests(unittest.TestCase):
         self.assertEqual(self.store.list_tasks()[0]["status"], "pending")
         events = [item["event"] for item in self.store.audit_events()]
         self.assertIn("task_lease_recovered", events)
+
+    def test_concurrent_stale_recovery_counts_and_audits_once(self):
+        from concurrent.futures import ThreadPoolExecutor
+        from threading import Barrier
+        task = self.store.enqueue("research_brief", "Stale recovery race")
+        self.store.claim_next()
+        with sqlite3.connect(self.store.db_path) as db:
+            db.execute("UPDATE tasks SET lease_expires_at='2000-01-01T00:00:00+00:00' WHERE id=?", (task["id"],))
+        barrier = Barrier(2)
+        def recover():
+            barrier.wait()
+            return self.store.recover_stale(worker_lane="general")
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            results = list(pool.map(lambda _: recover(), range(2)))
+        self.assertEqual(sum(result["requeued"] for result in results), 1)
+        self.assertEqual(sum(result["failed"] for result in results), 0)
+        events = [e for e in self.store.audit_events() if e["task_id"] == task["id"] and e["event"] == "task_lease_recovered"]
+        self.assertEqual(len(events), 1)
 
     def test_stale_recovery_is_scoped_to_consumer_lane(self):
         general = self.store.enqueue("research_brief", "General stale task")
