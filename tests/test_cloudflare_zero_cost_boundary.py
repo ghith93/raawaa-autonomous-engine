@@ -161,9 +161,11 @@ class ZeroCostBoundaryTests(unittest.TestCase):
                     "rate_plan": {"id": "free", "public_name": "Workers Free"}}]
         for value in (None, -1, 1.5, float("nan"), float("inf"), True):
             with self.subTest(value=value):
+                payload = subscription_payload(records)
+                payload["result_info"]["total_count"] = value
                 result = check_boundary(
                     "account", "token",
-                    opener=lambda *_a, **_k: Response(subscription_payload(records, total_count=value)),
+                    opener=lambda *_a, **_k: Response(payload),
                 )
                 self.assertFalse(result["eligible"])
                 self.assertEqual(result["reason"], "invalid_subscription_count")
