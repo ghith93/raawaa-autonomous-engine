@@ -45,7 +45,12 @@ jobs:
             self.assertIn("github.ref == 'refs/heads/main'", block)
             self.assertIn("github.event_name == 'push'", block)
             self.assertIn("github.event_name == 'workflow_dispatch' && inputs.enable_staging_operations == true", block)
+            needs_line = next(line for line in block.splitlines() if "needs:" in line)
+            self.assertIn("zero_cost_preflight", needs_line)
+            self.assertIn("needs.zero_cost_preflight.outputs.zero_cost_eligible == 'true'", block)
         self.assertEqual(check.staging_gate_violations(".github/workflows/ci.yml", workflow), [])
+        self.assertIn("zero_cost_preflight:", workflow)
+        self.assertIn("scripts/verify_cloudflare_zero_cost_boundary.py", workflow)
         self.assertIn("default: false", workflow)
 
 
@@ -57,6 +62,8 @@ jobs:
         self.assertEqual(len(violations), len(check.STAGING_EFFECT_JOBS))
         unsafe_default = workflow.replace("default: false", "default: true")
         self.assertTrue(check.staging_gate_violations(".github/workflows/ci.yml", unsafe_default))
+        unsafe_gate = workflow.replace("needs.zero_cost_preflight.outputs.zero_cost_eligible == 'true'", "true", 1)
+        self.assertTrue(check.staging_gate_violations(".github/workflows/ci.yml", unsafe_gate))
 
     def test_non_secret_or_non_dispatch_workflows_are_not_restricted(self):
         no_secret = """on:
