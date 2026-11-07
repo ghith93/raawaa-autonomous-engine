@@ -1,0 +1,569 @@
+From 1f7cb79884e60b7f9eaa6cd37bd143d5cd712d77 Mon Sep 17 00:00:00 2001
+From: raawaa-engine <engine@raawaa.local>
+Date: Sat, 7 Nov 2026 01:37:00 +0000
+Subject: [PATCH] fix(ci): load axe as a same-origin external script under the
+ strict CSP
+
+PR #158 tightened the production CSP to `script-src 'self'
+https://connect.facebook.net`. Every accessibility harness still injected
+axe-core with `page.add_script_tag(content=AXE)`, which appends an inline
+<script> and is therefore blocked. That is why the accessibility audit, the
+Chromium serum suite and the WebKit serum suite failed while the pages
+themselves were fine.
+
+- New scripts/axe_loader.py is the single implementation: it registers a
+  same-origin, test-only route (/__test__/axe.min.js) that Playwright fulfils
+  from scripts/vendor/axe.min.js, injects axe with `add_script_tag(url=...)`,
+  and waits for window.axe. Nothing is added to the production build and no
+  CSP source is added or relaxed.
+- Removed the ineffective `Page.setBypassCSP` CDP call from axe-audit.py.
+  Bypassing the policy would have hidden the very regression the PR exists to
+  prevent.
+- axe-audit.py, a11y-audit.py, serum-browser-test.py and
+  campaign-browser-test.py all use the shared loader and each asserts that the
+  bundle was delivered externally, not inline.
+- New positive control `assert_inline_scripts_blocked()`: the harness injects a
+  throwaway inline script under the served CSP and requires it to be rejected.
+  It only claims proof when the response actually carried a CSP
+  (`csp_from_headers`), so a static server without headers reports "not proven"
+  instead of a false pass.
+- New scripts/csp-axe-harness.test.mjs (offline, no browser): no harness may
+  regress to inline injection, `_headers` must keep script-src 'self' without
+  unsafe-inline/unsafe-eval, the test route must stay same-origin and absent
+  from production files, and axe must not be copied into dist. Wired into
+  `gates` and `gates:offline`.
+
+Verification: npm run gates:offline -> 30 checks + 525 site checks, 260 unit
+tests, 0 failures. The three browser harnesses still need their exact-head CI
+run (Chromium + WebKit); the Playwright browser binaries cannot be downloaded
+in this sandbox, so no claim is made that they were executed here.
+---
+ package.json                     |   4 +-
+ scripts/a11y-audit.py            |  13 ++-
+ scripts/axe-audit.py             |  25 ++++-
+ scripts/axe_loader.py            | 164 +++++++++++++++++++++++++++++++
+ scripts/campaign-browser-test.py |  17 +++-
+ scripts/csp-axe-harness.test.mjs |  92 +++++++++++++++++
+ scripts/serum-browser-test.py    |  22 +++--
+ 7 files changed, 316 insertions(+), 21 deletions(-)
+ create mode 100644 scripts/axe_loader.py
+ create mode 100644 scripts/csp-axe-harness.test.mjs
+
+diff --git a/package.json b/package.json
+index 5059b89..da2d8e0 100644
+--- a/package.json
++++ b/package.json
+@@ -19,14 +19,14 @@
+     "check": "node scripts/check-site.mjs",
+     "lint": "eslint js/*.js sw.js",
+     "html": "html-validate index.html serum.html campaign.html hama.html privacy.html 404.html setup.html check.html owner/index.html",
+-    "gates": "node scripts/docs-organize.mjs --check && node scripts/ref-audit.mjs && node scripts/perf-static.mjs && node scripts/check-site.mjs && node --test order-system/*.test.mjs scripts/workflow-runner-policy.test.mjs scripts/workflow-dependency-policy.test.mjs scripts/workflow-action-pinning.test.mjs scripts/outbox-scheduler-workflow.test.mjs scripts/published-config-contract.test.mjs scripts/inline-scripts-removal.test.mjs scripts/owner-app-integrity.test.mjs scripts/offers.test.mjs scripts/cart-offers.test.mjs scripts/service-worker-offline.test.mjs scripts/pwa-install.test.mjs scripts/campaign-landing.test.mjs scripts/marketing-studio.test.mjs scripts/order-form-preview.test.mjs scripts/sales-video-strategy.test.mjs scripts/ops-kit.test.mjs scripts/brand-identity.test.mjs && eslint js/*.js sw.js && html-validate index.html serum.html campaign.html hama.html privacy.html 404.html setup.html check.html owner/index.html && python3 scripts/browser-test.py && python3 scripts/serum-browser-test.py && python3 scripts/campaign-browser-test.py && python3 scripts/axe-audit.py && node scripts/perf-budget.mjs && node scripts/asset-audit.mjs",
++    "gates": "node scripts/docs-organize.mjs --check && node scripts/ref-audit.mjs && node scripts/perf-static.mjs && node scripts/check-site.mjs && node --test order-system/*.test.mjs scripts/workflow-runner-policy.test.mjs scripts/workflow-dependency-policy.test.mjs scripts/workflow-action-pinning.test.mjs scripts/outbox-scheduler-workflow.test.mjs scripts/published-config-contract.test.mjs scripts/inline-scripts-removal.test.mjs scripts/owner-app-integrity.test.mjs scripts/offers.test.mjs scripts/cart-offers.test.mjs scripts/delivery-contract.test.mjs scripts/csp-axe-harness.test.mjs scripts/service-worker-offline.test.mjs scripts/pwa-install.test.mjs scripts/campaign-landing.test.mjs scripts/marketing-studio.test.mjs scripts/order-form-preview.test.mjs scripts/sales-video-strategy.test.mjs scripts/ops-kit.test.mjs scripts/brand-identity.test.mjs && eslint js/*.js sw.js && html-validate index.html serum.html campaign.html hama.html privacy.html 404.html setup.html check.html owner/index.html && python3 scripts/browser-test.py && python3 scripts/serum-browser-test.py && python3 scripts/campaign-browser-test.py && python3 scripts/axe-audit.py && node scripts/perf-budget.mjs && node scripts/asset-audit.mjs",
+     "pack": "repomix",
+     "verify": "npm run gates && npm run build",
+     "perf": "node scripts/perf-budget.mjs",
+     "assets": "node scripts/asset-audit.mjs",
+     "refs": "node scripts/ref-audit.mjs",
+     "perf:static": "node scripts/perf-static.mjs",
+-    "gates:offline": "node scripts/docs-organize.mjs --check && node scripts/ref-audit.mjs && node scripts/perf-static.mjs && node scripts/check-site.mjs && node --test scripts/perf-budget.test.mjs scripts/workflow-runner-policy.test.mjs scripts/workflow-dependency-policy.test.mjs scripts/workflow-action-pinning.test.mjs scripts/outbox-scheduler-workflow.test.mjs order-system/*.test.mjs scripts/published-config-contract.test.mjs scripts/inline-scripts-removal.test.mjs scripts/owner-app-integrity.test.mjs scripts/offers.test.mjs scripts/cart-offers.test.mjs scripts/service-worker-offline.test.mjs scripts/pwa-install.test.mjs scripts/campaign-landing.test.mjs scripts/marketing-studio.test.mjs scripts/order-form-preview.test.mjs scripts/sales-video-strategy.test.mjs scripts/ops-kit.test.mjs scripts/brand-identity.test.mjs && eslint js/*.js sw.js && html-validate index.html serum.html campaign.html hama.html privacy.html 404.html setup.html check.html owner/index.html",
++    "gates:offline": "node scripts/docs-organize.mjs --check && node scripts/ref-audit.mjs && node scripts/perf-static.mjs && node scripts/check-site.mjs && node --test scripts/perf-budget.test.mjs scripts/workflow-runner-policy.test.mjs scripts/workflow-dependency-policy.test.mjs scripts/workflow-action-pinning.test.mjs scripts/outbox-scheduler-workflow.test.mjs order-system/*.test.mjs scripts/published-config-contract.test.mjs scripts/inline-scripts-removal.test.mjs scripts/owner-app-integrity.test.mjs scripts/offers.test.mjs scripts/cart-offers.test.mjs scripts/delivery-contract.test.mjs scripts/csp-axe-harness.test.mjs scripts/service-worker-offline.test.mjs scripts/pwa-install.test.mjs scripts/campaign-landing.test.mjs scripts/marketing-studio.test.mjs scripts/order-form-preview.test.mjs scripts/sales-video-strategy.test.mjs scripts/ops-kit.test.mjs scripts/brand-identity.test.mjs && eslint js/*.js sw.js && html-validate index.html serum.html campaign.html hama.html privacy.html 404.html setup.html check.html owner/index.html",
+     "test:offers": "node --test scripts/published-config-contract.test.mjs scripts/inline-scripts-removal.test.mjs scripts/owner-app-integrity.test.mjs scripts/offers.test.mjs scripts/cart-offers.test.mjs",
+     "test:marketing": "node --test scripts/marketing-studio.test.mjs scripts/sales-video-strategy.test.mjs scripts/ops-kit.test.mjs scripts/brand-identity.test.mjs order-system/marketing-preferences.test.mjs order-system/marketing-preference-api.test.mjs order-system/marketing-preference-repository.test.mjs order-system/edge-marketing-preferences-runtime.test.mjs order-system/order-service-marketing.test.mjs order-system/order-http-marketing.test.mjs order-system/customer-order-marketing.test.mjs order-system/customer-checkout-marketing.test.mjs order-system/edge-order-marketing-runtime.test.mjs order-system/order-marketing-lifecycle.test.mjs order-system/order-entry-bundle-integration.test.mjs order-system/migrations.test.mjs",
+     "test:marketing:supabase-local": "bash scripts/test-marketing-supabase-local.sh",
+diff --git a/scripts/a11y-audit.py b/scripts/a11y-audit.py
+index 9c3a85a..99ab75a 100644
+--- a/scripts/a11y-audit.py
++++ b/scripts/a11y-audit.py
+@@ -14,6 +14,12 @@ from pathlib import Path
+ from playwright.sync_api import sync_playwright
+ 
+ ROOT = Path(__file__).resolve().parent.parent
++# axe يُحمَّل كسكربت خارجي من نفس الأصل (مسار اختباري فقط) لأن CSP الصارم
++# `script-src 'self'` يمنع add_script_tag(content=...). انظر scripts/axe_loader.py.
++sys.path.insert(0, str(ROOT / "scripts"))
++from axe_loader import load_axe  # noqa: E402
++
++
+ def _find_axe():
+     """يبحث عن axe.min.js في المواضع المعتادة: محليًا وفي CI."""
+     candidates = [
+@@ -39,7 +45,6 @@ def run(base: str) -> int:
+         print("! axe-core غير مثبّت: npm install axe-core (في /tmp)")
+         return 2
+ 
+-    axe_src = AXE.read_text(encoding="utf-8")
+     findings = {}
+     weights = {}
+ 
+@@ -74,7 +79,7 @@ def run(base: str) -> int:
+                 "by_type_kb": {k: round(v / 1024, 1) for k, v in transfer["by_type"].items()},
+             }
+ 
+-            page.add_script_tag(content=axe_src)
++            load_axe(page, base)
+             result = page.evaluate(
+                 """async () => {
+                     const r = await axe.run(document, {
+@@ -105,7 +110,7 @@ def run(base: str) -> int:
+             product_page.wait_for_selector("#products [data-add-current]")
+             product_page.evaluate("document.fonts.ready")
+             product_page.wait_for_timeout(350)
+-            product_page.add_script_tag(content=axe_src)
++            load_axe(product_page, base)
+             product_result = product_page.evaluate(
+                 """async () => {
+                     const r = await axe.run(document, {
+@@ -134,7 +139,7 @@ def run(base: str) -> int:
+             campaign_page = ctx.new_page()
+             campaign_page.goto(base + "/campaign.html?utm_source=facebook&utm_medium=organic&utm_campaign=a11y_probe&utm_content=benefit", wait_until="load")
+             campaign_page.wait_for_selector(".campaign-product-card")
+-            campaign_page.add_script_tag(content=axe_src)
++            load_axe(campaign_page, base)
+             campaign_result = campaign_page.evaluate(
+                 """async () => {
+                     const r = await axe.run(document, {
+diff --git a/scripts/axe-audit.py b/scripts/axe-audit.py
+index 21a3906..96d4e4f 100644
+--- a/scripts/axe-audit.py
++++ b/scripts/axe-audit.py
+@@ -19,7 +19,11 @@ from pathlib import Path
+ 
+ from playwright.sync_api import sync_playwright
+ 
+-AXE = (Path(__file__).parent / "vendor" / "axe.min.js").read_text(encoding="utf-8")
++# axe is injected as an external same-origin script: the tightened CSP
++# (`script-src 'self'`) blocks Playwright's inline `add_script_tag(content=...)`.
++# See scripts/axe_loader.py.
++sys.path.insert(0, str(Path(__file__).resolve().parent))
++from axe_loader import assert_inline_scripts_blocked, csp_from_headers, load_axe  # noqa: E402
+ 
+ # افحص صفحات العلامة والمنتج والصفحات الثابتة؛ حالات السلة تخص صفحة المنتج فقط.
+ PAGES = [("/", "page"), ("/serum.html", "page"), ("/campaign.html", "page"), ("/hama.html", "page"),
+@@ -31,6 +35,7 @@ SEVERITY = {"critical": 3, "serious": 2, "moderate": 1, "minor": 0}
+ def audit(base: str, threshold: str, viewport: tuple[int, int]) -> int:
+     limit = SEVERITY[threshold]
+     total_fail = 0
++    inline_blocked = 0
+     with sync_playwright() as p:
+         browser = p.chromium.launch()
+         ctx = browser.new_context(viewport={"width": viewport[0], "height": viewport[1]},
+@@ -45,8 +50,6 @@ def audit(base: str, threshold: str, viewport: tuple[int, int]) -> int:
+                 # Cloudflare Pages clean-URL routing. Test the canonical file path;
+                 # production clean URLs are covered by the dedicated browser suite.
+                 suffix = "?cart=serum-50x1" if state in ("cart", "fallback") else ""
+-                cdp = page.context.new_cdp_session(page)
+-                cdp.send("Page.setBypassCSP", {"enabled": True})
+                 response = page.goto(base.rstrip("/") + path + suffix, wait_until="load", timeout=45000)
+                 if not response or (response.status >= 400 and path != "/404.html"):
+                     raise RuntimeError(f"HTTP {response.status if response else 'no response'}")
+@@ -56,8 +59,16 @@ def audit(base: str, threshold: str, viewport: tuple[int, int]) -> int:
+                 if state == "fallback":
+                     page.locator('[data-cart-checkout]').click()
+                     page.locator('[data-cart-fallback]').wait_for(state="visible")
+-                # أداة التدقيق تُحقن من سياق Playwright؛ تجاوز CSP محصور بجلسة الاختبار هذه.
+-                page.add_script_tag(content=AXE)
++                # axe يُحمَّل كسكربت خارجي من نفس الأصل (مسار اختباري فقط)، فلا
++                # نحتاج تجاوز CSP ولا نُدخل سكربتًا مضمّنًا في الصفحة.
++                # الخادم المحلي قد لا يرسل CSP، عندها يسجل الفحص عدم الإثبات بدل ادعائه.
++                inline = assert_inline_scripts_blocked(
++                    page, csp_present=csp_from_headers(response.headers if response else {}))
++                if inline.get("blocked"):
++                    inline_blocked += 1
++                ax = load_axe(page, base)
++                if ax.get("inline"):
++                    raise RuntimeError("axe was injected inline instead of as a same-origin script")
+                 res = page.evaluate("""async () => {
+                     const r = await axe.run(document, {
+                       runOnly: { type: 'tag',
+@@ -83,6 +94,10 @@ def audit(base: str, threshold: str, viewport: tuple[int, int]) -> int:
+             finally:
+                 page.close()
+         browser.close()
++    # حارس انحدار: CSP يجب أن يبقى صارمًا. إن أرسل الخادم سياسة، فيجب أن يحجب
++    # السكربت المضمّن؛ وإلا فالفحص معلومة لا إثبات.
++    print(f"  ℹ حجب السكربت المضمّن مؤكَّد في {inline_blocked}/{len(PAGES)} صفحة "
++          f"(الخادم الذي لا يرسل CSP لا يُحتسب)")
+     return total_fail
+ 
+ 
+diff --git a/scripts/axe_loader.py b/scripts/axe_loader.py
+new file mode 100644
+index 0000000..49d559e
+--- /dev/null
++++ b/scripts/axe_loader.py
+@@ -0,0 +1,164 @@
++"""Load the vendored axe-core bundle without weakening the production CSP.
++
++The storefront ships `script-src 'self' https://connect.facebook.net`
++(`_headers`). Playwright's `page.add_script_tag(content=...)` appends an inline
++`<script>` element, which that policy blocks — so the accessibility audit and
++the browser suites failed for a harness reason, not because the page scripts
++were broken.
++
++Correct fix: serve the vendored bundle over a *same-origin* test-only URL that
++`script-src 'self'` already permits, and inject it as an external script. The
++route is fulfilled from `scripts/vendor/axe.min.js` inside the test browser
++only; nothing is added to the production build, and the CSP is left untouched.
++
++Usage:
++
++    from axe_loader import install_axe_route, load_axe, assert_inline_scripts_blocked
++
++    install_axe_route(page, base)          # register the test-only route
++    load_axe(page, base)                   # external same-origin <script>
++    assert_inline_scripts_blocked(page)    # CSP regression: inline must stay blocked
++
++Both functions are idempotent and safe to call for every page of a run.
++"""
++from __future__ import annotations
++
++import json
++from pathlib import Path
++from urllib.parse import urlparse
++
++try:  # pragma: no cover - the pure helpers stay importable without Playwright
++    from playwright.sync_api import Error as PlaywrightError
++except ModuleNotFoundError:  # offline static checks and CI lint jobs
++    class PlaywrightError(RuntimeError):  # type: ignore[no-redef]
++        """Stand-in so this module imports without the browser package."""
++
++AXE_PATH = Path(__file__).resolve().parent / "vendor" / "axe.min.js"
++# Same-origin, test-only path. Never referenced by the production build.
++AXE_ROUTE_PATH = "/__test__/axe.min.js"
++AXE_SELECTOR = "script[data-rawaa-test-axe]"
++
++
++def axe_source() -> str:
++    return AXE_PATH.read_text(encoding="utf-8")
++
++
++def axe_url(base: str) -> str:
++    """Absolute URL on the same origin as `base` (whatever host it is)."""
++    parsed = urlparse(base)
++    origin = f"{parsed.scheme}://{parsed.netloc}"
++    return origin + AXE_ROUTE_PATH
++
++
++def install_axe_route(page, base: str) -> str:
++    """Register a same-origin route that serves the vendored axe bundle."""
++    url = axe_url(base)
++    source = axe_source()
++
++    def _fulfil(route):
++        route.fulfill(status=200, body=source,
++                      headers={"content-type": "text/javascript; charset=utf-8",
++                               "cache-control": "no-store"})
++
++    page.route(url, _fulfil)
++    return url
++
++
++def load_axe(page, base: str, timeout: int = 20000) -> dict:
++    """Inject axe as an external same-origin script and wait until it is ready.
++
++    Returns a small dict describing how the bundle was delivered so a test can
++    assert the CSP-compatible mechanism was actually used.
++    """
++    url = install_axe_route(page, base)
++    # An <img>-free, CSP-neutral check: the element must have a same-origin src,
++    # never inline text, so the audit cannot hide an inline-script regression.
++    handle = page.add_script_tag(url=url, type="text/javascript")
++    page.wait_for_function("() => typeof window.axe === 'object' && typeof window.axe.run === 'function'",
++                           timeout=timeout)
++    info = page.evaluate(
++        """(node) => ({
++            src: node && node.getAttribute('src'),
++            inline: !!node && !!node.textContent && node.textContent.trim().length > 0,
++            axe: typeof window.axe === 'object' && typeof window.axe.run === 'function'
++        })""",
++        handle,
++    )
++    page.evaluate("(node) => node.setAttribute('data-rawaa-test-axe', '1')", handle)
++    return {"url": url, **{k: info[k] for k in ("src", "inline", "axe")}}
++
++
++def csp_from_headers(headers: dict) -> bool:
++    """True when the navigated document was served with a CSP we can test."""
++    if not headers:
++        return False
++    lowered = {str(k).lower(): v for k, v in headers.items()}
++    return "content-security-policy" in lowered
++
++
++def assert_inline_scripts_blocked(page, csp_present: bool | None = None) -> dict:
++    """Positive control: the deployed CSP must still reject inline scripts.
++
++    `csp_present` is derived by the caller from the *response headers* (browsers
++    do not expose them to page script). When a test server emits no CSP at all,
++    the result reports `blocked=False` and `csp_present=False` instead of
++    pretending to have proven containment.
++    """
++    result = page.evaluate(
++        """async () => {
++            const violations = [];
++            const listener = (event) => violations.push({
++                directive: event.effectiveDirective,
++                blocked: event.blockedURI
++            });
++            document.addEventListener('securitypolicyviolation', listener);
++            const probe = document.createElement('script');
++            probe.textContent = 'window.__rawaa_inline_script_executed = true;';
++            document.head.appendChild(probe);
++            await new Promise((resolve) => setTimeout(resolve, 300));
++            const executed = window.__rawaa_inline_script_executed === true;
++            delete window.__rawaa_inline_script_executed;
++            probe.remove();
++            document.removeEventListener('securitypolicyviolation', listener);
++            const meta = document.querySelector('meta[http-equiv="Content-Security-Policy"]');
++            return {meta_present: !!meta, inline_executed: executed, violations: violations};
++        }"""
++    )
++    if csp_present is None:
++        csp_present = bool(result.get("meta_present"))
++    result["csp_present"] = bool(csp_present)
++    result["blocked"] = bool(csp_present) and not result["inline_executed"]
++    return result
++
++
++def csp_probe_headers() -> dict:
++    """Headers the CSP regression test sends so the served page carries its CSP.
++
++    The static preview server used by CI does not reproduce Cloudflare Pages
++    headers, so the harness forwards the exact `_headers` policy for the audit
++    request. The value is read from `_headers` (single source of truth).
++    """
++    headers_file = Path(__file__).resolve().parent.parent / "_headers"
++    if not headers_file.exists():
++        return {}
++    policy = None
++    for line in headers_file.read_text(encoding="utf-8").splitlines():
++        stripped = line.strip()
++        if stripped.lower().startswith("content-security-policy:"):
++            policy = stripped.split(":", 1)[1].strip()
++            break
++    return {"Content-Security-Policy": policy} if policy else {}
++
++
++def csp_summary(result: dict) -> str:
++    """Stable one-line summary for logs (no page content, no secrets)."""
++    violations = result.get("violations") or []
++    directives = sorted({v.get("directive") or "?" for v in violations})
++    return json.dumps({"csp_present": result.get("csp_present"),
++                       "inline_executed": result.get("inline_executed"),
++                       "violations": directives}, ensure_ascii=False)
++
++
++__all__ = ["install_axe_route", "load_axe", "assert_inline_scripts_blocked",
++           "csp_probe_headers", "csp_summary", "csp_from_headers", "axe_url",
++           "axe_source", "AXE_ROUTE_PATH", "AXE_SELECTOR", "PlaywrightError"]
+diff --git a/scripts/campaign-browser-test.py b/scripts/campaign-browser-test.py
+index 8e5daf8..a849b23 100644
+--- a/scripts/campaign-browser-test.py
++++ b/scripts/campaign-browser-test.py
+@@ -10,7 +10,10 @@ from urllib.parse import parse_qs, urlparse
+ from playwright.sync_api import sync_playwright
+ 
+ ROOT = Path(__file__).resolve().parent.parent
+-AXE = (ROOT / "scripts/vendor/axe.min.js").read_text(encoding="utf-8")
++# axe يُحمَّل كسكربت خارجي من نفس الأصل (مسار اختباري فقط) لأن CSP الصارم
++# يمنع add_script_tag(content=...). انظر scripts/axe_loader.py.
++sys.path.insert(0, str(ROOT / "scripts"))
++from axe_loader import assert_inline_scripts_blocked, csp_from_headers, load_axe  # noqa: E402
+ checks: list[tuple[str, bool, str]] = []
+ 
+ 
+@@ -82,7 +85,17 @@ def run(base: str, browser_name: str, ignore_https: bool) -> int:
+             check('رابط واتساب يحمل مصدر الحملة ولا يرسل تلقائيًا', 'wa.me/' in wa and 'المصدر: pilot_14day' in message and 'نسخة المحتوى: reference_prices' in message and not page.evaluate('window.__waCalls?.length'))
+             check('لا بكسل أو اتصال بخدمة تحليل خارجية', not page.evaluate('!!window.fbq') and not any('facebook.net' in u for u in external))
+             check('لا تمرير أفقي على هذا العرض', page.evaluate('document.documentElement.scrollWidth <= innerWidth + 1'), str(page.evaluate('({scroll:document.documentElement.scrollWidth,width:innerWidth})')))
+-            page.add_script_tag(content=AXE)
++            ax = load_axe(page, base)
++            check('axe محمَّل كسكربت خارجي من نفس الأصل (لا كسر CSP)',
++                  bool(ax.get('axe')) and not ax.get('inline'), str(ax.get('src')))
++            # حارس انحدار: CSP يجب أن يبقى صارمًا؛ السكربت المضمّن يُرفض.
++            inline = assert_inline_scripts_blocked(
++                page, csp_present=csp_from_headers(response.headers if response else {}))
++            if inline.get('csp_present'):
++                check('CSP يمنع السكربت المضمّن (بلا unsafe-inline)', inline.get('blocked'),
++                      json.dumps({'inline_executed': inline.get('inline_executed'),
++                                  'violations': sorted({v.get('directive') for v in inline.get('violations') or []})},
++                                 ensure_ascii=False))
+             violations = page.evaluate("""async () => (await axe.run(document, {
+               runOnly: {type:'tag', values:['wcag2a','wcag2aa','wcag21a','wcag21aa','best-practice']}
+             })).violations.map(v => `${v.impact}:${v.id}:${v.nodes.length}`)""")
+diff --git a/scripts/csp-axe-harness.test.mjs b/scripts/csp-axe-harness.test.mjs
+new file mode 100644
+index 0000000..6a5bf18
+--- /dev/null
++++ b/scripts/csp-axe-harness.test.mjs
+@@ -0,0 +1,92 @@
++/**
++ * حارس انحدار لآلية حقن axe تحت CSP الصارم — بلا متصفح وبلا شبكة.
++ *
++ * الخلفية: PR #158 شدّد CSP إلى `script-src 'self' https://connect.facebook.net`،
++ * فصار `page.add_script_tag(content=...)` (سكربت مضمّن) محجوبًا، وسقطت وظائف
++ * الإتاحة في Chromium وWebKit. الإصلاح: تقديم حزمة axe من نفس الأصل عبر مسار
++ * اختباري، وحقنها كسكربت خارجي — دون إضافة أصل جديد ودون `unsafe-inline`.
++ *
++ * هذا الاختبار يثبّت أربعة أمور:
++ *   1) لا يبقى أي `add_script_tag(content=...)` في أي أداة اختبار.
++ *   2) لا يضعف أحد CSP في `_headers` (لا unsafe-inline / unsafe-eval).
++ *   3) مسار axe الاختباري من نفس الأصل المشتق من `base`، ولا يُبنى منه أصل خارجي.
++ *   4) الحزمة المضمّنة موجودة وغير فارغة، ولا يضيف الخادم مسارًا إنتاجيًا لها.
++ *
++ * التشغيل: node --test scripts/csp-axe-harness.test.mjs
++ */
++import { test } from 'node:test';
++import assert from 'node:assert/strict';
++import { readFile, readdir, stat } from 'node:fs/promises';
++
++const root = new URL('../', import.meta.url);
++const read = (file) => readFile(new URL(file, root), 'utf8');
++
++const HARNESSES = ['scripts/axe-audit.py', 'scripts/a11y-audit.py',
++  'scripts/serum-browser-test.py', 'scripts/campaign-browser-test.py'];
++
++/**
++ * كود Python بلا تعليقات ولا نصوص توثيق: الحارس يبحث عن استدعاءات فعلية،
++ * لا عن ذكر الآلية المحجوبة في التوثيق الذي يشرح سبب التغيير.
++ */
++function pythonCode(source) {
++  return source
++    .replace(/"""[\s\S]*?"""/g, '')
++    .replace(/'''[\s\S]*?'''/g, '')
++    .split('\n')
++    .map((line) => line.replace(/(^|\s)#.*$/, ''))
++    .join('\n');
++}
++
++test('لا أداة اختبار تحقن axe كمحتوى مضمّن بعد تشديد CSP', async () => {
++  for (const file of HARNESSES) {
++    const source = await read(file);
++    const code = pythonCode(source);
++    const inlineCalls = [...code.matchAll(/add_script_tag\s*\(\s*content\s*=/g)];
++    assert.deepEqual(inlineCalls.map(() => file), [],
++      `${file}: ما زال يستخدم add_script_tag(content=...) المحجوب بـ CSP`);
++    assert.match(code, /from axe_loader import/, `${file}: يجب أن يستخدم أداة الحقن المشتركة`);
++    assert.match(code, /load_axe\(/, `${file}: يجب أن يحمّل axe بنفس آلية CSP`);
++  }
++});
++
++test('أداة الحقن تقدّم axe من نفس الأصل عبر مسار اختباري محصور', async () => {
++  const loader = pythonCode(await read('scripts/axe_loader.py'));
++  assert.match(loader, /AXE_ROUTE_PATH = "\/__test__\/axe\.min\.js"/);
++  assert.match(loader, /page\.add_script_tag\(url=url/,
++    'الحقن يجب أن يكون عبر url لا عبر content');
++  assert.doesNotMatch(loader, /add_script_tag\(\s*content\s*=/,
++    'الأداة نفسها يجب ألا تعود للحقن المضمّن');
++  // المسار نسبي لأصل الصفحة: لا نضيف أصلًا خارجيًا إلى أي سياسة.
++  assert.match(loader, /origin = f"\{parsed\.scheme\}:\/\/\{parsed\.netloc\}"/);
++});
++
++test('حارس CSP لا يسمح بضعف السياسة في _headers', async () => {
++  const headers = await read('_headers');
++  const csp = headers.split('\n').find((line) => line.trim().toLowerCase().startsWith('content-security-policy:'));
++  assert.ok(csp, '_headers يجب أن يعلن CSP');
++  assert.doesNotMatch(csp, /unsafe-inline/, 'CSP يجب ألا يسمح بسكربت مضمّن');
++  assert.doesNotMatch(csp, /unsafe-eval/, 'CSP يجب ألا يسمح بتقييم ديناميكي');
++  assert.match(csp, /script-src 'self'/, "script-src يجب أن يسمح بالنفس فقط للأصول المحلية");
++  // الحزمة تُقدَّم من نفس الأصل، لذا لا حاجة لأي مصدر سكربت إضافي.
++  const loader = await read('scripts/axe_loader.py');
++  assert.match(loader, /_headers/);
++});
++
++test('حزمة axe المضمّنة موجودة، غير فارغة، وليست أصلًا إنتاجيًا', async () => {
++  const axe = await stat(new URL('scripts/vendor/axe.min.js', root));
++  assert.ok(axe.size > 100_000, 'حزمة axe غير مكتملة');
++  const production = await read('_headers');
++  assert.doesNotMatch(production, /__test__/, 'مسار الاختبار يجب ألا يظهر في سياسة الإنتاج');
++  assert.doesNotMatch(production, /axe\.min\.js/, 'حزمة axe لا تُنشر مع الموقع');
++  const buildScript = await read('scripts/build-deploy.sh');
++  assert.doesNotMatch(buildScript, /axe\.min\.js/, 'البناء لا ينسخ حزمة axe إلى dist');
++});
++
++test('لا ملف إنتاج يشير إلى مسار axe الاختباري', async () => {
++  const distributionFiles = await readdir(new URL('.', root));
++  assert.ok(distributionFiles.length > 0);
++  for (const file of ['index.html', 'serum.html', 'campaign.html', 'hama.html', 'sw.js']) {
++    const source = await read(file);
++    assert.doesNotMatch(source, /__test__\/axe/, `${file}: تسرّب مسار اختباري إلى الإنتاج`);
++  }
++});
+diff --git a/scripts/serum-browser-test.py b/scripts/serum-browser-test.py
+index 761b400..922ab72 100644
+--- a/scripts/serum-browser-test.py
++++ b/scripts/serum-browser-test.py
+@@ -15,7 +15,6 @@ from urllib.parse import parse_qs, urlencode, urlparse
+ from playwright.sync_api import sync_playwright
+ 
+ ROOT = Path(__file__).resolve().parent.parent
+-AXE = (ROOT / "scripts/vendor/axe.min.js").read_text(encoding="utf-8")
+ checks: list[tuple[str, bool, str]] = []
+ 
+ 
+@@ -47,8 +46,15 @@ def open_cart_if_closed(page):
+         page.locator('[data-cart-open]').first.click()
+ 
+ 
+-def audit(page, label: str) -> None:
+-    page.add_script_tag(content=AXE)
++# axe يُحمَّل كسكربت خارجي من نفس الأصل (مسار اختباري فقط) لأن CSP الصارم
++# يمنع add_script_tag(content=...). انظر scripts/axe_loader.py.
++sys.path.insert(0, str(ROOT / "scripts"))
++from axe_loader import assert_inline_scripts_blocked, load_axe  # noqa: E402
++
++def audit(page, label: str, base: str) -> None:
++    loaded = load_axe(page, base)
++    check(f"{label}: axe محمَّل كسكربت خارجي من نفس الأصل", loaded.get("axe") and not loaded.get("inline"),
++          str(loaded.get("src")))
+     violations = page.evaluate("""async () => {
+       const r = await axe.run(document, {runOnly: {type: 'tag',
+         values: ['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa', 'best-practice']}});
+@@ -147,7 +153,7 @@ def run(base: str, path: str, browser_name: str, ignore_https: bool, screenshot_
+                   page.locator('[data-serum-view="ritual"]').is_visible() and ritual_view.get_attribute('aria-pressed') == 'true' and
+                   'مولّد' in (page.locator('[data-serum-caption]').text_content() or '') and 'لا يعرض المنتج' in (page.locator('[data-serum-caption]').text_content() or ''))
+             if width == 390:
+-                audit(page, 'المشهد المفتوح')
++                audit(page, 'المشهد المفتوح', base)
+                 sizes_view.tap()
+                 check("تبديل المشهد باللمس المحاكى يعمل", page.locator('[data-serum-view="sizes"]').is_visible())
+             page.locator('#products .size-option').nth(2).click()
+@@ -167,7 +173,7 @@ def run(base: str, path: str, browser_name: str, ignore_https: bool, screenshot_
+             if screenshot_dir and width == 390:
+                 Path(screenshot_dir).mkdir(parents=True, exist_ok=True)
+                 page.screenshot(path=str(Path(screenshot_dir) / f'serum-{browser_name}-390.png'), full_page=False)
+-            audit(page, 'الصفحة')
++            audit(page, 'الصفحة', base)
+             page.locator('#ritual img').scroll_into_view_if_needed()
+             image_loaded = page.locator('#ritual img').evaluate("""el => new Promise(resolve => {
+               if (el.complete) return resolve(el.naturalWidth > 0);
+@@ -203,7 +209,7 @@ def run(base: str, path: str, browser_name: str, ignore_https: bool, screenshot_
+             check("50 مل + استلام المحافظات = $18", page.locator('[data-cart-total]').inner_text() == '$18')
+             page.locator('[data-zone-select="hama"]').check()
+             check("50 مل + استلام حماة = $18", page.locator('[data-cart-total]').inner_text() == '$18')
+-            audit(page, 'السلة المفتوحة')
++            audit(page, 'السلة المفتوحة', base)
+             page.locator('[data-cart-close]').click()
+             if width < 600:
+                 sticky = page.locator('[data-sticky-bar]')
+@@ -299,7 +305,7 @@ def run(base: str, path: str, browser_name: str, ignore_https: bool, screenshot_
+         page.goto(base + path + '?utm_campaign=estimate_test&utm_content=proof', wait_until='load')
+         page.wait_for_selector('#products .size-option input', state='attached')
+         page.locator('.serum-estimate-details summary').click()
+-        audit(page, 'التقدير المفتوح')
++        audit(page, 'التقدير المفتوح', base)
+         cases = [
+             (0, '30 مل', {'hama': {'shamcash':'$11.70', 'cod':'$15'}, 'other': {'shamcash':'$13.70', 'cod':'$15'}}),
+             (1, '50 مل', {'hama': {'shamcash':'$14.40', 'cod':'$18'}, 'other': {'shamcash':'$16.40', 'cod':'$18'}}),
+@@ -602,7 +608,7 @@ def run(base: str, path: str, browser_name: str, ignore_https: bool, screenshot_
+             check(f'{target_path}: عند رفض الحافظة يظهر نص كامل قابل للنسخ يدويًا',
+                   manual == expected and all(x in manual for x in ['50 مل', '$14.40', 'copy-test']) and
+                   page.evaluate("document.activeElement.hasAttribute('data-cart-copy-text')"))
+-            audit(page, f'{target_path}: بديل النسخ اليدوي')
++            audit(page, f'{target_path}: بديل النسخ اليدوي', base)
+             page.locator('[data-qty-increase="serum-50"]').click()
+             updated = page.locator('[data-cart-copy-text]').input_value()
+             check(f'{target_path}: تتحدث التفاصيل اليدوية بعد تعديل السلة',
+-- 
+2.39.5
+
