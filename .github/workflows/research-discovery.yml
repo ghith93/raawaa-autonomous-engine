@@ -11,6 +11,8 @@ on:
       - "scripts/publish_research_scan_telemetry.py"
       - "worker/mobile-status.js"
       - "scripts/triage_research_candidates.py"
+      - "scripts/benchmark_research_search.py"
+      - "config/research-search-benchmark-qrels.json"
       - "scripts/analyze_capability_gaps.py"
       - "worker/index.js"
       - "migrations/**"
@@ -62,6 +64,12 @@ jobs:
         run: python -m engine.cli research-discover --max-per-query 5 > research-candidates.json
       - name: Rank candidates for manual review
         run: python scripts/triage_research_candidates.py research-candidates.json > research-triage.json
+      - name: Benchmark Arabic and English search on the current public snapshot
+        run: >-
+          python scripts/benchmark_research_search.py --real-corpus
+          --input research-candidates.json
+          --qrels config/research-search-benchmark-qrels.json
+          --json > research-search-benchmark.json
       - name: Analyze capability gaps from repository baseline
         run: python scripts/analyze_capability_gaps.py research-triage.json . > capability-gaps.json
       - name: Verify zero-cost boundary before Staging research writes
@@ -83,6 +91,13 @@ jobs:
         with:
           name: research-triage-${{ github.run_id }}
           path: research-triage.json
+          if-no-files-found: error
+          retention-days: 30
+      - name: Upload reproducible real-corpus search benchmark
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: research-search-benchmark-\${{ github.run_id }}
+          path: research-search-benchmark.json
           if-no-files-found: error
           retention-days: 30
       - name: Upload deterministic capability gap report
