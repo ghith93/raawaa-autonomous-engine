@@ -211,9 +211,8 @@ class CloudflareZeroCostEffectWorkflowTests(unittest.TestCase):
         gate_step = source[gate_start:gate_end]
         self.assertIn("steps.cloudflare_credentials.outputs.available == 'true'", gate_step)
         self.assertIn("scripts/verify_cloudflare_zero_cost_boundary.py", gate_step)
-        block = source[source.index(gate):source.index(token)]
-        self.assertIn("scripts/verify_cloudflare_zero_cost_boundary.py", block)
-        self.assertNotIn("continue-on-error", block)
+        self.assertIn("scripts/verify_cloudflare_zero_cost_boundary.py", gate_step)
+        self.assertNotIn("continue-on-error", gate_step)
         self.assertNotIn("id-token: write", source)
         self.assertIn('RAAWAA_ENGINE_SUPABASE_FALLBACK_ZERO_COST_VERIFIED: "false"', source)
 
