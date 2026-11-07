@@ -299,13 +299,32 @@ recovery contract is deliberately narrow:
   credential *validation* step with the same shape — so neither proves the
   current workflow shape can succeed on the scheduled path.
 
-  Since the boundary currently reports `zone_read_all_zones_scope_unconfirmed`
-  (the absent `CLOUDFLARE_ZONE_READ_ALL_ZONES_CONFIRMED` repository variable),
-  the daily `47 3 * * *` slot will report that same blocker rather than
-  advancing the count. That is the gate working as designed, not a regression in
-  the probe: a scheduled failure here must not be read as "the cron is broken"
-  or as evidence against Runtime-004's probe implementation, and it must not be
-  worked around by removing or bypassing the check.
+  The boundary currently reports `zone_read_all_zones_scope_unconfirmed` (the
+  absent `CLOUDFLARE_ZONE_READ_ALL_ZONES_CONFIRMED` repository variable), so if
+  this workflow ran it would report that same blocker rather than advance the
+  count. A scheduled failure here must therefore not be read as a regression in
+  the probe, and must not be worked around by removing or bypassing the check.
+
+- **Corrected 2026-11-07: this trigger has never fired at its declared time.**
+  I first predicted the `47 3 * * *` slot would run and fail at the
+  attestation step. It did not run at all. Checking observance instead of
+  assuming: the cron has been `47 3 * * *` in every revision since it was
+  introduced (`92ac6144`, 2026-11-05T03:43:36Z), yet the only two runs that
+  exist fired at **2026-11-05T11:37:45Z** and **2026-11-06T11:35:10Z** — roughly
+  8 hours after the declared minute — and the 2026-11-07 slot produced no run
+  through 03:58 UTC. The workflow's own state is `active`.
+
+  So the honest statement is not "the next slot will fail on the gate". It is
+  **"the daily trigger's observance is itself unverified"**, and the arrival
+  times look the way the repository has already documented GitHub's best-effort
+  scheduled delivery behaving elsewhere (delayed or dropped under load), not
+  like a cron edit failing to register. Until a run appears on the current main
+  SHA, Runtime-004's second cycle is blocked by **trigger observance first** and
+  the zero-cost attestation second — both must hold, and neither can be inferred
+  from the other.
+
+  This also means the *previous* framing in this document — that the probe is
+  merely waiting for another daily slot — understated the problem.
 
   Consequence for sequencing: Runtime-004's remaining acceptance evidence cannot
   be produced until the zero-cost attestation question is resolved. Setting the
