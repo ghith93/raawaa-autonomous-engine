@@ -28,5 +28,15 @@ class TaskRunnerZeroCostGateTests(unittest.TestCase):
         self.assertIn("Billing preflight:", text)
 
 
+    def test_local_fake_executor_cycle_runs_before_remote_billing_gate(self):
+        text = (ROOT / ".github" / "workflows" / "task-runner.yml").read_text(encoding="utf-8")
+        local = text.index("Prove local scheduled task lifecycle with fake executor")
+        preflight = text.index("Verify Cloudflare zero-cost boundary")
+        self.assertLess(local, preflight)
+        block = text[local:text.index("\n      - name:", local + 1)]
+        self.assertIn("scripts/run_local_task_cycle.py", block)
+        self.assertIn("RAAWAA_ENGINE_DB:", block)
+
+
 if __name__ == "__main__":
     unittest.main()
