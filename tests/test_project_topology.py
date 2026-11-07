@@ -39,6 +39,17 @@ class ProjectTopologyTests(unittest.TestCase):
         self.assertIn("does not prove a live agent process", context["authority_note"])
         self.assertLessEqual(len(context["relationships"]), 20)
 
+    def test_evidence_lists_longer_than_prompt_cap_are_validated_then_truncated(self):
+        value = sample_map(nodes=[
+            {"id": "agent:researcher", "kind": "agent", "status": "declared_only",
+             "evidence": ["a", "b", "c", "d"]},
+            {"id": "component:alpha", "kind": "component", "status": "implemented",
+             "evidence": ["engine/alpha.py"]},
+        ], edges=[])
+        context = build_agent_topology_context("researcher", value)
+        self.assertEqual(context["status"], "available")
+        self.assertEqual(context["agent_node"]["evidence"], ["a", "b", "c"])
+
     def test_relationships_are_sorted_deterministically(self):
         context = build_agent_topology_context("researcher", sample_map())
         self.assertEqual(
