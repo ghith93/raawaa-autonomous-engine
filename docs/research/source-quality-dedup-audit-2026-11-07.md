@@ -5,9 +5,9 @@
 Offline audit only. No new discovery request, network call, model/provider call, cloning, installation, candidate lifecycle mutation, D1 operation, or remote write was performed.
 
 - Discovery run: [42326546406](https://github.com/ghith93/raawaa-autonomous-engine/actions/runs/42326546406), main snapshot timestamp `2026-11-07T01:55:00.360528+00:00`.
-- Candidate artifact: `research-candidates-42326546406`, artifact ID `13555796139`, GitHub artifact SHA-256 `d0378e84fd46a0e96d5b84735d7b7bef7c0e56e9a1f8e4c0696022810c880324`.
+- Candidate artifact: `research-candidates-42326546406`, artifact ID `13555796139`, GitHub artifact SHA-256 `0d9fcb21b42b3ef21894d7208606ce440dbc9133c02591beb30d0d027a8d0b85`.
 - Extracted JSON SHA-256: `b63903b1d8b03b3e2178334c99ff49b2206c25a829ddfa9dacf5491cb90a6141`.
-- Benchmark artifact: `research-search-benchmark-42326546406`, artifact ID `13555855983`, SHA-256 `d0378e84fd46a0e96d5b84735d7b7bef7c0e56e9a1f8e4c0696022810c880324` (artifact digest is recorded by Actions; candidate and benchmark artifacts have separate IDs/digests).
+- Benchmark artifact: `research-search-benchmark-42326546406`, artifact ID `13555855983`, GitHub artifact SHA-256 `d0378e84fd46a0e96d5b84735d7b7bef7c0e56e9a1f8e4c0696022810c880324`.
 - Qrels source: `config/research-search-benchmark-qrels.json` on main at the audited benchmark run.
 
 The discovery JSON declares 84 metadata records and contains exactly 64 GitHub repositories, 10 Crossref works, 10 arXiv works, and zero SearXNG records. Its `discovery_only` marker is true; 11 source requests are recorded.
