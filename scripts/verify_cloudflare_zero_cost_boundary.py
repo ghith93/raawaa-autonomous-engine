@@ -1,9 +1,8 @@
-"""Read-only, fail-closed Cloudflare billing guard for automatic Staging.
+"""Read-only, fail-closed Cloudflare Workers/D1 Staging cost preflight.
 
-Cloudflare documents Workers Free as the default and documents that Workers
-Free/D1 Free limits fail requests rather than converting excess use into paid
-usage. This guard only permits Staging when the complete account subscription
-inventory is positively verified to contain no active paid/unknown plan.
+Only a complete account subscription listing with no active paid, trial,
+awaiting-payment, unknown-state, or unknown-price subscription can allow the
+automatic Staging lifecycle. No account or billing data is printed.
 """
 from __future__ import annotations
 
@@ -14,14 +13,13 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
 from urllib.request import HTTPRedirectHandler, Request, build_opener
 
-USER_AGENT = "RaawaaAutonomousEngine-ZeroCostPreflight/2.0"
+USER_AGENT = "RaawaaAutonomousEngine-ZeroCostPreflight/1.1"
 MAX_RESPONSE_BYTES = 1024 * 1024
-PER_PAGE = 50
-MAX_PAGES = 100
-MAX_SUBSCRIPTIONS = PER_PAGE * MAX_PAGES
-ACTIVE_STATES = {"Trial", "Provisioned", "Paid", "AwaitingPayment"}
-INACTIVE_STATES = {"Cancelled", "Failed", "Expired"}
-ALL_STATES = ACTIVE_STATES | INACTIVE_STATES
+REQUESTED_PER_PAGE = 50
+MAX_PAGES = 20
+KNOWN_STATES = {"Trial", "Provisioned", "Paid", "AwaitingPayment", "Cancelled", "Failed", "Expired"}
+TERMINAL_STATES = {"Cancelled", "Failed", "Expired"}
+NON_PERMANENT_STATES = {"Trial", "AwaitingPayment", "Paid"}
 
 
 class _RejectRedirects(HTTPRedirectHandler):
@@ -29,119 +27,132 @@ class _RejectRedirects(HTTPRedirectHandler):
         raise HTTPError(req.full_url, code, "billing redirects are disabled", headers, fp)
 
 
-def _invalid(reason: str) -> dict:
-    return {"eligible": False, "reason": reason, "active_paid_subscriptions": None}
+def _ineligible(reason: str, active_paid_subscriptions=None) -> dict:
+    return {
+        "eligible": False,
+        "reason": reason,
+        "active_paid_subscriptions": active_paid_subscriptions,
+    }
 
 
-def _nonnegative_finite_number(value) -> bool:
-    return (
-        isinstance(value, (int, float))
-        and not isinstance(value, bool)
-        and math.isfinite(value)
-        and value >= 0
-    )
+def assess_subscriptions(payload: dict) -> dict:
+    if not isinstance(payload, dict) or payload.get("success") is not True:
+        return _ineligible("invalid_billing_response")
+    subscriptions = payload.get("result")
+    info = payload.get("result_info")
+    if not isinstance(subscriptions, list) or not isinstance(info, dict):
+        return _ineligible("subscription_list_incomplete")
+    total = info.get("total_count")
+    if not isinstance(total, int) or isinstance(total, bool) or total < 0 or total != len(subscriptions):
+        return _ineligible("subscription_list_incomplete")
+    if any(not isinstance(item, dict) for item in subscriptions):
+        return _ineligible("invalid_subscription_record")
 
-
-def assess_subscriptions(subscriptions: list) -> dict:
-    if not isinstance(subscriptions, list):
-        return _invalid("invalid_subscription_list")
-    paid = 0
-    unknown = 0
+    paid_count = 0
     for item in subscriptions:
-        if not isinstance(item, dict):
-            return _invalid("invalid_subscription_record")
         state = item.get("state")
-        if state not in ALL_STATES:
-            return _invalid("unknown_subscription_state")
-        if state in INACTIVE_STATES:
+        if state not in KNOWN_STATES:
+            return _ineligible("active_subscription_state_unknown", paid_count)
+        if state in TERMINAL_STATES:
             continue
         price = item.get("price")
-        if not _nonnegative_finite_number(price):
-            return _invalid("invalid_subscription_price")
-        plan = item.get("rate_plan")
-        if not isinstance(plan, dict) or not isinstance(plan.get("id"), str) or not plan["id"]:
-            return _invalid("unknown_subscription_plan")
-        if price > 0:
-            paid += 1
-        elif plan["id"].lower() != "free":
-            unknown += 1
-    if paid:
-        return {"eligible": False, "reason": "active_paid_subscription_present",
-                "active_paid_subscriptions": paid}
-    if unknown:
-        return _invalid("active_zero_price_nonfree_plan")
-    return {"eligible": True, "reason": "no_active_paid_subscriptions",
-            "active_paid_subscriptions": 0}
+        if (
+            not isinstance(price, (int, float))
+            or isinstance(price, bool)
+            or not math.isfinite(price)
+            or price < 0
+        ):
+            return _ineligible("active_subscription_price_unknown", paid_count)
+        if state == "Paid" or price > 0:
+            paid_count += 1
+            return _ineligible("active_paid_subscription_present", paid_count)
+        if state in NON_PERMANENT_STATES:
+            return _ineligible("active_subscription_state_not_permanent_free", paid_count)
+        # The only active state accepted is Provisioned with an explicit $0 price.
+
+    return {
+        "eligible": True,
+        "reason": "no_active_paid_subscriptions",
+        "active_paid_subscriptions": paid_count,
+    }
 
 
-def _read_page(account_id: str, token: str, page: int, opener, timeout: int) -> tuple[list, dict]:
-    query = urlencode({"page": page, "per_page": PER_PAGE})
+def _read_subscription_page(account_id: str, token: str, page: int, opener, timeout: int) -> dict:
+    query = urlencode({"page": page, "per_page": REQUESTED_PER_PAGE})
     request = Request(
         f"https://api.cloudflare.com/client/v4/accounts/{account_id}/subscriptions?{query}",
-        headers={"Authorization": "Bearer " + token, "Accept": "application/json",
-                 "User-Agent": USER_AGENT},
+        headers={
+            "Authorization": "Bearer " + token,
+            "Accept": "application/json",
+            "User-Agent": USER_AGENT,
+        },
         method="GET",
     )
     with opener(request, timeout=timeout) as response:
         if response.status != 200:
-            raise ValueError("billing_api_unavailable")
+            raise OSError("billing_api_unavailable")
         raw = response.read(MAX_RESPONSE_BYTES + 1)
-    if len(raw) > MAX_RESPONSE_BYTES:
-        raise ValueError("billing_response_too_large")
-    payload = json.loads(raw.decode("utf-8"))
-    if not isinstance(payload, dict) or payload.get("success") is not True:
-        raise ValueError("invalid_billing_response")
-    records = payload.get("result")
-    info = payload.get("result_info")
-    if not isinstance(records, list) or not isinstance(info, dict):
-        raise ValueError("missing_pagination_metadata")
-    count, current_page = info.get("count"), info.get("page")
-    per_page, total = info.get("per_page"), info.get("total_count")
-    values = (count, current_page, per_page, total)
-    if any(not isinstance(v, int) or isinstance(v, bool) for v in values):
-        raise ValueError("invalid_pagination_metadata")
-    if current_page != page or per_page < 1 or per_page > PER_PAGE:
-        raise ValueError("invalid_pagination_metadata")
-    if count != len(records) or count > per_page or total < count or total > MAX_SUBSCRIPTIONS:
-        raise ValueError("incomplete_subscription_page")
-    return records, info
+        if len(raw) > MAX_RESPONSE_BYTES:
+            raise ValueError("billing_response_too_large")
+        return json.loads(raw.decode("utf-8"))
 
 
-def fetch_all_subscriptions(account_id: str, token: str, opener=None, timeout: int = 15) -> list:
-    if not account_id or not token:
-        raise ValueError("billing_credentials_missing")
-    open_request = opener or build_opener(_RejectRedirects).open
+def _read_all_subscriptions(account_id: str, token: str, opener, timeout: int) -> dict:
     collected = []
     expected_total = None
     expected_per_page = None
+
     for page in range(1, MAX_PAGES + 1):
-        records, info = _read_page(account_id, token, page, open_request, timeout)
+        payload = _read_subscription_page(account_id, token, page, opener, timeout)
+        if not isinstance(payload, dict) or payload.get("success") is not True:
+            return _ineligible("invalid_billing_response")
+        items = payload.get("result")
+        info = payload.get("result_info")
+        if not isinstance(items, list) or not isinstance(info, dict):
+            return _ineligible("subscription_list_incomplete")
+        page_number = info.get("page")
+        per_page = info.get("per_page")
+        total = info.get("total_count")
+        if (
+            not isinstance(page_number, int) or isinstance(page_number, bool) or page_number != page
+            or not isinstance(per_page, int) or isinstance(per_page, bool) or per_page < 1
+            or per_page > REQUESTED_PER_PAGE
+            or not isinstance(total, int) or isinstance(total, bool) or total < 0
+        ):
+            return _ineligible("subscription_pagination_metadata_invalid")
         if expected_total is None:
-            expected_total = info["total_count"]
-            expected_per_page = info["per_page"]
-        elif info["total_count"] != expected_total or info["per_page"] != expected_per_page:
-            raise ValueError("subscription_inventory_changed_during_pagination")
-        seen_ids = {item.get("id") for item in collected if isinstance(item, dict)}
-        for item in records:
-            subscription_id = item.get("id") if isinstance(item, dict) else None
-            if not isinstance(subscription_id, str) or not subscription_id or subscription_id in seen_ids:
-                raise ValueError("missing_or_duplicate_subscription_id")
-            seen_ids.add(subscription_id)
-        collected.extend(records)
+            expected_total = total
+            expected_per_page = per_page
+        elif total != expected_total or per_page != expected_per_page:
+            return _ineligible("subscription_pagination_changed")
+        if len(items) > per_page:
+            return _ineligible("subscription_page_oversized")
+        expected_page_size = min(per_page, max(0, expected_total - len(collected)))
+        if len(items) != expected_page_size:
+            return _ineligible("subscription_page_incomplete")
+        collected.extend(items)
         if len(collected) == expected_total:
-            return collected
-        if len(collected) > expected_total or not records:
-            raise ValueError("incomplete_subscription_inventory")
-    raise ValueError("subscription_inventory_page_limit_exceeded")
+            return assess_subscriptions({
+                "success": True,
+                "result": collected,
+                "result_info": {"total_count": len(collected)},
+            })
+        if page == MAX_PAGES:
+            return _ineligible("subscription_list_exceeds_safety_bound")
+        if not items:
+            return _ineligible("subscription_list_incomplete")
+
+    return _ineligible("subscription_list_incomplete")
 
 
 def check_boundary(account_id: str, token: str, opener=None, timeout: int = 15) -> dict:
+    if not account_id or not token:
+        return _ineligible("billing_credentials_missing")
+    open_request = opener or build_opener(_RejectRedirects).open
     try:
-        subscriptions = fetch_all_subscriptions(account_id, token, opener=opener, timeout=timeout)
-        return assess_subscriptions(subscriptions)
-    except (HTTPError, URLError, TimeoutError, OSError, ValueError,
-            json.JSONDecodeError, UnicodeDecodeError):
-        return _invalid("billing_inventory_unavailable_or_incomplete")
+        return _read_all_subscriptions(account_id, token, open_request, timeout)
+    except (HTTPError, URLError, TimeoutError, OSError, ValueError, json.JSONDecodeError, UnicodeDecodeError):
+        return _ineligible("billing_api_unavailable")
 
 
 def main() -> int:
