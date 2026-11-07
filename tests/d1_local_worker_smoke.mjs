@@ -471,6 +471,20 @@ try {
     idempotency_key: "d1-local-integration-smoke",
     max_attempts: 1,
   };
+  // Simulate an inconsistent pending row at its attempt cap; neither exact nor
+  // generic claiming may create an extra attempt or starve eligible work.
+  const cappedTask = await api("/v1/tasks/enqueue", { method: "POST", body: {
+    task_type: "system_audit", title: "Capped attempt fixture", payload: {},
+    idempotency_key: "local-capped-attempt", max_attempts: 1, priority: 100,
+  } });
+  assertStatus(cappedTask, 201, "enqueue capped local fixture");
+  const cappedId = cappedTask.payload.task.id;
+  assert.match(cappedId, /^[A-Za-z0-9_-]+$/);
+  executeLocalSql("UPDATE tasks SET attempts=max_attempts WHERE id='" + cappedId + "'");
+  const cappedExact = await api(`/v1/tasks/${cappedId}/claim-exact`, { method: "POST", body: {} });
+  assertStatus(cappedExact, 200, "exact claim on capped task");
+  assert.equal(cappedExact.payload.task, null);
+
   const enqueued = await api("/v1/tasks/enqueue", { method: "POST", body: taskPayload });
   assertStatus(enqueued, 201, "task enqueue");
   const duplicate = await api("/v1/tasks/enqueue", { method: "POST", body: taskPayload });
@@ -504,6 +518,11 @@ try {
   });
   assertStatus(claimed, 200, "task claim");
   assert.equal(claimed.payload.task.id, enqueued.payload.task.id);
+  const cappedRow = queryLocalSql("SELECT status,attempts,max_attempts FROM tasks WHERE id='" + cappedId + "'")[0];
+  assert.deepEqual([cappedRow.status, cappedRow.attempts, cappedRow.max_attempts], ["pending", 1, 1]);
+  const cappedClaims = queryLocalSql("SELECT COUNT(*) AS n FROM audit_log WHERE task_id='" + cappedId + "' AND event='task_claimed'");
+  assert.equal(cappedClaims[0].n, 0, "capped task must have no claim audit");
+
   assert.equal(typeof claimed.payload.lease_token, "string");
   assert.equal(claimed.payload.task.execution_mode, "dry_run");
 

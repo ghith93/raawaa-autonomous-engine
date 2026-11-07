@@ -102,6 +102,21 @@ class TaskStoreTests(unittest.TestCase):
         self.assertEqual(sum(row is not None for row in results), 1)
         self.assertEqual(self.store.list_tasks()[0]["attempts"], 1)
 
+    def test_generic_claim_never_exceeds_attempt_budget_or_blocks_other_work(self):
+        exhausted = self.store.enqueue("research_brief", "Exhausted", priority=100, max_attempts=1)
+        available = self.store.enqueue("research_brief", "Available", priority=10)
+        with self.store._connect() as db:
+            db.execute("UPDATE tasks SET attempts=max_attempts WHERE id=?", (exhausted["id"],))
+        claim = self.store.claim_next(execution_mode="dry_run")
+        self.assertEqual(claim["id"], available["id"])
+        self.assertEqual(claim["attempts"], 1)
+        self.assertIsNone(self.store.claim_exact(exhausted["id"]))
+        self.assertIsNone(self.store.claim_next(execution_mode="dry_run"))
+        row = next(t for t in self.store.list_tasks() if t["id"] == exhausted["id"])
+        self.assertEqual((row["status"], row["attempts"]), ("pending", 1))
+        self.assertFalse(any(event["task_id"] == exhausted["id"] and event["event"] == "task_claimed"
+                             for event in self.store.audit_events()))
+
     def test_worker_processes_safe_task_as_dry_run(self):
         self.store.enqueue("research_brief", "Test task", {"topic": "agent frameworks"})
         result = run_once(self.store)
