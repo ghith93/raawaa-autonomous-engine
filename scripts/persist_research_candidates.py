@@ -186,8 +186,14 @@ def persist_candidates(snapshot: dict, environ=None, request_fn=None, batch_size
         expected = [_candidate_key(item) for item in batch]
         readback = verify(base_url, token, expected, access_id, access_secret)
         found = readback.get("matched_keys") if isinstance(readback, dict) else None
-        if not isinstance(found, list) or set(found) != set(expected):
-            raise ResearchPersistenceError("research D1 exact-key readback did not confirm every submitted candidate")
+        if (
+            not isinstance(found, list)
+            or any(not isinstance(key, str) for key in found)
+            or len(found) != len(expected)
+            or len(set(found)) != len(found)
+            or set(found) != set(expected)
+        ):
+            raise ResearchPersistenceError("research D1 exact-key readback did not confirm every submitted candidate exactly once")
         persisted += accepted
         verified += len(expected)
         batches += 1
