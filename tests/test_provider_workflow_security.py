@@ -225,29 +225,65 @@ class CloudflareZeroCostEffectWorkflowTests(unittest.TestCase):
     def test_control_worker_deployment_requires_zero_cost_preflight(self):
         self._assert_gate_precedes(
             ".github/workflows/deploy-worker.yml",
-            "name: Verify Cloudflare zero-cost boundary",
+            "name: Verify Cloudflare zero-cost boundary before control Worker deployment",
             [
-                "name: Run Staging D1 migrations",
-                "name: Deploy authenticated Control Worker to Staging",
+                "name: Refuse to deploy with an unapplied migration",
+                "name: Deploy authenticated D1 control Worker",
             ],
         )
 
     def test_issue_comment_ingest_requires_zero_cost_preflight_before_post(self):
-        self._assert_gate_precedes(
-            ".github/workflows/issue-comment-ingest.yml",
-            "name: Verify Cloudflare zero-cost boundary",
-            ["run: python3 scripts/github_comment_ingest.py --post"],
-        )
+        path = ".github/workflows/issue-comment-ingest.yml"
+        source = (ROOT / path).read_text(encoding="utf-8")
+        gate = "name: Verify Cloudflare zero-cost boundary"
+        validate = "name: Validate comment without enqueue when billing is unverified"
+        enqueue = "name: Plan and enqueue from comment"
+        self.assertLess(source.index(gate), source.index(validate))
+        self.assertLess(source.index(validate), source.index(enqueue))
+        gate_at = source.index(gate)
+        gate_start = source.rfind("      - name:", 0, gate_at + len(gate))
+        gate_end = source.find("      - name:", gate_start + 1)
+        gate_step = source[gate_start:gate_end]
+        self.assertIn("scripts/verify_cloudflare_zero_cost_boundary.py", gate_step)
+        self.assertIn("continue-on-error: true", gate_step)
+        validate_at = source.index(validate)
+        validate_start = source.rfind("      - name:", 0, validate_at + len(validate))
+        validate_end = source.find("      - name:", validate_start + 1)
+        validate_step = source[validate_start:validate_end]
+        self.assertIn("steps.ingest_zero_cost_preflight.outcome != 'success'", validate_step)
+        self.assertIn("steps.ingest_zero_cost_preflight.outputs.zero_cost_eligible != 'true'", validate_step)
+        enqueue_at = source.index(enqueue)
+        enqueue_start = source.rfind("      - name:", 0, enqueue_at + len(enqueue))
+        enqueue_end = source.find("      - name:", enqueue_start + 1)
+        enqueue_step = source[enqueue_start:enqueue_end]
+        self.assertIn("steps.ingest_zero_cost_preflight.outcome == 'success'", enqueue_step)
+        self.assertIn("steps.ingest_zero_cost_preflight.outputs.zero_cost_eligible == 'true'", enqueue_step)
+        self.assertIn("run: python3 scripts/github_comment_ingest.py --post", enqueue_step)
 
     def test_task_runner_requires_zero_cost_preflight_before_authenticated_post(self):
-        self._assert_gate_precedes(
-            ".github/workflows/task-runner.yml",
-            "name: Verify Cloudflare zero-cost boundary",
-            [
-                "name: Verify authenticated POST path before task operations",
-                "name: Run bounded Staging task batch",
-            ],
-        )
+        path = ".github/workflows/task-runner.yml"
+        source = (ROOT / path).read_text(encoding="utf-8")
+        gate = "name: Verify Cloudflare zero-cost boundary"
+        effects = [
+            "name: Diagnose public Worker health path",
+            "name: Verify authenticated POST path before task operations",
+            "name: Read D1-backed mobile status (read-only)",
+            "name: Process bounded D1 task batch",
+        ]
+        gate_at = source.index(gate)
+        gate_start = source.rfind("      - name:", 0, gate_at + len(gate))
+        gate_end = source.find("      - name:", gate_start + 1)
+        gate_step = source[gate_start:gate_end]
+        self.assertIn("scripts/verify_cloudflare_zero_cost_boundary.py", gate_step)
+        self.assertIn("continue-on-error: true", gate_step)
+        for effect in effects:
+            effect_at = source.index(effect)
+            self.assertLess(gate_at, effect_at)
+            effect_start = source.rfind("      - name:", 0, effect_at + len(effect))
+            effect_end = source.find("      - name:", effect_start + 1)
+            effect_step = source[effect_start:effect_end]
+            self.assertIn("steps.task_zero_cost_preflight.outcome == 'success'", effect_step)
+            self.assertIn("steps.task_zero_cost_preflight.outputs.zero_cost_eligible == 'true'", effect_step)
 
     def test_workers_ai_image_generation_requires_zero_cost_preflight(self):
         self._assert_gate_precedes(
