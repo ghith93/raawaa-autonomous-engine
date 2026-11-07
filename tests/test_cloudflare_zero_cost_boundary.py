@@ -113,6 +113,24 @@ class ZeroCostBoundaryTests(unittest.TestCase):
         self.assertEqual(parse_qs(urlparse(seen[1][0].full_url).query), {"page": ["2"], "per_page": ["50"]})
         self.assertEqual(seen[0][0].get_header("Authorization"), "Bearer synthetic-token")
 
+    def test_integral_numeric_pagination_metadata_accepts_cloudflare_number_schema(self):
+        record = {"id": "sub-cancelled", "state": "Cancelled"}
+        payload = page([record], number=1, total=1, per_page=50)
+        payload["result_info"] = {key: float(value) for key, value in payload["result_info"].items()}
+
+        class Response:
+            status = 200
+            def __enter__(self): return self
+            def __exit__(self, *args): return False
+            def read(self, limit): return json.dumps(payload).encode()
+
+        result = check_boundary(
+            "synthetic-account", "synthetic-token",
+            opener=lambda request, timeout: Response(),
+        )
+        self.assertTrue(result["eligible"])
+        self.assertEqual(result["reason"], "no_active_paid_subscriptions")
+
     def test_partial_nonfinal_page_fails_closed(self):
         partial = page(
             [{"id": f"sub-{index}", "state": "Cancelled"} for index in range(49)],
