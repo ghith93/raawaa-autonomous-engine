@@ -21,11 +21,16 @@ jobs:
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 2
-    env:
-      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
     steps:
+      - name: Check out the exact reviewed revision
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
       - name: Validate billing inventory credentials
+        env:
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
         shell: bash
         run: |
           set -euo pipefail
@@ -34,6 +39,9 @@ jobs:
           echo "Required secret names are present; values are not printed."
 
       - name: Read Cloudflare billing controls without mutation
+        env:
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
         shell: bash
         run: |
           set -euo pipefail
@@ -112,6 +120,10 @@ jobs:
               summary["active_paid_subscription_count"] = len(paid)
 
           print(json.dumps(summary, indent=2))
+          # Only fixed numeric statuses and booleans are published as a check
+          # annotation; no raw billing data, account identifiers or secrets.
+          from scripts.billing_audit_annotation import build_annotation
+          print(build_annotation(summary))
           PY
 
           if [ "$subscriptions_status" != "200" ]; then
