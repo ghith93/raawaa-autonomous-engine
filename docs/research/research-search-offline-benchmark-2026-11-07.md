@@ -61,3 +61,15 @@ The daily discovery workflow now runs a second benchmark against the current `re
 Relevance labels are manually curated from public metadata and are not exhaustive ground truth. Arabic keywords are editorial aliases attached only to labelled candidates; this measures cross-language metadata retrieval with a controlled vocabulary, not automatic translation. The report records per-query label coverage so a changing daily corpus cannot silently look complete when relevant candidates are absent. Reports are uploaded as 30-day workflow artifacts.
 
 A local exploratory run on discovery snapshot #42317405323 (61 records: 41 GitHub, 10 Crossref, 10 arXiv; 20 queries) showed that strict AND matching was too restrictive. Weighted OR/BM25 materially improved recall and ranking on this small labelled set. These exploratory numbers are not production claims and do not establish D1 FTS5 parity or latency. The next step is to review the first scheduled benchmark artifacts and refine labels from observed misses before changing any production search endpoint.
+
+
+## Benchmark interpretation correction — source-native versus alias-assisted
+
+The first workflow artifact (#42324442467) measured the alias-assisted track only: editorial Arabic terms were added to candidates selected by the same qrels. This is a useful controlled vocabulary experiment, but it is label-conditioned and is **not** evidence that source-native metadata supports Arabic queries.
+
+The benchmark now reports two separate tracks for every retrieval method, with overall, English-only and Arabic-only metrics:
+
+- **Source-native:** indexes only titles and metadata actually present in the GitHub/Crossref/arXiv/SearXNG snapshot. No Arabic aliases are injected. This is the honest baseline for current native multilingual retrieval.
+- **Alias-assisted:** adds the editorial Arabic vocabulary to labelled candidates. This measures the potential gain from a future curated synonym/translation metadata layer. It is not native Arabic retrieval and must never be merged into the source-native score.
+
+The earlier artifact's FTS5 OR/BM25 figures (P@10 0.38, R@20 0.9079, MRR@10 0.9042 at 76.27% label coverage) should be read as alias-assisted only. The next artifact will expose both tracks side by side. Do not change a production endpoint based on the alias-assisted result alone.
