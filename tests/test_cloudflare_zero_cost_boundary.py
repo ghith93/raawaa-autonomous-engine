@@ -15,7 +15,7 @@ from scripts.verify_cloudflare_zero_cost_boundary import (
 )
 
 
-def page(records, number=1, total=None, per_page=50):
+def page(records, number=1, total=None, per_page=1000):
     return {
         "success": True,
         "result": records,
@@ -109,8 +109,8 @@ class ZeroCostBoundaryTests(unittest.TestCase):
         self.assertEqual(result["reason"], "no_active_paid_subscriptions")
         self.assertTrue(result["eligible"])
         self.assertEqual(len(seen), 2)
-        self.assertEqual(parse_qs(urlparse(seen[0][0].full_url).query), {"page": ["1"], "per_page": ["50"]})
-        self.assertEqual(parse_qs(urlparse(seen[1][0].full_url).query), {"page": ["2"], "per_page": ["50"]})
+        self.assertEqual(parse_qs(urlparse(seen[0][0].full_url).query), {"page": ["1"], "per_page": ["1000"]})
+        self.assertEqual(parse_qs(urlparse(seen[1][0].full_url).query), {"page": ["2"], "per_page": ["1000"]})
         self.assertEqual(seen[0][0].get_header("Authorization"), "Bearer synthetic-token")
 
     def test_partial_nonfinal_page_fails_closed(self):
