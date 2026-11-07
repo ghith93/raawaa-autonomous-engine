@@ -44,6 +44,7 @@ jobs:
             block = next((content for name, content in job_blocks(workflow) if name == job), "")
             self.assertIn("github.ref == 'refs/heads/main'", block)
             self.assertIn("github.event_name == 'push'", block)
+            self.assertIn("github.event_name == 'schedule'", block)
             self.assertNotIn("workflow_dispatch", block)
             needs_line = next(line for line in block.splitlines() if "needs:" in line)
             self.assertIn("zero_cost_preflight", needs_line)
