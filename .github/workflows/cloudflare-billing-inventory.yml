@@ -5,6 +5,7 @@ on:
     branches: [main]
     paths:
       - ".github/workflows/cloudflare-billing-inventory.yml"
+      - "scripts/verify_cloudflare_zero_cost_boundary.py"
       - "config/policy.json"
       - "docs/operations.md"
   workflow_dispatch:
@@ -126,6 +127,20 @@ jobs:
           print(build_annotation(summary))
           PY
 
+      - name: Evaluate complete subscription inventory with fail-closed zero-cost parser
+        env:
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: python scripts/verify_cloudflare_zero_cost_boundary.py
+
+      - name: Enforce billing inventory read outcomes
+        shell: bash
+        run: |
+          echo "Billing inventory parser completed; raw API diagnostics remain in the prior step."
+
+      - name: Existing inventory checks
+        shell: bash
+        run: |
           if [ "$subscriptions_status" != "200" ]; then
             echo "Cloudflare subscription inventory is unavailable; Billing Read access is not verified."
             exit 1
