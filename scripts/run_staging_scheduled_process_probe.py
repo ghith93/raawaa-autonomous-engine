@@ -1,9 +1,10 @@
 """Run one exact, read-only supervised task on the Staging queue from Cron only.
 
 The primary is the isolated Cloudflare Staging queue. A narrowly scoped,
-GitHub-OIDC-authenticated Supabase Free queue is used only when Cloudflare is
-unavailable or the Staging token could not be installed. Neither backend can
-claim an unrelated task; the fallback is not a general-purpose engine queue.
+GitHub-OIDC-authenticated Supabase queue is available only when the explicit
+RAAWAA_ENGINE_SUPABASE_FALLBACK_ZERO_COST_VERIFIED flag is true. The workflow
+keeps that flag false until the Supabase account's Free plan and hard-stop are
+independently verified. Neither backend can claim an unrelated task.
 """
 from __future__ import annotations
 
@@ -305,6 +306,12 @@ def run_scheduled_probe(
             primary_failure = _safe_failure_detail(exc) or "Cloudflare Staging API unavailable"
     else:
         primary_failure = "Cloudflare Staging token installation unavailable; primary queue skipped"
+
+    if env.get("RAAWAA_ENGINE_SUPABASE_FALLBACK_ZERO_COST_VERIFIED", "").strip().lower() != "true":
+        raise ScheduledProbeError(
+            f"{primary_failure or 'Cloudflare Staging API unavailable'}; "
+            "Supabase fallback disabled because zero-cost eligibility is not verified"
+        )
 
     if fallback_store is None:
         try:
