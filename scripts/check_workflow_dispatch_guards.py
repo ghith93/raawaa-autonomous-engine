@@ -269,7 +269,7 @@ STAGING_EFFECT_JOBS: tuple[str, ...] = (
 
 
 def staging_gate_violations(path: str, content: str) -> list[str]:
-    """Require automatic main-push Staging operations and explicit manual opt-in."""
+    """Require automatic main-push Staging only after a read-only zero-cost preflight."""
     if Path(path).name != "ci.yml":
         return []
     violations: list[str] = []
@@ -278,6 +278,14 @@ def staging_gate_violations(path: str, content: str) -> list[str]:
     if "        default: false" not in content:
         violations.append(f"{path}: enable_staging_operations must default to false")
     blocks = dict(job_blocks(content))
+    preflight = blocks.get("zero_cost_preflight", "")
+    if not preflight:
+        violations.append(f"{path}: read-only zero_cost_preflight job is required")
+    else:
+        if "scripts/verify_cloudflare_zero_cost_boundary.py" not in preflight:
+            violations.append(f"{path}: zero_cost_preflight must verify Cloudflare subscriptions")
+        if "outputs:" not in preflight or "zero_cost_eligible:" not in preflight:
+            violations.append(f"{path}: zero_cost_preflight must publish a bounded eligibility output")
     for job_name in STAGING_EFFECT_JOBS:
         block = blocks.get(job_name, "")
         if not block:
@@ -289,6 +297,10 @@ def staging_gate_violations(path: str, content: str) -> list[str]:
             violations.append(f"{path}: Staging job '{job_name}' lacks explicit opt-in for manual dispatch")
         if "github.ref == 'refs/heads/main'" not in block:
             violations.append(f"{path}: Staging job '{job_name}' is not restricted to main")
+        if "zero_cost_preflight" not in block.splitlines()[1]:
+            violations.append(f"{path}: Staging job '{job_name}' must depend on zero_cost_preflight")
+        if "needs.zero_cost_preflight.outputs.zero_cost_eligible == 'true'" not in block:
+            violations.append(f"{path}: Staging job '{job_name}' lacks the zero-cost eligibility gate")
     return violations
 
 
@@ -377,7 +389,7 @@ def main() -> int:
         return 1
     print("All secret-bearing workflow_dispatch and push/PR jobs are restricted to refs/heads/main.")
     print("No production-class workflow exposes a manual dispatch trigger.")
-    print("Staging D1 writes/deploys require an explicit workflow_dispatch opt-in; main pushes are read-only.")
+    print("Main pushes run Staging automatically only when the read-only zero-cost preflight confirms no active paid subscription; manual dispatch also requires explicit opt-in.")
     return 0
 
 
