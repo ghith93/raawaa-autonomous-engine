@@ -14,6 +14,16 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class WorkflowDispatchGuardTests(unittest.TestCase):
+    def test_cli_does_not_claim_main_pushes_are_read_only(self):
+        import contextlib
+        import io
+        from unittest.mock import patch
+        out = io.StringIO()
+        with patch("sys.argv", ["check_workflow_dispatch_guards.py"]), contextlib.redirect_stdout(out):
+            self.assertEqual(check.main(), 0)
+        self.assertIn("main pushes may run Staging writes and deployment", out.getvalue())
+        self.assertNotIn("main pushes are read-only", out.getvalue())
+
     def test_secret_dispatch_job_requires_main_ref(self):
         content = """on:
   workflow_dispatch:
