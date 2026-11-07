@@ -113,6 +113,12 @@ jobs:
         with:
           node-version: "22"
 
+      - name: Verify Cloudflare zero-cost boundary before storefront deployment
+        env:
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: python scripts/verify_cloudflare_zero_cost_boundary.py
+
       - name: Publish Brand-Only Pages URL & Retire Legacy Worker Subdomain
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
