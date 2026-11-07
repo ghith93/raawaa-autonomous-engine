@@ -16,7 +16,9 @@ permissions:
 
 concurrency:
   group: engine-ci-${{ github.ref }}
-  cancel-in-progress: true
+  # Cancel superseded PR checks, but never interrupt main/scheduled CI midway
+  # through its read-only billing preflight or an eligible Staging lifecycle.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   test:
