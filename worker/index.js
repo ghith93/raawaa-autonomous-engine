@@ -33,6 +33,8 @@ const REQUIRED_SCHEMA_TABLES = Object.freeze([
   "task_model_invocations",
   "task_process_dispatches",
   "workflow_runs",
+  "research_ingest_batches",
+  "research_ingest_events",
 ]);
 
 async function schemaProbe(env) {
