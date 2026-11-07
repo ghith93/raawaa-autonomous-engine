@@ -297,7 +297,7 @@ def staging_gate_violations(path: str, content: str) -> list[str]:
             violations.append(f"{path}: Staging job '{job_name}' lacks explicit opt-in for manual dispatch")
         if "github.ref == 'refs/heads/main'" not in block:
             violations.append(f"{path}: Staging job '{job_name}' is not restricted to main")
-        if "zero_cost_preflight" not in block.splitlines()[1]:
+        if not any("needs:" in line and "zero_cost_preflight" in line for line in block.splitlines()):
             violations.append(f"{path}: Staging job '{job_name}' must depend on zero_cost_preflight")
         if "needs.zero_cost_preflight.outputs.zero_cost_eligible == 'true'" not in block:
             violations.append(f"{path}: Staging job '{job_name}' lacks the zero-cost eligibility gate")
