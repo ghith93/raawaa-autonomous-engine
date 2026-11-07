@@ -104,7 +104,7 @@ class ProviderWorkflowSecurityTests(unittest.TestCase):
         start = source.index(marker)
         end = source.index("\n  staging-mobile-status-verify:", start)
         job = source[start:end]
-        self.assertIn("needs: [test, staging-migrate, staging-worker-verify]", job)
+        self.assertIn("needs: [test, staging-migrate, staging-worker-verify, zero_cost_preflight]", job)
         self.assertIn("github.event_name == 'push'", job)
         self.assertIn("github.event_name == 'workflow_dispatch' && inputs.enable_staging_operations == true", job)
         self.assertIn("github.ref == 'refs/heads/main'", job)
@@ -120,6 +120,7 @@ class ProviderWorkflowSecurityTests(unittest.TestCase):
     def test_staging_mobile_status_verification_uses_only_ephemeral_token(self):
         workflow = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
         verify = workflow.split("  staging-mobile-status-verify:", 1)[1]
+        self.assertIn("needs.zero_cost_preflight.outputs.zero_cost_eligible == 'true'", verify)
         self.assertIn("needs.publish-staging-ops-telemetry.result == 'success'", verify)
         self.assertIn("needs.staging-worker-verify.result == 'success'", verify)
         self.assertIn("secret put ENGINE_API_TOKEN", verify)
