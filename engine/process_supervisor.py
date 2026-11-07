@@ -230,7 +230,20 @@ def _utc_now() -> str:
 
 
 def _dispatch_outcome(classification: str, executed: Mapping[str, Any] | None = None) -> dict[str, Any]:
-    """Build the versioned remote-safe outcome fields; no missing value implies success."""
+    """Build the versioned remote-safe outcome fields; no missing value implies success.
+
+    The field set is a **published wire contract**: the Worker
+    (``worker/task-process-dispatches.js``) accepts an outcome only when it has
+    exactly these keys, and refuses the settle otherwise. Adding a local field
+    here therefore does not degrade gracefully -- it makes every remote settle
+    fail as ``ambiguous``. Measured, not guessed: adding two keys here produced
+    ``dispatch_settle_failed:DispatchLedgerError`` on the D1 smoke test.
+
+    So this stays pinned to the ten fields the deployed Worker validates. New
+    supervision facts live on ``ProcessOutcome``, which is local, and cross this
+    boundary only with a Worker change and a new outcome version -- a separate
+    PR with its own review.
+    """
     source = executed or {}
     return {
         "classification": classification,
@@ -243,8 +256,6 @@ def _dispatch_outcome(classification: str, executed: Mapping[str, Any] | None = 
         "stderr": source.get("stderr", "") if isinstance(source.get("stderr", ""), str) else "",
         "duration_seconds": round(float(source.get("duration_seconds", 0.0)), 3),
         "descendants_killed": int(source.get("descendants_killed", 0)),
-        "descendants_escaped": int(source.get("descendants_escaped", 0)),
-        "subreaper_enabled": bool(source.get("subreaper_enabled", False)),
     }
 
 

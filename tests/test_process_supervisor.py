@@ -293,6 +293,34 @@ class RegistryConfigurationTests(unittest.TestCase):
             self.assertTrue(entry["purpose"])
 
 
+class WireContractTests(unittest.TestCase):
+    """The remote outcome is a published contract, not a local dict."""
+
+    def test_the_remote_outcome_has_exactly_the_published_fields(self):
+        from engine.process_supervisor import _dispatch_outcome
+        from engine.remote_process_dispatch_ledger import OUTCOME_FIELDS
+
+        governed = _dispatch_outcome("succeeded", {"descendants_killed": 2,
+                                                   "descendants_escaped": 9,
+                                                   "subreaper_enabled": True})
+        self.assertEqual(tuple(governed), tuple(OUTCOME_FIELDS))
+        # Local facts must not leak across a boundary the Worker refuses.
+        self.assertNotIn("descendants_escaped", governed)
+        self.assertNotIn("subreaper_enabled", governed)
+
+    def test_the_worker_and_the_ledger_agree_on_the_field_set(self):
+        """A drift here fails every remote settle, so it is worth a test."""
+        import re
+        from pathlib import Path as _P
+        from engine.remote_process_dispatch_ledger import OUTCOME_FIELDS
+
+        source = _P("worker/task-process-dispatches.js").read_text()
+        block = re.search(r"const OUTCOME_FIELDS = \[(.*?)\];", source, re.S)
+        self.assertIsNotNone(block, "the Worker outcome field list moved")
+        worker = re.findall(r'"([a-z_]+)"', block.group(1))
+        self.assertEqual(tuple(worker), tuple(OUTCOME_FIELDS))
+
+
 class TimeoutAndTreeTests(SupervisorHarness):
     def test_hard_timeout_kills_the_process(self):
         started = time.monotonic()
