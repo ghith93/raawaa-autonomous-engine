@@ -21,7 +21,7 @@ class WorkflowDispatchGuardTests(unittest.TestCase):
         out = io.StringIO()
         with patch("sys.argv", ["check_workflow_dispatch_guards.py"]), contextlib.redirect_stdout(out):
             self.assertEqual(check.main(), 0)
-        self.assertIn("push and scheduled Engine CI runs skip them", out.getvalue())
+        self.assertIn("Main pushes and daily schedules run Staging automatically only after the read-only zero-cost preflight", out.getvalue())
         self.assertNotIn("push and scheduled runs are read-only", out.getvalue())
 
     def test_secret_dispatch_job_requires_main_ref(self):
