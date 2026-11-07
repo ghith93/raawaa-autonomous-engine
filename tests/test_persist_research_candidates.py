@@ -11,6 +11,7 @@ from scripts.persist_research_candidates import (
     persist_candidates,
     _RejectRedirects,
     _get,
+    _post,
 )
 
 
@@ -30,22 +31,26 @@ class ResearchPersistenceTests(unittest.TestCase):
             def __enter__(self): return self
             def __exit__(self, *args): return False
             def read(self, limit):
-                return b'{"candidates":[{"source_key":"github:org/repo"}]}'
+                return b'{"matched_keys":["github:org/repo"]}'
 
         with patch("scripts.persist_research_candidates._open_without_redirects", return_value=Response()) as opened:
             result = _get(
                 "https://engine.example",
                 "synthetic-test-token",
+                ["github:org/repo"],
                 "synthetic-access-id",
                 "synthetic-access-secret",
             )
         self.assertEqual(result["candidates"][0]["source_key"], "github:org/repo")
         request = opened.call_args.args[0]
-        self.assertEqual(request.full_url, "https://engine.example/v1/research/candidates?status=all&limit=100&keys_only=true")
+        self.assertEqual(request.full_url, "https://engine.example/v1/research/candidates/verify")
+        self.assertEqual(request.method, "POST")
+        self.assertEqual(request.get_header("Content-type"), "application/json")
         self.assertEqual(request.get_header("Authorization"), "Bearer synthetic-test-token")
         self.assertEqual(request.get_header("Cf-access-client-id"), "synthetic-access-id")
         self.assertEqual(request.get_header("Cf-access-client-secret"), "synthetic-access-secret")
         self.assertEqual(opened.call_args.kwargs["timeout"], 20)
+        self.assertIn("github:org/repo", request.data.decode("utf-8"))
 
     def test_workflow_persistence_is_staging_only_and_uses_dedicated_token(self):
         root = Path(__file__).resolve().parents[1]
@@ -61,6 +66,28 @@ class ResearchPersistenceTests(unittest.TestCase):
         self.assertNotIn("CLOUDFLARE_API_TOKEN", step)
         self.assertNotIn("CLOUDFLARE_ACCOUNT_ID", step)
 
+
+    def test_post_carries_stable_batch_id_without_exposing_credentials(self):
+        class Response:
+            status = 201
+            def __enter__(self): return self
+            def __exit__(self, *args): return False
+            def read(self, limit):
+                return b'{"accepted_count":1,"batch_id":"github:run:1","replayed":false}'
+
+        candidate = {"source": "github", "full_name": "org/repo"}
+        with patch("scripts.persist_research_candidates._open_without_redirects", return_value=Response()) as opened:
+            result = _post(
+                "https://engine.example", "synthetic-token", [candidate], "github:run:1",
+                "synthetic-access-id", "synthetic-access-secret",
+            )
+        self.assertEqual(result["batch_id"], "github:run:1")
+        request = opened.call_args.args[0]
+        self.assertEqual(request.full_url, "https://engine.example/v1/research/candidates")
+        self.assertEqual(request.method, "POST")
+        self.assertIn('"batch_id":"github:run:1"', request.data.decode("utf-8"))
+        self.assertEqual(request.get_header("Authorization"), "Bearer synthetic-token")
+        self.assertEqual(opened.call_args.kwargs["timeout"], 20)
 
     def test_authenticated_readback_rejects_redirects(self):
         handler = _RejectRedirects()
@@ -115,14 +142,14 @@ class ResearchPersistenceTests(unittest.TestCase):
             "arxiv:2601.01234", "searxng:https://example.org/agent",
         ]
         calls = []
-        def fake_post(base_url, token, batch, access_id, access_secret):
+        def fake_post(base_url, token, batch, batch_id, access_id, access_secret):
             calls.append([item["source"] for item in batch])
-            return {"accepted_count": len(batch)}
+            return {"accepted_count": len(batch), "batch_id": batch_id, "replayed": False}
         result = persist_candidates(
             snapshot,
-            environ={"RAAWAA_ENGINE_API_URL": "https://engine.example", "RAAWAA_ENGINE_API_TOKEN": "test-secret"},
+            environ={"RAAWAA_ENGINE_API_URL": "https://engine.example", "RAAWAA_ENGINE_API_TOKEN": "test-secret", "RAAWAA_RESEARCH_SCAN_ID": "synthetic-run"},
             request_fn=fake_post,
-            verify_fn=lambda *args: {"candidates": [{"source_key": key} for key in expected]},
+            verify_fn=lambda *args: {"matched_keys": expected},
         )
         self.assertEqual(result["sources"], ["arxiv", "crossref", "github", "searxng"])
         self.assertEqual(result["discovered"], 4)
@@ -162,9 +189,30 @@ class ResearchPersistenceTests(unittest.TestCase):
         self.assertEqual(connection.execute("SELECT COUNT(*) FROM research_candidates").fetchone()[0], 3)
         connection.close()
 
+    def test_research_ingest_idempotency_migration_creates_durable_unique_keys(self):
+        root = Path(__file__).resolve().parents[1]
+        connection = sqlite3.connect(":memory:")
+        connection.execute("CREATE TABLE schema_migrations(version TEXT PRIMARY KEY)")
+        connection.executescript((root / "migrations" / "0002_research_candidates.sql").read_text(encoding="utf-8"))
+        connection.executescript((root / "migrations" / "0015_research_ingest_idempotency.sql").read_text(encoding="utf-8"))
+        connection.execute(
+            "INSERT INTO research_ingest_batches(batch_id,payload_sha256,candidate_count,created_at) VALUES(?,?,?,?)",
+            ("github:run:1", "a" * 64, 1, "2026-11-07T00:00:00Z"),
+        )
+        connection.execute(
+            "INSERT INTO research_ingest_events(batch_id,source_key,payload_sha256,created_at) VALUES(?,?,?,?)",
+            ("github:run:1", "github:org/repo", "a" * 64, "2026-11-07T00:00:00Z"),
+        )
+        with self.assertRaises(sqlite3.IntegrityError):
+            connection.execute(
+                "INSERT INTO research_ingest_events(batch_id,source_key,payload_sha256,created_at) VALUES(?,?,?,?)",
+                ("github:run:1", "github:org/repo", "a" * 64, "2026-11-07T00:00:01Z"),
+            )
+        connection.close()
+
     def test_empty_snapshot_does_not_need_credentials_or_network(self):
         result = persist_candidates({"candidates": [], "academic_candidates": []}, environ={})
-        self.assertEqual(result, {"discovered": 0, "persisted": 0, "batches": 0, "sources": []})
+        self.assertEqual(result, {"discovered": 0, "persisted": 0, "verified": 0, "batches": 0, "replayed_batches": 0, "sources": []})
 
     def test_persistence_is_batched_and_uses_existing_secret_environment(self):
         snapshot = {
@@ -172,20 +220,20 @@ class ResearchPersistenceTests(unittest.TestCase):
             "academic_candidates": [{"doi": "10.1234/paper", "title": "Research"}],
         }
         calls = []
-        def fake_post(base_url, token, batch, access_id, access_secret):
+        def fake_post(base_url, token, batch, batch_id, access_id, access_secret):
             calls.append((base_url, token, len(batch), access_id, access_secret))
-            return {"accepted_count": len(batch)}
+            return {"accepted_count": len(batch), "batch_id": batch_id, "replayed": False}
         result = persist_candidates(
             snapshot,
             environ={
                 "RAAWAA_ENGINE_API_URL": "https://engine.example",
-                "RAAWAA_ENGINE_API_TOKEN": "test-secret",
+                "RAAWAA_ENGINE_API_TOKEN": "test-secret", "RAAWAA_RESEARCH_SCAN_ID": "synthetic-run",
                 "RAAWAA_ENGINE_CF_ACCESS_CLIENT_ID": "access-id",
                 "RAAWAA_ENGINE_CF_ACCESS_CLIENT_SECRET": "access-secret",
             },
             request_fn=fake_post,
             batch_size=5,
-            verify_fn=lambda *args: {"candidates": [{"source_key": "github:org/repo-" + str(i)} for i in range(7)] + [{"source_key": "crossref:10.1234/paper"}]},
+            verify_fn=lambda *args: {"matched_keys": args[2]},
         )
         self.assertEqual([call[2] for call in calls], [5, 3])
         self.assertEqual(calls[0], ("https://engine.example", "test-secret", 5, "access-id", "access-secret"))
@@ -202,26 +250,29 @@ class ResearchPersistenceTests(unittest.TestCase):
             persist_candidates(snapshot, environ={
                 "RAAWAA_ENGINE_API_URL": "https://engine.example",
                 "RAAWAA_ENGINE_API_TOKEN": "test-secret",
+                "RAAWAA_RESEARCH_SCAN_ID": "synthetic-run",
                 "RAAWAA_ENGINE_CF_ACCESS_CLIENT_ID": "only-one",
             })
 
     def test_retries_temporary_worker_deploy_or_migration_errors(self):
         snapshot = {"candidates": [{"full_name": "org/repo"}]}
-        calls, sleeps = [], []
+        calls, sleeps, batch_ids = [], [], []
         def flaky_post(*args):
             calls.append(1)
+            batch_ids.append(args[3])
             if len(calls) < 3:
                 raise ResearchPersistenceError("research persistence endpoint returned HTTP 404")
-            return {"accepted_count": 1}
+            return {"accepted_count": 1, "batch_id": args[3], "replayed": False}
         result = persist_candidates(
             snapshot,
-            environ={"RAAWAA_ENGINE_API_URL": "https://engine.example", "RAAWAA_ENGINE_API_TOKEN": "test-secret"},
+            environ={"RAAWAA_ENGINE_API_URL": "https://engine.example", "RAAWAA_ENGINE_API_TOKEN": "test-secret", "RAAWAA_RESEARCH_SCAN_ID": "synthetic-run"},
             request_fn=flaky_post,
             sleep_fn=sleeps.append,
-            verify_fn=lambda *args: {"candidates": [{"source_key": "github:org/repo"}]},
+            verify_fn=lambda *args: {"matched_keys": ["github:org/repo"]},
         )
         self.assertEqual(result["persisted"], 1)
         self.assertEqual(len(calls), 3)
+        self.assertEqual(len(set(batch_ids)), 1, "all retries must reuse the same idempotency key")
         self.assertEqual(sleeps, [5, 10])
 
     def test_does_not_retry_auth_or_validation_errors(self):
@@ -233,10 +284,10 @@ class ResearchPersistenceTests(unittest.TestCase):
         with self.assertRaises(ResearchPersistenceError):
             persist_candidates(
                 snapshot,
-                environ={"RAAWAA_ENGINE_API_URL": "https://engine.example", "RAAWAA_ENGINE_API_TOKEN": "test-secret"},
+                environ={"RAAWAA_ENGINE_API_URL": "https://engine.example", "RAAWAA_ENGINE_API_TOKEN": "test-secret", "RAAWAA_RESEARCH_SCAN_ID": "synthetic-run"},
                 request_fn=unauthorized,
                 sleep_fn=lambda _: self.fail("auth errors must not be retried"),
-                verify_fn=lambda *args: {"candidates": []},
+                verify_fn=lambda *args: {"matched_keys": []},
             )
         self.assertEqual(len(calls), 1)
 
@@ -245,19 +296,64 @@ class ResearchPersistenceTests(unittest.TestCase):
         with self.assertRaises(ResearchPersistenceError):
             persist_candidates(
                 snapshot,
-                environ={"RAAWAA_ENGINE_API_URL": "https://engine.example", "RAAWAA_ENGINE_API_TOKEN": "test-secret"},
-                request_fn=lambda *args: {"accepted_count": 1},
-                verify_fn=lambda *args: {"candidates": []},
+                environ={"RAAWAA_ENGINE_API_URL": "https://engine.example", "RAAWAA_ENGINE_API_TOKEN": "test-secret", "RAAWAA_RESEARCH_SCAN_ID": "synthetic-run"},
+                request_fn=lambda *args: {"accepted_count": 1, "batch_id": args[3], "replayed": False},
+                verify_fn=lambda *args: {"matched_keys": []},
             )
+
+    def test_exact_key_verification_is_batched_and_not_limited_to_latest_100(self):
+        snapshot = {"candidates": [
+            {"full_name": f"org/repo-{i}", "url": f"https://github.com/org/repo-{i}"}
+            for i in range(111)
+        ]}
+        post_ids, verified_batches = [], []
+        def fake_post(base_url, token, batch, batch_id, access_id, access_secret):
+            post_ids.append(batch_id)
+            return {"accepted_count": len(batch), "batch_id": batch_id, "replayed": False}
+        def fake_verify(base_url, token, keys, access_id, access_secret):
+            verified_batches.append(list(keys))
+            return {"matched_keys": list(keys)}
+        result = persist_candidates(
+            snapshot,
+            environ={"RAAWAA_ENGINE_API_URL": "https://engine.example",
+                     "RAAWAA_ENGINE_API_TOKEN": "test-secret",
+                     "RAAWAA_RESEARCH_SCAN_ID": "large-scan"},
+            request_fn=fake_post,
+            batch_size=10,
+            verify_fn=fake_verify,
+        )
+        self.assertEqual(result["discovered"], 111)
+        self.assertEqual(result["verified"], 111)
+        self.assertEqual(result["batches"], 12)
+        self.assertEqual(len(post_ids), 12)
+        self.assertEqual(post_ids[0], "github:large-scan:1")
+        self.assertEqual(post_ids[-1], "github:large-scan:12")
+        self.assertEqual(sum(map(len, verified_batches)), 111)
+        self.assertLessEqual(max(map(len, verified_batches)), 10)
+
+    def test_replayed_batch_receipt_is_counted_without_changing_exact_verification(self):
+        snapshot = {"candidates": [{"full_name": "org/repo"}]}
+        result = persist_candidates(
+            snapshot,
+            environ={"RAAWAA_ENGINE_API_URL": "https://engine.example",
+                     "RAAWAA_ENGINE_API_TOKEN": "test-secret",
+                     "RAAWAA_RESEARCH_SCAN_ID": "retry-scan"},
+            request_fn=lambda base, token, batch, batch_id, access_id, access_secret:
+                {"accepted_count": len(batch), "batch_id": batch_id, "replayed": True},
+            verify_fn=lambda base, token, keys, access_id, access_secret: {"matched_keys": keys},
+        )
+        self.assertEqual(result["replayed_batches"], 1)
+        self.assertEqual(result["verified"], 1)
 
     def test_partial_acceptance_stops_for_safe_retry(self):
         snapshot = {"candidates": [{"full_name": "org/repo"}]}
         def partial(*args):
-            return {"accepted_count": 0}
+            return {"accepted_count": 0, "batch_id": args[3], "replayed": False}
         with self.assertRaises(ResearchPersistenceError):
             persist_candidates(snapshot, environ={
                 "RAAWAA_ENGINE_API_URL": "https://engine.example",
                 "RAAWAA_ENGINE_API_TOKEN": "test-secret",
+                "RAAWAA_RESEARCH_SCAN_ID": "synthetic-run",
             }, request_fn=partial)
 
 
