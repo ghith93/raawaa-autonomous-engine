@@ -22,8 +22,8 @@ from urllib.request import HTTPRedirectHandler, Request, build_opener
 
 USER_AGENT = "RaawaaAutonomousEngine-ZeroCostPreflight/4.0"
 MAX_RESPONSE_BYTES = 1024 * 1024
-MAX_ZONES_TO_VERIFY = 20
-ZONE_PAGE_SIZE = 20
+MAX_ZONES_TO_VERIFY = 49
+ZONE_PAGE_SIZE = 50
 FREE_ZONE_PLAN_IDS = {"free"}
 INACTIVE_STATES = {"Cancelled", "Failed", "Expired"}
 ACTIVE_STATES = {"Trial", "Provisioned", "Paid", "AwaitingPayment"}
@@ -173,10 +173,10 @@ def fetch_subscription_inventory(account_id: str, token: str, opener=None, timeo
 def fetch_zone_inventory(account_id: str, token: str, opener=None, timeout: int = 10) -> list:
     """List every zone in the account using the documented paginated List Zones API.
 
-    The safety gate deliberately caps the account at 20 zones so that per-zone
-    subscription verification remains bounded inside the two-minute inventory
-    workflow. Larger inventories fail closed and require a separately reviewed
-    bounded strategy; no zone is silently omitted.
+    One 50-record page is requested. Because Cloudflare's total_count metadata
+    is explicitly unfiltered (it can describe zones outside this account), it
+    is validated for shape but never used as the account-specific result count.
+    A full page is ambiguous and fails closed; only 0-49 returned zones can pass.
     """
     if not account_id or not token:
         raise ValueError("billing_credentials_missing")
@@ -203,25 +203,17 @@ def fetch_zone_inventory(account_id: str, token: str, opener=None, timeout: int 
     count = _metadata_integer(info, "count")
     page = _metadata_integer(info, "page")
     per_page = _metadata_integer(info, "per_page")
-    total = _metadata_integer(info, "total_count")
-    total_pages = _metadata_integer(info, "total_pages")
-    if count is None or page != 1 or per_page is None or total is None:
+    # Cloudflare documents total_count as the total available without search
+    # parameters. With account.id filtering it is not the account's zone count.
+    # Validate optional metadata types, but do not compare those global totals.
+    _metadata_integer(info, "total_count")
+    _metadata_integer(info, "total_pages")
+    if count is None or page != 1 or per_page != ZONE_PAGE_SIZE:
         raise ValueError("zone_inventory_incomplete")
-    if per_page < 5 or per_page > 50 or count != len(zones) or count > per_page:
+    if count != len(zones):
         raise ValueError("zone_inventory_incomplete")
-    if total < count or total > MAX_ZONES_TO_VERIFY:
-        raise ValueError("too_many_zones_to_verify" if total > MAX_ZONES_TO_VERIFY else "zone_inventory_incomplete")
-    expected_pages = 0 if total == 0 else math.ceil(total / per_page)
-    if total_pages is not None:
-        allowed_total_pages = {expected_pages}
-        if total == 0:
-            # Cloudflare may encode an empty page set as either 0 or 1 pages.
-            allowed_total_pages.add(1)
-        if total_pages not in allowed_total_pages:
-            raise ValueError("zone_inventory_incomplete")
-    if total != len(zones):
-        # This one bounded request must contain the entire small account zone list.
-        raise ValueError("zone_inventory_incomplete")
+    if count >= per_page or count > MAX_ZONES_TO_VERIFY:
+        raise ValueError("too_many_zones_to_verify")
     seen = set()
     for zone in zones:
         if not isinstance(zone, dict):
