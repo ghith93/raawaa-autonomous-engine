@@ -79,7 +79,10 @@ def build_agent_topology_context(agent_id: str, project_map: dict[str, Any]) -> 
     """Return bounded direct relationships for one agent without changing routing."""
     if not isinstance(agent_id, str) or not agent_id.strip() or len(agent_id) > 128:
         raise ProjectTopologyError("agent id is invalid")
-    if not isinstance(project_map, dict) or project_map.get("schema_version") != 1:
+    if not isinstance(project_map, dict):
+        raise ProjectTopologyError("project topology must be an object")
+    schema_version = project_map.get("schema_version")
+    if isinstance(schema_version, bool) or not isinstance(schema_version, int) or schema_version != 1:
         raise ProjectTopologyError("unsupported project topology schema")
     map_id = _bounded_text(project_map.get("map_id"), "map_id", maximum=128)
     scope_note = _bounded_text(project_map.get("scope_note"), "scope_note", maximum=1000)
@@ -152,9 +155,12 @@ def build_agent_topology_context(agent_id: str, project_map: dict[str, Any]) -> 
         item["direction"], item["relation"], item["node"]["id"],
     ))
 
-    canonical = json.dumps(
-        project_map, ensure_ascii=False, sort_keys=True, separators=(",", ":"),
-    ).encode("utf-8")
+    try:
+        canonical = json.dumps(
+            project_map, ensure_ascii=False, sort_keys=True, separators=(",", ":"),
+        ).encode("utf-8")
+    except (TypeError, ValueError) as exc:
+        raise ProjectTopologyError("project topology is not canonical JSON data") from exc
     return {
         "status": "available",
         "mode": "read_only_advisory",
