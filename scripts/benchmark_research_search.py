@@ -45,6 +45,7 @@ class QueryCase:
     query_id: str
     query: str
     expected_ids: tuple[str, ...]
+    language: str = "en"
 
 
 def build_fixture() -> tuple[list[dict[str, str]], list[QueryCase]]:
@@ -248,7 +249,8 @@ def run_benchmark() -> dict[str, Any]:
         db.close()
 
 
-def build_real_corpus_from_data(snapshot: dict[str, Any], qrels: dict[str, Any]):
+def build_real_corpus_from_data(snapshot: dict[str, Any], qrels: dict[str, Any], *,
+                                include_arabic_aliases: bool = True):
     """Transform a bounded discovery snapshot and editorial qrels into offline search cases."""
     if not isinstance(snapshot, dict) or not isinstance(qrels, dict):
         raise ValueError("snapshot and qrels must be JSON objects")
@@ -327,12 +329,13 @@ def build_real_corpus_from_data(snapshot: dict[str, Any], qrels: dict[str, Any])
         capability, expected = query.get("capability"), query.get("expected_ids")
         if isinstance(capability, str) and isinstance(expected, list):
             expected_by_capability.setdefault(capability, set()).update(x for x in expected if isinstance(x, str))
-    for document in documents:
-        matching = [capability for capability, ids in expected_by_capability.items() if document["id"] in ids]
-        document["body"] += " " + " ".join(
-            term for capability in matching
-            if isinstance((term := aliases.get(capability, "")), str) and term
-        )
+    if include_arabic_aliases:
+        for document in documents:
+            matching = [capability for capability, ids in expected_by_capability.items() if document["id"] in ids]
+            document["body"] += " " + " ".join(
+                term for capability in matching
+                if isinstance((term := aliases.get(capability, "")), str) and term
+            )
 
     present = {document["id"] for document in documents}
     cases: list[QueryCase] = []
@@ -354,51 +357,84 @@ def build_real_corpus_from_data(snapshot: dict[str, Any], qrels: dict[str, Any])
             "evaluated": bool(expected_ids),
         })
         if expected_ids:
-            cases.append(QueryCase(query_id, text_value, expected_ids))
+            cases.append(QueryCase(query_id, text_value, expected_ids, language))
     if not documents or not cases:
         raise ValueError("real corpus snapshot has no documents or no covered qrels")
     return documents, cases, coverage
 
 
+def evaluate_by_language(search_fn, db: sqlite3.Connection,
+                         queries: list[QueryCase]) -> dict[str, Any]:
+    """Return overall and per-language metrics for the same judgement set."""
+    report: dict[str, Any] = {"all": evaluate(search_fn, db, queries)}
+    for language in ("en", "ar"):
+        subset = [query for query in queries if query.language == language]
+        if subset:
+            report[language] = evaluate(search_fn, db, subset)
+    return report
+
+
 def run_real_corpus_benchmark(snapshot: dict[str, Any], qrels: dict[str, Any]) -> dict[str, Any]:
-    """Benchmark current public metadata snapshot; no network, provider or remote writes."""
-    documents, queries, coverage = build_real_corpus_from_data(snapshot, qrels)
-    db = _create_database(documents)
-    try:
-        methods = {
-            "substring_like": evaluate(search_like, db, queries),
-            "sqlite_fts5_and": evaluate(search_fts, db, queries),
-            "sqlite_fts5_or_bm25": evaluate(search_fts_or, db, queries),
-        }
-        source_counts: dict[str, int] = {}
-        for document in documents:
-            source_counts[document["language"]] = source_counts.get(document["language"], 0) + 1
-        expected_total = sum(row["expected_count"] for row in coverage)
-        present_total = sum(row["present_count"] for row in coverage)
-        return {
-            "benchmark": "raawaa_research_search_real_corpus_v1",
-            "network_calls": 0, "remote_writes": 0, "provider_calls": 0,
-            "database": "in_memory_sqlite", "fts5": "available",
-            "snapshot": {
-                "retrieved_at": snapshot.get("retrieved_at"), "source_counts": source_counts,
-                "documents": len(documents), "qrels_queries": len(coverage), "evaluated_queries": len(queries),
-                "arabic_queries": sum(1 for row in coverage if row["language"] == "ar" and row["evaluated"]),
-                "english_queries": sum(1 for row in coverage if row["language"] == "en" and row["evaluated"]),
-                "label_coverage": round(present_total / expected_total, 4) if expected_total else 0.0,
-                "benchmark_status": "sufficient_coverage" if len(queries) >= 10 and expected_total and present_total / expected_total >= 0.5 else "insufficient_coverage",
-                "coverage_by_query": coverage,
+    """Benchmark source-native and alias-assisted retrieval; no network or remote writes."""
+    native_documents, queries, coverage = build_real_corpus_from_data(
+        snapshot, qrels, include_arabic_aliases=False
+    )
+    alias_documents, _, _ = build_real_corpus_from_data(
+        snapshot, qrels, include_arabic_aliases=True
+    )
+
+    def track(documents: list[dict[str, str]]) -> dict[str, Any]:
+        db = _create_database(documents)
+        try:
+            return {
+                "methods": {
+                    "substring_like": evaluate_by_language(search_like, db, queries),
+                    "sqlite_fts5_and": evaluate_by_language(search_fts, db, queries),
+                    "sqlite_fts5_or_bm25": evaluate_by_language(search_fts_or, db, queries),
+                }
+            }
+        finally:
+            db.close()
+
+    source_counts: dict[str, int] = {}
+    for document in native_documents:
+        source_counts[document["language"]] = source_counts.get(document["language"], 0) + 1
+    expected_total = sum(row["expected_count"] for row in coverage)
+    present_total = sum(row["present_count"] for row in coverage)
+    label_coverage = round(present_total / expected_total, 4) if expected_total else 0.0
+    evaluated = len(queries)
+    return {
+        "benchmark": "raawaa_research_search_real_corpus_v2",
+        "network_calls": 0, "remote_writes": 0, "provider_calls": 0,
+        "database": "in_memory_sqlite", "fts5": "available",
+        "snapshot": {
+            "retrieved_at": snapshot.get("retrieved_at"), "source_counts": source_counts,
+            "documents": len(native_documents), "qrels_queries": len(coverage), "evaluated_queries": evaluated,
+            "arabic_queries": sum(1 for row in coverage if row["language"] == "ar" and row["evaluated"]),
+            "english_queries": sum(1 for row in coverage if row["language"] == "en" and row["evaluated"]),
+            "label_coverage": label_coverage,
+            "benchmark_status": "sufficient_coverage" if evaluated >= 10 and expected_total and label_coverage >= 0.5 else "insufficient_coverage",
+            "coverage_by_query": coverage,
+        },
+        "tracks": {
+            "source_native": {
+                "description": "Indexes only title and metadata actually present in the public discovery snapshot; no editorial aliases.",
+                **track(native_documents),
             },
-            "methods": methods,
-            "limitations": [
-                "One bounded public-metadata discovery snapshot; results vary with source availability.",
-                "Relevance labels are manually curated and are not exhaustive ground truth.",
-                "Arabic aliases are editorial annotations, not original source text or automatic translation.",
-                "This does not prove Cloudflare D1 FTS5 parity or production latency.",
-                "No full text, semantic embeddings, crawling, model calls or source adoption are included.",
-            ],
-        }
-    finally:
-        db.close()
+            "alias_assisted": {
+                "description": "Adds editorial Arabic aliases to qrels-labelled candidates; label-conditioned controlled experiment, not native Arabic retrieval.",
+                **track(alias_documents),
+            },
+        },
+        "limitations": [
+            "One bounded public-metadata discovery snapshot; results vary with source availability.",
+            "Relevance labels are manually curated and are not exhaustive ground truth.",
+            "The alias-assisted track is label-conditioned and must not be presented as native Arabic retrieval.",
+            "The source-native track measures only source-provided metadata; it does not perform automatic translation.",
+            "Neither track proves Cloudflare D1 FTS5 parity or production latency.",
+            "No full text, semantic embeddings, crawling, model calls or source adoption are included.",
+        ],
+    }
 
 
 def main() -> int:
