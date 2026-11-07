@@ -54,6 +54,7 @@ function dbMock(options = {}) {
           if (sql.includes("FROM audit_log")) return { results: options.auditRows || [] };
           if (sql.includes("FROM tasks WHERE id IN")) return { results: options.dependencyRows || [] };
           if (sql.includes("FROM task_dependencies")) return { results: options.dependencyEdges || insertedDependencies };
+          if (sql.includes("SELECT id,attempts,max_attempts,lease_token FROM tasks")) return { results: options.staleTasks || [] };
           if (sql.includes("WITH RECURSIVE blocked")) return { results: options.blockedTasks || [] };
           return { results: [] };
         },
@@ -74,7 +75,7 @@ function dbMock(options = {}) {
           .filter(statement => statement.sql.includes("INSERT OR IGNORE INTO task_dependencies"))
           .map(statement => ({ dependency_task_id: statement.values[1] }));
       }
-      return [];
+      return options.batchResults || [];
     },
   };
 }
@@ -356,6 +357,32 @@ test("enqueue rejects an idempotency key reused with a different priority", asyn
   assert.equal(response.status, 409);
   assert.deepEqual(await response.json(), { error: "idempotency_conflict" });
   assert.equal(DB.calls.some(call => call.kind === "batch"), false);
+});
+
+test("enqueue replay binds type, title, payload and attempt policy", async () => {
+  const existingTask = {
+    id: "existing", task_type: "research_brief", title: "Stable",
+    payload_json: '{"nested":{"a":1,"b":2},"list":[1,2]}',
+    max_attempts: 3, priority: 50, dependencies_json: "[]", execution_lane: "general",
+  };
+  const base = { task_type: "research_brief", title: "Stable", idempotency_key: "key",
+    payload: { list: [1, 2], nested: { b: 2, a: 1 } }, max_attempts: 3 };
+  for (const [change, status] of [
+    [{}, 200], [{task_type: "content_draft"}, 409], [{title: "Changed"}, 409],
+    [{payload: {list: [2, 1], nested: {a: 1, b: 2}}}, 409], [{max_attempts: 2}, 409],
+  ]) {
+    const DB = dbMock({existingTask});
+    const response = await worker.fetch(request("/v1/tasks/enqueue", {
+      method: "POST", body: {...base, ...change},
+    }), {DB, ENGINE_API_TOKEN: TOKEN});
+    assert.equal(response.status, status);
+    assert.equal(DB.calls.some(call => call.kind === "batch"), false);
+  }
+  const corrupt = dbMock({existingTask: {...existingTask, payload_json: "invalid"}});
+  const response = await worker.fetch(request("/v1/tasks/enqueue", {
+    method: "POST", body: base,
+  }), {DB: corrupt, ENGINE_API_TOKEN: TOKEN});
+  assert.equal(response.status, 409);
 });
 
 test("enqueue rejects malformed task payload", async () => {
@@ -839,6 +866,34 @@ test("recover endpoint is authenticated and scopes stale selection and writes to
     assert.match(write.sql, /execution_lane=\?/);
     assert.deepEqual(write.values.slice(-2), ["general", "general"]);
   }
+});
+
+test("recovery counts only confirmed transitions and guards audit against lost races", async () => {
+  const staleTasks = [
+    {id: "lost-race", attempts: 1, max_attempts: 2, lease_token: "old"},
+    {id: "winner", attempts: 2, max_attempts: 2, lease_token: "old2"},
+  ];
+  const DB = dbMock({staleTasks, batchResults: [
+    {success: true, meta: {changes: 0}}, {success: true, meta: {changes: 0}},
+    {success: true, meta: {changes: 1}}, {success: true, meta: {changes: 1}},
+  ]});
+  const response = await worker.fetch(request("/v1/tasks/recover", {method: "POST", body: {}}),
+    {DB, ENGINE_API_TOKEN: TOKEN});
+  assert.equal(response.status, 200);
+  assert.deepEqual(await response.json(), {requeued: 0, failed: 1});
+  const statements = DB.calls.find(call => call.kind === "batch").statements;
+  assert.match(statements[1].sql, /changes\(\)=1/);
+  assert.match(statements[3].sql, /changes\(\)=1/);
+  const invalid = dbMock({staleTasks, batchResults: []});
+  const failed = await worker.fetch(request("/v1/tasks/recover", {method: "POST", body: {}}),
+    {DB: invalid, ENGINE_API_TOKEN: TOKEN});
+  assert.equal(failed.status, 503);
+  const inconsistent = dbMock({staleTasks: [staleTasks[0]], batchResults: [
+    {success: true, meta: {changes: 1}}, {success: true, meta: {changes: 0}},
+  ]});
+  const mismatch = await worker.fetch(request("/v1/tasks/recover", {method: "POST", body: {}}),
+    {DB: inconsistent, ENGINE_API_TOKEN: TOKEN});
+  assert.equal(mismatch.status, 503);
 });
 
 test("specialist stale recovery requires and applies its own capability", async () => {
