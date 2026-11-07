@@ -147,7 +147,7 @@ class ZeroCostBoundaryTests(unittest.TestCase):
             ):
                 self.assertEqual(main(), 1)
             output.seek(0)
-            self.assertEqual(output.read(), "zero_cost_eligible=false\\n")
+            self.assertEqual(output.read(), "zero_cost_eligible=false\n")
 
     def test_redirects_are_rejected(self):
         handler = _RejectRedirects()
