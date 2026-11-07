@@ -226,6 +226,18 @@ class ZeroCostBoundaryTests(unittest.TestCase):
             output.seek(0)
             self.assertEqual(output.read(), "zero_cost_eligible=false\n")
 
+    def test_http_failures_expose_only_safe_status_codes(self):
+        for code in (401, 403, 404, 429, 500):
+            with self.subTest(code=code):
+                def fail(_request, timeout):
+                    raise HTTPError("https://api.cloudflare.com/private", code,
+                                    "private response body", {}, None)
+                result = check_boundary("synthetic-account", "synthetic-token", opener=fail)
+                self.assertFalse(result["eligible"])
+                self.assertEqual(result["reason"], f"billing_http_{code}")
+                self.assertNotIn("private", json.dumps(result))
+                self.assertNotIn("synthetic", json.dumps(result))
+
     def test_redirects_are_rejected(self):
         handler = _RejectRedirects()
         with self.assertRaises(HTTPError):
