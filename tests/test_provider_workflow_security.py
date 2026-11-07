@@ -222,6 +222,33 @@ class CloudflareZeroCostEffectWorkflowTests(unittest.TestCase):
             ["name: Publish Brand-Only Pages URL & Retire Legacy Worker Subdomain"],
         )
 
+    def test_control_worker_deployment_requires_zero_cost_preflight(self):
+        self._assert_gate_precedes(
+            ".github/workflows/deploy-worker.yml",
+            "name: Verify Cloudflare zero-cost boundary",
+            [
+                "name: Run Staging D1 migrations",
+                "name: Deploy authenticated Control Worker to Staging",
+            ],
+        )
+
+    def test_issue_comment_ingest_requires_zero_cost_preflight_before_post(self):
+        self._assert_gate_precedes(
+            ".github/workflows/issue-comment-ingest.yml",
+            "name: Verify Cloudflare zero-cost boundary",
+            ["run: python3 scripts/github_comment_ingest.py --post"],
+        )
+
+    def test_task_runner_requires_zero_cost_preflight_before_authenticated_post(self):
+        self._assert_gate_precedes(
+            ".github/workflows/task-runner.yml",
+            "name: Verify Cloudflare zero-cost boundary",
+            [
+                "name: Verify authenticated POST path before task operations",
+                "name: Run bounded Staging task batch",
+            ],
+        )
+
     def test_workers_ai_image_generation_requires_zero_cost_preflight(self):
         self._assert_gate_precedes(
             ".github/workflows/raawaa-image-route-check.yml",
