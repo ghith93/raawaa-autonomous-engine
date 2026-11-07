@@ -101,6 +101,12 @@ class ZeroCostBoundaryTests(unittest.TestCase):
         self.assertTrue(result["eligible"])
         self.assertEqual(result["zones_checked"], 0)
         self.assertEqual(result["active_paid_zone_plans"], 0)
+        # Cloudflare has emitted both 0 and 1 total_pages for an empty result.
+        empty_variant = zone_payload([], total_pages=1)
+        self.assertEqual(
+            fetch_zone_inventory(ACCOUNT, TOKEN, opener=lambda *_a, **_k: Response(empty_variant)),
+            [],
+        )
 
     def test_active_paid_addon_blocks_before_zone_reads(self):
         paid = [{"id": "workers-paid", "state": "Paid", "price": 5,
