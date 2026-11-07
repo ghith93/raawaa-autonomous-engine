@@ -116,8 +116,7 @@ class ProviderWorkflowSecurityTests(unittest.TestCase):
         self.assertIn("scripts/verify_cloudflare_zero_cost_boundary.py", block)
         self.assertIn("CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}", block)
         self.assertIn("CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}", block)
-        if not allow_continue_on_error:
-            self.assertNotIn("continue-on-error", block)
+        self.assertNotIn("continue-on-error", block)
         self.assertNotIn("if: always()", block)
 
     def test_ci_telemetry_publisher_is_main_only_and_staging_only(self):
@@ -164,7 +163,8 @@ class CloudflareZeroCostEffectWorkflowTests(unittest.TestCase):
         self.assertIn("scripts/verify_cloudflare_zero_cost_boundary.py", block)
         self.assertIn("CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}", block)
         self.assertIn("CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}", block)
-        self.assertNotIn("continue-on-error", block)
+        if not allow_continue_on_error:
+            self.assertNotIn("continue-on-error", block)
         self.assertNotIn("if: always()", block)
 
     def _assert_effect_steps_require_zero_cost(self, path, effects, step_id):
