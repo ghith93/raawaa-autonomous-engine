@@ -116,6 +116,7 @@ class ProviderWorkflowSecurityTests(unittest.TestCase):
         self.assertIn("scripts/verify_cloudflare_zero_cost_boundary.py", block)
         self.assertIn("CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}", block)
         self.assertIn("CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}", block)
+        self.assertIn("CLOUDFLARE_ZONE_READ_SCOPE_ATTESTATION: ${{ vars.CLOUDFLARE_ZONE_READ_SCOPE_ATTESTATION }}", block)
         self.assertNotIn("continue-on-error", block)
         self.assertNotIn("if: always()", block)
 
@@ -181,6 +182,38 @@ class CloudflareZeroCostEffectWorkflowTests(unittest.TestCase):
                 step = source[step_start:] if step_end < 0 else source[step_start:step_end]
                 self.assertIn(condition, step)
 
+    def test_every_preflight_invocation_receives_the_all_zone_scope_attestation(self):
+        paths = [
+            ".github/workflows/cloudflare-billing-inventory.yml",
+            ".github/workflows/ci.yml",
+            ".github/workflows/d1-migrate.yml",
+            ".github/workflows/deploy-commerce-storefront.yml",
+            ".github/workflows/deploy-worker.yml",
+            ".github/workflows/groq-free-inference-staging-smoke.yml",
+            ".github/workflows/issue-comment-ingest.yml",
+            ".github/workflows/raawaa-image-route-check.yml",
+            ".github/workflows/research-discovery.yml",
+            ".github/workflows/staging-p1-task-proof.yml",
+            ".github/workflows/staging-supervised-process-probe.yml",
+            ".github/workflows/task-runner.yml",
+        ]
+        for path in paths:
+            with self.subTest(path=path):
+                source = (ROOT / path).read_text(encoding="utf-8")
+                marker = "run: python scripts/verify_cloudflare_zero_cost_boundary.py"
+                at = source.index(marker)
+                start = source.rfind("      - name:", 0, at)
+                end = source.find("      - name:", start + 1)
+                step = source[start:] if end < 0 else source[start:end]
+                self.assertIn(
+                    "CLOUDFLARE_ZONE_READ_SCOPE_ATTESTATION: ${{ vars.CLOUDFLARE_ZONE_READ_SCOPE_ATTESTATION }}",
+                    step,
+                )
+
+    def test_task_runner_cron_is_staggered_and_remains_five_minute(self):
+        source = (ROOT / ".github/workflows/task-runner.yml").read_text(encoding="utf-8")
+        self.assertIn('cron: "3,8,13,18,23,28,33,38,43,48,53,58 * * * *"', source)
+
     def test_production_d1_migration_requires_zero_cost_preflight(self):
         self._assert_gate_precedes(
             ".github/workflows/d1-migrate.yml",
@@ -226,6 +259,7 @@ class CloudflareZeroCostEffectWorkflowTests(unittest.TestCase):
         gate_step = source[gate_start:gate_end]
         self.assertIn("steps.cloudflare_credentials.outputs.available == 'true'", gate_step)
         self.assertIn("scripts/verify_cloudflare_zero_cost_boundary.py", gate_step)
+        self.assertIn("CLOUDFLARE_ZONE_READ_SCOPE_ATTESTATION: ${{ vars.CLOUDFLARE_ZONE_READ_SCOPE_ATTESTATION }}", gate_step)
         self.assertNotIn("continue-on-error", gate_step)
         self.assertNotIn("id-token: write", source)
         self.assertIn('RAAWAA_ENGINE_SUPABASE_FALLBACK_ZERO_COST_VERIFIED: "false"', source)
