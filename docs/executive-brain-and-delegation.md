@@ -48,11 +48,11 @@ The proposer cannot select a different enabled agent to bypass the map. The rost
 
 The orchestrator rejects duplicate IDs, unknown dependencies, cycles, unsafe task types, disabled/missing specialists, capability mismatches, missing acceptance checks, malformed estimates, and per-task budget violations. It computes a deterministic topological order and execution waves. Independent tasks may share a wave, capped by max_parallel_agents; dependent work waits for upstream success.
 
-**Important:** F5 queue enforcement is merged in PR #457 and Staging-verified: persisted priority, dependency-aware claims, same-execution-mode release, and failed-dependency propagation are enforced in SQLite and D1. Workflow planning still validates and previews the DAG only. Do not treat multi-step workflow dispatch as enabled; the planner remains proposal-only until a separate dispatcher contract is reviewed and approved.
+**Implemented boundary (PR #490 and follow-ups):** F5 queue enforcement is merged and Staging-verified: persisted priority, dependency-aware claims, same-execution-mode release, and failed-dependency propagation are enforced in SQLite and D1. The authenticated Worker endpoint `/v1/workflows/dispatch` accepts a validated manifest and atomically enqueues its steps with stable idempotency keys. The local CLI exposes `workflow-plan`, `workflow-manifest`, and `workflow-dispatch-body`; the last command only builds/prints the request body and performs no network request. Therefore the endpoint and atomic queue path exist, but there is no end-to-end CLI sender. Do not claim that a local plan command itself dispatches tasks.
 
 ### Step 5 — Execution and verification
 
-After a separately reviewed dispatcher is implemented, it may enqueue only currently eligible root/ready steps using stable idempotency keys. Existing workers claim tasks using fenced leases. The scheduler may run no more than the policy concurrency limit. A dependent task becomes eligible only after every upstream task succeeds in the same execution mode; a dry-run success cannot release live-inference work.
+A caller that has an authorized Worker API session may submit the body produced by `workflow-dispatch-body` to `/v1/workflows/dispatch`; the Worker validates and atomically enqueues the manifest. The CLI currently does not perform this HTTP submission. Existing workers claim tasks using fenced leases. The scheduler may run no more than the policy concurrency limit. A dependent task becomes eligible only after every upstream task succeeds in the same execution mode; a dry-run success cannot release live-inference work. In the current repository state, the shared Cloudflare zero-cost preflight is fail-closed until all-zones Zone Read scope is attested, so remote Staging/Production workflows remain blocked before remote effects.
 
 For consequential work, the reviewer role must be separate from the executor and must return evidence against the acceptance checks. Failed or ambiguous outcomes block dependent tasks and go to triage; they are not silently treated as success.
 
@@ -74,14 +74,14 @@ Implemented:
 - Existing task-to-specialist mapping and capability checks in engine/agent_runtime.py.
 - Fenced worker leases and bounded parallel batch execution in engine/worker.py and engine/batch_runner.py.
 - Deterministic workflow DAG validation and specialist assignment in engine/orchestrator.py.
-- Proposal-only CLI: python -m engine.cli workflow-plan --file path/to/workflow.json.
+- Local workflow tooling: `workflow-plan` validates the DAG; `workflow-manifest` creates stable run metadata; `workflow-dispatch-body` prints the endpoint request body without sending it.
 - Executive read-only portfolio snapshot in engine/executive_intelligence.py.
 - Existing quota/budget, data classification, deny-by-default tool permissions, and policy loading.
 
 Not yet implemented:
 - A persistent executive cycle that creates and reviews objectives on a schedule.
 - A live, verified free planning-model adapter.
-- Dependency-aware queue claims and downstream release in both SQLite and D1 are implemented and Staging-verified (PR #457; additive migration 0010).
+- An end-to-end CLI/API client that submits `workflow-dispatch-body` output to the authenticated Worker endpoint; the endpoint itself is implemented.
 - Durable plan/decision version storage and cross-run orchestration state.
 - Independent reviewer enforcement as a required completion gate for consequential work.
 - A measured agent/model capability registry based on completed task outcomes.
