@@ -472,10 +472,6 @@ def _require_host_network_control():
 #: configured but not enforced passes the small request and fails this one.
 PRESSURE_OVERSHOOT = 4
 
-#: Fallback aside for the memory measurement, well above the limit so the page
-#: really is written before the allocation that must fail.
-_PRESSURE_SCRATCH = "/tmp/.raawaa-pressure-scratch"
-
 #: The memory and pids measurements run in their own child process.
 #:
 #: This is not tidiness. A cgroup memory limit kills the *process group* with
@@ -489,42 +485,34 @@ _PRESSURE_SCRATCH = "/tmp/.raawaa-pressure-scratch"
 #: survives, and "the child was killed while asking for 4x the limit" is a
 #: *stronger* statement than "the allocation raised MemoryError".
 _PRESSURE_CHILD = r"""
-import json, os, sys
+import json, subprocess, sys, time
 
 LIMIT_MIB = int(sys.argv[1])
 OVERSHOOT = int(sys.argv[2])
-SCRATCH = sys.argv[3]
 
-result = {"memory_mib": 0, "pids_held": 0, "pids_refused": False}
+result = {"memory_mib": 0, "memory_method": "anonymous", "pids_held": 0,
+          "pids_refused": False}
 
-# Preallocate the file first: writing it while the cgroup is already at its
-# limit can fail on a dirty-page charge, which would look like a memory refusal
-# that never happened.
+# --- memory -------------------------------------------------------------
+# Anonymous memory, touched page by page. NOT a file: writing to a file at
+# increasing offsets measures the filesystem, not the RAM limit, and an earlier
+# version of this probe did exactly that -- it "reached 2048 MiB" inside a 32 MiB
+# tmpfs because it never grew the file, only rewrote the first block. The live
+# test caught it, which is why the number is now a real allocation.
 block = 16 * 1024 * 1024
-with open(SCRATCH, "wb") as handle:
-    handle.write(b"\0" * block)
-
-# --- memory: seek past the limit and touch every page --------------------
+chunks = []
 try:
-    with open(SCRATCH, "r+b") as handle:
-        for _ in range(int(LIMIT_MIB * OVERSHOOT // 16)):
-            for offset in range(0, block, 4096):
-                handle.seek(offset)
-                handle.write(b"\1")
-            handle.seek(0)
-            result["memory_mib"] += 16
+    for _ in range(int(LIMIT_MIB * OVERSHOOT // 16)):
+        chunk = bytearray(block)
+        for offset in range(0, block, 4096):
+            chunk[offset] = 1
+        chunks.append(chunk)
+        result["memory_mib"] += 16
 except MemoryError:
-    pass
-except OSError:
-    pass
-
-try:
-    os.unlink(SCRATCH)
-except OSError:
-    pass
+    result["memory_method"] = "MemoryError"
+del chunks
 
 # --- process count ------------------------------------------------------
-import subprocess, time
 children = []
 try:
     for _ in range(OVERSHOOT * 128):
@@ -555,14 +543,13 @@ import base64, json, os, resource, signal, subprocess, sys, time
 
 LIMIT_MIB = {limit_mib}
 OVERSHOOT = {overshoot}
-SCRATCH = {scratch!r}
 CHILD = base64.b64decode({child_b64!r}).decode("utf-8")
 
 result = {{}}
 
 # --- memory and process count, in a child that is allowed to be killed ----
 completed = subprocess.run(
-    [sys.executable, "-c", CHILD, str(LIMIT_MIB), str(OVERSHOOT), SCRATCH],
+    [sys.executable, "-c", CHILD, str(LIMIT_MIB), str(OVERSHOOT)],
     capture_output=True, text=True, timeout=150, check=False,
 )
 # A negative return code is a signal. Under a cgroup memory limit this is the
@@ -577,6 +564,7 @@ for line in completed.stdout.strip().splitlines():
     except ValueError:
         continue
 result["memory_mib"] = observed.get("memory_mib")
+result["memory_method"] = observed.get("memory_method")
 result["pids_held"] = observed.get("pids_held")
 result["pids_refused"] = observed.get("pids_refused")
 
@@ -616,7 +604,6 @@ def _child_b64() -> str:
 def _pressure_program(limit_mib: int, overshoot: int) -> str:
     """The probe exactly as it is handed to the container."""
     return _PRESSURE_PROGRAM.format(limit_mib=limit_mib, overshoot=overshoot,
-                                    scratch=_PRESSURE_SCRATCH,
                                     child_b64=_child_b64())
 
 
@@ -636,8 +623,20 @@ class PressureProbeContractTest(unittest.TestCase):
     def test_the_allocations_are_touched_not_merely_reserved(self):
         # Over-commit means an untouched buffer proves nothing about memory, so
         # every page is written, not merely reserved.
-        self.assertIn('handle.write(b"\\1")', _PRESSURE_CHILD)
+        self.assertIn("chunk[offset] = 1", _PRESSURE_CHILD)
         self.assertIn("range(0, block, 4096)", _PRESSURE_CHILD)
+
+    def test_memory_is_measured_as_anonymous_memory_not_as_a_file(self):
+        """The bug the second live dispatch found.
+
+        An earlier version wrote a file at increasing offsets. That measures the
+        filesystem: it "reached 2048 MiB" inside a 32 MiB tmpfs because the file
+        never grew, so the write loop only rewrote the first block. A RAM limit
+        cannot constrain that. Anonymous memory is what --memory governs.
+        """
+        self.assertNotIn("handle.seek(offset)", _PRESSURE_CHILD)
+        self.assertNotIn('open(SCRATCH', _PRESSURE_CHILD)
+        self.assertIn("bytearray(block)", _PRESSURE_CHILD)
 
     def test_the_probe_reaps_the_children_it_creates(self):
         self.assertIn("child.kill()", _PRESSURE_CHILD)
@@ -679,6 +678,7 @@ class PressureProbeContractTest(unittest.TestCase):
         # limit, it must not look bounded.
         self.assertFalse(observed["child_killed"],
                          "an unlimited host reported a killed memory child")
+        self.assertEqual(observed["memory_method"], "anonymous")
         self.assertGreaterEqual(observed["memory_mib"], 128,
                                 "an unlimited host reported a bounded allocation")
         self.assertFalse(observed["pids_refused"],
