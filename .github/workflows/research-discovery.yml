@@ -8,6 +8,7 @@ on:
       - "engine/research_discovery.py"
       - "config/research_sources.json"
       - "scripts/persist_research_candidates.py"
+      - "scripts/verify_research_persistence_schema.py"
       - "scripts/publish_research_scan_telemetry.py"
       - "worker/mobile-status.js"
       - "scripts/triage_research_candidates.py"
