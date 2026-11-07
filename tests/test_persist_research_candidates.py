@@ -41,7 +41,7 @@ class ResearchPersistenceTests(unittest.TestCase):
                 "synthetic-access-id",
                 "synthetic-access-secret",
             )
-        self.assertEqual(result["candidates"][0]["source_key"], "github:org/repo")
+        self.assertEqual(result["matched_keys"], ["github:org/repo"])
         request = opened.call_args.args[0]
         self.assertEqual(request.full_url, "https://engine.example/v1/research/candidates/verify")
         self.assertEqual(request.method, "POST")
@@ -87,7 +87,7 @@ class ResearchPersistenceTests(unittest.TestCase):
         self.assertEqual(request.method, "POST")
         self.assertIn('"batch_id":"github:run:1"', request.data.decode("utf-8"))
         self.assertEqual(request.get_header("Authorization"), "Bearer synthetic-token")
-        self.assertEqual(opened.call_args.kwargs["timeout"], 20)
+        self.assertEqual(opened.call_args.args[1], 20)
 
     def test_authenticated_readback_rejects_redirects(self):
         handler = _RejectRedirects()
