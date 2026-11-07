@@ -1238,6 +1238,27 @@ test("research candidate listing is authenticated and bounded", async () => {
   assert.ok(DB.calls.some(x => x.kind === "all" && x.sql.includes("WHERE review_status=?") && x.values[0] === "unreviewed"));
 });
 
+test("research exact-key verification rejects unauthenticated and duplicate-key requests", async () => {
+  const unauthenticated = await worker.fetch(request("/v1/research/candidates/verify", {
+    method: "POST", token: null, body: { source_keys: ["github:org/repo"] },
+  }), { DB: dbMock(), ENGINE_API_TOKEN: TOKEN });
+  assert.equal(unauthenticated.status, 401);
+  const duplicate = await worker.fetch(request("/v1/research/candidates/verify", {
+    method: "POST", body: { source_keys: ["github:org/repo", "github:org/repo"] },
+  }), { DB: dbMock(), ENGINE_API_TOKEN: TOKEN });
+  assert.equal(duplicate.status, 400);
+});
+
+test("research ingestion requires a bounded stable batch ID before writes", async () => {
+  const DB = dbMock();
+  const response = await worker.fetch(request("/v1/research/candidates", {
+    method: "POST", body: { candidates: [{ source: "github", full_name: "org/repo", url: "https://github.com/org/repo" }] },
+  }), { DB, ENGINE_API_TOKEN: TOKEN });
+  assert.equal(response.status, 400);
+  assert.deepEqual(await response.json(), { error: "invalid_batch_id" });
+  assert.equal(DB.calls.length, 0);
+});
+
 test("research candidate review is explicit and audited", async () => {
   const DB = dbMock();
   const response = await worker.fetch(request("/v1/research/candidates/review", { method: "POST", body: { source_key: "github:org/agent", review_status: "accepted", note: "Licence and security reviewed." } }), { DB, ENGINE_API_TOKEN: TOKEN });
