@@ -108,7 +108,7 @@ def _get(base_url: str, token: str, access_client_id: str = "",
     request = Request(base_url.rstrip("/") + "/v1/research/candidates?status=all&limit=100&keys_only=true",
                       headers=headers, method="GET")
     try:
-        with urlopen(request, timeout=timeout) as response:
+        with _open_without_redirects(request, timeout=timeout) as response:
             raw = response.read(64 * 1024 + 1)
             if len(raw) > 64 * 1024:
                 raise ResearchPersistenceError("research readback response exceeded limit")

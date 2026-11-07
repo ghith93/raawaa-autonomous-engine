@@ -6,6 +6,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 
+// Freeze the fixture's date slots so a run spanning UTC midnight cannot collide.
+const FIXTURE_NOW = Date.now();
 const PORT = 8792;
 const BASE = "http://127.0.0.1:" + PORT;
 const TOKEN = "test-engine-token-local-only";
@@ -1114,9 +1116,17 @@ print(json.dumps(run_once(store, environ={}, task_id=os.environ['LOCAL_TASK_ID']
   assertStatus(await api(stalePath, { method: "POST", body: { action: "start",
     lease_token: staleClaim.payload.lease_token, dispatch_id: staleIdentity.dispatch_id } }), 200, "start before stale lease");
   executeLocalSql("UPDATE tasks SET lease_expires_at='2000-01-01T00:00:00.000Z' WHERE id='" + staleId + "'");
-  const staleRecovery = await api("/v1/tasks/recover", { method: "POST", body: {} });
-  assertStatus(staleRecovery, 200, "recover expired supervised task lease");
-  assert.ok(staleRecovery.payload.requeued >= 1, "stale task lease is requeued");
+  const staleRecoveries = await Promise.all([
+    api("/v1/tasks/recover", { method: "POST", body: {} }),
+    api("/v1/tasks/recover", { method: "POST", body: {} }),
+  ]);
+  staleRecoveries.forEach(result => assertStatus(result, 200, "recover expired supervised task lease"));
+  assert.equal(staleRecoveries.reduce((sum, result) => sum + result.payload.requeued, 0), 1,
+    "concurrent recovery reports one actual transition");
+  const recoveryAudit = await api("/v1/audit?limit=30&task_id=" + staleId);
+  assertStatus(recoveryAudit, 200, "read recovery audit");
+  assert.equal(recoveryAudit.payload.events.filter(event => event.event === "task_lease_recovered").length, 1,
+    "concurrent recovery produces one audit event");
   const replacementClaim = await api("/v1/tasks/claim", { method: "POST", body: { execution_mode: "dry_run" } });
   assertStatus(replacementClaim, 200, "replacement worker claims stale task");
   assert.equal(replacementClaim.payload.task.id, staleId);
@@ -1167,7 +1177,7 @@ print(json.dumps(run_once(store, environ={}, task_id=os.environ['LOCAL_TASK_ID']
   // start one trusted fixture child, kill its worker before settle, expire only
   // that task lease, recover the exact daily probe, then prove the next owner
   // quarantines the durable in-flight dispatch without starting another child.
-  const crashSlot = new Date().toISOString().slice(0, 10).replaceAll("-", "");
+  const crashSlot = new Date(FIXTURE_NOW).toISOString().slice(0, 10).replaceAll("-", "");
   const crashKey = "staging-cron-supervised-probe:" + crashSlot;
   const crashTask = await api("/v1/tasks/enqueue", {
     method: "POST",
@@ -1329,7 +1339,7 @@ print(json.dumps(run_once(store, environ={}, task_id=os.environ['LOCAL_TASK_ID']
   // Exact production envelope (max_attempts=1): after a child start and worker
   // death, recovery must terminally fail the task, quarantine the dispatch as
   // ambiguous, and never start a second child — without raising the retry budget.
-  const exactSlot = new Date(Date.now() - 86_400_000).toISOString().slice(0, 10).replaceAll("-", "");
+  const exactSlot = new Date(FIXTURE_NOW - 86_400_000).toISOString().slice(0, 10).replaceAll("-", "");
   const exactKey = "staging-cron-supervised-probe:" + exactSlot;
   const exactTask = await api("/v1/tasks/enqueue", {
     method: "POST",
@@ -1377,7 +1387,7 @@ print(json.dumps(run_once(store, environ={}, task_id=os.environ['LOCAL_TASK_ID']
   // Concurrent recovery race on a real local D1 row: two simultaneous
   // recoveries of one expired lease produce exactly one transition and one
   // audit event; the loser is a deterministic replay, never a second lease.
-  const raceSlot = new Date(Date.now() - 2 * 86_400_000).toISOString().slice(0, 10).replaceAll("-", "");
+  const raceSlot = new Date(FIXTURE_NOW - 2 * 86_400_000).toISOString().slice(0, 10).replaceAll("-", "");
   const raceKey = "staging-cron-supervised-probe:" + raceSlot;
   const raceTask = await api("/v1/tasks/enqueue", {
     method: "POST",

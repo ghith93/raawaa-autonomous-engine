@@ -14,15 +14,15 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class WorkflowDispatchGuardTests(unittest.TestCase):
-    def test_cli_does_not_claim_main_pushes_are_read_only(self):
+    def test_cli_describes_engine_ci_staging_scope(self):
         import contextlib
         import io
         from unittest.mock import patch
         out = io.StringIO()
         with patch("sys.argv", ["check_workflow_dispatch_guards.py"]), contextlib.redirect_stdout(out):
             self.assertEqual(check.main(), 0)
-        self.assertIn("main pushes may run Staging writes and deployment", out.getvalue())
-        self.assertNotIn("main pushes are read-only", out.getvalue())
+        self.assertIn("push and scheduled Engine CI runs skip them", out.getvalue())
+        self.assertNotIn("push and scheduled runs are read-only", out.getvalue())
 
     def test_secret_dispatch_job_requires_main_ref(self):
         content = """on:
@@ -47,18 +47,30 @@ jobs:
 """
         self.assertEqual(len(workflow_violations("deploy.yml", content)), 1)
 
-    def test_staging_replay_jobs_are_explicitly_main_guarded(self):
+    def test_staging_jobs_are_opt_in_only_and_never_automatic(self):
         workflow = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
         for job in ("staging-migrate", "staging-worker-verify",
                     "publish-staging-ops-telemetry", "staging-mobile-status-verify"):
             block = next((content for name, content in job_blocks(workflow) if name == job), "")
             self.assertIn("github.ref == 'refs/heads/main'", block)
-            self.assertIn("github.event_name == 'push'", block)
+            self.assertNotIn("github.event_name == 'push'", block)
+            self.assertNotIn("github.event_name == 'schedule'", block)
             self.assertIn("github.event_name == 'workflow_dispatch' && inputs.enable_staging_operations == true", block)
         self.assertEqual(check.staging_gate_violations(".github/workflows/ci.yml", workflow), [])
         self.assertIn("default: false", workflow)
 
 
+
+    def test_engine_ci_has_daily_unattended_regression_schedule(self):
+        workflow = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+        triggers = check.parse_triggers(workflow)
+        self.assertIn("schedule", triggers)
+        self.assertIn('cron: "17 4 * * *"', workflow)
+        self.assertIn("workflow_dispatch", triggers)
+        for job in check.STAGING_EFFECT_JOBS:
+            block = next((content for name, content in job_blocks(workflow) if name == job), "")
+            self.assertNotIn("github.event_name == 'schedule'", block)
+            self.assertNotIn("github.event_name == 'push'", block)
 
     def test_staging_jobs_fail_closed_without_explicit_opt_in(self):
         workflow = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")

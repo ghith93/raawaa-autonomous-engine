@@ -269,7 +269,7 @@ STAGING_EFFECT_JOBS: tuple[str, ...] = (
 
 
 def staging_gate_violations(path: str, content: str) -> list[str]:
-    """Require automatic main-push Staging operations and explicit manual opt-in."""
+    """Require Staging side effects to be opt-in only, never push/schedule driven."""
     if Path(path).name != "ci.yml":
         return []
     violations: list[str] = []
@@ -283,10 +283,10 @@ def staging_gate_violations(path: str, content: str) -> list[str]:
         if not block:
             violations.append(f"{path}: required Staging job '{job_name}' is missing")
             continue
-        if "github.event_name == 'push'" not in block:
-            violations.append(f"{path}: Staging job '{job_name}' must run automatically on main push")
+        if "github.event_name == 'push'" in block or "github.event_name == 'schedule'" in block:
+            violations.append(f"{path}: Staging job '{job_name}' must never run automatically on push or schedule")
         if "github.event_name == 'workflow_dispatch' && inputs.enable_staging_operations == true" not in block:
-            violations.append(f"{path}: Staging job '{job_name}' lacks explicit opt-in for manual dispatch")
+            violations.append(f"{path}: Staging job '{job_name}' must require explicit manual opt-in")
         if "github.ref == 'refs/heads/main'" not in block:
             violations.append(f"{path}: Staging job '{job_name}' is not restricted to main")
     return violations
@@ -377,7 +377,7 @@ def main() -> int:
         return 1
     print("All secret-bearing workflow_dispatch and push/PR jobs are restricted to refs/heads/main.")
     print("No production-class workflow exposes a manual dispatch trigger.")
-    print("Manual Staging operations require explicit opt-in; successful main pushes may run Staging writes and deployment.")
+    print("Engine CI Staging-effect jobs require explicit manual opt-in; push and scheduled Engine CI runs skip them.")
     return 0
 
 

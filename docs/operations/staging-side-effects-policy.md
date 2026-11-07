@@ -2,19 +2,18 @@
 
 ## Default autonomous operation
 
-A reviewed merge to `main` automatically triggers the complete Staging lifecycle after CI tests pass:
-1. Validate Staging and Production D1 identities are distinct and match the reviewed targets.
-2. Apply pending migrations to Staging only.
-3. Deploy the isolated Staging Worker on `workers.dev` only.
-4. Generate ephemeral consumer/admin capabilities, verify the worker and researcher lane, and revoke temporary secrets on exit.
-5. Verify the monetary ledger and lane isolation.
-6. Publish sanitized operational telemetry to Staging D1 and verify authenticated mobile status.
-
-No person needs to open Actions or manually start this lifecycle. Failed tests block downstream Staging operations. Branch pushes and pull requests run code tests only; Staging jobs are main-only.
+Engine CI runs its test suite on pushes, pull requests and daily schedules. Its
+four Staging-effect jobs skip these events, including main pushes. This is a
+statement about Engine CI jobs only: other workflows have their own triggers and
+may have side effects. GitHub Actions does not wake an Arena session.
 
 ## Manual dispatch safety
 
-The optional `workflow_dispatch` path remains available only with `enable_staging_operations=true`. Its input defaults to `false`, so a casual/manual dispatch cannot write to Staging accidentally. This is an additional safe manual path, not a requirement for normal operation.
+The Staging lifecycle runs only on a main-ref `workflow_dispatch` with
+`enable_staging_operations=true`; the input defaults to false. When enabled, it
+can apply migrations, deploy the isolated Worker, install temporary capabilities,
+run remote proofs and publish telemetry. Opt-in is not evidence of a zero-cost
+boundary: verify provider billing and all other safety requirements before use.
 
 ## Boundaries
 
@@ -26,4 +25,11 @@ The optional `workflow_dispatch` path remains available only with `enable_stagin
 
 ## Verification
 
-`scripts/check_workflow_dispatch_guards.py`, `tests/test_workflow_dispatch_guards.py`, and `tests/test_provider_workflow_security.py` enforce the automatic main-push path and false-by-default manual path.
+`scripts/check_workflow_dispatch_guards.py`, `tests/test_workflow_dispatch_guards.py`, and `tests/test_provider_workflow_security.py` check the manual opt-in and Engine CI event guards.
+
+
+## Autonomous CI policy — 2026-11-07
+
+Engine CI runs automatically on branch pushes, pull requests, and once daily at 04:17 UTC. These runs execute the full offline test, Worker, local D1, and policy suites without requiring a person to dispatch them.
+
+Staging migrations, Worker deployment, temporary secret installation, telemetry writes, and remote proofs are deliberately excluded from push and scheduled runs. They remain behind the existing explicit manual opt-in as an emergency/diagnostic path only; ordinary autonomous progress does not depend on it. The scheduled research-discovery workflow remains independent and runs daily. No Arena session wake is implied by a GitHub Actions run.
