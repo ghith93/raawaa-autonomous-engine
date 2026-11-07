@@ -13,7 +13,7 @@
 | Research memory | GitHub Actions artifacts; optional D1 `research_candidates` persistence | Artifacts retained 30 days; D1 persistence requires the existing opt-in variable. | **Keep existing storage.** No second vector DB. |
 | Tool permissions | Tool Broker + `config/tool_permissions.json` | Deny-by-default; read-file/list-files are the only registered tools; no external adapters connected to live agents. | **Keep and connect carefully.** Do not grant tools merely because they are discovered. |
 | Agent roster/runtime | `config/agents.json`, `engine/agent_runtime.py`, `engine/worker.py` | Deterministic role/task contracts exist; worker also has a separate default-off quota-gated specialist inference path. Roster entries alone do not prove continuously running agent processes. | **Keep.** The model path remains default-off until route eligibility and live safety are verified. |
-| Knowledge graph | Graphify OSS pilot in PR #620 | Initial run created 5,297 nodes / 11,848 edges / 256 communities; report-generation step needed correction. Exact-head corrected CI still pending. | **Pilot only.** Does not become a task orchestrator or source of truth. |
+| Knowledge graph | Graphify OSS code graph + evidence-backed project/agent topology in PR #626 replacement | Prior code-only pilot produced 5,394 nodes / 11,981 edges / 255 communities. Exact-head Engine CI and Graphify topology job passed on `2bbb085`; branch rebase onto latest main is in progress before merge. | **Read-only integration candidate.** No model calls; D1 remains the live task source of truth. |
 
 ## 2. Agent and orchestration alternatives
 
@@ -100,3 +100,12 @@ The earlier wording that process supervision did not exist was too broad. `engin
 | #405 | Park the Workers AI Neuron ledger until account and quota boundaries are independently verified. | `48117a70c245` |
 
 Earlier Groq audit branch run [42309108728](https://github.com/ghith93/raawaa-autonomous-engine/actions/runs/42309108728) failed before any job. PR #619 replaces that invalid workflow with an offline default-policy audit; it does not prove account billing eligibility, idempotency, live inference or Staging deployment. Issue #577 and Runtime-004's second qualifying task lifecycle remain open.
+
+
+## 11. Graphify topology integration and Staging safety gate — 2026-11-07
+
+The clean-base Graphify integration adds `config/project-agent-map.json`, deterministic validation, an idempotent evidence-link overlay, and a read-only Graphify job. It distinguishes code dependencies, declared role/capability topology, and live task dependencies. It does not assert that declarative roles are running agents and does not copy D1 tasks into the graph.
+
+Exact-head checks passed on `2bbb085987f90c1480af722c719805281b8f4208`: Engine CI test and Graphify knowledge-graph job succeeded; all four Staging-effect jobs were skipped. The PR could not be merged because main advanced from `0b88aded` to `e55bc117` during the review window. A replacement branch based on the latest main is being prepared; the new exact head must pass CI before merge.
+
+The integration also changes all four Staging-effect jobs to require a manual `workflow_dispatch` input `enable_staging_operations=true`, defaulting to false. Ordinary pushes and merges to main are read-only. No Staging or Production operation was executed by the integration branch.
