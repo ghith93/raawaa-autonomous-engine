@@ -56,7 +56,7 @@ jobs:
   zero_cost_preflight:
     name: Verify zero-cost Cloudflare boundary (read-only)
     needs: test
-    if: ${{ github.ref == 'refs/heads/main' && github.event_name == 'push' }}
+    if: ${{ github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'schedule') }}
     runs-on: ubuntu-latest
     timeout-minutes: 2
     outputs:
