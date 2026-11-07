@@ -129,8 +129,13 @@ def _read_subscriptions(account_id: str, token: str, opener, timeout: int) -> li
     count = _metadata_count(info.get("count"))
     if count != len(records):
         raise ValueError("incomplete_subscription_inventory")
-    # Do not use result_info.total_count to invent paging semantics: this
-    # endpoint is a SinglePage operation in the generated official SDKs.
+    # This endpoint is a SinglePage operation; never invent pagination. If
+    # Cloudflare returns total_count, it must agree with the complete result.
+    # A larger or malformed value makes inventory completeness ambiguous.
+    if "total_count" in info:
+        total_count = _metadata_count(info.get("total_count"))
+        if total_count != count:
+            raise ValueError("incomplete_subscription_inventory")
     return records
 
 
