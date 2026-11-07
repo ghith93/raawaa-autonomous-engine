@@ -73,6 +73,50 @@ class SandboxAdversarialRunnerTests(unittest.TestCase):
         suite = unittest.TestSuite([self.Passing("test_one"), self.Passing("test_one")])
         self.assertFalse(runner.run_checked(suite, {self.Passing("test_one").id()}, stream=io.StringIO()))
 
+    def annotations_for(self, case):
+        suite = unittest.TestLoader().loadTestsFromTestCase(case)
+        result = runner.run_suite(suite, stream=io.StringIO())
+        return runner.result_annotations(result, [case("test_one").id()])
+
+    def test_each_reviewed_probe_is_reported_individually(self):
+        """A green job must say which proofs ran, readable without the job log."""
+        self.assertEqual(self.annotations_for(self.Passing), [
+            "::notice title=Sandbox probe one::passed",
+        ])
+        # A skip is never allowed to look like success.
+        self.assertEqual(self.annotations_for(self.Skipped), [
+            "::error title=Sandbox probe one::skipped",
+        ])
+        self.assertEqual(self.annotations_for(self.Failing), [
+            "::error title=Sandbox probe one::failed",
+        ])
+
+    def test_annotations_cover_every_expected_probe_even_if_it_never_ran(self):
+        """A probe that is absent from the result is still reported, as an error."""
+        # A bare TestResult records no executions, which is what an aborted run
+        # looks like; it must be an error, never a pass.
+        lines = runner.result_annotations(
+            unittest.TestResult(), ["pkg.Case.test_the_probe_actually_ran"])
+        self.assertEqual(lines, ["::error title=Sandbox probe the_probe_actually_ran::not_run"])
+
+    def test_annotation_text_carries_no_paths_values_or_output(self):
+        class Leaky(unittest.TestCase):
+            def test_one(self):
+                self.fail("/tmp/secret canary=abc token=xyz")
+
+        line = self.annotations_for(Leaky)[0]
+        self.assertNotIn("secret", line)
+        self.assertNotIn("canary", line)
+        self.assertNotIn("token", line)
+        self.assertNotIn("/tmp", line)
+        self.assertEqual(len(line.splitlines()), 1)
+
+    def test_unsafe_probe_name_is_refused_before_it_reaches_a_workflow_command(self):
+        for name in ("test_bad\n::error::injected", "test_Bad", "test_" + "a" * 70,
+                     "test_", "test_bad name"):
+            with self.subTest(name=name), self.assertRaises(ValueError):
+                runner.result_annotations(unittest.TestResult(), [f"pkg.Case.{name}"])
+
     def test_only_exact_approved_image_passes_identity_preflight(self):
         approved = runner.APPROVED_IMAGE
         alternatives = (
