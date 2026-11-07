@@ -69,6 +69,26 @@ class ProjectTopologyTests(unittest.TestCase):
         with self.assertRaises(ProjectTopologyError):
             build_agent_topology_context("researcher", invalid_edge)
 
+    def test_large_relationship_sets_are_truncated_to_prompt_budget(self):
+        nodes = [{"id": "agent:researcher", "kind": "agent", "status": "declared_only"}]
+        edges = []
+        for index in range(30):
+            node_id = f"component:item_{index:02d}"
+            nodes.append({
+                "id": node_id, "kind": "component", "status": "implemented",
+                "evidence": [f"docs/evidence-{index}-{part}.md" for part in range(3)],
+            })
+            edges.append({
+                "from": "agent:researcher", "to": node_id,
+                "relation": "uses", "status": "role_intent_only",
+            })
+        context = build_agent_topology_context("researcher", sample_map(nodes=nodes, edges=edges))
+        import json
+        self.assertTrue(context["truncated"])
+        self.assertEqual(context["relationship_count_total"], 30)
+        self.assertEqual(context["relationship_count_included"], len(context["relationships"]))
+        self.assertLessEqual(len(json.dumps(context, ensure_ascii=False).encode("utf-8")), 2500)
+
     def test_boolean_or_unknown_schema_version_is_rejected(self):
         for version in (True, 2, "1"):
             with self.subTest(version=version):
