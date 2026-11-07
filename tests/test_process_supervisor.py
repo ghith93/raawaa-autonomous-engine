@@ -79,6 +79,25 @@ def _test_registry(**overrides) -> OperationRegistry:
             grace_seconds=0.4,
         ),
         OperationSpec(
+            name="setsid_daemon",
+            executable=PYTHON,
+            arguments=(
+                "-c",
+                # fork -> setsid -> fork: leaves both the process group and the
+                # session, so killpg cannot reach it. This is the shape that
+                # survived the supervisor before the subreaper was added.
+                "import os,sys,time;"
+                "pid=os.fork();"
+                "os._exit(0) if pid else None;"
+                "os.setsid();"
+                "pid2=os.fork();"
+                "os._exit(0) if pid2 else None;"
+                "print(os.getpid(),flush=True);time.sleep(60)",
+            ),
+            wall_seconds=0.6,
+            grace_seconds=0.3,
+        ),
+        OperationSpec(
             name="orphan_child",
             executable=PYTHON,
             arguments=(
@@ -274,6 +293,34 @@ class RegistryConfigurationTests(unittest.TestCase):
             self.assertTrue(entry["purpose"])
 
 
+class WireContractTests(unittest.TestCase):
+    """The remote outcome is a published contract, not a local dict."""
+
+    def test_the_remote_outcome_has_exactly_the_published_fields(self):
+        from engine.process_supervisor import _dispatch_outcome
+        from engine.remote_process_dispatch_ledger import OUTCOME_FIELDS
+
+        governed = _dispatch_outcome("succeeded", {"descendants_killed": 2,
+                                                   "descendants_escaped": 9,
+                                                   "subreaper_enabled": True})
+        self.assertEqual(tuple(governed), tuple(OUTCOME_FIELDS))
+        # Local facts must not leak across a boundary the Worker refuses.
+        self.assertNotIn("descendants_escaped", governed)
+        self.assertNotIn("subreaper_enabled", governed)
+
+    def test_the_worker_and_the_ledger_agree_on_the_field_set(self):
+        """A drift here fails every remote settle, so it is worth a test."""
+        import re
+        from pathlib import Path as _P
+        from engine.remote_process_dispatch_ledger import OUTCOME_FIELDS
+
+        source = _P("worker/task-process-dispatches.js").read_text()
+        block = re.search(r"const OUTCOME_FIELDS = \[(.*?)\];", source, re.S)
+        self.assertIsNotNone(block, "the Worker outcome field list moved")
+        worker = re.findall(r'"([a-z_]+)"', block.group(1))
+        self.assertEqual(tuple(worker), tuple(OUTCOME_FIELDS))
+
+
 class TimeoutAndTreeTests(SupervisorHarness):
     def test_hard_timeout_kills_the_process(self):
         started = time.monotonic()
@@ -300,6 +347,57 @@ class TimeoutAndTreeTests(SupervisorHarness):
         self.assertFalse(_pid_is_alive(orphan), "orphan kept the output pipes open")
         self.assertGreaterEqual(outcome.descendants_killed, 1)
         self.assertLess(elapsed, 5.0)
+
+    def test_a_setsid_daemon_is_killed_and_reaped_not_surviving(self):
+        """The escape that the group scan cannot see.
+
+        A descendant that calls setsid leaves the process group, so killpg does
+        not reach it and descendants_killed would read 0 while it kept running.
+        With the subreaper set the kernel re-parents the orphan to the
+        supervisor, which then enumerates, kills and reaps it.
+        """
+        outcome = self.supervisor.run_operation("setsid_daemon", task_id="t-setsid")
+        self.assertTrue(outcome.subreaper_enabled,
+                        "PR_SET_CHILD_SUBREAPER did not take; the escapee is invisible")
+        escapee = int(outcome.stdout.strip().splitlines()[0])
+        self.assertEqual(outcome.descendants_escaped, 0, "a daemonised descendant survived")
+        self.assertGreaterEqual(outcome.descendants_killed, 1)
+        self.assertFalse(_pid_is_alive(escapee), "setsid escapee survived the supervisor")
+
+    def test_an_escapee_we_cannot_reap_is_reported_rather_than_hidden(self):
+        """A failed census must not read as containment.
+
+        If the orphan survives the kill, ``descendants_escaped`` must say so. The
+        scan is injected because a genuinely unkillable process is not something
+        a test can arrange on demand.
+        """
+        supervisor = ProcessSupervisor(operations=self.supervisor.operations)
+        stubborn = {999001, 999002}
+        calls = {"n": 0}
+
+        def scan(*, exclude=()):
+            calls["n"] += 1
+            return set(stubborn)  # never goes away
+
+        supervisor._orphan_scan = scan
+        supervisor._settle_orphans = lambda *a, **k: None
+        outcome = supervisor.run_operation("setsid_daemon", task_id="t-escaped")
+        self.assertEqual(outcome.descendants_escaped, len(stubborn))
+        self.assertEqual(outcome.descendants_killed, 0)
+        self.assertGreaterEqual(calls["n"], 1)
+
+    def test_a_preexisting_child_is_not_mistaken_for_an_escapee(self):
+        """The census must not kill a concurrent child that predates the run."""
+        import subprocess as _sp
+
+        bystander = _sp.Popen([sys.executable, "-c", "import time;time.sleep(30)"])
+        try:
+            outcome = self.supervisor.run_operation("orphan_child", task_id="t-bystander")
+            self.assertEqual(outcome.classification, "succeeded")
+            self.assertIsNone(bystander.poll(), "the supervisor killed an unrelated child")
+        finally:
+            bystander.kill()
+            bystander.wait()
 
     def test_nonzero_exit_is_classified_as_failed(self):
         outcome = self.supervisor.run_operation("exiting_three", task_id="t-exit")
