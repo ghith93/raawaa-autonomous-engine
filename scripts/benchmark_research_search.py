@@ -1,8 +1,9 @@
 """Reproducible, offline benchmark for Arabic/English evidence retrieval.
 
-This compares exact-substring lookup with local SQLite FTS5 using synthetic
-fixtures and stdlib modules only. It never contacts D1, Cloudflare, a model
-provider, or an external search API.
+This compares exact-substring lookup with SQLite FTS5 AND and weighted OR/BM25
+using synthetic fixtures or a bounded public-metadata discovery snapshot. It
+uses stdlib modules only and never contacts D1, Cloudflare, a model provider, or
+an external search API.
 """
 from __future__ import annotations
 
