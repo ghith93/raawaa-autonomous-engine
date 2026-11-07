@@ -8,6 +8,7 @@ import time
 from pathlib import Path
 from urllib.error import HTTPError, URLError
 from urllib.request import HTTPRedirectHandler, Request, build_opener
+from urllib.parse import urlencode
 
 
 USER_AGENT = "RaawaaAutonomousEngine-Research/1.0 (+https://github.com/ghith93/raawaa-autonomous-engine)"
@@ -96,7 +97,7 @@ def _post(base_url: str, token: str, candidates: list[dict],
 
 
 def _get(base_url: str, token: str, access_client_id: str = "",
-         access_client_secret: str = "", timeout: int = 20) -> dict:
+         access_client_secret: str = "", timeout: int = 20, *, source_key: str | None = None) -> dict:
     headers = {
         "Authorization": "Bearer " + token,
         "Accept": "application/json",
@@ -105,7 +106,10 @@ def _get(base_url: str, token: str, access_client_id: str = "",
     if access_client_id and access_client_secret:
         headers["CF-Access-Client-Id"] = access_client_id
         headers["CF-Access-Client-Secret"] = access_client_secret
-    request = Request(base_url.rstrip("/") + "/v1/research/candidates?status=all&limit=100&keys_only=true",
+    if not isinstance(source_key, str) or not source_key:
+        raise ValueError("exact source key is required for readback")
+    query = urlencode({"status": "all", "keys_only": "true", "source_key": source_key})
+    request = Request(base_url.rstrip("/") + "/v1/research/candidates?" + query,
                       headers=headers, method="GET")
     try:
         with _open_without_redirects(request, timeout=timeout) as response:
@@ -161,11 +165,6 @@ def persist_candidates(snapshot: dict, environ=None, request_fn=None, batch_size
         persisted += accepted
         batches += 1
     verify = verify_fn or _get
-    readback = verify(base_url, token, access_id, access_secret)
-    rows = readback.get("candidates") if isinstance(readback, dict) else None
-    if not isinstance(rows, list):
-        raise ResearchPersistenceError("research readback endpoint returned an invalid candidate list")
-    found = {row.get("source_key") for row in rows if isinstance(row, dict)}
     expected = set()
     for item in candidates:
         if item["source"] == "github":
@@ -176,8 +175,13 @@ def persist_candidates(snapshot: dict, environ=None, request_fn=None, batch_size
             expected.add("arxiv:" + item["arxiv_id"].lower())
         elif item["source"] == "searxng":
             expected.add("searxng:" + item["url"][:900])
-    if expected - found:
-        raise ResearchPersistenceError("research D1 readback did not confirm every submitted candidate")
+    # Presence is not proof this particular invocation applied: a row may have
+    # existed already. Only report verification after a successful POST response.
+    for key in sorted(expected):
+        readback = verify(base_url, token, access_id, access_secret, source_key=key)
+        rows = readback.get("candidates") if isinstance(readback, dict) else None
+        if not isinstance(rows, list) or rows != [{"source_key": key}]:
+            raise ResearchPersistenceError("research D1 exact-key readback did not confirm a submitted candidate")
     return {"discovered": len(candidates), "persisted": persisted, "verified": len(expected), "batches": batches, "sources": sources}
 
 

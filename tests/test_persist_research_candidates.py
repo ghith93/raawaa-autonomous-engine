@@ -38,10 +38,11 @@ class ResearchPersistenceTests(unittest.TestCase):
                 "synthetic-test-token",
                 "synthetic-access-id",
                 "synthetic-access-secret",
+                source_key="github:org/repo",
             )
         self.assertEqual(result["candidates"][0]["source_key"], "github:org/repo")
         request = opened.call_args.args[0]
-        self.assertEqual(request.full_url, "https://engine.example/v1/research/candidates?status=all&limit=100&keys_only=true")
+        self.assertEqual(request.full_url, "https://engine.example/v1/research/candidates?status=all&keys_only=true&source_key=github%3Aorg%2Frepo")
         self.assertEqual(request.get_header("Authorization"), "Bearer synthetic-test-token")
         self.assertEqual(request.get_header("Cf-access-client-id"), "synthetic-access-id")
         self.assertEqual(request.get_header("Cf-access-client-secret"), "synthetic-access-secret")
@@ -122,7 +123,7 @@ class ResearchPersistenceTests(unittest.TestCase):
             snapshot,
             environ={"RAAWAA_ENGINE_API_URL": "https://engine.example", "RAAWAA_ENGINE_API_TOKEN": "test-secret"},
             request_fn=fake_post,
-            verify_fn=lambda *args: {"candidates": [{"source_key": key} for key in expected]},
+            verify_fn=lambda *args, source_key: {"candidates": [{"source_key": source_key}] if source_key in expected else []},
         )
         self.assertEqual(result["sources"], ["arxiv", "crossref", "github", "searxng"])
         self.assertEqual(result["discovered"], 4)
@@ -185,7 +186,7 @@ class ResearchPersistenceTests(unittest.TestCase):
             },
             request_fn=fake_post,
             batch_size=5,
-            verify_fn=lambda *args: {"candidates": [{"source_key": "github:org/repo-" + str(i)} for i in range(7)] + [{"source_key": "crossref:10.1234/paper"}]},
+            verify_fn=lambda *args, source_key: {"candidates": [{"source_key": source_key}]},
         )
         self.assertEqual([call[2] for call in calls], [5, 3])
         self.assertEqual(calls[0], ("https://engine.example", "test-secret", 5, "access-id", "access-secret"))
@@ -218,7 +219,7 @@ class ResearchPersistenceTests(unittest.TestCase):
             environ={"RAAWAA_ENGINE_API_URL": "https://engine.example", "RAAWAA_ENGINE_API_TOKEN": "test-secret"},
             request_fn=flaky_post,
             sleep_fn=sleeps.append,
-            verify_fn=lambda *args: {"candidates": [{"source_key": "github:org/repo"}]},
+            verify_fn=lambda *args, source_key: {"candidates": [{"source_key": source_key}]},
         )
         self.assertEqual(result["persisted"], 1)
         self.assertEqual(len(calls), 3)
@@ -236,7 +237,7 @@ class ResearchPersistenceTests(unittest.TestCase):
                 environ={"RAAWAA_ENGINE_API_URL": "https://engine.example", "RAAWAA_ENGINE_API_TOKEN": "test-secret"},
                 request_fn=unauthorized,
                 sleep_fn=lambda _: self.fail("auth errors must not be retried"),
-                verify_fn=lambda *args: {"candidates": []},
+                verify_fn=lambda *args, **kwargs: {"candidates": []},
             )
         self.assertEqual(len(calls), 1)
 
@@ -247,8 +248,26 @@ class ResearchPersistenceTests(unittest.TestCase):
                 snapshot,
                 environ={"RAAWAA_ENGINE_API_URL": "https://engine.example", "RAAWAA_ENGINE_API_TOKEN": "test-secret"},
                 request_fn=lambda *args: {"accepted_count": 1},
-                verify_fn=lambda *args: {"candidates": []},
+                verify_fn=lambda *args, **kwargs: {"candidates": []},
             )
+
+    def test_exact_readback_checks_each_of_more_than_100_keys(self):
+        snapshot = {"candidates": [{"full_name": f"org/repo-{i}"} for i in range(105)]}
+        checked = []
+        def verify(*args, source_key):
+            checked.append(source_key)
+            return {"candidates": [{"source_key": source_key}]}
+        result = persist_candidates(snapshot, environ={"RAAWAA_ENGINE_API_URL": "https://engine.example", "RAAWAA_ENGINE_API_TOKEN": "synthetic"},
+                                    request_fn=lambda *args: {"accepted_count": len(args[2])}, verify_fn=verify)
+        self.assertEqual(len(set(checked)), 105)
+        self.assertEqual(result["verified"], 105)
+
+    def test_exact_readback_rejects_unexpected_or_duplicate_rows(self):
+        snapshot = {"candidates": [{"full_name": "org/repo"}]}
+        for rows in ([{"source_key": "github:other/repo"}], [{"source_key": "github:org/repo"}] * 2):
+            with self.subTest(rows=rows), self.assertRaises(ResearchPersistenceError):
+                persist_candidates(snapshot, environ={"RAAWAA_ENGINE_API_URL": "https://engine.example", "RAAWAA_ENGINE_API_TOKEN": "synthetic"},
+                                   request_fn=lambda *args: {"accepted_count": 1}, verify_fn=lambda *args, **kwargs: {"candidates": rows})
 
     def test_partial_acceptance_stops_for_safe_retry(self):
         snapshot = {"candidates": [{"full_name": "org/repo"}]}

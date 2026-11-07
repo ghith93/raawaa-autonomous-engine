@@ -197,6 +197,8 @@ async function listResearchCandidates(url, env) {
   const rawLimit = Number(url.searchParams.get("limit") || 50);
   const status = url.searchParams.get("status") || "all";
   const allowed = ["all", "unreviewed", "accepted", "rejected", "deferred"];
+  const keys = url.searchParams.getAll("source_key");
+  if (keys.length > 1 || (keys.length === 1 && (!safeResearchString(keys[0], 920) || url.searchParams.get("keys_only") !== "true" || status !== "all"))) return json({ error: "invalid_query" }, 400);
   const metadataFlag = url.searchParams.get("include_metadata") || "false";
   const keysOnlyFlag = url.searchParams.get("keys_only") || "false";
   if (!Number.isInteger(rawLimit) || rawLimit < 1 || rawLimit > 100 || !allowed.includes(status) || !["true", "false"].includes(metadataFlag) || !["true", "false"].includes(keysOnlyFlag) || (metadataFlag === "true" && keysOnlyFlag === "true")) return json({ error: "invalid_query" }, 400);
@@ -204,7 +206,9 @@ async function listResearchCandidates(url, env) {
     ? "source_key,source,title,url,metadata_json,review_status,review_note,first_seen_at,last_seen_at,reviewed_at,discovery_count,updated_at"
     : "source_key,source,title,url,review_status,review_note,first_seen_at,last_seen_at,reviewed_at,discovery_count,updated_at";
   try {
-    const result = status === "all"
+    const result = keys.length
+      ? await env.DB.prepare("SELECT source_key FROM research_candidates WHERE source_key=?").bind(keys[0]).all()
+      : status === "all"
       ? await env.DB.prepare("SELECT " + columns + " FROM research_candidates ORDER BY last_seen_at DESC LIMIT ?").bind(rawLimit).all()
       : await env.DB.prepare("SELECT " + columns + " FROM research_candidates WHERE review_status=? ORDER BY last_seen_at DESC LIMIT ?").bind(status, rawLimit).all();
     return json({ candidates: result.results || [] });

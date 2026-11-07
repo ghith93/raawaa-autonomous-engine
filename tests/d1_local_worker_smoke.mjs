@@ -284,6 +284,23 @@ try {
   assert.ok(persistedSources.has("arxiv:2601.01234v2"));
   assert.ok(persistedSources.has("searxng:https://docs.example.org/agent-security?source=searxng"));
 
+  // An older key remains verifiable even after more than 100 later candidates.
+  for (let i = 0; i < 105; i += 25) {
+    const candidates = Array.from({length: Math.min(25, 105 - i)}, (_, j) => {
+      const full_name = `exactread/repo-${i + j}`;
+      return {source: "github", full_name, url: `https://github.com/${full_name}`};
+    });
+    const inserted = await api("/v1/research/candidates", {method: "POST", body: {candidates}});
+    assertStatus(inserted, 201, "local research fixture insert");
+  }
+  const researchExactKey = "arxiv:2601.01234v2";
+  const researchExact = await api("/v1/research/candidates?keys_only=true&source_key=" + encodeURIComponent(researchExactKey));
+  assertStatus(researchExact, 200, "exact-key readback after over 100 inserts");
+  assert.deepEqual(researchExact.payload.candidates, [{source_key: researchExactKey}]);
+  const researchAbsent = await api("/v1/research/candidates?keys_only=true&source_key=github%3Aabsent%2Frepo");
+  assertStatus(researchAbsent, 200, "absent exact-key readback");
+  assert.deepEqual(researchAbsent.payload.candidates, []);
+
   // --- Atomic workflow dispatch against the real D1 -------------------------
   const dispatchBody = {
     run_id: "smoke-run-1",

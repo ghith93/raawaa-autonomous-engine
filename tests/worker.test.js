@@ -1917,3 +1917,20 @@ test("GET /v1/tasks supports optional status and task_id filters and rejects inv
   assert.deepEqual(await badTaskId.json(), { error: "invalid_task_id" });
 });
 
+
+test("exact research key lookup binds the key and rejects malformed queries", async () => {
+  const DB = dbMock();
+  const key = "github:org/a' OR 1=1 --";
+  const url = "/v1/research/candidates?keys_only=true&source_key=" + encodeURIComponent(key);
+  const response = await worker.fetch(request(url), { DB, ENGINE_API_TOKEN: TOKEN });
+  assert.equal(response.status, 200);
+  const query = DB.calls.find(x => x.kind === "all");
+  assert.equal(query.sql, "SELECT source_key FROM research_candidates WHERE source_key=?");
+  assert.deepEqual(query.values, [key]);
+  for (const invalid of ["?keys_only=true&source_key=a&source_key=b", "?source_key=a", "?keys_only=true&source_key=a&status=accepted"]) {
+    const db = dbMock();
+    assert.equal((await worker.fetch(request("/v1/research/candidates" + invalid), { DB: db, ENGINE_API_TOKEN: TOKEN })).status, 400);
+    assert.equal(db.calls.length, 0);
+  }
+  assert.equal((await worker.fetch(request(url, { token: null }), { DB: dbMock(), ENGINE_API_TOKEN: TOKEN })).status, 401);
+});
