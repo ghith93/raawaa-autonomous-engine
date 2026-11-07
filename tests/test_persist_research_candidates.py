@@ -49,7 +49,7 @@ class ResearchPersistenceTests(unittest.TestCase):
         self.assertEqual(request.get_header("Authorization"), "Bearer synthetic-test-token")
         self.assertEqual(request.get_header("Cf-access-client-id"), "synthetic-access-id")
         self.assertEqual(request.get_header("Cf-access-client-secret"), "synthetic-access-secret")
-        self.assertEqual(opened.call_args.kwargs["timeout"], 20)
+        self.assertEqual(opened.call_args.args[1], 20)
         self.assertIn("github:org/repo", request.data.decode("utf-8"))
 
     def test_workflow_persistence_is_staging_only_and_uses_dedicated_token(self):
@@ -290,6 +290,24 @@ class ResearchPersistenceTests(unittest.TestCase):
                 verify_fn=lambda *args: {"matched_keys": []},
             )
         self.assertEqual(len(calls), 1)
+
+    def test_readback_rejects_duplicate_unexpected_and_non_string_keys(self):
+        snapshot = {"candidates": [{"full_name": "org/repo"}]}
+        bad_results = (
+            {"matched_keys": ["github:org/repo", "github:org/repo"]},
+            {"matched_keys": ["github:org/other"]},
+            {"matched_keys": ["github:org/repo", {"unexpected": "object"}]},
+        )
+        for bad in bad_results:
+            with self.subTest(bad=bad), self.assertRaises(ResearchPersistenceError):
+                persist_candidates(
+                    snapshot,
+                    environ={"RAAWAA_ENGINE_API_URL": "https://engine.example",
+                             "RAAWAA_ENGINE_API_TOKEN": "test-secret",
+                             "RAAWAA_RESEARCH_SCAN_ID": "synthetic-run"},
+                    request_fn=lambda *args: {"accepted_count": 1, "batch_id": args[3], "replayed": False},
+                    verify_fn=lambda *args, response=bad: response,
+                )
 
     def test_readback_must_confirm_every_submitted_candidate(self):
         snapshot = {"candidates": [{"full_name": "org/repo"}]}
