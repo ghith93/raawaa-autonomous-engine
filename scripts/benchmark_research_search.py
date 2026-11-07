@@ -360,6 +360,13 @@ def build_real_corpus_from_data(snapshot: dict[str, Any], qrels: dict[str, Any])
     return documents, cases, coverage
 
 
+def build_real_corpus_source_native_from_data(snapshot: dict[str, Any], qrels: dict[str, Any]):
+    """Build the same corpus without injecting editorial aliases into source metadata."""
+    native_qrels = dict(qrels)
+    native_qrels["arabic_aliases"] = {}
+    return build_real_corpus_from_data(snapshot, native_qrels)
+
+
 def run_real_corpus_benchmark(snapshot: dict[str, Any], qrels: dict[str, Any]) -> dict[str, Any]:
     """Benchmark current public metadata snapshot; no network, provider or remote writes."""
     documents, queries, coverage = build_real_corpus_from_data(snapshot, qrels)
@@ -370,6 +377,20 @@ def run_real_corpus_benchmark(snapshot: dict[str, Any], qrels: dict[str, Any]) -
             "sqlite_fts5_and": evaluate(search_fts, db, queries),
             "sqlite_fts5_or_bm25": evaluate(search_fts_or, db, queries),
         }
+        # Run a second, unaugmented track over source metadata only. The main
+        # track above deliberately measures editorial-alias assistance; keeping
+        # both prevents qrels-derived aliases from being mistaken for native
+        # Arabic retrieval capability.
+        native_documents, native_queries, native_coverage = build_real_corpus_source_native_from_data(snapshot, qrels)
+        native_db = _create_database(native_documents)
+        try:
+            source_native_methods = {
+                "substring_like": evaluate(search_like, native_db, native_queries),
+                "sqlite_fts5_and": evaluate(search_fts, native_db, native_queries),
+                "sqlite_fts5_or_bm25": evaluate(search_fts_or, native_db, native_queries),
+            }
+        finally:
+            native_db.close()
         source_counts: dict[str, int] = {}
         for document in documents:
             source_counts[document["language"]] = source_counts.get(document["language"], 0) + 1
@@ -388,7 +409,13 @@ def run_real_corpus_benchmark(snapshot: dict[str, Any], qrels: dict[str, Any]) -
                 "benchmark_status": "sufficient_coverage" if len(queries) >= 10 and expected_total and present_total / expected_total >= 0.5 else "insufficient_coverage",
                 "coverage_by_query": coverage,
             },
+            "methods_track": "alias_assisted",
             "methods": methods,
+            "source_native": {
+                "methods": source_native_methods,
+                "coverage_by_query": native_coverage,
+                "note": "Indexes only source snapshot fields; no qrels-derived Arabic aliases are injected.",
+            },
             "limitations": [
                 "One bounded public-metadata discovery snapshot; results vary with source availability.",
                 "Relevance labels are manually curated and are not exhaustive ground truth.",
