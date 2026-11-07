@@ -47,9 +47,14 @@ def assess_subscriptions(subscriptions: list) -> dict:
         return _invalid("invalid_subscription_list")
     paid = 0
     unknown = 0
+    seen_ids = set()
     for item in subscriptions:
         if not isinstance(item, dict):
             return _invalid("invalid_subscription_record")
+        subscription_id = item.get("id")
+        if not isinstance(subscription_id, str) or not subscription_id or subscription_id in seen_ids:
+            return _invalid("missing_or_duplicate_subscription_id")
+        seen_ids.add(subscription_id)
         state = item.get("state")
         if state not in ALL_STATES:
             return _invalid("unknown_subscription_state")
@@ -139,8 +144,9 @@ def check_boundary(account_id: str, token: str, opener=None, timeout: int = 15) 
     try:
         subscriptions = fetch_all_subscriptions(account_id, token, opener=opener, timeout=timeout)
         return assess_subscriptions(subscriptions)
-    except (HTTPError, URLError, TimeoutError, OSError, ValueError,
-            json.JSONDecodeError, UnicodeDecodeError):
+    except ValueError as exc:
+        return _invalid(str(exc))
+    except (HTTPError, URLError, TimeoutError, OSError, json.JSONDecodeError, UnicodeDecodeError):
         return _invalid("billing_inventory_unavailable_or_incomplete")
 
 
