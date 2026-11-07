@@ -237,6 +237,24 @@ class TaskStoreTests(unittest.TestCase):
         events = [item["event"] for item in self.store.audit_events()]
         self.assertIn("task_lease_recovered", events)
 
+    def test_concurrent_stale_recovery_counts_and_audits_once(self):
+        from concurrent.futures import ThreadPoolExecutor
+        from threading import Barrier
+        task = self.store.enqueue("research_brief", "Stale recovery race")
+        self.store.claim_next()
+        with sqlite3.connect(self.store.db_path) as db:
+            db.execute("UPDATE tasks SET lease_expires_at='2000-01-01T00:00:00+00:00' WHERE id=?", (task["id"],))
+        barrier = Barrier(2)
+        def recover():
+            barrier.wait()
+            return self.store.recover_stale(worker_lane="general")
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            results = list(pool.map(lambda _: recover(), range(2)))
+        self.assertEqual(sum(result["requeued"] for result in results), 1)
+        self.assertEqual(sum(result["failed"] for result in results), 0)
+        events = [e for e in self.store.audit_events() if e["task_id"] == task["id"] and e["event"] == "task_lease_recovered"]
+        self.assertEqual(len(events), 1)
+
     def test_stale_recovery_is_scoped_to_consumer_lane(self):
         general = self.store.enqueue("research_brief", "General stale task")
         specialist = self.store.enqueue(
