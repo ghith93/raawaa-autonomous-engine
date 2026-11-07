@@ -289,8 +289,8 @@ def staging_gate_violations(path: str, content: str) -> list[str]:
         if not block:
             violations.append(f"{path}: required Staging job '{job_name}' is missing")
             continue
-        if "github.event_name == 'push'" not in block:
-            violations.append(f"{path}: Staging job '{job_name}' must run automatically on main push")
+        if "github.event_name == 'push'" not in block or "github.event_name == 'schedule'" not in block:
+            violations.append(f"{path}: Staging job '{job_name}' must run automatically on main push and daily schedule")
         if "workflow_dispatch" in block:
             violations.append(f"{path}: Staging job '{job_name}' must not depend on manual dispatch")
         if "github.ref == 'refs/heads/main'" not in block:
