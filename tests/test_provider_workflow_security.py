@@ -101,7 +101,7 @@ class ProviderWorkflowSecurityTests(unittest.TestCase):
         self.assertIn("worker_lane=EXECUTION_LANE", script)
         self.assertIn("list_tasks(100, worker_lane=EXECUTION_LANE)", script)
 
-    def test_ci_telemetry_publisher_is_opt_in_only_and_staging_only(self):
+    def test_ci_telemetry_publisher_is_automatic_after_zero_cost_preflight(self):
         workflow = ROOT / ".github" / "workflows" / "ci.yml"
         source = workflow.read_text(encoding="utf-8")
         marker = "  publish-staging-ops-telemetry:"
