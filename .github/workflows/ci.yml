@@ -63,8 +63,8 @@ jobs:
         run: npm run test:workflow-local
   zero_cost_preflight:
     name: Verify zero-cost Cloudflare boundary (read-only)
-    needs: [test, zero_cost_preflight]
-    if: ${{ github.ref == 'refs/heads/main' && (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.enable_staging_operations == true)) && needs.zero_cost_preflight.outputs.zero_cost_eligible == 'true' }}
+    needs: test
+    if: ${{ github.ref == 'refs/heads/main' && (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.enable_staging_operations == true)) }}
     runs-on: ubuntu-latest
     timeout-minutes: 2
     outputs:
@@ -87,8 +87,8 @@ jobs:
 
   staging-migrate:
     name: Apply reviewed migrations to Staging
-    needs: test
-    if: ${{ github.ref == 'refs/heads/main' && (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.enable_staging_operations == true)) }}
+    needs: [test, zero_cost_preflight]
+    if: ${{ github.ref == 'refs/heads/main' && (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.enable_staging_operations == true)) && needs.zero_cost_preflight.outputs.zero_cost_eligible == 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     concurrency:
