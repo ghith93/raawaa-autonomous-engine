@@ -76,9 +76,11 @@ class ZeroCostBoundaryTests(unittest.TestCase):
 
     def test_pagination_is_followed_until_the_complete_inventory_is_read(self):
         seen = []
+        first_page = [{"id": f"sub-{index}", "state": "Cancelled"} for index in range(50)]
+        second_page = [{"id": "sub-50", "state": "Expired"}]
         responses = [
-            page([{"id": "sub-1", "state": "Cancelled"}], number=1, total=2, per_page=1),
-            page([{"id": "sub-2", "state": "Expired"}], number=2, total=2, per_page=1),
+            page(first_page, number=1, total=51, per_page=50),
+            page(second_page, number=2, total=51, per_page=50),
         ]
         class Response:
             status = 200
@@ -96,6 +98,23 @@ class ZeroCostBoundaryTests(unittest.TestCase):
         self.assertEqual(parse_qs(urlparse(seen[0][0].full_url).query), {"page": ["1"], "per_page": ["50"]})
         self.assertEqual(parse_qs(urlparse(seen[1][0].full_url).query), {"page": ["2"], "per_page": ["50"]})
         self.assertEqual(seen[0][0].get_header("Authorization"), "Bearer synthetic-token")
+
+    def test_partial_nonfinal_page_fails_closed(self):
+        partial = page(
+            [{"id": f"sub-{index}", "state": "Cancelled"} for index in range(49)],
+            number=1, total=51, per_page=50,
+        )
+        class Response:
+            status = 200
+            def __enter__(self): return self
+            def __exit__(self, *args): return False
+            def read(self, limit): return json.dumps(partial).encode()
+        result = check_boundary(
+            "synthetic-account", "synthetic-token",
+            opener=lambda request, timeout: Response(),
+        )
+        self.assertFalse(result["eligible"])
+        self.assertEqual(result["reason"], "incomplete_subscription_page")
 
     def test_missing_or_incomplete_pagination_fails_closed(self):
         class Response:
