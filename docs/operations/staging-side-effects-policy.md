@@ -26,6 +26,21 @@ Cloudflare documents Workers Free as the default plan and documents the Free/pai
 
 The first post-SinglePage main run (**42328401696**) returned HTTP 200 with an empty account add-on list (empty_subscription_inventory_unverified). That response proves only that no account-level add-ons were returned; it does **not** prove that every domain is on Free. Cloudflare bills zone plans separately from add-on subscriptions. The new gate therefore checks the complete zone inventory and every zone's current subscription before it can allow remote work. Until a future read-only run positively verifies all add-ons and all zones, zero_cost_eligible=false and remote operations remain skipped. The empty add-on response is not a reason to relax the gate.
 
+### Live state (2026-11-07): one precise, owner-actionable blocker
+
+Endpoint attribution (#690) and the staged diagnostic in the read-only inventory made the gate's actual blocker readable for the first time. Two independent workflows now agree:
+
+- main run **42330732936** (read-only inventory, `success`) published
+  `account_subscriptions=200`, `zones=200`, `spend_policies=404`, and
+  `eligible=false; reason=zone_read_all_zones_scope_unconfirmed`;
+- main run **42330732914** (Engine CI preflight) published the same reason, with every Staging job skipped.
+
+So the endpoint read is healthy: **the token can reach both the account add-on inventory and the zone list.** `spend_policies=404` is unrelated to eligibility — it only means no account-level `usage_block` policy exists (see the earlier finding).
+
+The single blocker is the attestation introduced in #689: `main()` requires the repository variable `CLOUDFLARE_ZONE_READ_ALL_ZONES_CONFIRMED == "true"`. It is absent, so the gate refuses before reading zones. This is deliberate — a token scoped to a subset of zones cannot be detected from the List Zones response, so completeness has to be attested rather than inferred — but it means **no zone evidence has been collected at all**, and the earlier `billing_http_404`/`empty_subscription_inventory_unverified` confusion is now resolved into this one cause.
+
+Owner action, if remote Staging is still wanted: set that repository variable to `true` once the token's Zone Read scope covers **all** zones in the account (https://github.com/ghith93/raawaa-autonomous-engine/settings/variables/actions). This is a deliberate correctness declaration, not a formality: setting it without that scope would let a partial zone list pass as complete. Until it is set, `zero_cost_eligible=false`, remote operations stay skipped, and the offline proofs remain the only verified lifecycle evidence.
+
 ## Automated Staging lifecycle
 
 When the zero-cost preflight passes, the workflow:
