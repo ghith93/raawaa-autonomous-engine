@@ -142,7 +142,7 @@ class ZeroCostBoundaryTests(unittest.TestCase):
             opener=lambda request, timeout: Response(),
         )
         self.assertTrue(result["eligible"])
-        self.assertEqual(result["reason"], "no_active_paid_subscriptions")
+        self.assertEqual(result["reason"], "active_free_subscription_verified")
 
     def test_partial_nonfinal_page_fails_closed(self):
         partial = page(
