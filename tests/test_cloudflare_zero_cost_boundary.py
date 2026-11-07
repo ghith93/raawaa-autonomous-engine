@@ -72,8 +72,8 @@ class ZeroCostBoundaryTests(unittest.TestCase):
     def test_pagination_is_followed_until_the_complete_inventory_is_read(self):
         seen = []
         responses = [
-            page([{"state": "Cancelled"}], number=1, total=2),
-            page([{"state": "Expired"}], number=2, total=2),
+            page([{"id": "sub-1", "state": "Cancelled"}], number=1, total=2),
+            page([{"id": "sub-2", "state": "Expired"}], number=2, total=2),
         ]
         class Response:
             status = 200
@@ -131,7 +131,8 @@ class ZeroCostBoundaryTests(unittest.TestCase):
             seen += 1
             return Response(body)
         self.assertFalse(check_boundary("account", "token", opener=duplicate_opener)["eligible"])
-        self.assertFalse(assess_subscriptions([{"state": "Cancelled"}])["eligible"])
+        missing_id_page = page([{"state": "Cancelled"}], number=1, total=1)
+        self.assertFalse(check_boundary("account", "token", opener=lambda *_a, **_k: Response(missing_id_page))["eligible"])
 
     def test_main_fails_ci_when_zero_cost_eligibility_is_unknown(self):
         with tempfile.NamedTemporaryFile(mode="r+", encoding="utf-8") as output:
