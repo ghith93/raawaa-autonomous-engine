@@ -62,6 +62,7 @@ def _node_summary(node: dict[str, Any]) -> dict[str, Any]:
         "evidence": _bounded_string_list(
             node.get("evidence", []), "node evidence",
             maximum_items=MAX_EVIDENCE_ITEMS,
+            maximum_length=120,
         ),
     }
     for key in ("role", "label"):
@@ -175,6 +176,7 @@ def build_agent_topology_context(agent_id: str, project_map: dict[str, Any]) -> 
         "agent_node": _node_summary(agent_node),
         "relationships": relationships,
         "relationship_count_total": relationship_count,
+        "relationship_count_included": len(relationships),
         "truncated": relationship_count > len(relationships),
         "authority_note": (
             "Topology is descriptive context only. It does not prove a live agent process, "
@@ -187,4 +189,6 @@ def build_agent_topology_context(agent_id: str, project_map: dict[str, Any]) -> 
     if len(json.dumps(context, ensure_ascii=False, sort_keys=True).encode("utf-8")) > MAX_CONTEXT_BYTES:
         raise ProjectTopologyError("project topology context exceeds the prompt-size bound")
     context["relationship_count_included"] = len(context["relationships"])
+    if len(json.dumps(context, ensure_ascii=False, sort_keys=True).encode("utf-8")) > MAX_CONTEXT_BYTES:
+        raise ProjectTopologyError("project topology context exceeds the prompt-size bound")
     return context
