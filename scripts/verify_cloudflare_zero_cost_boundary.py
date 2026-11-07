@@ -121,6 +121,12 @@ def fetch_all_subscriptions(account_id: str, token: str, opener=None, timeout: i
             expected_per_page = info["per_page"]
         elif info["total_count"] != expected_total or info["per_page"] != expected_per_page:
             raise ValueError("subscription_inventory_changed_during_pagination")
+        seen_ids = {item.get("id") for item in collected if isinstance(item, dict)}
+        for item in records:
+            subscription_id = item.get("id") if isinstance(item, dict) else None
+            if not isinstance(subscription_id, str) or not subscription_id or subscription_id in seen_ids:
+                raise ValueError("missing_or_duplicate_subscription_id")
+            seen_ids.add(subscription_id)
         collected.extend(records)
         if len(collected) == expected_total:
             return collected
@@ -156,7 +162,7 @@ def main() -> int:
     }, sort_keys=True))
     if not result["eligible"]:
         print("Staging operations skipped: zero-cost eligibility was not established.")
-    return 0
+    return 0 if result["eligible"] else 1
 
 
 if __name__ == "__main__":
