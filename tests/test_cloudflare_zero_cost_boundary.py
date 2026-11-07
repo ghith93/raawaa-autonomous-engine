@@ -198,7 +198,7 @@ class ZeroCostBoundaryTests(unittest.TestCase):
                     def read(self, limit): return json.dumps(body).encode()
                 result = check_boundary("account", "token", opener=lambda *_a, **_k: Response())
                 self.assertFalse(result["eligible"])
-                self.assertEqual(result["reason"], "invalid_pagination_" + field)
+                self.assertEqual(result["reason"], "invalid_subscription_inventory_metadata")
 
     def test_missing_or_incomplete_inventory_fails_closed_without_leaking_response(self):
         class Response:
