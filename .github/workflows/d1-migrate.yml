@@ -35,6 +35,11 @@ jobs:
             echo "Target confirmation did not match; refusing to run."
             exit 1
           }
+      - name: Verify Cloudflare zero-cost boundary before Production D1 migration
+        env:
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: python scripts/verify_cloudflare_zero_cost_boundary.py
       - name: Show remote migration status
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
