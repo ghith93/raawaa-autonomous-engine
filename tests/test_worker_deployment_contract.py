@@ -24,6 +24,7 @@ TEST_STEP_NAMES = [
     "Require explicit deployment confirmation",
     "Set up Node.js",
     "Validate deployment secrets",
+    "Verify Cloudflare zero-cost boundary before control Worker deployment",
     "Refuse to deploy with an unapplied migration",
     "Verify the deployed Worker already accepts the repository bearer token",
     "Deploy authenticated D1 control Worker",
@@ -63,6 +64,22 @@ class ProductionWorkerDeploymentContractTests(unittest.TestCase):
             "wrangler@4.156.1 deploy --config wrangler.toml --keep-vars",
             _workflow_text(),
         )
+
+
+    def test_zero_cost_boundary_precedes_migrations_and_control_worker_deploy(self):
+        workflow = _workflow_text()
+        boundary = workflow.index(
+            "name: Verify Cloudflare zero-cost boundary before control Worker deployment"
+        )
+        migration = workflow.index("name: Refuse to deploy with an unapplied migration")
+        deploy = workflow.index("name: Deploy authenticated D1 control Worker")
+        self.assertLess(boundary, migration)
+        self.assertLess(boundary, deploy)
+        block = workflow[boundary:migration]
+        self.assertIn("scripts/verify_cloudflare_zero_cost_boundary.py", block)
+        self.assertIn("CLOUDFLARE_ACCOUNT_ID:", block)
+        self.assertIn("CLOUDFLARE_API_TOKEN:", block)
+        self.assertNotIn("continue-on-error", block)
 
     def test_migration_gate_precedes_credential_verification_and_deploy(self):
         workflow = _workflow_text()
