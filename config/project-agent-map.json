@@ -203,7 +203,7 @@
     {
       "id": "component:project_knowledge_graph",
       "kind": "component",
-      "status": "graphify_pilot_pending_ci_evidence",
+      "status": "ci_verified_read_only_code_and_agent_topology_artifact_2026_11_07",
       "evidence": [
         "docs/research/graphify-code-knowledge-graph-2026-11-07.md",
         ".graphifyignore"
