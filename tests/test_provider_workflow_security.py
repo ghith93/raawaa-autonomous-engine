@@ -118,6 +118,9 @@ class ProviderWorkflowSecurityTests(unittest.TestCase):
         self.assertIn("CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}", block)
         if not allow_continue_on_error:
             if not allow_continue_on_error:
+            if allow_continue_on_error:
+            self.assertIn("continue-on-error: true", block)
+        else:
             self.assertNotIn("continue-on-error", block)
         self.assertNotIn("if: always()", block)
 
