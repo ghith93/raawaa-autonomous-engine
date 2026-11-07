@@ -7,6 +7,7 @@ being mistaken for live proof.
 from __future__ import annotations
 
 import os
+import re
 import shutil
 import sys
 import unittest
@@ -35,6 +36,85 @@ APPROVED_IMAGE = (
 )
 
 
+# Each probe name is reported as a fixed result token. The pattern is asserted
+# before the name is placed in a workflow command, so a test name cannot forge
+# annotations or extra log lines.
+RESULT_TOKEN_RE = re.compile(r"^[a-z][a-z0-9_]{0,63}$")
+
+
+class _RecordingResult(unittest.TextTestResult):
+    """Records which tests actually started.
+
+    Without this, a probe that never ran would simply be absent from the
+    failures and skips, and would be reported as a pass - the exact false-pass
+    this whole file exists to prevent. Only a test that started *and* produced
+    no error, failure, skip or unexpected outcome may be reported as passed.
+    """
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.executed_ids: set[str] = set()
+
+    def startTest(self, test):
+        self.executed_ids.add(test.id())
+        super().startTest(test)
+
+
+def run_suite(suite: unittest.TestSuite, *, stream) -> _RecordingResult:
+    runner = unittest.TextTestRunner(stream=stream, verbosity=2, resultclass=_RecordingResult)
+    return runner.run(suite)
+
+
+def result_annotations(result: unittest.TestResult, expected_ids: Iterable[str]) -> list[str]:
+    """Render one workflow command per reviewed probe.
+
+    The job log is served from GitHub's results blob storage, which is not
+    reachable from every reviewer environment, so "the job was green" does not
+    by itself say *which* proofs ran. These annotations carry the outcome of
+    each reviewed probe and nothing else: no paths, canary values, markers,
+    environment data or container output. Every non-passing outcome is reported
+    as an error, so neither a skip nor a test that never started can look like
+    success.
+    """
+    failed = {test.id() for test, _ in result.failures + result.errors}
+    skipped = {test.id() for test, _ in result.skipped}
+    # expectedFailures is a (test, reason) list; unexpectedSuccesses is a list
+    # of bare TestCase instances. Normalise both to ids before use.
+    unexpected = {test.id() for test, _ in result.expectedFailures}
+    unexpected |= {test.id() for test in result.unexpectedSuccesses}
+    executed = getattr(result, "executed_ids", set())
+    lines = []
+    for test_id in sorted(expected_ids):
+        token = test_id.rsplit(".", 1)[-1].removeprefix("test_")
+        if not RESULT_TOKEN_RE.match(token):
+            raise ValueError("unsafe_probe_result_token")
+        if test_id in failed:
+            outcome, command = "failed", "::error"
+        elif test_id in skipped:
+            outcome, command = "skipped", "::error"
+        elif test_id in unexpected:
+            outcome, command = "unexpected", "::error"
+        elif test_id in executed:
+            outcome, command = "passed", "::notice"
+        else:
+            outcome, command = "not_run", "::error"
+        lines.append(f"{command} title=Sandbox probe {token}::{outcome}")
+    return lines
+
+
+def check_result(result: unittest.TestResult, expected_ids: Iterable[str]) -> bool:
+    """Fail for wrong identities, partial execution, skip or failure."""
+    expected = set(expected_ids)
+    return (
+        bool(expected)
+        and result.testsRun == len(expected)
+        and not result.skipped
+        and not result.expectedFailures
+        and not result.unexpectedSuccesses
+        and result.wasSuccessful()
+    )
+
+
 def _test_ids(suite: unittest.TestSuite) -> list[str]:
     result = []
     for item in suite:
@@ -46,15 +126,16 @@ def _test_ids(suite: unittest.TestSuite) -> list[str]:
 
 
 def run_checked(suite: unittest.TestSuite, expected_ids: Iterable[str], *, stream) -> bool:
-    """Fail for different test identities, partial execution, skip, or failure."""
+    """Refuse a different test set, then run it and publish per-probe outcomes."""
     expected = set(expected_ids)
     observed = _test_ids(suite)
     if not expected or len(observed) != len(expected) or set(observed) != expected:
         print("Sandbox proof refused: probe suite differs from the reviewed test set.", file=stream)
         return False
-    result = unittest.TextTestRunner(stream=stream, verbosity=2).run(suite)
-    if (result.testsRun != len(expected) or result.skipped or result.expectedFailures
-            or result.unexpectedSuccesses or not result.wasSuccessful()):
+    result = run_suite(suite, stream=stream)
+    for line in result_annotations(result, expected):
+        print(line)
+    if not check_result(result, expected):
         print("Sandbox proof refused: probes failed, skipped, or did not all run.", file=stream)
         return False
     return True
