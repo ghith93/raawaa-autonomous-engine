@@ -45,6 +45,11 @@ class ZeroCostBoundaryTests(unittest.TestCase):
         self.assertFalse(assess_subscriptions([{
             "id": "sub-trial", "state": "Provisioned", "price": 0, "rate_plan": {"id": "paid_trial"},
         }])["eligible"])
+        for state in ("Trial", "AwaitingPayment", "Paid"):
+            with self.subTest(state=state):
+                self.assertFalse(assess_subscriptions([{
+                    "id": "sub-state", "state": state, "price": 0, "rate_plan": {"id": "free"},
+                }])["eligible"])
 
     def test_cancelled_and_expired_subscriptions_are_inactive(self):
         result = assess_subscriptions([
@@ -72,8 +77,8 @@ class ZeroCostBoundaryTests(unittest.TestCase):
     def test_pagination_is_followed_until_the_complete_inventory_is_read(self):
         seen = []
         responses = [
-            page([{"id": "sub-1", "state": "Cancelled"}], number=1, total=2),
-            page([{"id": "sub-2", "state": "Expired"}], number=2, total=2),
+            page([{"id": "sub-1", "state": "Cancelled"}], number=1, total=2, per_page=1),
+            page([{"id": "sub-2", "state": "Expired"}], number=2, total=2, per_page=1),
         ]
         class Response:
             status = 200
@@ -99,7 +104,7 @@ class ZeroCostBoundaryTests(unittest.TestCase):
             def __enter__(self): return self
             def __exit__(self, *args): return False
             def read(self, limit): return json.dumps(self.body).encode()
-        incomplete = page([{"state": "Cancelled"}], number=1, total=2)
+        incomplete = page([{"id": "sub-1", "state": "Cancelled"}], number=1, total=2, per_page=1)
         calls = 0
         def opener(request, timeout):
             nonlocal calls
@@ -116,8 +121,8 @@ class ZeroCostBoundaryTests(unittest.TestCase):
 
     def test_duplicate_or_missing_subscription_ids_fail_closed(self):
         duplicate_pages = [
-            page([{"id": "same", "state": "Cancelled"}], number=1, total=2),
-            page([{"id": "same", "state": "Expired"}], number=2, total=2),
+            page([{"id": "same", "state": "Cancelled"}], number=1, total=2, per_page=1),
+            page([{"id": "same", "state": "Expired"}], number=2, total=2, per_page=1),
         ]
         class Response:
             status = 200
@@ -132,7 +137,7 @@ class ZeroCostBoundaryTests(unittest.TestCase):
             seen += 1
             return Response(body)
         self.assertFalse(check_boundary("account", "token", opener=duplicate_opener)["eligible"])
-        missing_id_page = page([{"state": "Cancelled"}], number=1, total=1)
+        missing_id_page = page([{"state": "Cancelled"}], number=1, total=1, per_page=1)
         self.assertFalse(check_boundary("account", "token", opener=lambda *_a, **_k: Response(missing_id_page))["eligible"])
 
     def test_main_fails_ci_when_zero_cost_eligibility_is_unknown(self):
