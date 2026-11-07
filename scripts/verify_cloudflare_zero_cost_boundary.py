@@ -32,15 +32,26 @@ def assess_subscriptions(payload: dict) -> dict:
         item for item in subscriptions
         if isinstance(item, dict) and item.get("state") not in {"Cancelled", "Failed", "Expired"}
     ]
+    unknown_price = [
+        item for item in active
+        if not isinstance(item.get("price"), (int, float))
+        or isinstance(item.get("price"), bool)
+    ]
     paid = [
         item for item in active
         if isinstance(item.get("price"), (int, float))
         and not isinstance(item.get("price"), bool)
         and item.get("price", 0) > 0
     ]
+    eligible = not paid and not unknown_price
+    reason = (
+        "active_paid_subscription_present" if paid
+        else "active_subscription_price_unknown" if unknown_price
+        else "no_active_paid_subscriptions"
+    )
     return {
-        "eligible": len(paid) == 0,
-        "reason": "no_active_paid_subscriptions" if not paid else "active_paid_subscription_present",
+        "eligible": eligible,
+        "reason": reason,
         "active_paid_subscriptions": len(paid),
     }
 
