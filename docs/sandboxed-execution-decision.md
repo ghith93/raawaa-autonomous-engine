@@ -184,12 +184,34 @@ narrower claim and is no longer presented as parent-process isolation.
    child in its own session and terminates then force-kills the whole group,
    recording `descendants_killed`.
 
-   What remains unproven is the behaviour under real pressure: that a *grandchild*
-   spawned inside the container is actually reaped, and that the task lease is
-   revoked rather than merely expired. The ledger path (`SqliteDispatchLedger`)
-   makes a retry after a crash replay instead of starting a second container, which
-   is at-most-once for *dispatch*; it is not lease revocation. Item 2 stays open
-   for those two facts.
+   **Descendant cleanup is now measured, and it was broken.** `killpg` reaches only
+   the process group. A descendant that calls `setsid()` leaves that group while
+   keeping its pid, so it survived the supervisor's return while
+   `descendants_killed` read `0` — the number was computed inside the group it had
+   already left. This was reproduced here with a stand-in runtime: a
+   `fork → setsid → fork` daemon was still alive after `run_operation` returned.
+
+   The fix is `PR_SET_CHILD_SUBREAPER`: the supervisor becomes the reaper for
+   orphaned descendants, so the kernel re-parents the escapee to it instead of to
+   init, and it can then be enumerated, killed and reaped. The same escapee is now
+   killed (`descendants_killed: 1`) and its `/proc` entry disappears. The outcome
+   gained `subreaper_enabled` and `descendants_escaped` precisely so that `0`
+   cannot mean both "nothing escaped" and "we could not see";
+   `SandboxExecutor.containment_report()` returns `unverified` rather than `clean`
+   when the census was blind.
+
+   What remains unproven is the behaviour under real pressure — memory, pids and
+   cpu limits holding while the container is actually saturated — and that the
+   task lease is *revoked* rather than merely expiring. The ledger path
+   (`SqliteDispatchLedger`) makes a retry after a crash replay instead of starting
+   a second container, which is at-most-once for *dispatch*; it is not lease
+   revocation. Item 2 stays open for those two facts.
+
+   A caveat worth keeping: the subreaper is a Linux facility and it is what made
+   the escape visible. On a host where it is unavailable the supervisor reports
+   `unverified`, and the real boundary remains the container's own cgroup kill,
+   which `--rm` plus the reviewed limits provide but which this module does not
+   itself verify.
 3. **Disk is bounded by the tmpfs sizes only.** A task that writes to its scratch
    path is capped; anything larger needs a filesystem quota, which is not part of
    this contract yet.

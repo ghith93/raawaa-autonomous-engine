@@ -130,6 +130,10 @@ CEILINGS = {
     # existing operation keeps exactly the bound it was reviewed with.
     "max_arguments": 40,
     "operations": 32,
+    # A SETSID escapee leaves the supervisor's process group entirely, so the
+    # group scan cannot see it. The census that finds those survives is bounded
+    # so the check cannot become a slow sweep of /proc under a hostile load.
+    "escapees": 64,
 }
 
 #: Byte cap on how much of each stream is *kept*. The reader keeps draining
@@ -239,6 +243,8 @@ def _dispatch_outcome(classification: str, executed: Mapping[str, Any] | None = 
         "stderr": source.get("stderr", "") if isinstance(source.get("stderr", ""), str) else "",
         "duration_seconds": round(float(source.get("duration_seconds", 0.0)), 3),
         "descendants_killed": int(source.get("descendants_killed", 0)),
+        "descendants_escaped": int(source.get("descendants_escaped", 0)),
+        "subreaper_enabled": bool(source.get("subreaper_enabled", False)),
     }
 
 
@@ -988,6 +994,13 @@ class ProcessOutcome:
     output_truncated: bool = False
     duration_seconds: float = 0.0
     descendants_killed: int = 0
+    #: Descendants that left the process group (setsid) and were still alive
+    #: after the census kill. Non-zero means containment failed for those pids;
+    #: it is reported rather than raised so the outcome still describes the run.
+    descendants_escaped: int = 0
+    #: Whether the subreaper that makes an escapee visible was active. ``0``
+    #: escaped means nothing only when this is true.
+    subreaper_enabled: bool = False
     dispatch_id: str | None = None
     replayed: bool = False
     started: bool = False
@@ -1012,6 +1025,8 @@ class ProcessOutcome:
             "output_truncated": self.output_truncated,
             "duration_seconds": round(self.duration_seconds, 3),
             "descendants_killed": self.descendants_killed,
+            "descendants_escaped": self.descendants_escaped,
+            "subreaper_enabled": self.subreaper_enabled,
             "dispatch_id": self.dispatch_id,
             "replayed": self.replayed,
             "started": self.started,
@@ -1083,6 +1098,8 @@ class ProcessSupervisor:
         spawn: Callable[..., Any] = subprocess.Popen,
         clock: Callable[[], float] = time.monotonic,
         ancestors_scan: Callable[[int], set[int]] | None = None,
+        orphan_scan: Callable[..., set[int]] | None = None,
+        enable_subreaper: bool = True,
     ):
         self.operations = operations if operations is not None else default_registry()
         if not isinstance(self.operations, OperationRegistry):
@@ -1103,6 +1120,11 @@ class ProcessSupervisor:
         self._spawn = spawn
         self._clock = clock
         self._group_scan = ancestors_scan or _linux_group_members
+        self._orphan_scan = orphan_scan or _linux_adopted_orphans
+        # Opt-out exists for tests that run inside another supervisor, but the
+        # default is on: a capability you must remember to enable is one that is
+        # silently missing in production.
+        self.subreaper_enabled = _enable_child_subreaper() if enable_subreaper else False
 
     # -- identity ---------------------------------------------------------
 
@@ -1184,6 +1206,35 @@ class ProcessSupervisor:
                 return exited and not self._group_members(pgid)
             time.sleep(interval)
 
+    def _orphans(self, *, exclude: Iterable[int] = ()) -> set[int]:
+        """Adopted descendants that detached from the process group."""
+        try:
+            return set(self._orphan_scan(exclude=tuple(exclude)))
+        except OSError:  # pragma: no cover - /proc unreadable
+            return set()
+
+    def _reap(self, pids: Iterable[int]) -> None:
+        """``waitpid`` our own adopted children, without blocking.
+
+        Only pids the subreaper re-parented to us are ours to reap; ``ECHILD``
+        for anything else is expected and ignored rather than treated as a
+        failure.
+        """
+        for pid in pids:
+            try:
+                os.waitpid(pid, os.WNOHANG)
+            except (ChildProcessError, OSError):  # pragma: no cover - not ours
+                continue
+
+    def _settle_orphans(self, candidates: set[int], *, exclude: Iterable[int] = (),
+                        timeout: float = 2.0) -> None:
+        """Give SIGKILL a moment, so the follow-up census is not a race."""
+        deadline = self._clock() + max(0.0, timeout)
+        pending = set(candidates)
+        while pending and self._clock() < deadline:
+            time.sleep(max(self.poll_interval_seconds, 0.05))
+            pending = self._orphans(exclude=exclude) & pending
+
     def _join_readers(self, readers: Sequence[threading.Thread], timeout: float) -> bool:
         deadline = self._clock() + max(0.0, timeout)
         for thread in readers:
@@ -1215,6 +1266,11 @@ class ProcessSupervisor:
         cancelled_reason: str | None = None
         descendants_killed = 0
         try:
+            # Whoever was already our child is not this run's escapee. Capture
+            # that set before spawning so a concurrent child cannot be counted,
+            # signalled, or reported as a containment failure that never happened.
+            pre_existing_children = self._orphans()
+
             environment = build_child_environment(isolated_home)
             proc = self._spawn(
                 list(argv),
@@ -1285,6 +1341,28 @@ class ProcessSupervisor:
             after = self._group_members(pgid) - {proc.pid}
             descendants_killed = len(before - after)
 
+            # ``descendants_killed`` is measured inside the group we signal, so a
+            # descendant that called setsid() made it read 0 while the process
+            # ran on (measured, not assumed). With the subreaper set, such an
+            # orphan is re-parented to us and can be counted, killed, and counted
+            # again -- so the second number is evidence, not a reassurance.
+            orphans = self._orphans(exclude=pre_existing_children | {proc.pid})
+            if orphans:
+                for pid in sorted(orphans):
+                    try:
+                        os.kill(pid, signal.SIGKILL)
+                    except OSError:  # pragma: no cover - already gone
+                        pass
+                self._settle_orphans(orphans, exclude=pre_existing_children | {proc.pid})
+                remaining = self._orphans(exclude=pre_existing_children | {proc.pid})
+                descendants_killed += len(orphans - remaining)
+                # A killed orphan is now *our* child, so it stays a zombie until
+                # we reap it. Leaving that to process exit would accumulate one
+                # zombie per escaped task in a long-lived worker.
+                self._reap(orphans)
+                orphans = remaining
+            descendants_escaped = len(orphans)
+
             exit_code = proc.returncode
             if exit_code is None:  # pragma: no cover - terminate always reaps
                 exit_code = -signal.SIGKILL
@@ -1311,6 +1389,8 @@ class ProcessSupervisor:
                 "output_truncated": bool(truncated or stdout_truncated or stderr_truncated),
                 "duration_seconds": max(0.0, self._clock() - started),
                 "descendants_killed": descendants_killed,
+                "descendants_escaped": descendants_escaped,
+                "subreaper_enabled": bool(self.subreaper_enabled),
                 "working_directory": working_directory,
                 "reason": cancelled_reason,
                 "started": True,
@@ -1545,6 +1625,8 @@ class ProcessSupervisor:
             output_truncated=executed["output_truncated"],
             duration_seconds=executed["duration_seconds"],
             descendants_killed=executed["descendants_killed"],
+            descendants_escaped=executed["descendants_escaped"],
+            subreaper_enabled=executed["subreaper_enabled"],
             dispatch_id=dispatch_id,
             started=True,
             fence=fence,
@@ -1567,6 +1649,8 @@ class ProcessSupervisor:
                 output_truncated=record.output_truncated or bool(recorded.get("output_truncated", False)),
                 duration_seconds=float(recorded.get("duration_seconds", 0.0)),
                 descendants_killed=int(recorded.get("descendants_killed", 0)),
+                descendants_escaped=int(recorded.get("descendants_escaped", 0)),
+                subreaper_enabled=bool(recorded.get("subreaper_enabled", False)),
                 dispatch_id=record.dispatch_id,
                 replayed=True,
                 started=False,
@@ -1598,6 +1682,93 @@ class ProcessSupervisor:
         if self.ledger is None:
             return 0
         return self.ledger.reconcile(stale_after_seconds=stale_after_seconds)
+
+
+def _linux_process_state(pid: int) -> str | None:
+    """The single-letter state from ``/proc/<pid>/stat``, or ``None``."""
+    try:
+        with open(f"/proc/{pid}/stat", "rb") as stream:
+            raw = stream.read()
+    except OSError:
+        return None
+    try:
+        return raw.rsplit(b")", 1)[1].split()[0].decode("ascii", "replace")
+    except (IndexError, UnicodeDecodeError):  # pragma: no cover - malformed stat
+        return None
+
+
+def _enable_child_subreaper() -> bool:
+    """Become the reaper for orphaned descendants. Returns whether it took.
+
+    ``killpg`` only reaches the process group, and a descendant that calls
+    ``setsid()`` leaves that group while keeping the pid. Measured on this
+    repository with a stand-in runtime, such a process survived the supervisor's
+    return with ``descendants_killed`` reading 0 -- the number was measured
+    inside the group, so it could not see the escape.
+
+    ``PR_SET_CHILD_SUBREAPER`` fixes the visibility without any privilege: when a
+    descendant orphans itself, the kernel re-parents it to the nearest subreaper
+    ancestor -- this process -- instead of to init. It is then an ordinary child
+    we can enumerate, signal and confirm dead. Verified working here: a
+    double-``setsid`` daemon, the classic unkillable shape, was adopted and
+    killed.
+
+    It is *not* a boundary. A descendant that stays a child of something outside
+    our subtree is still invisible, and on a non-Linux host this whole mechanism
+    is absent. That is why the outcome reports whether it was enabled rather than
+    letting ``0`` mean both "nothing escaped" and "we could not see".
+    """
+    if not sys.platform.startswith("linux"):
+        return False
+    try:
+        import ctypes
+
+        libc = ctypes.CDLL("libc.so.6", use_errno=True)
+        # 36 = PR_SET_CHILD_SUBREAPER
+        return libc.prctl(36, 1, 0, 0, 0) == 0
+    except Exception:  # pragma: no cover - no libc / blocked prctl
+        return False
+
+
+def _linux_adopted_orphans(exclude: Iterable[int] = ()) -> set[int]:
+    """Live children of this process that are *waiting*, i.e. orphaned onto us.
+
+    A descendant we spawned and still track is not an orphan yet; the ones that
+    matter are the processes that detached and were re-parented to us by
+    ``PR_SET_CHILD_SUBREAPER``. Children we had before the run are excluded by
+    the caller, so a concurrent, legitimate child is never counted as an escapee.
+    """
+    adopted: set[int] = set()
+    if not os.path.isdir("/proc"):
+        return adopted
+    me = os.getpid()
+    excluded = set(exclude)
+    try:
+        entries = os.listdir("/proc")
+    except OSError:  # pragma: no cover - /proc unreadable
+        return adopted
+    for entry in entries:
+        if not entry.isdigit():
+            continue
+        pid = int(entry)
+        if pid in excluded:
+            continue
+        try:
+            with open(f"/proc/{pid}/stat", "rb") as stream:
+                raw = stream.read()
+        except OSError:
+            continue
+        try:
+            tail = raw.rsplit(b")", 1)[1].split()
+            state = tail[0]
+            ppid = int(tail[1])
+        except (IndexError, ValueError):
+            continue
+        # Zombies are a reaping problem, not a running escapee, and a zombie
+        # whose parent is us is one we have not reaped *yet*.
+        if ppid == me and state != b"Z":
+            adopted.add(pid)
+    return adopted
 
 
 def _linux_group_members(pgid: int) -> set[int]:

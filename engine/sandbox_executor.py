@@ -216,6 +216,29 @@ class SandboxExecutor:
         return SandboxPlan(argv=tuple(rebuilt), image=validated.image,
                            wall_seconds=wall, ref=ref)
 
+    @staticmethod
+    def containment_report(outcome: Any) -> dict[str, Any]:
+        """Summarise descendant containment without overclaiming.
+
+        ``descendants_escaped == 0`` is only good news when the census was
+        actually able to see: an unreaped escapee reads as 0 on a host where the
+        subreaper did not take. Reporting both numbers together is what keeps a
+        reader from treating the zero as proof.
+        """
+        killed = int(getattr(outcome, "descendants_killed", 0) or 0)
+        escaped = int(getattr(outcome, "descendants_escaped", 0) or 0)
+        observed = bool(getattr(outcome, "subreaper_enabled", False))
+        return {
+            "descendants_killed": killed,
+            "descendants_escaped": escaped,
+            "census_observable": observed,
+            "verdict": (
+                "unverified" if not observed
+                else "clean" if escaped == 0
+                else "leaked"
+            ),
+        }
+
     def run(self, request: SandboxRequest, *, task_id: str, ref: str, **kwargs: Any):
         """Prepare, then hand the exact vector to a supervisor.
 

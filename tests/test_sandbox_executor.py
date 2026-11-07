@@ -235,6 +235,35 @@ class SandboxLedgerTests(unittest.TestCase):
         self.assertFalse(executor.has_durable_ledger)
 
 
+class ContainmentReportTests(unittest.TestCase):
+    """A zero must never be reported as containment when the census was blind."""
+
+    class _Outcome:
+        def __init__(self, killed, escaped, observable):
+            self.descendants_killed = killed
+            self.descendants_escaped = escaped
+            self.subreaper_enabled = observable
+
+    def test_a_clean_census_is_clean(self):
+        report = SandboxExecutor.containment_report(self._Outcome(2, 0, True))
+        self.assertEqual(report["verdict"], "clean")
+
+    def test_zero_escaped_without_the_census_reads_as_unverified(self):
+        report = SandboxExecutor.containment_report(self._Outcome(0, 0, False))
+        self.assertEqual(report["verdict"], "unverified")
+
+    def test_a_surviving_escapee_reads_as_leaked(self):
+        report = SandboxExecutor.containment_report(self._Outcome(0, 3, True))
+        self.assertEqual(report["verdict"], "leaked")
+
+    def test_the_report_does_not_claim_more_than_the_supervisor_measured(self):
+        report = SandboxExecutor.containment_report(self._Outcome(1, 0, True))
+        self.assertEqual(set(report), {
+            "descendants_killed", "descendants_escaped",
+            "census_observable", "verdict",
+        })
+
+
 class SandboxRegistryTests(unittest.TestCase):
     def setUp(self):
         self.stand_in = _StandIn()
