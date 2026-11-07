@@ -201,8 +201,18 @@ def check_boundary(account_id: str, token: str, opener=None, timeout: int = 15) 
         }
         reason = str(exc)
         return _invalid(reason if reason in safe_reasons else "billing_inventory_unavailable_or_incomplete")
-    except (HTTPError, URLError, TimeoutError, OSError):
-        return _invalid("billing_inventory_unavailable_or_incomplete")
+    except HTTPError as exc:
+        # HTTP status is useful for permission/rate-limit diagnosis; never log
+        # response bodies, URLs, account identifiers or authorization data.
+        if 400 <= exc.code <= 599:
+            return _invalid(f"billing_http_{exc.code}")
+        return _invalid("billing_http_error")
+    except URLError:
+        return _invalid("billing_transport_error")
+    except TimeoutError:
+        return _invalid("billing_timeout")
+    except OSError:
+        return _invalid("billing_os_error")
 
 
 def main() -> int:
