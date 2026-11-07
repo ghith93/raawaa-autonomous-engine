@@ -30,14 +30,17 @@ and verifies both, and the marker carries a per-run nonce so a stale file cannot
 stand in for this run. The offline half of this contract is tested in
 ``test_probe_harness.py``.
 """
+import base64
 import json
 import os
 import shutil
+import socket
 import subprocess
 import tempfile
 import unittest
 import uuid
 from pathlib import Path
+from unittest.mock import patch
 
 from engine.sandbox_policy import SandboxLimits, SandboxRequest, assert_sandbox_argv, build_docker_argv
 
@@ -54,17 +57,21 @@ CONTROL_EXPECTED = "raawaa-autonomous-engine"
 REQUIRED_KEYS = (
     "control",
     "host_canary",
+    "secret_marker_present",
     "network",
-    "root_write",
-    "exists:/var/run/docker.sock",
-    "exists:/root/.ssh",
+    "root_readonly",
+    "var_tmp_readonly",
+    "var_tmp_world_writable",
+    "root_write_errno",
+    "path:/var/run/docker.sock",
+    "path:/root/.ssh",
 )
 
 # Each probe prints a single JSON object. Anything the probe could not even attempt
 # is reported as an error string, so the assertion below can tell "denied" from
 # "never ran".
 PROBE_TEMPLATE = r"""
-import json, os, socket
+import json, os, socket, stat
 
 
 def read(path):
@@ -80,24 +87,54 @@ result = {}
 # probe's file access is broken and every other denial below is meaningless.
 result["control"] = read(__CONTROL_PATH__)
 result["host_canary"] = read(__HOST_CANARY_PATH__)
-try:
-    result["own_environ"] = "|".join(sorted(os.environ))[:400]
-except OSError as exc:
-    result["own_environ_error"] = type(exc).__name__
-for path in ("/var/run/docker.sock", "/root/.ssh", "/home", "/etc/shadow"):
-    result["exists:" + path] = os.path.exists(path)
+# Report a boolean only; never print environment names or values. Checking
+# values, not just names, makes a synthetic inherited secret observable.
+result["secret_marker_present"] = any(__SECRET_MARKER__ in value for value in os.environ.values())
+def path_state(path):
+    # exists() collapses PermissionError into False: that is not absence.
+    try:
+        os.lstat(path)
+        return "present"
+    except FileNotFoundError:
+        return "missing"
+    except PermissionError:
+        return "inaccessible"
+    except OSError as exc:
+        return "error:" + type(exc).__name__
+
+for path in ("/var/run/docker.sock", "/root/.ssh"):
+    result["path:" + path] = path_state(path)
 try:
     sock = socket.create_connection(("1.1.1.1", 80), timeout=3)
     sock.close()
     result["network"] = "connected"
 except OSError as exc:
     result["network"] = "denied:" + type(exc).__name__
+# /var/tmp is not one of the contract's writable tmpfs mounts. Test a
+# directory writable by an unprivileged user if the root mount were writable;
+# permission-denied or a missing path must never stand in for read-only.
 try:
-    with open("/escaped", "w") as handle:
-        handle.write("x")
-    result["root_write"] = "succeeded"
-except OSError as exc:
-    result["root_write"] = "denied:" + type(exc).__name__
+    result["root_readonly"] = bool(os.statvfs("/").f_flag & os.ST_RDONLY)
+    result["var_tmp_readonly"] = bool(os.statvfs("/var/tmp").f_flag & os.ST_RDONLY)
+    mode = os.lstat("/var/tmp").st_mode
+    result["var_tmp_world_writable"] = stat.S_ISDIR(mode) and mode & 0o003 == 0o003
+    target = "/var/tmp/raawaa-rootfs-proof-" + str(os.getpid())
+    try:
+        fd = os.open(target, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+    except OSError as exc:
+        result["root_write_errno"] = exc.errno
+    else:
+        os.close(fd)
+        try:
+            os.unlink(target)
+        finally:
+            result["root_write_errno"] = 0
+except OSError:
+    # Missing or inaccessible prerequisites make the result inconclusive.
+    result.setdefault("root_readonly", None)
+    result.setdefault("var_tmp_readonly", None)
+    result.setdefault("var_tmp_world_writable", None)
+    result.setdefault("root_write_errno", None)
 print(json.dumps(result))
 """
 
@@ -158,13 +195,24 @@ def _create_canary(base):
 
 def _probe_program(canary_path, control_path=CONTROL_PATH):
     """Substitute exact, repr-quoted paths into the probe template."""
-    for sentinel in ("__HOST_CANARY_PATH__", "__CONTROL_PATH__"):
+    for sentinel in ("__HOST_CANARY_PATH__", "__CONTROL_PATH__", "__SECRET_MARKER__"):
         if sentinel not in PROBE_TEMPLATE:
             # An edit that drops the placeholder would silently produce a probe
             # that reads nothing, and "read nothing" must never look like "denied".
             raise RuntimeError(f"probe template has lost its {sentinel} placeholder")
     program = PROBE_TEMPLATE.replace("__HOST_CANARY_PATH__", repr(str(canary_path)))
-    return program.replace("__CONTROL_PATH__", repr(str(control_path)))
+    program = program.replace("__CONTROL_PATH__", repr(str(control_path)))
+    return program.replace("__SECRET_MARKER__", repr(SECRET_MARKER))
+
+
+def _python_command(program):
+    """Encode a multiline probe into one newline-free Docker argument.
+
+    The sandbox argv policy rejects newlines in every argument; passing the raw
+    multiline template would otherwise fail before the container could start.
+    """
+    encoded = base64.b64encode(program.encode("utf-8")).decode("ascii")
+    return ("python3", "-c", f"exec(__import__('base64').b64decode({encoded!r}))")
 
 
 def _parse_probe_output(completed):
@@ -192,6 +240,14 @@ def _assert_probe_usable(output):
     missing = [key for key in REQUIRED_KEYS if key not in output]
     if missing:
         raise AssertionError(f"probe output is missing {missing}; a missing key must not read as containment")
+    for key in ("secret_marker_present", "root_readonly", "var_tmp_readonly", "var_tmp_world_writable"):
+        if type(output[key]) is not bool:
+            raise AssertionError(f"probe output {key} must be a boolean")
+    if type(output["root_write_errno"]) is not int:
+        raise AssertionError("probe output root_write_errno must be an integer")
+    for key in ("path:/var/run/docker.sock", "path:/root/.ssh"):
+        if output[key] not in ("present", "missing", "inaccessible"):
+            raise AssertionError(f"probe output {key} is not a recognised path state")
     control = str(output["control"])
     if control.startswith("denied:"):
         raise AssertionError(
@@ -202,6 +258,45 @@ def _assert_probe_usable(output):
         raise AssertionError(
             f"positive control read {control[:80]!r}, which does not contain {CONTROL_EXPECTED!r}"
         )
+
+
+def _assert_secret_not_in_environ(output):
+    """A missing/non-boolean result is not evidence of secret isolation."""
+    if type(output.get("secret_marker_present")) is not bool:
+        raise AssertionError("probe must explicitly report secret_marker_present as a boolean")
+    if output["secret_marker_present"]:
+        raise AssertionError("synthetic host secret was present in the sandbox environment")
+
+
+def _assert_paths_not_accessible(output):
+    """Missing and permission-denied are distinct; neither proves host mounts absent."""
+    for path in ("/var/run/docker.sock", "/root/.ssh"):
+        state = output.get("path:" + path)
+        if state not in ("missing", "inaccessible"):
+            raise AssertionError(f"sensitive path is present or unobservable: {path} ({state!r})")
+
+
+def _assert_root_read_only(output):
+    """Require EROFS on a normally writable location, not mere EACCES."""
+    import errno
+
+    if (output.get("root_readonly") is not True
+            or output.get("var_tmp_readonly") is not True
+            or output.get("var_tmp_world_writable") is not True
+            or type(output.get("root_write_errno")) is not int
+            or output["root_write_errno"] != errno.EROFS):
+        raise AssertionError("root read-only proof is inconclusive or failed")
+
+
+def _require_host_network_control():
+    """Prove the host can reach the same address before interpreting denial."""
+    try:
+        with socket.create_connection(("1.1.1.1", 80), timeout=3):
+            pass
+    except OSError as exc:
+        raise AssertionError(
+            f"host network positive control failed ({type(exc).__name__}); egress result is inconclusive"
+        ) from None
 
 
 @unittest.skipUnless(_sandbox_available(), "no live sandbox: set RAAWAA_SANDBOX_LIVE=1 and RAAWAA_SANDBOX_IMAGE")
@@ -215,10 +310,12 @@ class SandboxEscapeTest(unittest.TestCase):
         cls.addClassCleanup(shutil.rmtree, cls.host_canary.parent, True)
         if cls.host_canary.resolve().is_relative_to(cls.workspace):
             raise RuntimeError("host canary must be outside the mounted workspace")
-        os.environ["RAAWAA_PROBE_SECRET"] = SECRET_MARKER
+        environment_patch = patch.dict(os.environ, {"RAAWAA_PROBE_SECRET": SECRET_MARKER})
+        environment_patch.start()
+        cls.addClassCleanup(environment_patch.stop)
         cls.vector = build_docker_argv(SandboxRequest(
             image=IMAGE,
-            command=("python3", "-c", _probe_program(cls.host_canary)),
+            command=_python_command(_probe_program(cls.host_canary)),
             source_dir=str(cls.workspace),
             limits=SandboxLimits(memory_mb=512, cpus=1.0, pids=64, wall_seconds=90, scratch_mb=32),
         ))
@@ -245,26 +342,44 @@ class SandboxEscapeTest(unittest.TestCase):
         canary = str(output["host_canary"])
         self.assertTrue(canary.startswith("denied:"), canary[:200])
         self.assertNotIn(self.canary_marker, canary)
-        self.assertNotIn(SECRET_MARKER, str(output.get("own_environ", "")))
+        _assert_secret_not_in_environ(output)
+
+    def test_synthetic_environment_canary_detection(self):
+        # Negative control within the same sandbox contract. The harmless test
+        # marker is inserted by the child itself, not via a Docker --env flag.
+        # It demonstrates that this exact image and generated program detect a
+        # marker value, without revealing any environment data in output.
+        program = ("import os\nos.environ['RAAWAA_SYNTHETIC_CONTROL'] = "
+                   + repr(SECRET_MARKER) + "\n" + _probe_program(self.host_canary))
+        vector = build_docker_argv(SandboxRequest(
+            image=IMAGE, command=_python_command(program), source_dir=str(self.workspace),
+            limits=SandboxLimits(memory_mb=512, cpus=1.0, pids=64, wall_seconds=90, scratch_mb=32),
+        ))
+        assert_sandbox_argv(vector, expected_source_dir=str(self.workspace))
+        completed = subprocess.run(vector, capture_output=True, text=True, timeout=120, check=False)
+        self.assertEqual(completed.returncode, 0, completed.stderr[-800:])
+        output = _parse_probe_output(completed)
+        _assert_probe_usable(output)
+        self.assertIs(output["secret_marker_present"], True)
+        self.assertNotIn(SECRET_MARKER, completed.stdout)
+        with self.assertRaisesRegex(AssertionError, "synthetic host secret"):
+            _assert_secret_not_in_environ(output)
 
     def test_the_public_network_is_unreachable(self):
         output = self._observed()
+        _require_host_network_control()
         self.assertTrue(
             str(output.get("network", "")).startswith("denied"),
             output.get("network"),
         )
 
-    def test_credentials_and_the_docker_socket_are_absent(self):
+    def test_credentials_and_the_docker_socket_are_not_accessible(self):
         output = self._observed()
-        for path in ("/var/run/docker.sock", "/root/.ssh"):
-            self.assertFalse(output["exists:" + path], path)
+        _assert_paths_not_accessible(output)
 
     def test_the_root_filesystem_cannot_be_written(self):
         output = self._observed()
-        self.assertTrue(
-            str(output.get("root_write", "")).startswith("denied"),
-            output.get("root_write"),
-        )
+        _assert_root_read_only(output)
 
 
 if __name__ == "__main__":

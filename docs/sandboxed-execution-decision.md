@@ -3,6 +3,75 @@
 **Status:** decided, contract implemented, live proof not yet run.
 **Date:** 2026-11-04. **Issue:** #440. **Related:** #427 (stays disabled), #34.
 
+## Probe-hardening update — 2026-11-05 (offline only)
+
+The live workflow now runs an explicit six-test identity/count gate and treats
+skips, expected failures, failures, or partial runs as failure. A synthetic
+host-environment marker is checked as a required boolean without outputting
+values; a separate live negative control injects only that harmless marker
+*inside* the sandbox process and must detect it. An offline negative control also
+exercises the generated probe program. The multiline probe is encoded in one
+newline-free command argument: the independent argv validator rejects literal
+newlines, so the old raw template could not start. Checkout token persistence is
+disabled for the proof job. These are harness changes, not live sandbox evidence.
+
+The sandbox egress probe additionally requires a successful TCP connection from
+the host runner to the same address; if that control fails, the observation is
+inconclusive and the proof fails. Sensitive paths are reported as `missing`,
+`inaccessible`, or `present` using `lstat`, rather than treating a permission
+denial as absence. Missing or inaccessible paths are not evidence that no host
+credential mounts exist elsewhere; that broader property remains unproven.
+The root-filesystem probe requires read-only filesystem flags on `/` and
+`/var/tmp`, a normally world-writable/traversable `/var/tmp` directory, and an
+actual `EROFS` from an exclusive create attempt. `EACCES`, a missing directory,
+or an absent flag is inconclusive and fails; this is not proof that other
+mounts are immutable.
+
+**Release posture unchanged:** #427 was already merged but its Codespaces
+executor release gate remains false. #440 remains open; this proof still does
+not verify all resource-exhaustion, descendant-cleanup, lease-revocation, and
+unreviewed-ref acceptance criteria. Do not dispatch the live workflow until its
+exact changes and provenance have been independently reviewed and a verified
+immutable image digest and zero-cost runner eligibility are established.
+
+### Evidence table (current-main port; offline only)
+
+| Proof property | Offline evidence | Live-only requirement | Status |
+| --- | --- | --- | --- |
+| Exact six tests, no skips or expected failures | Runner identity/count and simulated outcomes | Execute all six in reviewed environment | Harness tested; live unproven |
+| Canary and readable negative control | Probe harness canary/path and synthetic marker tests | Observe actual sandbox output | Harness tested; live unproven |
+| Sensitive path and parent environment isolation | Typed result and generated-program tests | Inspect actual sandbox and broader mount/credential boundaries | Partial harness only |
+| Read-only root, EROFS distinction | Synthetic flag/error tests | EROFS on actual approved image and runtime | Harness tested; live unproven |
+| Network isolation | Simulated host positive-control and denial tests | Reach target from host and fail from sandbox | Harness tested; live unproven |
+| Process and timeout behavior | Policy and harness timeout tests | Resource exhaustion and descendant cleanup under runtime | Incomplete |
+| Official immutable image | Exact digest allowlist tests | Revalidate provenance, image, and runner cost before pull | Pin tested; live unverified |
+
+The Codespaces execution bridge is not an isolation boundary. The proof cannot
+close #440 or establish zero cost; #427 was already merged but its executor
+release gate remains disabled.
+
+### Image and runner research (2026-11-05 UTC)
+
+- Docker Hub's [official Python `3.12-slim` tag metadata](https://hub.docker.com/v2/repositories/library/python/tags/3.12-slim)
+  reported Linux/amd64 image manifest digest
+  `sha256:05a994d2344eb364cc186910f4fc8786a38215f39f00d0acc25bff33a08f4177`;
+  the separate multi-platform index digest was
+  `sha256:4840d514c583a4d3d8cad3940e68dee6f0f6f3635c12fcd0a3d74c21a5b93a54`.
+  These are timestamped tag observations, not evidence of a successful pull or
+  content execution; revalidate the chosen digest and provenance before use.
+  The proof workflow and runner share a strict allowlist for the amd64 image
+  `docker.io/library/python@sha256:05a994d2344eb364cc186910f4fc8786a38215f39f00d0acc25bff33a08f4177`;
+  other image names, tags, registries, digests and the multi-platform index are
+  rejected. Updating this fixed identity requires a reviewed change and fresh
+  verification; pinning does not by itself establish provenance or containment.
+  Docker's [registry API](https://docs.docker.com/reference/api/registry/latest/)
+  describes fetching the target platform manifest from a multi-platform index.
+- GitHub's [runner reference](https://docs.github.com/en/actions/reference/runners/github-hosted-runners)
+  identifies `ubuntu-24.04` as a standard public-repository runner and says
+  standard runner use on public repositories is free. The repository API
+  reported this repository public on 2026-11-05. This does not verify billing
+  for other services, artifacts, or future changes in repository visibility.
+
 ## The finding that forced the decision
 
 The Codespaces bridge launches repository-controlled commands as a child process of
