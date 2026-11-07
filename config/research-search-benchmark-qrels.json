@@ -1,0 +1,297 @@
+{
+  "schema_version": 1,
+  "benchmark": "raawaa_research_search_qrels_v1",
+  "annotation_policy": "Manually curated relevance labels from public metadata. Arabic aliases are editorial benchmark annotations, not original source text. Labels are a small judgement set, not exhaustive truth.",
+  "arabic_aliases": {
+    "agent_orchestration": "تنسيق الوكلاء متعدد الوكلاء سير العمل إدارة فرق الوكلاء",
+    "coding_agents": "وكيل برمجي كتابة الشيفرة تنفيذ المهام مراجعة طلبات الدمج",
+    "skill_security": "أمان المهارات فحص البرمجيات حقن التعليمات تسريب البيانات",
+    "mcp_tools": "بروتوكول سياق النماذج خوادم الأدوات فهرس الأدوات",
+    "agent_memory": "ذاكرة الوكلاء ذاكرة طويلة الأمد تخزين استرجاع الذاكرة",
+    "durable_workflows": "سير عمل دائم تنفيذ مستمر طوابير مهام إعادة المحاولة",
+    "agent_evaluation": "تقييم الوكلاء معيار قياس الأداء اختبار المهارات",
+    "model_routing": "توجيه النماذج مزود الاستدلال بوابة النماذج حصص الاستخدام",
+    "academic_coordination": "تنسيق الوكلاء إسناد المهام تعاون متعدد الوكلاء",
+    "research_reproducibility": "قابلية إعادة الإنتاج توثيق الأبحاث معايير التحقق"
+  },
+  "queries": [
+    {
+      "query_id": "q01-en",
+      "query": "multi-agent orchestration workflow",
+      "language": "en",
+      "capability": "agent_orchestration",
+      "expected_ids": [
+        "github:5dive-ai/5dive",
+        "github:ashlrai/phantom",
+        "github:kortix-ai/companyos",
+        "github:omnigent-ai/omnigent",
+        "github:crewaiinc/crewai",
+        "github:division-sh/swarm",
+        "github:microsoft/agent-framework",
+        "github:aequitas-labs/lobstah",
+        "github:cogitator-ai/cogitator-ai",
+        "github:goshikavs/goshikq-agent-framework",
+        "github:synergycodes/workflowbuilder",
+        "github:glassflow/tares"
+      ]
+    },
+    {
+      "query_id": "q01-ar",
+      "query": "تنسيق الوكلاء وسير العمل متعدد الوكلاء",
+      "language": "ar",
+      "capability": "agent_orchestration",
+      "expected_ids": [
+        "github:5dive-ai/5dive",
+        "github:ashlrai/phantom",
+        "github:kortix-ai/companyos",
+        "github:omnigent-ai/omnigent",
+        "github:crewaiinc/crewai",
+        "github:division-sh/swarm",
+        "github:microsoft/agent-framework",
+        "github:aequitas-labs/lobstah",
+        "github:cogitator-ai/cogitator-ai",
+        "github:goshikavs/goshikq-agent-framework",
+        "github:synergycodes/workflowbuilder",
+        "github:glassflow/tares"
+      ]
+    },
+    {
+      "query_id": "q02-en",
+      "query": "coding agent task execution pull request",
+      "language": "en",
+      "capability": "coding_agents",
+      "expected_ids": [
+        "github:5dive-ai/5dive",
+        "github:ashlrai/phantom",
+        "github:codealong/codealong",
+        "github:jonsmithtlt/agentic-engineering-workflow",
+        "github:glassflow/tares",
+        "github:cogitator-ai/cogitator-ai",
+        "github:ki11a-conton/harness-agent",
+        "github:l3187773278-star/agent-harness-lab"
+      ]
+    },
+    {
+      "query_id": "q02-ar",
+      "query": "تنفيذ مهام الوكيل البرمجي ومراجعة طلبات الدمج",
+      "language": "ar",
+      "capability": "coding_agents",
+      "expected_ids": [
+        "github:5dive-ai/5dive",
+        "github:ashlrai/phantom",
+        "github:codealong/codealong",
+        "github:jonsmithtlt/agentic-engineering-workflow",
+        "github:glassflow/tares",
+        "github:cogitator-ai/cogitator-ai",
+        "github:ki11a-conton/harness-agent",
+        "github:l3187773278-star/agent-harness-lab"
+      ]
+    },
+    {
+      "query_id": "q03-en",
+      "query": "agent skill security prompt injection scanner",
+      "language": "en",
+      "capability": "skill_security",
+      "expected_ids": [
+        "github:tarunreddy77/skill-scanner",
+        "github:nvidia/skillspector",
+        "github:obielin/skillshield",
+        "github:diptapradipta21/agent-skill-sentinel",
+        "github:wonglaitung/skill-scanner",
+        "github:getedgehq/skills"
+      ]
+    },
+    {
+      "query_id": "q03-ar",
+      "query": "فحص أمان مهارات الوكلاء وحقن التعليمات",
+      "language": "ar",
+      "capability": "skill_security",
+      "expected_ids": [
+        "github:tarunreddy77/skill-scanner",
+        "github:nvidia/skillspector",
+        "github:obielin/skillshield",
+        "github:diptapradipta21/agent-skill-sentinel",
+        "github:wonglaitung/skill-scanner",
+        "github:getedgehq/skills"
+      ]
+    },
+    {
+      "query_id": "q04-en",
+      "query": "Model Context Protocol server tools catalog",
+      "language": "en",
+      "capability": "mcp_tools",
+      "expected_ids": [
+        "github:humle93/mcp-index",
+        "github:microsoft/mcp",
+        "github:api-evangelist/mcp360",
+        "github:pdbeurope/pdbe-mcp-servers",
+        "github:vrushabh05/mealpilot-mcp"
+      ]
+    },
+    {
+      "query_id": "q04-ar",
+      "query": "فهرس خوادم وأدوات بروتوكول سياق النماذج",
+      "language": "ar",
+      "capability": "mcp_tools",
+      "expected_ids": [
+        "github:humle93/mcp-index",
+        "github:microsoft/mcp",
+        "github:api-evangelist/mcp360",
+        "github:pdbeurope/pdbe-mcp-servers",
+        "github:vrushabh05/mealpilot-mcp"
+      ]
+    },
+    {
+      "query_id": "q05-en",
+      "query": "long-term agent memory storage retrieval",
+      "language": "en",
+      "capability": "agent_memory",
+      "expected_ids": [
+        "github:openjiuwen-ai/agent-memory",
+        "github:landonmclain/paf",
+        "github:aegeanworks/neurocore",
+        "github:kiazh/machina-harness",
+        "github:zinebnadak/zizo",
+        "github:kortix-ai/companyos"
+      ]
+    },
+    {
+      "query_id": "q05-ar",
+      "query": "تخزين واسترجاع الذاكرة طويلة الأمد للوكلاء",
+      "language": "ar",
+      "capability": "agent_memory",
+      "expected_ids": [
+        "github:openjiuwen-ai/agent-memory",
+        "github:landonmclain/paf",
+        "github:aegeanworks/neurocore",
+        "github:kiazh/machina-harness",
+        "github:zinebnadak/zizo",
+        "github:kortix-ai/companyos"
+      ]
+    },
+    {
+      "query_id": "q06-en",
+      "query": "durable workflow queue retries orchestration",
+      "language": "en",
+      "capability": "durable_workflows",
+      "expected_ids": [
+        "github:durable-workflow/workflow",
+        "github:synergycodes/workflowbuilder",
+        "github:glassflow/tares",
+        "github:jonsmithtlt/agentic-engineering-workflow",
+        "github:cogitator-ai/cogitator-ai",
+        "github:division-sh/swarm"
+      ]
+    },
+    {
+      "query_id": "q06-ar",
+      "query": "تنسيق سير العمل الدائم وطوابير المهام وإعادة المحاولة",
+      "language": "ar",
+      "capability": "durable_workflows",
+      "expected_ids": [
+        "github:durable-workflow/workflow",
+        "github:synergycodes/workflowbuilder",
+        "github:glassflow/tares",
+        "github:jonsmithtlt/agentic-engineering-workflow",
+        "github:cogitator-ai/cogitator-ai",
+        "github:division-sh/swarm"
+      ]
+    },
+    {
+      "query_id": "q07-en",
+      "query": "agent evaluation benchmark harness skills",
+      "language": "en",
+      "capability": "agent_evaluation",
+      "expected_ids": [
+        "github:benchflow-ai/skillsbench",
+        "github:zcag/local-llm-bench",
+        "github:francaroscillidev-gif/agent-arena",
+        "github:ki11a-conton/harness-agent",
+        "github:l3187773278-star/agent-harness-lab",
+        "github:jonsmithtlt/agentic-engineering-workflow",
+        "github:jitter00/llm-on-a-stick"
+      ]
+    },
+    {
+      "query_id": "q07-ar",
+      "query": "تقييم الوكلاء ومعايير قياس المهارات والاختبارات",
+      "language": "ar",
+      "capability": "agent_evaluation",
+      "expected_ids": [
+        "github:benchflow-ai/skillsbench",
+        "github:zcag/local-llm-bench",
+        "github:francaroscillidev-gif/agent-arena",
+        "github:ki11a-conton/harness-agent",
+        "github:l3187773278-star/agent-harness-lab",
+        "github:jonsmithtlt/agentic-engineering-workflow",
+        "github:jitter00/llm-on-a-stick"
+      ]
+    },
+    {
+      "query_id": "q08-en",
+      "query": "LLM provider routing inference gateway quota",
+      "language": "en",
+      "capability": "model_routing",
+      "expected_ids": [
+        "github:nolimitkun/eaig-poc",
+        "github:omnigent-ai/omnigent",
+        "github:ashlrai/phantom"
+      ]
+    },
+    {
+      "query_id": "q08-ar",
+      "query": "توجيه مزودي النماذج وبوابة الاستدلال والحصص",
+      "language": "ar",
+      "capability": "model_routing",
+      "expected_ids": [
+        "github:nolimitkun/eaig-poc",
+        "github:omnigent-ai/omnigent",
+        "github:ashlrai/phantom"
+      ]
+    },
+    {
+      "query_id": "q09-en",
+      "query": "multi-agent task assignment coordination",
+      "language": "en",
+      "capability": "academic_coordination",
+      "expected_ids": [
+        "crossref:10.1007/s10458-020-09461-y",
+        "crossref:10.1007/s10458-008-9068-3"
+      ]
+    },
+    {
+      "query_id": "q09-ar",
+      "query": "إسناد المهام وتنسيق التعاون بين الوكلاء",
+      "language": "ar",
+      "capability": "academic_coordination",
+      "expected_ids": [
+        "crossref:10.1007/s10458-020-09461-y",
+        "crossref:10.1007/s10458-008-9068-3"
+      ]
+    },
+    {
+      "query_id": "q10-en",
+      "query": "reproducible research artifacts benchmark verification",
+      "language": "en",
+      "capability": "research_reproducibility",
+      "expected_ids": [
+        "arxiv:2611.08452v1",
+        "arxiv:2611.08417v1",
+        "arxiv:2611.08318v1",
+        "arxiv:2611.08285v1"
+      ]
+    },
+    {
+      "query_id": "q10-ar",
+      "query": "قابلية إعادة إنتاج الأبحاث والتحقق من المعايير",
+      "language": "ar",
+      "capability": "research_reproducibility",
+      "expected_ids": [
+        "arxiv:2611.08452v1",
+        "arxiv:2611.08417v1",
+        "arxiv:2611.08318v1",
+        "arxiv:2611.08285v1"
+      ]
+    }
+  ]
+}

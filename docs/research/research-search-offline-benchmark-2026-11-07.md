@@ -52,3 +52,18 @@ P@10 is 0.5 because the fixture has five relevant documents per query and the me
 ## Decision gate
 
 This result is an offline SQLite benchmark only. It does not establish Cloudflare D1 FTS5 support or production performance. The next step after exact-head CI passes is a read-only capability probe against the existing isolated D1 environment, only when the zero-cost preflight proves eligibility. If the D1 feature/plan remains unknown, keep production search on the existing metadata path and retain SQLite FTS5 only as an offline fallback. Do not add a new database or search service before measured evidence requires one.
+
+
+## Real-corpus benchmark — 2026-11-07
+
+The daily discovery workflow now runs a second benchmark against the current `research-candidates.json` snapshot using the versioned editorial qrels in `config/research-search-benchmark-qrels.json`. It evaluates exact substring lookup, strict FTS5 AND, and weighted FTS5 OR/BM25 across English and Arabic query pairs. The benchmark is offline: it consumes the discovery file already produced by the workflow and makes no additional network, model, or write calls.
+
+Relevance labels are manually curated from public metadata and are not exhaustive ground truth. Arabic keywords are editorial aliases attached only to labelled candidates; this measures cross-language metadata retrieval with a controlled vocabulary, not automatic translation. The report records per-query label coverage so a changing daily corpus cannot silently look complete when relevant candidates are absent. Reports are uploaded as 30-day workflow artifacts.
+
+The report now separates two evaluation tracks:
+- **Alias-assisted:** editorial Arabic aliases are added to qrels-labelled candidates. This measures retrieval when the controlled vocabulary is available; because the aliases are attached using the relevance labels, these scores are intentionally label-conditioned and must not be interpreted as native Arabic retrieval performance.
+- **Source-native:** the same snapshot and qrels are evaluated with only source-provided metadata fields; no qrels-derived aliases are injected. This is the evidence track for whether Arabic queries can retrieve documents from the metadata as actually collected. A low score can indicate that source metadata is English-only or lacks Arabic terminology, not necessarily a ranking defect.
+
+Both tracks retain per-query label coverage and are reported separately. Never quote alias-assisted metrics without the source-native comparison.
+
+A local exploratory run on discovery snapshot #42317405323 (61 records: 41 GitHub, 10 Crossref, 10 arXiv; 20 queries) showed that strict AND matching was too restrictive. Weighted OR/BM25 materially improved recall and ranking on this small labelled set. These exploratory numbers are not production claims and do not establish D1 FTS5 parity or latency. The next step is to review the first scheduled benchmark artifacts and refine labels from observed misses before changing any production search endpoint.
