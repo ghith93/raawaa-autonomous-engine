@@ -47,18 +47,20 @@ class ResearchPersistenceTests(unittest.TestCase):
         self.assertEqual(request.get_header("Cf-access-client-secret"), "synthetic-access-secret")
         self.assertEqual(opened.call_args.kwargs["timeout"], 20)
 
-    def test_workflow_passes_only_required_engine_credentials_to_persistence_step(self):
+    def test_workflow_persistence_is_staging_only_and_uses_dedicated_token(self):
         root = Path(__file__).resolve().parents[1]
         workflow = (root / ".github" / "workflows" / "research-discovery.yml").read_text(encoding="utf-8")
-        start = workflow.index("      - name: Persist research metadata in D1")
+        start = workflow.index("      - name: Persist research metadata in isolated Staging D1 only")
         end = workflow.index("\n      - name:", start + 8)
         step = workflow[start:end]
-        self.assertIn("RAAWAA_ENGINE_API_URL: https://raawaa-autonomous-engine-control.ghith-shikhkhaled.workers.dev", step)
-        self.assertIn("RAAWAA_ENGINE_API_TOKEN: ${{ secrets.ENGINE_API_TOKEN }}", step)
-        self.assertIn("RAAWAA_ENGINE_CF_ACCESS_CLIENT_ID: ${{ secrets.CF_ACCESS_CLIENT_ID }}", step)
-        self.assertIn("RAAWAA_ENGINE_CF_ACCESS_CLIENT_SECRET: ${{ secrets.CF_ACCESS_CLIENT_SECRET }}", step)
+        self.assertIn("RAAWAA_ENGINE_API_URL: https://raawaa-autonomous-engine-staging.ghith-shikhkhaled.workers.dev", step)
+        self.assertIn("RAAWAA_ENGINE_API_TOKEN: ${{ secrets.ENGINE_STAGING_API_TOKEN }}", step)
+        self.assertNotIn("raawaa-autonomous-engine-control", step)
+        self.assertNotIn("secrets.ENGINE_API_TOKEN", step)
+        self.assertNotIn("CF_ACCESS", step)
         self.assertNotIn("CLOUDFLARE_API_TOKEN", step)
         self.assertNotIn("CLOUDFLARE_ACCOUNT_ID", step)
+
 
     def test_authenticated_readback_rejects_redirects(self):
         handler = _RejectRedirects()
