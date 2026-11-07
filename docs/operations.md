@@ -1,3 +1,14 @@
+## Cloudflare zero-cost gate review — 2026-11-07 (PR #685)
+
+- **Credential scope is a completeness prerequisite:** the Cloudflare API token used by `scripts/verify_cloudflare_zero_cost_boundary.py` must have **Zone Read across every zone in the account** (not a selected-zone subset) and **Billing Read** for each `GET /zones/{zone_id}/subscription` request. The List Zones API cannot reveal zones hidden by token scope. A successful response therefore proves completeness only when this all-zones token scope is independently confirmed by the operator. If that scope cannot be confirmed, treat the inventory as unknown and keep remote effects blocked.
+- **Bounded zone coverage:** the preflight explicitly requests all four zone types (`full,partial,secondary,internal`), checks account ownership, and fails closed when the single page is full or the account exceeds the reviewed 20-zone bound. Accounts above that bound require a reviewed pagination/completeness implementation; do not raise the bound by assumption.
+- **Workers AI image check is a separate bounded exception:** `.github/workflows/raawaa-image-route-check.yml` performs one real 1024×1024, 4-step image inference after the zero-cost preflight succeeds. It is not disabled by the model-gateway default. It must remain gated by verified Workers Free eligibility and its daily free allowance; this workflow is not evidence that general model inference is enabled.
+- **Scheduled runtime evidence:** the five-minute Task Runner and daily supervised Staging schedule are configured separately. Configuration or a successful `workflow_dispatch` is not proof of schedule operation. Keep schedule acceptance marked runtime-unverified until the required two distinct genuine `event=schedule` successes are recorded.
+- **Historical evidence:** account add-on subscriptions returned HTTP 200 with an empty result in run [#42328401696](https://github.com/ghith93/raawaa-autonomous-engine/actions/runs/42328401696). This proves only that no account-level add-ons were returned; it is not proof of Free zone plans. The per-zone subscription checks are required.
+- **PR #685 is not merged.** Remote operations remain blocked unless the complete read-only gate passes. This documentation update does not run a Cloudflare API request, change secrets, perform a migration, or deploy anything.
+
+---
+
 # Operations and contributor guide
 
 ## Latest verified operational state — 2026-11-07 (post-PR #614)
