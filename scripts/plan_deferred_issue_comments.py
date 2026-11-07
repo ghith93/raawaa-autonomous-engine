@@ -2,8 +2,8 @@
 
 Input is a locally supplied, complete JSON list of GitHub issue-comment records.
 This tool does not fetch, enqueue, attest cost, or claim that a task is absent.
-Edited comments require manual evidence review because their original event body
-is no longer available. Output never contains comment bodies or credentials.
+Comments with unequal edit timestamps require evidence review; equal timestamps
+do not prove the snapshot matches the original event body. Output never contains comment bodies or credentials.
 """
 from __future__ import annotations
 
