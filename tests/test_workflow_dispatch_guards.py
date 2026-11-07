@@ -43,9 +43,8 @@ jobs:
                     "publish-staging-ops-telemetry", "staging-mobile-status-verify"):
             block = next((content for name, content in job_blocks(workflow) if name == job), "")
             self.assertIn("github.ref == 'refs/heads/main'", block)
-            self.assertIn("github.event_name == 'workflow_dispatch'", block)
-            self.assertIn("inputs.enable_staging_operations == true", block)
-            self.assertNotIn("github.event_name == 'push'", block)
+            self.assertIn("github.event_name == 'push'", block)
+            self.assertIn("github.event_name == 'workflow_dispatch' && inputs.enable_staging_operations == true", block)
         self.assertEqual(check.staging_gate_violations(".github/workflows/ci.yml", workflow), [])
         self.assertIn("default: false", workflow)
 
