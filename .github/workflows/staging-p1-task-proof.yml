@@ -61,6 +61,11 @@ jobs:
               raise SystemExit("Refusing P1 proof: repository defaults are not fail-closed")
           print("Staging Worker/D1 identities and zero-provider defaults verified.")
           PY
+      - name: Verify Cloudflare zero-cost boundary before Staging P1 side effects
+        env:
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: python scripts/verify_cloudflare_zero_cost_boundary.py
       - name: Install pinned Wrangler CLI without credentials
         run: npx --yes wrangler@4.156.1 --version
       - name: Generate an ephemeral Staging-only bearer token
