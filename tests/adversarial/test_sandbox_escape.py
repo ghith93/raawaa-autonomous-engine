@@ -640,6 +640,39 @@ class PressureProbeContractTest(unittest.TestCase):
     def test_the_process_overshoot_is_bounded_so_it_cannot_flood_the_host(self):
         self.assertIn("OVERSHOOT * 128", _BEHAVIOUR_PROGRAM)
 
+    def test_the_reviewed_probe_count_exceeds_the_annotation_ceiling(self):
+        """Why a report file exists at all.
+
+        GitHub keeps at most ten annotations per step. Run 42379096458 emitted
+        fourteen and the four dropped were exactly the four criterion-5 probes,
+        which made a green run impossible to audit. If the count ever drops to
+        ten or fewer this test still holds the reason in place, so removing the
+        artifact step stays a deliberate decision rather than an oversight.
+        """
+        from scripts.run_sandbox_adversarial_tests import (
+            EXPECTED_METHODS, EXPECTED_PRESSURE_METHODS,
+        )
+        total = len(EXPECTED_METHODS) + len(EXPECTED_PRESSURE_METHODS)
+        self.assertGreater(total, 10,
+                           "if the reviewed set fits the ceiling, say so explicitly")
+
+    def test_every_reviewed_probe_has_a_report_entry(self):
+        """The report is only authoritative if it covers the whole reviewed set."""
+        from scripts.run_sandbox_adversarial_tests import (
+            EXPECTED_METHODS, EXPECTED_PRESSURE_METHODS,
+        )
+        combined = EXPECTED_METHODS | EXPECTED_PRESSURE_METHODS
+        self.assertEqual(len(combined), 14)
+        self.assertEqual(combined & {"test_memory_overshoot_is_killed_by_the_limit",
+                                     "test_the_process_count_is_bounded",
+                                     "test_the_positive_control_allocates_and_survives",
+                                     "test_the_wall_clock_holds"},
+                         {"test_memory_overshoot_is_killed_by_the_limit",
+                          "test_the_process_count_is_bounded",
+                          "test_the_positive_control_allocates_and_survives",
+                          "test_the_wall_clock_holds"},
+                         "the four probes GitHub dropped must stay in the reviewed set")
+
     def test_an_unbounded_host_does_not_look_bounded(self):
         """The negative control, run for real on this machine.
 
