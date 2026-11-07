@@ -11,6 +11,7 @@ from scripts.persist_research_candidates import (
     persist_candidates,
     _RejectRedirects,
     _get,
+    _post,
 )
 
 
@@ -63,6 +64,28 @@ class ResearchPersistenceTests(unittest.TestCase):
         self.assertIn("RAAWAA_ENGINE_CF_ACCESS_CLIENT_SECRET: ${{ secrets.CF_ACCESS_CLIENT_SECRET }}", step)
         self.assertNotIn("CLOUDFLARE_API_TOKEN", step)
         self.assertNotIn("CLOUDFLARE_ACCOUNT_ID", step)
+
+    def test_post_carries_stable_batch_id_without_exposing_credentials(self):
+        class Response:
+            status = 201
+            def __enter__(self): return self
+            def __exit__(self, *args): return False
+            def read(self, limit):
+                return b'{"accepted_count":1,"batch_id":"github:run:1","replayed":false}'
+
+        candidate = {"source": "github", "full_name": "org/repo"}
+        with patch("scripts.persist_research_candidates._open_without_redirects", return_value=Response()) as opened:
+            result = _post(
+                "https://engine.example", "synthetic-token", [candidate], "github:run:1",
+                "synthetic-access-id", "synthetic-access-secret",
+            )
+        self.assertEqual(result["batch_id"], "github:run:1")
+        request = opened.call_args.args[0]
+        self.assertEqual(request.full_url, "https://engine.example/v1/research/candidates")
+        self.assertEqual(request.method, "POST")
+        self.assertIn('"batch_id":"github:run:1"', request.data.decode("utf-8"))
+        self.assertEqual(request.get_header("Authorization"), "Bearer synthetic-token")
+        self.assertEqual(opened.call_args.kwargs["timeout"], 20)
 
     def test_authenticated_readback_rejects_redirects(self):
         handler = _RejectRedirects()
