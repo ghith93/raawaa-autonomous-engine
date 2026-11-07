@@ -29,6 +29,7 @@ INACTIVE_STATES = {"Cancelled", "Failed", "Expired"}
 ACTIVE_STATES = {"Trial", "Provisioned", "Paid", "AwaitingPayment"}
 # Workflow annotations accept only fixed, sanitized reason tokens.
 SAFE_REASON_RE = re.compile(r"^[a-z][a-z0-9_]{0,63}$")
+REQUIRED_ZONE_SCOPE_ATTESTATION = "all_account_zones"
 
 
 class _RejectRedirects(HTTPRedirectHandler):
@@ -343,10 +344,16 @@ def activity_annotation(result: dict) -> str:
 
 
 def main() -> int:
-    result = check_boundary(
-        os.environ.get("CLOUDFLARE_ACCOUNT_ID", "").strip(),
-        os.environ.get("CLOUDFLARE_API_TOKEN", "").strip(),
-    )
+    # Cloudflare does not expose a reliable API field proving that a Zone Read
+    # token is scoped to every zone rather than a selected subset. Require an
+    # explicit owner attestation after reviewing the token policy in Cloudflare.
+    if os.environ.get("CLOUDFLARE_ZONE_READ_SCOPE_ATTESTATION", "").strip() != REQUIRED_ZONE_SCOPE_ATTESTATION:
+        result = _invalid("zone_scope_not_attested")
+    else:
+        result = check_boundary(
+            os.environ.get("CLOUDFLARE_ACCOUNT_ID", "").strip(),
+            os.environ.get("CLOUDFLARE_API_TOKEN", "").strip(),
+        )
     eligible = "true" if result["eligible"] else "false"
     output_path = os.environ.get("GITHUB_OUTPUT")
     if output_path:
