@@ -14,6 +14,20 @@ The preflight reads the Cloudflare account subscriptions endpoint only: `GET /ac
 
 Cloudflare documents this endpoint as a single-page list. The [API reference](https://developers.cloudflare.com/api/resources/accounts/subresources/subscriptions/methods/get/) declares only `account_id`/`zone_id` path parameters — no `page` or `per_page` — and marks `result_info` optional; the generated [Python SDK](https://developers.cloudflare.com/api/python/resources/accounts/subresources/subscriptions/methods/get/) returns `SyncSinglePage[Subscription]`, not a paginated array type. The earlier implementation appended `?page=1&per_page=1000` and followed pages, which sent an undocumented request; the observed effect was `billing_http_400` and a permanently ineligible gate. Because the inventory now arrives in one response, a response whose metadata contradicts its own `result` length (for example a `total_count` or `count` larger than the returned array, `page` other than 1, or more records than a declared `per_page`) is treated as unknown and blocks rather than being repaired by requesting a second page.
 
+### Live finding (2026-11-07): the endpoint is not plan evidence for this account
+
+After the SinglePage correction merged, the preflight published a readable reason (`#680`) and the first post-fix main run (**42328401696**) reported:
+
+```
+eligible=false; reason=empty_subscription_inventory_unverified
+```
+
+That is the *request* succeeding: HTTP 200 with `result: []`. Two independent read-only sources agree — the `cloudflare-billing-inventory.yml` runs (e.g. **42318133267**) print `subscriptions_http_status=200` and count zero subscriptions, and their `::notice` annotation says the status without any pagination parameters ever being sent.
+
+The consequence has to be stated plainly: **for this account the subscriptions endpoint returns an empty list, so the current eligibility rule can never be satisfied.** An account on Free plans has no subscription records to enumerate; the endpoint reports billed *plan subscriptions*, which is a different question from "does any metered product bill this account". The gate has therefore been false for a structural reason since it was introduced, not only because of the HTTP 400.
+
+What this does **not** justify: relaxing the rule so that an empty inventory counts as proof of zero cost. That is precisely the inference the endpoint cannot support, and it would convert an unknown into an allow. The gate stays false, remote Staging steps stay skipped, and the finding needs an owner decision — either a different positively-verifiable signal for the account's plan, or an explicit decision to run Staging only with remote steps skipped. Until then the offline lifecycle proofs (Task Runner local smoke, run **42326404131**) are the only verified evidence.
+
 Eligibility requires at least one active, explicitly named Free subscription and no active paid, trial, awaiting-payment or unknown subscription. Empty, inactive-only, incomplete, unavailable or malformed inventory is **not** proof of Free eligibility. The preflight publishes only a boolean and sanitized reason. HTTP diagnostics expose status codes only; response bodies, account identifiers and secrets are never logged.
 
 This is a conservative gate for the account-level subscription inventory, not a global no-charge guarantee. It does not independently establish the billing posture of every Cloudflare product/zone, external provider account, or model route. Model-provider billing and Workers AI entitlements remain separate gates. If any required evidence is unknown, remote operations stay skipped.
