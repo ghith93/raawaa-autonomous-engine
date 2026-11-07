@@ -269,7 +269,7 @@ try {
   // Verify the widened source CHECK constraint and real Worker normalization after local migrations.
   const researchIngest = await api("/v1/research/candidates", {
     method: "POST",
-    body: { candidates: [
+    body: { batch_id: "local-schema:1", candidates: [
       { source: "arxiv", arxiv_id: "2601.01234v2", title: "Local arXiv schema check",
         url: "https://arxiv.org/abs/2601.01234v2", abstract_retrieved: false, full_text_retrieved: false },
       { source: "searxng", title: "Local SearXNG schema check",
