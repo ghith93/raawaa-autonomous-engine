@@ -182,7 +182,7 @@ class ZeroCostBoundaryTests(unittest.TestCase):
         missing_id_page = page([{"state": "Cancelled"}], number=1, total=1, per_page=1)
         self.assertFalse(check_boundary("account", "token", opener=lambda *_a, **_k: Response(missing_id_page))["eligible"])
 
-    def test_main_fails_ci_when_zero_cost_eligibility_is_unknown(self):
+    def test_main_succeeds_but_blocks_remote_jobs_when_zero_cost_eligibility_is_unknown(self):
         with tempfile.NamedTemporaryFile(mode="r+", encoding="utf-8") as output:
             env = {
                 "CLOUDFLARE_ACCOUNT_ID": "synthetic-account",
@@ -194,7 +194,7 @@ class ZeroCostBoundaryTests(unittest.TestCase):
                 return_value={"eligible": False, "reason": "billing_inventory_unavailable_or_incomplete",
                               "active_paid_subscriptions": None},
             ):
-                self.assertEqual(main(), 1)
+                self.assertEqual(main(), 0)
             output.seek(0)
             self.assertEqual(output.read(), "zero_cost_eligible=false\n")
 
