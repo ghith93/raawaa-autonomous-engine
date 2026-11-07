@@ -37,38 +37,43 @@ jobs:
 """
         self.assertEqual(len(workflow_violations("deploy.yml", content)), 1)
 
-    def test_staging_jobs_are_opt_in_only_and_never_automatic(self):
+    def test_staging_jobs_run_automatically_after_zero_cost_preflight(self):
         workflow = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
-        for job in ("staging-migrate", "staging-worker-verify",
-                    "publish-staging-ops-telemetry", "staging-mobile-status-verify"):
-            block = next((content for name, content in job_blocks(workflow) if name == job), "")
+        triggers = check.parse_triggers(workflow)
+        self.assertIn("push", triggers)
+        self.assertIn("schedule", triggers)
+        self.assertNotIn("workflow_dispatch", triggers)
+        blocks = dict(job_blocks(workflow))
+        preflight = blocks["zero_cost_preflight"]
+        self.assertIn("scripts/verify_cloudflare_zero_cost_boundary.py", preflight)
+        self.assertIn("zero_cost_eligible:", preflight)
+        for job in check.STAGING_EFFECT_JOBS:
+            block = blocks[job]
             self.assertIn("github.ref == 'refs/heads/main'", block)
-            self.assertNotIn("github.event_name == 'push'", block)
-            self.assertNotIn("github.event_name == 'schedule'", block)
-            self.assertIn("github.event_name == 'workflow_dispatch' && inputs.enable_staging_operations == true", block)
+            self.assertIn("github.event_name == 'push'", block)
+            self.assertIn("github.event_name == 'schedule'", block)
+            self.assertNotIn("workflow_dispatch", block)
+            needs_line = next(line for line in block.splitlines() if "needs:" in line)
+            self.assertIn("zero_cost_preflight", needs_line)
+            self.assertIn("needs.zero_cost_preflight.outputs.zero_cost_eligible == 'true'", block)
         self.assertEqual(check.staging_gate_violations(".github/workflows/ci.yml", workflow), [])
-        self.assertIn("default: false", workflow)
 
-
-
-    def test_engine_ci_has_daily_unattended_regression_schedule(self):
+    def test_engine_ci_has_daily_unattended_full_lifecycle(self):
         workflow = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
         triggers = check.parse_triggers(workflow)
         self.assertIn("schedule", triggers)
         self.assertIn('cron: "17 4 * * *"', workflow)
-        self.assertIn("workflow_dispatch", triggers)
-        for job in check.STAGING_EFFECT_JOBS:
-            block = next((content for name, content in job_blocks(workflow) if name == job), "")
-            self.assertNotIn("github.event_name == 'schedule'", block)
-            self.assertNotIn("github.event_name == 'push'", block)
+        self.assertNotIn("workflow_dispatch", triggers)
+        self.assertIn("zero_cost_preflight:", workflow)
 
-    def test_staging_jobs_fail_closed_without_explicit_opt_in(self):
+    def test_staging_jobs_fail_closed_without_zero_cost_preflight(self):
         workflow = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
-        unsafe = workflow.replace("inputs.enable_staging_operations == true", "false")
-        violations = check.staging_gate_violations(".github/workflows/ci.yml", unsafe)
-        self.assertEqual(len(violations), len(check.STAGING_EFFECT_JOBS))
-        unsafe_default = workflow.replace("default: false", "default: true")
-        self.assertTrue(check.staging_gate_violations(".github/workflows/ci.yml", unsafe_default))
+        unsafe = workflow.replace("needs.zero_cost_preflight.outputs.zero_cost_eligible == 'true'", "true", 1)
+        self.assertTrue(check.staging_gate_violations(".github/workflows/ci.yml", unsafe))
+        missing_preflight = workflow.replace("  zero_cost_preflight:", "  removed_preflight:")
+        self.assertTrue(check.staging_gate_violations(".github/workflows/ci.yml", missing_preflight))
+        unsafe_event = workflow.replace("github.event_name == 'schedule'", "false", 1)
+        self.assertTrue(check.staging_gate_violations(".github/workflows/ci.yml", unsafe_event))
 
     def test_non_secret_or_non_dispatch_workflows_are_not_restricted(self):
         no_secret = """on:
