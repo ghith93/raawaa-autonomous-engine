@@ -404,9 +404,8 @@ def activity_annotation(result: dict) -> str:
 
 
 def main() -> int:
-    # The List Zones API cannot reveal zones hidden by a token scoped to a
-    # subset. Require an explicit repository-variable attestation before
-    # treating the returned inventory as complete. Missing/false is fail-closed.
+    # List Zones cannot reveal zones hidden by token resource scope. Require
+    # explicit all-zones scope attestation before making any Cloudflare call.
     all_zones_confirmed = (
         os.environ.get("CLOUDFLARE_ZONE_READ_ALL_ZONES_CONFIRMED", "").strip().lower() == "true"
     )
