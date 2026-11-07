@@ -112,13 +112,20 @@ def _read_page(account_id: str, token: str, page: int, opener, timeout: int) -> 
     info = payload.get("result_info")
     if not isinstance(records, list) or not isinstance(info, dict):
         raise ValueError("missing_pagination_metadata")
-    count, current_page = info.get("count"), info.get("page")
-    per_page, total = info.get("per_page"), info.get("total_count")
-    values = (count, current_page, per_page, total)
-    names = ("count", "page", "per_page", "total_count")
-    for name, value in zip(names, values):
-        if not isinstance(value, int) or isinstance(value, bool):
+    def pagination_integer(name: str) -> int:
+        value = info.get(name)
+        if isinstance(value, bool):
             raise ValueError("invalid_pagination_" + name)
+        if isinstance(value, int):
+            return value
+        if isinstance(value, float) and math.isfinite(value) and value.is_integer():
+            return int(value)
+        raise ValueError("invalid_pagination_" + name)
+
+    count = pagination_integer("count")
+    current_page = pagination_integer("page")
+    per_page = pagination_integer("per_page")
+    total = pagination_integer("total_count")
     if current_page != page:
         raise ValueError("pagination_page_mismatch")
     if per_page < 1 or per_page > PER_PAGE:
