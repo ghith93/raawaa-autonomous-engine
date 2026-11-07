@@ -30,6 +30,18 @@ Metrics:
 
 Arabic normalization applies Unicode NFKC, removes combining marks and tatweel, normalizes alef variants, and maps alef maqsura/ta marbuta consistently. The fixture includes diacritics/letter variants in unit tests.
 
+
+## Observed exact-head CI result
+
+Engine CI run 42322290258 on commit 5f136be708cb33abc9fbf0cf4abb3d318f394ff0 reported:
+
+| Method | P@10 | R@20 | MRR@10 | p50 ms | p95 ms |
+|---|---:|---:|---:|---:|---:|
+| Normalized substring LIKE | 0.0000 | 0.0000 | 0.0000 | 0.061 | 0.095 |
+| SQLite FTS5 + BM25 | 0.5000 | 1.0000 | 1.0000 | 0.035 | 0.056 |
+
+P@10 is 0.5 because the fixture has five relevant documents per query and the metric denominator is ten; all five relevant records were retrieved within the top 20 and the first relevant result ranked first. These are local in-memory measurements on a tiny synthetic corpus, not production latency or relevance estimates. The exact-head run reported FTS5 available, 144 documents, 24 queries (12 Arabic / 12 English), and zero network/provider/remote writes.
+
 ## Safety and scope
 
 - Uses only Python standard library and an in-memory SQLite database.
