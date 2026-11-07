@@ -116,15 +116,7 @@ class ProviderWorkflowSecurityTests(unittest.TestCase):
         self.assertIn("scripts/verify_cloudflare_zero_cost_boundary.py", block)
         self.assertIn("CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}", block)
         self.assertIn("CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}", block)
-        if not allow_continue_on_error:
-            if not allow_continue_on_error:
-            if allow_continue_on_error:
-            self.assertIn("continue-on-error: true", block)
-        else:
-            if allow_continue_on_error:
-            self.assertIn("continue-on-error: true", block)
-        else:
-            self.assertNotIn("continue-on-error", block)
+        self.assertNotIn("continue-on-error", block)
         self.assertNotIn("if: always()", block)
 
     def test_ci_telemetry_publisher_is_main_only_and_staging_only(self):
@@ -171,7 +163,10 @@ class CloudflareZeroCostEffectWorkflowTests(unittest.TestCase):
         self.assertIn("scripts/verify_cloudflare_zero_cost_boundary.py", block)
         self.assertIn("CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}", block)
         self.assertIn("CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}", block)
-        self.assertNotIn("continue-on-error", block)
+        if allow_continue_on_error:
+            self.assertIn("continue-on-error: true", block)
+        else:
+            self.assertNotIn("continue-on-error", block)
         self.assertNotIn("if: always()", block)
 
     def test_production_d1_migration_requires_zero_cost_preflight(self):
