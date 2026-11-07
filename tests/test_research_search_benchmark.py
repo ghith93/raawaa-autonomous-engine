@@ -133,4 +133,5 @@ class RealCorpusResearchSearchTests(unittest.TestCase):
         self.assertEqual(result["snapshot"]["documents"], 3)
         self.assertEqual(result["snapshot"]["source_counts"], {"github": 1, "crossref": 1, "arxiv": 1})
         self.assertEqual(result["snapshot"]["evaluated_queries"], 3)
+        self.assertEqual(result["snapshot"]["benchmark_status"], "insufficient_coverage")
         self.assertIn("sqlite_fts5_or_bm25", result["methods"])
