@@ -27,13 +27,13 @@
     "config/tool_permissions.json"
   ],
   "watermark": {
-    "last_processed_comment_id": 6699275117,
-    "last_processed_comment_created_at": "2026-11-07T00:07:34Z",
-    "last_processed_comment_url": "https://github.com/ghith93/raawaa-autonomous-engine/issues/464#issuecomment-6699275117",
+    "last_processed_comment_id": 6699376011,
+    "last_processed_comment_created_at": "2026-11-07T00:12:56Z",
+    "last_processed_comment_url": "https://github.com/ghith93/raawaa-autonomous-engine/issues/464#issuecomment-6699376011",
     "last_reviewed_task_comment_id": 6693901805,
     "last_verified_main_sha": "cd189dc166607f657220cefad311ad187a1bc77e",
-    "updated_at_utc": "2026-11-07T00:09:04Z",
-    "summary": "Read-only billing inventory 42316214429 succeeded but logs are inaccessible and external hard-stop remains unverified. Add sanitized check annotation; PR #628 recovery fix remains draft. No Staging deployment or provider calls initiated."
+    "updated_at_utc": "2026-11-07T00:14:12Z",
+    "summary": "Reviewed #630 and #631: main push triggers Staging and zero-cost boundary unverified; #631 reuses control target/credentials contrary to isolated Staging contract. Store #158 axe harness confirmed; write to store denied. Billing audit #629 remains draft."
   },
   "open_engineering_priorities": [
     "P0: Review and approve a dedicated main-only one-shot Groq Free GPT-OSS 20B Staging dispatch path (with run-scoped idempotency key and revalidated 20B account hard-stop evidence) while keeping 120B disabled/quarantined and xAI Grok blocked.",
