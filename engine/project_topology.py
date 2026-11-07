@@ -13,7 +13,9 @@ ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_MAP_PATH = ROOT / "config" / "project-agent-map.json"
 MAX_NODES = 500
 MAX_EDGES = 2000
-MAX_EVIDENCE_ITEMS = 20
+MAX_EVIDENCE_ITEMS = 3
+MAX_RELATIONSHIPS = 8
+MAX_CONTEXT_BYTES = 2500
 
 
 class ProjectTopologyError(ValueError):
@@ -67,8 +69,8 @@ def _node_summary(node: dict[str, Any]) -> dict[str, Any]:
         if value is not None:
             summary[key] = value
     capabilities = _bounded_string_list(
-        node.get("capabilities", []), "node capabilities", maximum_items=30,
-        maximum_length=128,
+        node.get("capabilities", []), "node capabilities", maximum_items=8,
+        maximum_length=80,
     )
     if capabilities:
         summary["capabilities"] = capabilities
@@ -85,7 +87,7 @@ def build_agent_topology_context(agent_id: str, project_map: dict[str, Any]) -> 
     if isinstance(schema_version, bool) or not isinstance(schema_version, int) or schema_version != 1:
         raise ProjectTopologyError("unsupported project topology schema")
     map_id = _bounded_text(project_map.get("map_id"), "map_id", maximum=128)
-    scope_note = _bounded_text(project_map.get("scope_note"), "scope_note", maximum=1000)
+    scope_note = _bounded_text(project_map.get("scope_note"), "scope_note", maximum=500)
     nodes = project_map.get("nodes")
     edges = project_map.get("edges")
     if not isinstance(nodes, list) or len(nodes) > MAX_NODES:
@@ -154,6 +156,8 @@ def build_agent_topology_context(agent_id: str, project_map: dict[str, Any]) -> 
     relationships.sort(key=lambda item: (
         item["direction"], item["relation"], item["node"]["id"],
     ))
+    relationship_count = len(relationships)
+    relationships = relationships[:MAX_RELATIONSHIPS]
 
     try:
         canonical = json.dumps(
@@ -161,7 +165,7 @@ def build_agent_topology_context(agent_id: str, project_map: dict[str, Any]) -> 
         ).encode("utf-8")
     except (TypeError, ValueError) as exc:
         raise ProjectTopologyError("project topology is not canonical JSON data") from exc
-    return {
+    context = {
         "status": "available",
         "mode": "read_only_advisory",
         "map_id": map_id,
@@ -170,8 +174,17 @@ def build_agent_topology_context(agent_id: str, project_map: dict[str, Any]) -> 
         "scope_note": scope_note,
         "agent_node": _node_summary(agent_node),
         "relationships": relationships,
+        "relationship_count_total": relationship_count,
+        "truncated": relationship_count > len(relationships),
         "authority_note": (
             "Topology is descriptive context only. It does not prove a live agent process, "
             "authorize tools, change task assignment, or override operating policy."
         ),
     }
+    while len(json.dumps(context, ensure_ascii=False, sort_keys=True).encode("utf-8")) > MAX_CONTEXT_BYTES and context["relationships"]:
+        context["relationships"].pop()
+        context["truncated"] = True
+    if len(json.dumps(context, ensure_ascii=False, sort_keys=True).encode("utf-8")) > MAX_CONTEXT_BYTES:
+        raise ProjectTopologyError("project topology context exceeds the prompt-size bound")
+    context["relationship_count_included"] = len(context["relationships"])
+    return context
