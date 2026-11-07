@@ -236,7 +236,7 @@ class ResearchPersistenceTests(unittest.TestCase):
         with self.assertRaises(ResearchPersistenceError):
             persist_candidates(
                 snapshot,
-                environ={"RAAWAA_ENGINE_API_URL": "https://engine.example", "RAAWAA_ENGINE_API_TOKEN": "test-secret"},
+                environ={"RAAWAA_ENGINE_API_URL": "https://engine.example", "RAAWAA_ENGINE_API_TOKEN": "test-secret", "RAAWAA_RESEARCH_SCAN_ID": "synthetic-run"},
                 request_fn=unauthorized,
                 sleep_fn=lambda _: self.fail("auth errors must not be retried"),
                 verify_fn=lambda *args: {"matched_keys": []},
@@ -248,7 +248,7 @@ class ResearchPersistenceTests(unittest.TestCase):
         with self.assertRaises(ResearchPersistenceError):
             persist_candidates(
                 snapshot,
-                environ={"RAAWAA_ENGINE_API_URL": "https://engine.example", "RAAWAA_ENGINE_API_TOKEN": "test-secret"},
+                environ={"RAAWAA_ENGINE_API_URL": "https://engine.example", "RAAWAA_ENGINE_API_TOKEN": "test-secret", "RAAWAA_RESEARCH_SCAN_ID": "synthetic-run"},
                 request_fn=lambda *args: {"accepted_count": 1, "batch_id": args[3], "replayed": False},
                 verify_fn=lambda *args: {"matched_keys": []},
             )
