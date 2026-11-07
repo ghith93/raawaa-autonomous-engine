@@ -284,6 +284,8 @@ def staging_gate_violations(path: str, content: str) -> list[str]:
             violations.append(f"{path}: zero_cost_preflight must verify Cloudflare subscriptions")
         if "outputs:" not in preflight or "zero_cost_eligible:" not in preflight:
             violations.append(f"{path}: zero_cost_preflight must publish a bounded eligibility output")
+        if "github.event_name == 'push'" not in preflight or "github.event_name == 'schedule'" not in preflight:
+            violations.append(f"{path}: zero_cost_preflight must run automatically on main push and daily schedule")
     for job_name in STAGING_EFFECT_JOBS:
         block = blocks.get(job_name, "")
         if not block:
