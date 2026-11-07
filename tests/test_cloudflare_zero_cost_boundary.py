@@ -135,6 +135,15 @@ class ZeroCostBoundaryTests(unittest.TestCase):
         self.assertFalse(check_boundary("account", "token", opener=lambda *_a, **_k: Response({
             "success": True, "result": [],
         }))["eligible"])
+        class InvalidJsonResponse:
+            status = 200
+            def __enter__(self): return self
+            def __exit__(self, *args): return False
+            def read(self, limit): return b'{"private_account_detail":"must-not-leak"'
+        invalid_json = check_boundary("account", "token", opener=lambda *_a, **_k: InvalidJsonResponse())
+        self.assertFalse(invalid_json["eligible"])
+        self.assertEqual(invalid_json["reason"], "invalid_billing_json")
+        self.assertNotIn("private_account_detail", json.dumps(invalid_json))
         self.assertFalse(check_boundary("", "token")["eligible"])
         self.assertFalse(check_boundary("account", "")["eligible"])
 
