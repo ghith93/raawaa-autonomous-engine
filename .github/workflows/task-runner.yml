@@ -40,7 +40,17 @@ jobs:
           python-version: "3.11"
       - name: Validate safe execution policy
         run: python -m engine.cli audit
+      # Unknown or failed billing evidence must not reach the control Worker.
+      # Keep the cron and watchdog workflow_dispatch fallback unchanged.
+      - name: Verify Cloudflare zero-cost boundary
+        id: task_zero_cost_preflight
+        continue-on-error: true
+        env:
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: python scripts/verify_cloudflare_zero_cost_boundary.py
       - name: Diagnose public Worker health path
+        if: steps.task_zero_cost_preflight.outcome == 'success' && steps.task_zero_cost_preflight.outputs.zero_cost_eligible == 'true'
         id: health
         env:
           ENGINE_API_URL: https://raawaa-autonomous-engine-control.ghith-shikhkhaled.workers.dev
@@ -91,6 +101,7 @@ jobs:
                   print(f"{name}: {value}")
           PY
       - name: Verify authenticated POST path before task operations
+        if: steps.task_zero_cost_preflight.outcome == 'success' && steps.task_zero_cost_preflight.outputs.zero_cost_eligible == 'true'
         id: auth
         env:
           ENGINE_API_URL: https://raawaa-autonomous-engine-control.ghith-shikhkhaled.workers.dev
@@ -147,6 +158,7 @@ jobs:
               raise SystemExit(1)
           PY
       - name: Read D1-backed mobile status (read-only)
+        if: steps.task_zero_cost_preflight.outcome == 'success' && steps.task_zero_cost_preflight.outputs.zero_cost_eligible == 'true'
         id: mobile
         env:
           ENGINE_API_URL: https://raawaa-autonomous-engine-control.ghith-shikhkhaled.workers.dev
@@ -155,6 +167,7 @@ jobs:
           CF_ACCESS_CLIENT_SECRET: ${{ secrets.CF_ACCESS_CLIENT_SECRET }}
         run: python -m engine.mobile_status_probe
       - name: Process bounded D1 task batch
+        if: steps.task_zero_cost_preflight.outcome == 'success' && steps.task_zero_cost_preflight.outputs.zero_cost_eligible == 'true'
         id: batch
         env:
           # Provider credentials are scoped to the bounded worker process only.
@@ -205,7 +218,7 @@ jobs:
           raise SystemExit(result.returncode)
           PY
       - name: Publish per-task outcomes
-        if: always() && !(github.event_name == 'workflow_dispatch' && inputs.run_public_research_once)
+        if: always() && !(github.event_name == 'workflow_dispatch' && inputs.run_public_research_once) && steps.batch.outcome != 'skipped'
         # Annotations and the step summary are readable through the checks API and
         # the run page; raw job logs are not. Always run, so a failed batch still
         # says which task failed and why.
@@ -219,6 +232,8 @@ jobs:
           HEALTH_RAY: ${{ steps.health.outputs.ray }}
           AUTH_STATUS: ${{ steps.auth.outputs.status }}
           AUTH_RAY: ${{ steps.auth.outputs.ray }}
+          ZERO_COST_ELIGIBLE: ${{ steps.task_zero_cost_preflight.outputs.zero_cost_eligible }}
+          ZERO_COST_OUTCOME: ${{ steps.task_zero_cost_preflight.outcome }}
           BATCH_OUTCOME: ${{ steps.batch.outcome }}
           TASKS_PROCESSED: ${{ steps.batch.outputs.tasks_processed }}
           STOP_REASON: ${{ steps.batch.outputs.stop_reason }}
@@ -257,6 +272,7 @@ jobs:
               "Job result: " + (process.env.JOB_STATUS || "unknown"),
               "Health GET: " + (process.env.HEALTH_STATUS || "unknown") + " (Ray " + (process.env.HEALTH_RAY || "not supplied") + ")",
               "Authenticated POST: " + (process.env.AUTH_STATUS || "unknown") + " (Ray " + (process.env.AUTH_RAY || "not supplied") + ")",
+              "Billing preflight: " + (process.env.ZERO_COST_OUTCOME || "not run") + " / eligible: " + (process.env.ZERO_COST_ELIGIBLE || "unknown"),
               "Batch step: " + (process.env.BATCH_OUTCOME || "not run"),
               "Tasks processed: " + (process.env.TASKS_PROCESSED || "unknown"),
               "Stop reason: " + (process.env.STOP_REASON || "unknown"),
