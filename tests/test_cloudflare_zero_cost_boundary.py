@@ -40,16 +40,26 @@ class ZeroCostBoundaryTests(unittest.TestCase):
 
     def test_only_explicit_free_zero_price_active_subscription_is_eligible(self):
         self.assertTrue(assess_subscriptions([{
-            "id": "sub-free", "state": "Provisioned", "price": 0, "rate_plan": {"id": "free"},
+            "id": "sub-free", "state": "Provisioned", "price": 0, "rate_plan": {"id": "free", "public_name": "Workers Free"},
         }])["eligible"])
         self.assertFalse(assess_subscriptions([{
-            "id": "sub-trial", "state": "Provisioned", "price": 0, "rate_plan": {"id": "paid_trial"},
+            "id": "sub-trial", "state": "Provisioned", "price": 0, "rate_plan": {"id": "paid_trial", "public_name": "Workers Paid"},
         }])["eligible"])
         for state in ("Trial", "AwaitingPayment", "Paid"):
             with self.subTest(state=state):
                 self.assertFalse(assess_subscriptions([{
-                    "id": "sub-state", "state": state, "price": 0, "rate_plan": {"id": "free"},
+                    "id": "sub-state", "state": state, "price": 0, "rate_plan": {"id": "free", "public_name": "Workers Free"},
                 }])["eligible"])
+
+    def test_free_rate_plan_requires_explicit_free_public_name(self):
+        self.assertTrue(assess_subscriptions([{
+            "id": "sub-free", "state": "Provisioned", "price": 0,
+            "rate_plan": {"id": "free", "public_name": "Workers Free"},
+        }])["eligible"])
+        self.assertFalse(assess_subscriptions([{
+            "id": "sub-business", "state": "Provisioned", "price": 0,
+            "rate_plan": {"id": "free", "public_name": "Business Plan"},
+        }])["eligible"])
 
     def test_cancelled_and_expired_subscriptions_are_inactive(self):
         result = assess_subscriptions([
@@ -64,6 +74,8 @@ class ZeroCostBoundaryTests(unittest.TestCase):
             {"id": "sub-unknown", "state": "mystery", "price": 0, "rate_plan": {"id": "free"}},
             {"id": "sub-missing-plan", "state": "Paid", "price": 0},
             {"id": "sub-empty-plan", "state": "Paid", "price": 0, "rate_plan": {}},
+            {"id": "sub-free-id-business-name", "state": "Provisioned", "price": 0,
+             "rate_plan": {"id": "free", "public_name": "Business Plan"}},
             {"id": "sub-negative", "state": "Paid", "price": -1, "rate_plan": {"id": "free"}},
             {"id": "sub-nan", "state": "Paid", "price": float("nan"), "rate_plan": {"id": "free"}},
             {"id": "sub-inf", "state": "Paid", "price": float("inf"), "rate_plan": {"id": "free"}},
