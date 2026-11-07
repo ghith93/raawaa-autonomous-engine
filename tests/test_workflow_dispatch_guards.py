@@ -37,13 +37,14 @@ jobs:
 """
         self.assertEqual(len(workflow_violations("deploy.yml", content)), 1)
 
-    def test_staging_replay_jobs_are_explicitly_main_guarded(self):
+    def test_staging_jobs_are_opt_in_only_and_never_automatic(self):
         workflow = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
         for job in ("staging-migrate", "staging-worker-verify",
                     "publish-staging-ops-telemetry", "staging-mobile-status-verify"):
             block = next((content for name, content in job_blocks(workflow) if name == job), "")
             self.assertIn("github.ref == 'refs/heads/main'", block)
-            self.assertIn("github.event_name == 'push'", block)
+            self.assertNotIn("github.event_name == 'push'", block)
+            self.assertNotIn("github.event_name == 'schedule'", block)
             self.assertIn("github.event_name == 'workflow_dispatch' && inputs.enable_staging_operations == true", block)
         self.assertEqual(check.staging_gate_violations(".github/workflows/ci.yml", workflow), [])
         self.assertIn("default: false", workflow)
