@@ -269,7 +269,7 @@ try {
   // Verify the widened source CHECK constraint and real Worker normalization after local migrations.
   const researchIngest = await api("/v1/research/candidates", {
     method: "POST",
-    body: { candidates: [
+    body: { batch_id: "local-schema:1", candidates: [
       { source: "arxiv", arxiv_id: "2601.01234v2", title: "Local arXiv schema check",
         url: "https://arxiv.org/abs/2601.01234v2", abstract_retrieved: false, full_text_retrieved: false },
       { source: "searxng", title: "Local SearXNG schema check",
@@ -1747,6 +1747,50 @@ print(json.dumps(run_once(store, environ={}, task_id=os.environ['LOCAL_TASK_ID']
   assert.equal(ledger.payload.checkpoint_count, 1);
   assert.equal(ledger.payload.head_sequence, 1);
 
+  const researchBatchId = "d1-local:" + randomUUID();
+  const researchPayload = {
+    batch_id: researchBatchId,
+    candidates: [{
+      source: "github",
+      full_name: "local/research-idempotency",
+      url: "https://github.com/local/research-idempotency",
+      description: "Local D1 idempotency fixture",
+      stars: 1,
+      license_spdx: "MIT",
+      topics: ["local-test"],
+    }],
+  };
+  const researchInserted = await api("/v1/research/candidates", {
+    method: "POST", body: researchPayload,
+  });
+  assertStatus(researchInserted, 201, "persist research candidate batch");
+  assert.equal(researchInserted.payload.replayed, false);
+  const researchReplayed = await api("/v1/research/candidates", {
+    method: "POST", body: researchPayload,
+  });
+  assertStatus(researchReplayed, 200, "replay research candidate batch");
+  assert.equal(researchReplayed.payload.replayed, true);
+  const researchConflict = await api("/v1/research/candidates", {
+    method: "POST",
+    body: {
+      batch_id: researchBatchId,
+      candidates: [{
+        source: "github",
+        full_name: "local/changed-payload",
+        url: "https://github.com/local/changed-payload",
+      }],
+    },
+  });
+  assertStatus(researchConflict, 409, "changed payload under a reused research batch ID");
+  const researchVerified = await api("/v1/research/candidates/verify", {
+    method: "POST", body: { source_keys: ["github:local/research-idempotency"] },
+  });
+  assertStatus(researchVerified, 200, "exact-key research D1 readback");
+  assert.deepEqual(researchVerified.payload.matched_keys, ["github:local/research-idempotency"]);
+  const researchRow = queryLocalSql("SELECT discovery_count,review_status FROM research_candidates WHERE source_key='github:local/research-idempotency'")[0];
+  assert.equal(researchRow.discovery_count, 1, "batch replay must not inflate discovery_count");
+  assert.equal(researchRow.review_status, "unreviewed", "ingestion replay must preserve review state");
+
   status = await api("/v1/mobile/status");
   assertStatus(status, 200, "mobile status after D1 writes");
   assert.equal(status.payload.paper_events.find(row => row.event_type === "candidate_detected")?.count, 1);
@@ -1776,7 +1820,7 @@ print(json.dumps(run_once(store, environ={}, task_id=os.environ['LOCAL_TASK_ID']
     "process-dispatch prepare/start/settle and ambiguity, concurrent claims, stale-lease fencing and restart no-replay, " +
     "exact daily-probe recovery with interrupted-child fault injection and no second child start, " +
     "exact one-attempt production-envelope crash recovery and concurrent-recovery race, Python remote adapter, " +
-    "monetary/quota and paper ledgers, and removed Telegram webhook.",
+    "monetary/quota and paper ledgers, research batch idempotency/exact-key readback, and removed Telegram webhook.",
   );
 } catch (error) {
   throw new Error(String(error?.stack || error) + "\nWrangler logs:\n" + logs);
