@@ -43,7 +43,7 @@ class ZeroCostBoundaryTests(unittest.TestCase):
         self.assertEqual(result["reason"], "active_subscription_price_unknown")
 
     def test_unknown_or_malformed_billing_data_fails_closed(self):
-        for payload in ({}, {"success": False, "result": []}, {"success": True, "result": {}}):
+        for payload in ({}, {"success": False, "result": []}, {"success": True, "result": {}}, {"success": True, "result": [None]}):
             with self.subTest(payload=payload):
                 self.assertFalse(assess_subscriptions(payload)["eligible"])
         self.assertFalse(check_boundary("", "synthetic-token")["eligible"])
