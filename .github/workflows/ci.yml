@@ -80,7 +80,7 @@ jobs:
   staging-migrate:
     name: Apply reviewed migrations to Staging
     needs: [test, zero_cost_preflight]
-    if: ${{ github.ref == 'refs/heads/main' && github.event_name == 'push' && needs.zero_cost_preflight.outputs.zero_cost_eligible == 'true' }}
+    if: ${{ github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'schedule') && needs.zero_cost_preflight.outputs.zero_cost_eligible == 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     concurrency:
@@ -144,7 +144,7 @@ jobs:
   staging-worker-verify:
     name: Deploy isolated Staging Worker and verify monetary ledger
     needs: [test, staging-migrate, zero_cost_preflight]
-    if: ${{ github.ref == 'refs/heads/main' && github.event_name == 'push' && needs.zero_cost_preflight.outputs.zero_cost_eligible == 'true' }}
+    if: ${{ github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'schedule') && needs.zero_cost_preflight.outputs.zero_cost_eligible == 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     concurrency:
@@ -321,7 +321,7 @@ jobs:
   publish-staging-ops-telemetry:
     name: Publish sanitized CI and inference-gate telemetry to Staging
     needs: [test, staging-migrate, staging-worker-verify, zero_cost_preflight]
-    if: ${{ always() && github.ref == 'refs/heads/main' && github.event_name == 'push' && needs.zero_cost_preflight.outputs.zero_cost_eligible == 'true' }}
+    if: ${{ always() && github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'schedule') && needs.zero_cost_preflight.outputs.zero_cost_eligible == 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -344,7 +344,7 @@ jobs:
   staging-mobile-status-verify:
     name: Verify authenticated Staging mobile status readback
     needs: [publish-staging-ops-telemetry, staging-worker-verify, zero_cost_preflight]
-    if: ${{ always() && github.ref == 'refs/heads/main' && github.event_name == 'push' && needs.zero_cost_preflight.outputs.zero_cost_eligible == 'true' && needs.publish-staging-ops-telemetry.result == 'success' && needs.staging-worker-verify.result == 'success' }}
+    if: ${{ always() && github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'schedule') && needs.zero_cost_preflight.outputs.zero_cost_eligible == 'true' && needs.publish-staging-ops-telemetry.result == 'success' && needs.staging-worker-verify.result == 'success' }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
     concurrency:
