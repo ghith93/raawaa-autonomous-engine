@@ -51,6 +51,7 @@ def assess_subscriptions(subscriptions: list) -> dict:
         return _invalid("empty_subscription_inventory_unverified")
     paid = 0
     unknown = 0
+    active_free = 0
     seen_ids = set()
     for item in subscriptions:
         if not isinstance(item, dict):
@@ -82,11 +83,15 @@ def assess_subscriptions(subscriptions: list) -> dict:
             paid += 1
         elif not is_explicit_free_plan:
             unknown += 1
+        else:
+            active_free += 1
     if paid:
         return {"eligible": False, "reason": "active_paid_subscription_present",
                 "active_paid_subscriptions": paid}
     if unknown:
         return _invalid("active_zero_price_nonfree_plan")
+    if not active_free:
+        return _invalid("no_active_free_plan_verified")
     return {"eligible": True, "reason": "no_active_paid_subscriptions",
             "active_paid_subscriptions": 0}
 

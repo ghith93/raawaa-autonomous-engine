@@ -23,7 +23,7 @@ class TaskRunnerZeroCostGateTests(unittest.TestCase):
                 self.assertIn("steps.task_zero_cost_preflight.outputs.zero_cost_eligible == 'true'", condition)
                 self.assertNotIn("||", condition)
         report = text.split("      - name: Publish per-task outcomes", 1)[1].split("\n      - name:", 1)[0]
-        self.assertIn("steps.batch.outcome != 'skipped'", report)
+        self.assertIn("(steps.batch.outcome == 'success' || steps.batch.outcome == 'failure')", report)
         self.assertIn("Billing preflight:", text)
 
 

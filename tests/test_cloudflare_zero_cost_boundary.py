@@ -63,13 +63,14 @@ class ZeroCostBoundaryTests(unittest.TestCase):
             "rate_plan": {"id": "free", "public_name": "Business Plan"},
         }])["eligible"])
 
-    def test_cancelled_and_expired_subscriptions_are_inactive(self):
+    def test_inactive_only_inventory_does_not_prove_an_active_free_plan(self):
         result = assess_subscriptions([
             {"id": "sub-cancelled", "state": "Cancelled", "rate_plan": {"id": "paid"}},
             {"id": "sub-expired", "state": "Expired", "rate_plan": {"id": "paid"}},
             {"id": "sub-failed", "state": "Failed", "rate_plan": {"id": "paid"}},
         ])
-        self.assertTrue(result["eligible"])
+        self.assertFalse(result["eligible"])
+        self.assertEqual(result["reason"], "no_active_free_plan_verified")
 
     def test_unknown_state_plan_and_malformed_prices_fail_closed(self):
         bad_records = [
@@ -91,7 +92,8 @@ class ZeroCostBoundaryTests(unittest.TestCase):
     def test_pagination_is_followed_until_the_complete_inventory_is_read(self):
         seen = []
         first_page = [{"id": f"sub-{index}", "state": "Cancelled"} for index in range(50)]
-        second_page = [{"id": "sub-50", "state": "Expired"}]
+        second_page = [{"id": "sub-50", "state": "Provisioned", "price": 0,
+                        "rate_plan": {"id": "free", "public_name": "Workers Free"}}]
         responses = [
             page(first_page, number=1, total=51, per_page=50),
             page(second_page, number=2, total=51, per_page=50),

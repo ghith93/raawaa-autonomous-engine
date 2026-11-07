@@ -218,7 +218,7 @@ jobs:
           raise SystemExit(result.returncode)
           PY
       - name: Publish per-task outcomes
-        if: always() && !(github.event_name == 'workflow_dispatch' && inputs.run_public_research_once) && steps.batch.outcome != 'skipped'
+        if: always() && !(github.event_name == 'workflow_dispatch' && inputs.run_public_research_once) && (steps.batch.outcome == 'success' || steps.batch.outcome == 'failure')
         # Annotations and the step summary are readable through the checks API and
         # the run page; raw job logs are not. Always run, so a failed batch still
         # says which task failed and why.
