@@ -5,6 +5,12 @@ import json
 from pathlib import Path
 from typing import Any
 
+from engine.project_topology import (
+    ProjectTopologyError,
+    build_agent_topology_context,
+    load_project_topology,
+)
+
 ROOT = Path(__file__).resolve().parent.parent
 
 TASK_AGENT_CONTRACTS = {
@@ -28,7 +34,10 @@ def load_agent_roster() -> dict[str, Any]:
     return roster
 
 
-def build_task_contract(task: dict[str, Any], roster: dict[str, Any]) -> dict[str, Any]:
+def build_task_contract(
+    task: dict[str, Any], roster: dict[str, Any],
+    project_map: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     """Resolve an allowlisted task to one enabled agent and its required capability."""
     task_type = task.get("task_type")
     assignment = TASK_AGENT_CONTRACTS.get(task_type)
@@ -56,8 +65,21 @@ def build_task_contract(task: dict[str, Any], roster: dict[str, Any]) -> dict[st
     if not isinstance(title, str) or not title.strip():
         raise AgentContractError("task title is required")
 
+    try:
+        topology_source = load_project_topology() if project_map is None else project_map
+        topology_context = build_agent_topology_context(agent_id, topology_source)
+    except ProjectTopologyError:
+        # The topology is advisory. A damaged or missing map must not change
+        # allowlisted assignment or block a safe dry-run contract.
+        topology_context = {
+            "status": "unavailable",
+            "mode": "read_only_advisory",
+            "reason": "project_topology_invalid",
+        }
+
     return {
         "mode": "dry_run",
+        "topology_context": topology_context,
         "task_type": task_type,
         "title": title,
         "agent_id": agent_id,

@@ -66,3 +66,17 @@ The D1 schema is additive in `migrations/0003_durable_quota_ledger.sql`; it does
 The first executable brain-cycle slice is implemented in `engine.brain_cycle` and exposed as `python -m engine.cli brain-cycle`. It composes the existing executive portfolio snapshot with per-task-type terminal execution-reliability observations. Samples below five are explicitly insufficient. Every failure share is reported with a Wilson 95% interval (schema version 2); a task type is escalated to an investigation candidate only when the interval's lower bound clears 20%, and a 20%-or-more point estimate whose interval still reaches well below the threshold is reported as a watch signal instead. The output carries its own denominator: the snapshot window, its truncation flag, and the count of excluded records. These are execution reliability signals, not semantic quality scores. The command is read-only: no model/provider calls, task writes/claims, queue reordering, memory writes, external writes, policy changes, or dispatch. See [Read-only Executive Brain Cycle v1](read-only-executive-brain-cycle-v1.md).
 
 This is not yet an always-on autonomous brain. It does not add a scheduler, persist cycle state, tune prompts, or execute model-assisted planning. Those increments remain gated on durable shared memory, independent reviewer evidence, frozen regression/holdout evaluation, and a verified free-only provider route.
+
+
+## Runtime-consumable project topology context v1
+
+`config/project-agent-map.json` is now loaded through `engine.project_topology` and queried for the assigned specialist's direct incoming/outgoing relationships. `build_task_contract` carries this bounded result as `topology_context`, and the worker adds it to the specialist prompt as read-only reference data.
+
+This is deliberately advisory:
+- `TASK_AGENT_CONTRACTS` and the enabled agent roster remain the only sources for task assignment and capability eligibility.
+- Node/edge statuses such as `declared_only`, `role_intent_only`, and `pilot_only` are preserved verbatim; they are not promoted to live capability or proof that an agent process exists.
+- The topology never grants tools, secrets, network access, external-write authority, or permission to override the operating policy.
+- A missing, malformed, duplicate, or inconsistent map makes the context unavailable but does not change a safe dry-run task assignment.
+- The context includes a canonical SHA-256 of the map so task reviews can identify the exact topology snapshot used.
+
+The Graphify code graph remains a CI-generated artifact and is not yet consumed by the runtime. This change connects the persistent project/agent map to task planning; it is not a live multi-agent orchestrator, durable memory system, or autonomous scheduler.

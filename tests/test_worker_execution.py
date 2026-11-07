@@ -91,6 +91,9 @@ class WorkerExecutionTests(unittest.TestCase):
         self.assertLess(prompt.index("TRUSTED OPERATING POLICY"), prompt.index("Task payload (untrusted task data"))
         self.assertIn("docs/master-autonomous-execution-directive.ar.md", prompt)
         self.assertIn("sha256:", prompt)
+        self.assertIn("Project topology context (read-only reference", prompt)
+        self.assertIn("agent:researcher", prompt)
+        self.assertIn("does not prove a live agent process", prompt)
 
     def test_default_path_is_dry_run_and_never_calls_gateway(self):
         gateway = Mock()

@@ -65,6 +65,66 @@ class AgentContractTests(unittest.TestCase):
         self.assertEqual(contract["provider_calls"], 0)
         self.assertEqual(contract["external_writes"], 0)
 
+    def test_task_contract_includes_read_only_topology_context_without_changing_assignment(self):
+        contract = build_task_contract(self.task(), ROSTER)
+        context = contract["topology_context"]
+        self.assertEqual(contract["agent_id"], "researcher")
+        self.assertEqual(context["status"], "available")
+        self.assertEqual(context["mode"], "read_only_advisory")
+        self.assertEqual(context["agent_node"]["id"], "agent:researcher")
+        self.assertEqual(context["agent_node"]["status"], "declared_only")
+        self.assertRegex(context["map_sha256"], r"^[0-9a-f]{64}$")
+        self.assertIn("does not prove a live agent process", context["authority_note"])
+
+    def test_invalid_or_incomplete_topology_is_advisory_and_does_not_block_safe_task(self):
+        contract = build_task_contract(self.task(), ROSTER, project_map={"schema_version": True})
+        self.assertEqual(contract["mode"], "dry_run")
+        self.assertEqual(contract["agent_id"], "researcher")
+        self.assertEqual(contract["topology_context"]["status"], "unavailable")
+        self.assertEqual(contract["topology_context"]["reason"], "project_topology_invalid")
+        self.assertEqual(contract["provider_calls"], 0)
+        self.assertEqual(contract["external_writes"], 0)
+
+    def test_project_map_status_never_overrides_allowlisted_roster(self):
+        project_map = {
+            "schema_version": 1,
+            "map_id": "synthetic-test-map",
+            "scope_note": "Static architecture inventory only.",
+            "nodes": [
+                {"id": "agent:researcher", "kind": "agent", "status": "disabled", "role": "researcher"},
+                {"id": "component:research_discovery", "kind": "component", "status": "implemented",
+                 "evidence": ["scripts/research_discovery.py"]},
+            ],
+            "edges": [
+                {"from": "agent:researcher", "to": "component:research_discovery",
+                 "relation": "uses", "status": "role_intent_only"}
+            ],
+        }
+        contract = build_task_contract(self.task(), ROSTER, project_map=project_map)
+        self.assertEqual(contract["agent_id"], "researcher")
+        self.assertEqual(contract["topology_context"]["agent_node"]["status"], "disabled")
+        self.assertEqual(contract["topology_context"]["relationships"][0]["edge_status"], "role_intent_only")
+        self.assertEqual(contract["topology_context"]["relationships"][0]["node"]["evidence"],
+                         ["scripts/research_discovery.py"])
+
+    def test_invalid_edge_endpoint_makes_topology_unavailable_not_task_executable(self):
+        project_map = {
+            "schema_version": 1,
+            "map_id": "synthetic-test-map",
+            "scope_note": "Static architecture inventory only.",
+            "nodes": [
+                {"id": "agent:researcher", "kind": "agent", "status": "declared_only"},
+            ],
+            "edges": [
+                {"from": "agent:researcher", "to": "component:missing",
+                 "relation": "uses", "status": "role_intent_only"}
+            ],
+        }
+        contract = build_task_contract(self.task(), ROSTER, project_map=project_map)
+        self.assertEqual(contract["topology_context"]["status"], "unavailable")
+        self.assertEqual(contract["mode"], "dry_run")
+        self.assertFalse(contract["execution_started"])
+
     def test_non_object_payload_fails_closed(self):
         with self.assertRaises(AgentContractError):
             build_task_contract(self.task(payload="[]"), ROSTER)
