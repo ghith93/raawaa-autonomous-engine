@@ -127,7 +127,7 @@ class ZeroCostBoundaryTests(unittest.TestCase):
             ):
                 self.assertEqual(main(), 1)
             output.seek(0)
-            self.assertEqual(output.read(), "zero_cost_eligible=false\\n")
+            self.assertEqual(output.read(), "zero_cost_eligible=false\n")
 
     def test_main_succeeds_only_when_zero_cost_eligibility_is_proven(self):
         with tempfile.NamedTemporaryFile(mode="r+", encoding="utf-8") as output:
@@ -143,7 +143,7 @@ class ZeroCostBoundaryTests(unittest.TestCase):
             ):
                 self.assertEqual(main(), 0)
             output.seek(0)
-            self.assertEqual(output.read(), "zero_cost_eligible=true\\n")
+            self.assertEqual(output.read(), "zero_cost_eligible=true\n")
 
     def test_duplicate_or_missing_subscription_ids_fail_closed(self):
         duplicate_pages = [
