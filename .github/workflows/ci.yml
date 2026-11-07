@@ -76,6 +76,8 @@ jobs:
           python-version: "3.12"
       - name: Verify there are no active paid Cloudflare subscriptions
         id: preflight
+        # Unknown billing metadata must block Staging without failing offline CI.
+        continue-on-error: true
         env:
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
