@@ -9,6 +9,8 @@ on:
   push:
   pull_request:
     branches: [main]
+  schedule:
+    - cron: "17 4 * * *"
 permissions:
   contents: read
 
