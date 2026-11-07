@@ -16,7 +16,6 @@ on:
       - "migrations/**"
   schedule:
     - cron: "31 5 * * *"
-  workflow_dispatch:
   pull_request:
     paths:
       - ".github/workflows/research-discovery.yml"
