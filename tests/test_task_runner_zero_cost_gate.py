@@ -35,6 +35,7 @@ class TaskRunnerZeroCostGateTests(unittest.TestCase):
         self.assertLess(local, preflight)
         block = text[local:text.index("\n      - name:", local + 1)]
         self.assertIn("scripts/run_local_task_cycle.py", block)
+        self.assertIn("PYTHONPATH: ${{ github.workspace }}", block)
         self.assertNotIn("secrets.", block)
         self.assertNotIn("RAAWAA_ENGINE_API_URL", block)
 
