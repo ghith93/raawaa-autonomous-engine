@@ -59,11 +59,13 @@ def _node_summary(node: dict[str, Any]) -> dict[str, Any]:
         "id": node["id"],
         "kind": node["kind"],
         "status": node["status"],
+        # Validate the complete bounded evidence list, but expose only the
+        # first MAX_EVIDENCE_ITEMS entries to keep prompt context compact.
         "evidence": _bounded_string_list(
             node.get("evidence", []), "node evidence",
-            maximum_items=MAX_EVIDENCE_ITEMS,
+            maximum_items=30,
             maximum_length=120,
-        ),
+        )[:MAX_EVIDENCE_ITEMS],
     }
     for key in ("role", "label"):
         value = _bounded_text(node.get(key), f"node {key}", optional=True)
