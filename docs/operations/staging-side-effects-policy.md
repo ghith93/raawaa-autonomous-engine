@@ -27,3 +27,10 @@ The optional `workflow_dispatch` path remains available only with `enable_stagin
 ## Verification
 
 `scripts/check_workflow_dispatch_guards.py`, `tests/test_workflow_dispatch_guards.py`, and `tests/test_provider_workflow_security.py` enforce the automatic main-push path and false-by-default manual path.
+
+
+## Autonomous CI policy — 2026-11-07
+
+Engine CI runs automatically on branch pushes, pull requests, and once daily at 04:17 UTC. These runs execute the full offline test, Worker, local D1, and policy suites without requiring a person to dispatch them.
+
+Staging migrations, Worker deployment, temporary secret installation, telemetry writes, and remote proofs are deliberately excluded from push and scheduled runs. They remain behind the existing explicit manual opt-in as an emergency/diagnostic path only; ordinary autonomous progress does not depend on it. The scheduled research-discovery workflow remains independent and runs daily. No Arena session wake is implied by a GitHub Actions run.
