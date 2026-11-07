@@ -211,19 +211,73 @@ async function listResearchCandidates(url, env) {
   } catch { return json({ error: "storage_unavailable" }, 503); }
 }
 
+async function researchPayloadHash(normalized) {
+  const stable = normalized.map(item => ({
+    source_key: item.source_key, source: item.source, title: item.title,
+    url: item.url, metadata_json: item.metadata_json,
+  })).sort((a, b) => a.source_key.localeCompare(b.source_key));
+  const bytes = new TextEncoder().encode(JSON.stringify(stable));
+  const digest = await crypto.subtle.digest("SHA-256", bytes);
+  return [...new Uint8Array(digest)].map(value => value.toString(16).padStart(2, "0")).join("");
+}
+
 async function ingestResearchCandidates(request, env) {
   let input;
   try { input = await readJson(request); }
   catch (error) { return json({ error: error.message === "body_too_large" ? "body_too_large" : "invalid_json" }, 400); }
+  const batchId = input?.batch_id;
+  if (!safeResearchString(batchId, 200) || !/^[A-Za-z0-9:_-]{1,200}$/.test(batchId)) return json({ error: "invalid_batch_id" }, 400);
   if (!Array.isArray(input?.candidates) || input.candidates.length < 1 || input.candidates.length > 25) return json({ error: "invalid_candidates" }, 400);
   const normalized = input.candidates.map(normalizeResearchCandidate);
   if (normalized.some(item => item === null)) return json({ error: "invalid_candidate" }, 400);
-  const statements = normalized.map(item => env.DB.prepare("INSERT INTO research_candidates(source_key,source,title,url,metadata_json,review_status,first_seen_at,last_seen_at,discovery_count,updated_at) VALUES(?,?,?,?,?,'unreviewed',?,?,1,?) ON CONFLICT(source_key) DO UPDATE SET title=excluded.title,url=excluded.url,metadata_json=excluded.metadata_json,last_seen_at=excluded.last_seen_at,discovery_count=research_candidates.discovery_count+1,updated_at=excluded.updated_at").bind(item.source_key, item.source, item.title, item.url, item.metadata_json, item.now, item.now, item.now));
+  const payloadHash = await researchPayloadHash(normalized);
   const sources = [...new Set(normalized.map(item => item.source))];
-  statements.push(env.DB.prepare("INSERT INTO audit_log(task_id,event,details_json,created_at) VALUES(NULL,?,?,?)").bind("research_candidates_ingested", JSON.stringify({ count: normalized.length, sources }), new Date().toISOString()));
+  const now = new Date().toISOString();
+  const statements = [
+    env.DB.prepare("INSERT OR IGNORE INTO research_ingest_batches(batch_id,payload_sha256,candidate_count,created_at) VALUES(?,?,?,?)")
+      .bind(batchId, payloadHash, normalized.length, now),
+    env.DB.prepare("INSERT INTO audit_log(task_id,event,details_json,created_at) SELECT NULL,?,?,? WHERE changes()=1")
+      .bind("research_candidates_ingested", JSON.stringify({ batch_id: batchId, count: normalized.length, sources }), now),
+  ];
+  for (const item of normalized) {
+    statements.push(env.DB.prepare(
+      "INSERT OR IGNORE INTO research_ingest_events(batch_id,source_key,payload_sha256,created_at) SELECT ?,?,?,? WHERE EXISTS (SELECT 1 FROM research_ingest_batches WHERE batch_id=? AND payload_sha256=?)"
+    ).bind(batchId, item.source_key, payloadHash, now, batchId, payloadHash));
+    statements.push(env.DB.prepare(
+      "INSERT INTO research_candidates(source_key,source,title,url,metadata_json,review_status,first_seen_at,last_seen_at,discovery_count,updated_at) SELECT ?,?,?,?,?, 'unreviewed',?,?,1,? WHERE changes()=1 ON CONFLICT(source_key) DO UPDATE SET title=excluded.title,url=excluded.url,metadata_json=excluded.metadata_json,last_seen_at=excluded.last_seen_at,discovery_count=research_candidates.discovery_count+1,updated_at=excluded.updated_at"
+    ).bind(item.source_key, item.source, item.title, item.url, item.metadata_json, item.now, item.now, item.now));
+  }
   try {
-    await env.DB.batch(statements);
-    return json({ accepted_count: normalized.length, sources }, 201);
+    const results = await env.DB.batch(statements);
+    if (!Array.isArray(results) || results.length !== statements.length ||
+        results.some(result => result?.success !== true || !Number.isInteger(result.meta?.changes))) {
+      throw new Error("invalid_research_batch_result");
+    }
+    const header = await env.DB.prepare("SELECT payload_sha256,candidate_count FROM research_ingest_batches WHERE batch_id=?")
+      .bind(batchId).first();
+    if (!header) return json({ error: "storage_unavailable" }, 503);
+    if (header.payload_sha256 !== payloadHash || header.candidate_count !== normalized.length) {
+      return json({ error: "batch_id_payload_conflict" }, 409);
+    }
+    const replayed = results[0].meta.changes === 0;
+    return json({ accepted_count: normalized.length, sources, batch_id: batchId, replayed }, replayed ? 200 : 201);
+  } catch { return json({ error: "storage_unavailable" }, 503); }
+}
+
+async function verifyResearchCandidates(request, env) {
+  let input;
+  try { input = await readJson(request); }
+  catch (error) { return json({ error: error.message === "body_too_large" ? "body_too_large" : "invalid_json" }, 400); }
+  const keys = input?.source_keys;
+  if (!Array.isArray(keys) || keys.length < 1 || keys.length > 25 ||
+      keys.some(key => !safeResearchString(key, 1000)) || new Set(keys).size !== keys.length) {
+    return json({ error: "invalid_source_keys" }, 400);
+  }
+  try {
+    const placeholders = keys.map(() => "?").join(",");
+    const result = await env.DB.prepare("SELECT source_key FROM research_candidates WHERE source_key IN (" + placeholders + ")")
+      .bind(...keys).all();
+    return json({ matched_keys: (result.results || []).map(row => row.source_key) });
   } catch { return json({ error: "storage_unavailable" }, 503); }
 }
 
@@ -372,6 +426,7 @@ export default {
         url.pathname !== "/v1/diagnostics/auth" &&
         url.pathname !== "/v1/diagnostics/schema" &&
         url.pathname !== "/v1/research/candidates" &&
+        url.pathname !== "/v1/research/candidates/verify" &&
         url.pathname !== "/v1/quota" &&
         url.pathname !== "/v1/monetary-ledger" &&
         url.pathname !== "/v1/paper-ledger" &&
@@ -439,6 +494,7 @@ export default {
 
     if (url.pathname === "/v1/research/candidates" && request.method === "GET") return listResearchCandidates(url, env);
     if (url.pathname === "/v1/research/candidates" && request.method === "POST") return ingestResearchCandidates(request, env);
+    if (url.pathname === "/v1/research/candidates/verify" && request.method === "POST") return verifyResearchCandidates(request, env);
     if (url.pathname === "/v1/research/candidates/review" && request.method === "POST") return reviewResearchCandidate(request, env);
 
     // Authenticated, read-only POST probe used to distinguish application auth
