@@ -49,7 +49,7 @@ class ResearchPersistenceTests(unittest.TestCase):
         self.assertEqual(request.get_header("Authorization"), "Bearer synthetic-test-token")
         self.assertEqual(request.get_header("Cf-access-client-id"), "synthetic-access-id")
         self.assertEqual(request.get_header("Cf-access-client-secret"), "synthetic-access-secret")
-        self.assertEqual(opened.call_args.args[1], 20)
+        self.assertEqual(opened.call_args.kwargs["timeout"], 20)
         self.assertIn("github:org/repo", request.data.decode("utf-8"))
 
     def test_workflow_persistence_is_staging_only_and_uses_dedicated_token(self):
