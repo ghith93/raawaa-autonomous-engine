@@ -307,6 +307,15 @@ def build_real_corpus_from_data(snapshot: dict[str, Any], qrels: dict[str, Any])
         ] if x)
         add_document("arxiv:" + arxiv_id.lower(), "arxiv", title, body, str(item.get("published") or ""))
 
+    for item in snapshot.get("searxng_candidates", []) if isinstance(snapshot.get("searxng_candidates"), list) else []:
+        if not isinstance(item, dict):
+            continue
+        url, title = item.get("url"), item.get("title")
+        if not isinstance(url, str) or not url.startswith("https://") or not isinstance(title, str):
+            continue
+        body = " ".join(str(x) for x in [item.get("content", ""), item.get("engine", ""), item.get("category", "")] if x)
+        add_document("searxng:" + url.lower(), "searxng", title, body, str(item.get("publishedDate") or ""))
+
     aliases, query_rows = qrels.get("arabic_aliases", {}), qrels.get("queries", [])
     if not isinstance(aliases, dict) or not isinstance(query_rows, list):
         raise ValueError("qrels requires arabic_aliases object and queries list")
@@ -375,6 +384,7 @@ def run_real_corpus_benchmark(snapshot: dict[str, Any], qrels: dict[str, Any]) -
                 "arabic_queries": sum(1 for row in coverage if row["language"] == "ar" and row["evaluated"]),
                 "english_queries": sum(1 for row in coverage if row["language"] == "en" and row["evaluated"]),
                 "label_coverage": round(present_total / expected_total, 4) if expected_total else 0.0,
+                "benchmark_status": "sufficient_coverage" if len(queries) >= 10 and expected_total and present_total / expected_total >= 0.5 else "insufficient_coverage",
                 "coverage_by_query": coverage,
             },
             "methods": methods,
