@@ -325,7 +325,7 @@ class StagingScheduledProbeTests(unittest.TestCase):
         processor = Mock()
         with self.assertRaisesRegex(probe.ScheduledProbeError, "does not recover"):
             probe.run_scheduled_probe(
-                cron_environment(RAAWAA_ENGINE_STAGING_TOKEN_INSTALLED="false"),
+                cron_environment(RAAWAA_ENGINE_STAGING_TOKEN_INSTALLED="false", RAAWAA_ENGINE_SUPABASE_FALLBACK_ZERO_COST_VERIFIED="true"),
                 fallback_store_factory=lambda *args, **kwargs: fallback,
                 oidc_token_factory=lambda *args, **kwargs: "a" * 100 + ".b.c",
                 processor=processor,
@@ -363,7 +363,7 @@ class StagingScheduledProbeTests(unittest.TestCase):
         })
 
         result = probe.run_scheduled_probe(
-            cron_environment(), store_factory=primary_factory,
+            cron_environment(RAAWAA_ENGINE_SUPABASE_FALLBACK_ZERO_COST_VERIFIED="true"), store_factory=primary_factory,
             fallback_store_factory=fallback_factory,
             oidc_token_factory=oidc_factory, processor=processor,
         )
@@ -386,23 +386,40 @@ class StagingScheduledProbeTests(unittest.TestCase):
         self.assertEqual(result["external_writes"], 0)
         self.assertEqual(result["provider_calls"], 0)
 
-    def test_missing_cloudflare_token_skips_primary_and_can_use_fallback(self):
-        fallback = FakeStore()
-        processor = Mock(return_value={
-            "id": "probe-123", "status": "succeeded", "classification": "succeeded",
-            "operation": probe.OPERATION, "dispatch_id": "d" * 32, "replayed": False,
-        })
+    def test_missing_cloudflare_token_cannot_fall_back_without_zero_cost_verification(self):
+        fallback_factory = Mock()
+        oidc_factory = Mock()
+        processor = Mock()
         primary_factory = Mock()
-        result = probe.run_scheduled_probe(
-            cron_environment(RAAWAA_ENGINE_STAGING_TOKEN_INSTALLED="false"),
-            store_factory=primary_factory,
-            fallback_store_factory=lambda *args, **kwargs: fallback,
-            oidc_token_factory=lambda *args, **kwargs: "a" * 100 + ".b.c",
-            processor=processor,
-        )
+        with self.assertRaisesRegex(probe.ScheduledProbeError, "zero-cost eligibility is not verified"):
+            probe.run_scheduled_probe(
+                cron_environment(RAAWAA_ENGINE_STAGING_TOKEN_INSTALLED="false"),
+                store_factory=primary_factory,
+                fallback_store_factory=fallback_factory,
+                oidc_token_factory=oidc_factory,
+                processor=processor,
+            )
         primary_factory.assert_not_called()
-        self.assertEqual(result["backend"], "supabase_free_fallback")
-        self.assertIn("token installation unavailable", result["cloudflare_primary_failure"])
+        fallback_factory.assert_not_called()
+        oidc_factory.assert_not_called()
+        processor.assert_not_called()
+
+    def test_supabase_fallback_requires_explicit_zero_cost_verification(self):
+        primary = Mock()
+        primary.list_tasks.return_value = []
+        primary.enqueue.side_effect = RemoteTaskStoreError(
+            "Remote task API temporarily unavailable (HTTP 503)",
+            status_code=503, retryable=True,
+        )
+        fallback_factory = Mock()
+        oidc_factory = Mock()
+        with self.assertRaisesRegex(probe.ScheduledProbeError, "zero-cost eligibility is not verified"):
+            probe.run_scheduled_probe(
+                cron_environment(), store_factory=lambda *args, **kwargs: primary,
+                fallback_store_factory=fallback_factory, oidc_token_factory=oidc_factory,
+            )
+        fallback_factory.assert_not_called()
+        oidc_factory.assert_not_called()
 
     def test_non_retryable_cloudflare_auth_error_does_not_fail_over(self):
         primary = Mock()
