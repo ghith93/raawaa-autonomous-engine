@@ -33,8 +33,12 @@ EXPECTED_METHODS = frozenset({
 #: in a separate reviewed set because a configured flag is not evidence and this
 #: is the only group that can produce evidence for it.
 EXPECTED_PRESSURE_METHODS = frozenset({
-    "test_the_pressure_probe_actually_ran",
-    "test_memory_cannot_exceed_the_limit",
+    # The control exists because a container that dies for any reason at all
+    # would otherwise read as the memory limit working.
+    "test_the_positive_control_allocates_and_survives",
+    # The memory claim is judged from the host: three dispatches established that
+    # the kill destroys any in-container observer.
+    "test_memory_overshoot_is_killed_by_the_limit",
     "test_the_process_count_is_bounded",
     "test_cpu_is_bounded_to_one_core",
     "test_the_wall_clock_holds",

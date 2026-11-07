@@ -484,35 +484,59 @@ PRESSURE_OVERSHOOT = 4
 #: Running the allocation in a child makes the SIGKILL observable: the parent
 #: survives, and "the child was killed while asking for 4x the limit" is a
 #: *stronger* statement than "the allocation raised MemoryError".
-_PRESSURE_CHILD = r"""
-import json, subprocess, sys, time
+#: Allocate ``LIMIT_MIB * OVERSHOOT`` MiB of anonymous memory, touched page by
+#: page, and print a marker if it survives.
+#:
+#: On a real run this container is *expected to die*. A --memory limit is
+#: enforced by killing the container, and under gVisor the whole sandbox is torn
+#: down -- measured across three dispatches: any in-container observer of this
+#: event is destroyed along with the evidence. So the memory claim is asserted
+#: from the host, on the container's exit status, not from inside.
+_MEMORY_PROGRAM = r"""
+import json, sys
 
 LIMIT_MIB = int(sys.argv[1])
 OVERSHOOT = int(sys.argv[2])
 
-result = {"memory_mib": 0, "memory_method": "anonymous", "pids_held": 0,
-          "pids_refused": False}
-
-# --- memory -------------------------------------------------------------
-# Anonymous memory, touched page by page. NOT a file: writing to a file at
-# increasing offsets measures the filesystem, not the RAM limit, and an earlier
-# version of this probe did exactly that -- it "reached 2048 MiB" inside a 32 MiB
-# tmpfs because it never grew the file, only rewrote the first block. The live
-# test caught it, which is why the number is now a real allocation.
 block = 16 * 1024 * 1024
 chunks = []
+reached = 0
 try:
     for _ in range(int(LIMIT_MIB * OVERSHOOT // 16)):
         chunk = bytearray(block)
         for offset in range(0, block, 4096):
             chunk[offset] = 1
         chunks.append(chunk)
-        result["memory_mib"] += 16
+        reached += 16
 except MemoryError:
-    result["memory_method"] = "MemoryError"
-del chunks
+    pass
+print(json.dumps({"memory_mib": reached, "survived": True}))
+""".strip()
 
-# --- process count ------------------------------------------------------
+#: A small allocation that must succeed. Without it, a container that dies for
+#: any reason at all -- wrong runtime, missing image -- would look like the
+#: memory limit working.
+_MEMORY_CONTROL_PROGRAM = r"""
+import json
+
+block = 16 * 1024 * 1024
+chunk = bytearray(block)
+for offset in range(0, block, 4096):
+    chunk[offset] = 1
+print(json.dumps({"memory_mib": 16, "control": "allocated"}))
+""".strip()
+
+#: Everything that *can* be observed from inside: the pids bound, the cpu bound,
+#: and a setsid descendant. No overshoot here, so the container survives to
+#: report.
+_BEHAVIOUR_PROGRAM = r"""
+import json, os, subprocess, sys, time
+
+LIMIT_MIB = int(sys.argv[1])
+OVERSHOOT = int(sys.argv[2])
+
+result = {}
+
 children = []
 try:
     for _ in range(OVERSHOOT * 128):
@@ -524,6 +548,7 @@ try:
             break
 except Exception:
     result["pids_refused"] = True
+result.setdefault("pids_refused", False)
 result["pids_held"] = len(children)
 for child in children:
     try:
@@ -532,45 +557,6 @@ for child in children:
     except Exception:
         pass
 
-print(json.dumps(result))
-""".strip()
-
-#: The allocation cap inside the container, well under the 512 MiB limit, so a
-#: machine with a different page size still reaches the refusal rather than
-#: being killed by the OOM killer with no output.
-_PRESSURE_PROGRAM = r"""
-import base64, json, os, resource, signal, subprocess, sys, time
-
-LIMIT_MIB = {limit_mib}
-OVERSHOOT = {overshoot}
-CHILD = base64.b64decode({child_b64!r}).decode("utf-8")
-
-result = {{}}
-
-# --- memory and process count, in a child that is allowed to be killed ----
-completed = subprocess.run(
-    [sys.executable, "-c", CHILD, str(LIMIT_MIB), str(OVERSHOOT)],
-    capture_output=True, text=True, timeout=150, check=False,
-)
-# A negative return code is a signal. Under a cgroup memory limit this is the
-# only way the refusal can appear, so it is recorded as the limit doing its job
-# rather than as a probe failure.
-result["child_signal"] = -completed.returncode if completed.returncode < 0 else None
-result["child_killed"] = completed.returncode < 0
-observed = {{}}
-for line in completed.stdout.strip().splitlines():
-    try:
-        observed = json.loads(line)
-    except ValueError:
-        continue
-result["memory_mib"] = observed.get("memory_mib")
-result["memory_method"] = observed.get("memory_method")
-result["pids_held"] = observed.get("pids_held")
-result["pids_refused"] = observed.get("pids_refused")
-
-# --- cpu ----------------------------------------------------------------
-# Busy-loop for a fixed wall window and compare CPU time to elapsed. On a
-# --cpus=1.0 container the ratio cannot meaningfully exceed 1.
 started = time.monotonic()
 cpu_started = time.process_time()
 while time.monotonic() - started < 2.0:
@@ -580,10 +566,6 @@ cpu = time.process_time() - cpu_started
 result["cpu_ratio"] = round(cpu / elapsed, 2) if elapsed else None
 result["cpu_count_visible"] = len(os.sched_getaffinity(0))
 
-# --- escaped descendant under pressure ----------------------------------
-# A child that calls setsid leaves the process group. Under load is exactly
-# when a supervisor's cleanup is most likely to be skipped, so the executor's
-# subreaper contract is asserted here as well as offline.
 child = subprocess.Popen([sys.executable, "-c",
     "import os,time\n"
     "if os.fork()==0:\n"
@@ -597,97 +579,102 @@ print(json.dumps(result))
 """.strip()
 
 
-def _child_b64() -> str:
-    return base64.b64encode(_PRESSURE_CHILD.encode("utf-8")).decode("ascii")
+def _with_args(program: str, *values: int) -> str:
+    """Prefix the program with the numeric arguments it reads from argv."""
+    prefix = f"import sys\nsys.argv = [{program!r}] + {list(values)!r}\n"
+    return prefix + program
 
 
-def _pressure_program(limit_mib: int, overshoot: int) -> str:
-    """The probe exactly as it is handed to the container."""
-    return _PRESSURE_PROGRAM.format(limit_mib=limit_mib, overshoot=overshoot,
-                                    child_b64=_child_b64())
+def _run_pressure_container(program: str, limits: "SandboxLimits", workspace: Path):
+    """Run one pressure container from the host and return (completed, elapsed)."""
+    vector = build_docker_argv(SandboxRequest(
+        image=IMAGE, command=_python_command(program), source_dir=str(workspace),
+        limits=limits,
+    ))
+    assert_sandbox_argv(vector, expected_source_dir=str(workspace))
+    started = time.monotonic()
+    completed = subprocess.run(vector, capture_output=True, text=True,
+                               timeout=limits.wall_seconds + 60, check=False)
+    return completed, time.monotonic() - started
 
 
 class PressureProbeContractTest(unittest.TestCase):
-    """The pressure probe's *shape*, tested without a container.
+    """The pressure probes' *shape*, tested without a container.
 
-    The live assertions above can only run on a real runner. These lock the
-    property that makes them meaningful: the probe must ask for more than the
-    limit, and an unbounded host must NOT look bounded. Without this, a probe
-    that silently allocated nothing would pass every live assertion.
+    The live assertions can only run on a real runner. These lock the properties
+    that make them meaningful, and each one exists because a dispatch taught it.
     """
 
     def test_the_probe_overshoots_each_limit(self):
         self.assertGreater(PRESSURE_OVERSHOOT, 1,
                            "a probe that asks for exactly the limit cannot detect it")
 
-    def test_the_allocations_are_touched_not_merely_reserved(self):
-        # Over-commit means an untouched buffer proves nothing about memory, so
-        # every page is written, not merely reserved.
-        self.assertIn("chunk[offset] = 1", _PRESSURE_CHILD)
-        self.assertIn("range(0, block, 4096)", _PRESSURE_CHILD)
-
     def test_memory_is_measured_as_anonymous_memory_not_as_a_file(self):
-        """The bug the second live dispatch found.
+        """Dispatch 42378111101: writing a file at increasing offsets measures the
+        filesystem. It 'reached 2048 MiB' inside a 32 MiB tmpfs because the file
+        never grew, so a --memory limit could never have constrained it."""
+        self.assertNotIn("handle.seek", _MEMORY_PROGRAM)
+        self.assertIn("bytearray(block)", _MEMORY_PROGRAM)
+        self.assertIn("chunk[offset] = 1", _MEMORY_PROGRAM)
 
-        An earlier version wrote a file at increasing offsets. That measures the
-        filesystem: it "reached 2048 MiB" inside a 32 MiB tmpfs because the file
-        never grew, so the write loop only rewrote the first block. A RAM limit
-        cannot constrain that. Anonymous memory is what --memory governs.
-        """
-        self.assertNotIn("handle.seek(offset)", _PRESSURE_CHILD)
-        self.assertNotIn('open(SCRATCH', _PRESSURE_CHILD)
-        self.assertIn("bytearray(block)", _PRESSURE_CHILD)
+    def test_a_positive_control_exists_beside_the_overshoot(self):
+        """Dispatch 42377430224: without a control, any container death at all
+        would have read as the memory limit working."""
+        self.assertIn("control", _MEMORY_CONTROL_PROGRAM)
+        self.assertLess(len(_MEMORY_CONTROL_PROGRAM), len(_MEMORY_PROGRAM) + 400)
 
-    def test_the_probe_reaps_the_children_it_creates(self):
-        self.assertIn("child.kill()", _PRESSURE_CHILD)
-        self.assertIn("child.wait(", _PRESSURE_CHILD)
+    def test_the_memory_claim_is_judged_from_the_host_not_inside(self):
+        """Dispatch 42378776731: the kill takes the whole sandbox, so no
+        in-container observer survives it. The overshoot program must therefore
+        not be the one that asserts anything."""
+        self.assertNotIn("raise AssertionError", _MEMORY_PROGRAM)
+        self.assertNotIn("result[", _MEMORY_PROGRAM)
 
-    def test_the_probe_reports_rather_than_asserting_inside_the_container(self):
-        """A crash inside the sandbox produces no evidence at all."""
-        program = _pressure_program(512, PRESSURE_OVERSHOOT)
-        self.assertNotIn("raise AssertionError", program)
-        self.assertIn("json.dumps(result)", program)
+    def test_the_behavioural_probes_stay_inside_the_limits_so_they_survive(self):
+        """The pids, cpu and descendant observations are useless if the container
+        dies before printing them."""
+        self.assertIn("print(json.dumps(result))", _BEHAVIOUR_PROGRAM)
+        self.assertIn("child.kill()", _BEHAVIOUR_PROGRAM)
+        self.assertIn("child.wait(", _BEHAVIOUR_PROGRAM)
 
-    def test_a_killed_child_is_reported_as_a_signal_not_as_silence(self):
-        """The fix for the first live failure, locked here.
-
-        A cgroup memory limit SIGKILLs the group; it never raises MemoryError in
-        the allocating process. If the probe did its allocation in the parent it
-        would die and destroy its own output -- which is exactly what happened on
-        dispatch 42377430224, where six pressure probes failed while the wall
-        clock passed. The child must run separately so the kill is observable.
-        """
-        program = _pressure_program(512, PRESSURE_OVERSHOOT)
-        self.assertIn("child_killed", program)
-        self.assertIn("child_signal", program)
-        self.assertIn("completed.returncode < 0", program)
+    def test_the_process_overshoot_is_bounded_so_it_cannot_flood_the_host(self):
+        self.assertIn("OVERSHOOT * 128", _BEHAVIOUR_PROGRAM)
 
     def test_an_unbounded_host_does_not_look_bounded(self):
         """The negative control, run for real on this machine.
 
-        On a host with no limits the probe must report numbers *above* the
-        thresholds the live tests assert. If it reported bounded values here,
-        the live assertions would pass for the wrong reason.
+        On a host with no limits the allocation must sail past the threshold the
+        live test asserts. If an unlimited machine looked bounded, the live
+        assertion would pass for the wrong reason.
         """
-        program = _pressure_program(64, PRESSURE_OVERSHOOT)
+        program = _with_args(_MEMORY_PROGRAM, 64, PRESSURE_OVERSHOOT)
         completed = subprocess.run([sys.executable, "-c", program],
                                    capture_output=True, text=True, timeout=180, check=False)
         self.assertEqual(completed.returncode, 0, completed.stderr[-500:])
         observed = json.loads(completed.stdout.strip().splitlines()[-1])
-        # The live test asserts memory < 128 MiB for a 64 MiB limit; here, with no
-        # limit, it must not look bounded.
-        self.assertFalse(observed["child_killed"],
-                         "an unlimited host reported a killed memory child")
-        self.assertEqual(observed["memory_method"], "anonymous")
         self.assertGreaterEqual(observed["memory_mib"], 128,
                                 "an unlimited host reported a bounded allocation")
-        self.assertFalse(observed["pids_refused"],
-                         "a host with no pids limit refused a fork")
+
+    def test_a_touched_allocation_really_is_allocated(self):
+        """Touching is not decoration: it is what makes over-commit visible."""
+        program = _with_args(_MEMORY_PROGRAM, 16, 1)
+        completed = subprocess.run([sys.executable, "-c", program],
+                                   capture_output=True, text=True, timeout=120, check=False)
+        self.assertEqual(completed.returncode, 0, completed.stderr[-500:])
+        observed = json.loads(completed.stdout.strip().splitlines()[-1])
+        self.assertEqual(observed["memory_mib"], 16)
+        self.assertTrue(observed["survived"])
 
 
 @unittest.skipUnless(_sandbox_available(), "no live sandbox: set RAAWAA_SANDBOX_LIVE=1 and RAAWAA_SANDBOX_IMAGE")
 class SandboxResourceLimitTest(unittest.TestCase):
-    """Criterion 5: the limits hold when the task actually pushes on them."""
+    """Criterion 5: the limits hold when the task actually pushes on them.
+
+    Three containers, because one cannot answer both questions. The overshoot run
+    is destroyed by the very mechanism it is testing, so it is judged from the
+    host by exit status; the behavioural run stays inside its limits, survives,
+    and reports the pids and cpu observations itself.
+    """
 
     MEMORY_MIB = 512
     CPUS = 1.0
@@ -696,80 +683,88 @@ class SandboxResourceLimitTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.workspace = Path(__file__).resolve().parents[2]
-        program = _pressure_program(cls.MEMORY_MIB, PRESSURE_OVERSHOOT)
-        cls.vector = build_docker_argv(SandboxRequest(
-            image=IMAGE,
-            command=_python_command(program),
-            source_dir=str(cls.workspace),
-            limits=SandboxLimits(memory_mb=cls.MEMORY_MIB, cpus=cls.CPUS,
-                                  pids=cls.PIDS, wall_seconds=120, scratch_mb=32),
-        ))
-        assert_sandbox_argv(cls.vector, expected_source_dir=str(cls.workspace))
-        started = time.monotonic()
-        cls.completed = subprocess.run(cls.vector, capture_output=True, text=True,
-                                       timeout=180, check=False)
-        cls.elapsed = time.monotonic() - started
+        limits = SandboxLimits(memory_mb=cls.MEMORY_MIB, cpus=cls.CPUS, pids=cls.PIDS,
+                               wall_seconds=120, scratch_mb=32)
+        # argv placeholders are filled by the container's own argv, so the
+        # limit/overshoot values travel as a prefix the program reads.
+        cls.control, cls.control_elapsed = _run_pressure_container(
+            _MEMORY_CONTROL_PROGRAM, limits, cls.workspace)
+        cls.overshoot, cls.overshoot_elapsed = _run_pressure_container(
+            _with_args(_MEMORY_PROGRAM, cls.MEMORY_MIB, PRESSURE_OVERSHOOT),
+            limits, cls.workspace)
+        cls.behaviour, cls.behaviour_elapsed = _run_pressure_container(
+            _with_args(_BEHAVIOUR_PROGRAM, cls.MEMORY_MIB, PRESSURE_OVERSHOOT),
+            limits, cls.workspace)
+        cls.limits = limits
 
-    def _observed(self):
-        self.assertEqual(self.completed.returncode, 0,
-                         f"pressure probe failed: {self.completed.stderr[-800:]}")
-        return json.loads(self.completed.stdout.strip().splitlines()[-1])
+    @staticmethod
+    def _json(completed):
+        for line in reversed(completed.stdout.strip().splitlines()):
+            try:
+                return json.loads(line)
+            except ValueError:
+                continue
+        return None
 
-    def test_the_pressure_probe_actually_ran(self):
-        # Without this, every assertion below could pass on an empty result.
-        observed = self._observed()
-        self.assertIn("memory_mib", observed)
-        self.assertIn("cpu_ratio", observed)
+    def test_the_positive_control_allocates_and_survives(self):
+        """Without this, any container death would look like the limit working."""
+        self.assertEqual(self.control.returncode, 0,
+                         f"control run failed: {self.control.stderr[-500:]}")
+        observed = self._json(self.control)
+        self.assertIsNotNone(observed, "the control produced no output")
+        self.assertEqual(observed["control"], "allocated")
 
-    def test_memory_cannot_exceed_the_limit(self):
-        observed = self._observed()
-        allocated = observed.get("memory_mib")
-        # Two acceptable shapes, and both are refusals. Either the kernel killed
-        # the allocating child (what a cgroup limit actually does) or Python
-        # raised MemoryError before the limit. Silence is neither, and an
-        # allocation far past the limit means the --memory flag is decorative.
-        if observed.get("child_killed") and allocated is None:
-            return  # the limit enforced itself by killing the child
-        self.assertIsNotNone(allocated, "the memory child produced no result at all")
-        self.assertLess(allocated, self.MEMORY_MIB * 2,
-                        f"reached {allocated} MiB against a {self.MEMORY_MIB} MiB limit")
-        self.assertGreater(allocated, 0, "the probe allocated nothing")
+    def test_memory_overshoot_is_killed_by_the_limit(self):
+        """The memory claim, asserted from the host.
+
+        Three dispatches established that no in-container observer can report
+        this: the kill takes the whole sandbox. So the evidence is the container
+        failing to exit cleanly *and* failing before its own deadline -- if it
+        had exited 0, the --memory flag would be decorative.
+        """
+        self.assertIsNone(self._json(self.overshoot),
+                          "the overshoot container survived and reported; "
+                          "the memory limit did not hold")
+        self.assertNotEqual(self.overshoot.returncode, 0,
+                            "the overshoot container exited successfully")
+        self.assertLess(self.overshoot_elapsed, self.limits.wall_seconds,
+                        "the container hit its wall clock, not its memory limit")
 
     def test_the_process_count_is_bounded(self):
-        observed = self._observed()
-        if observed.get("pids_held") is None:
-            # The same child that measures pids may have been killed for memory
-            # first. Say so rather than reading a missing number as a pass.
-            self.assertTrue(observed.get("child_killed"),
-                            "the pids measurement vanished without the child being killed")
-            return
+        self.assertEqual(self.behaviour.returncode, 0,
+                         f"behaviour probe failed: {self.behaviour.stderr[-500:]}")
+        observed = self._json(self.behaviour)
+        self.assertIsNotNone(observed, "the behaviour probe produced no output")
         self.assertLessEqual(observed["pids_held"], self.PIDS + 8,
                              "the --pids-limit did not bound the process count")
         self.assertTrue(observed["pids_refused"],
                         "no fork was ever refused, so the pids limit was never reached")
 
     def test_cpu_is_bounded_to_one_core(self):
-        observed = self._observed()
+        self.assertEqual(self.behaviour.returncode, 0,
+                         f"behaviour probe failed: {self.behaviour.stderr[-500:]}")
+        observed = self._json(self.behaviour)
+        self.assertIsNotNone(observed)
         ratio = observed["cpu_ratio"]
         self.assertIsNotNone(ratio)
-        # --cpus=1.0: a busy loop cannot consume more than about one core-second
-        # per wall second. Allow scheduling noise, not a second core.
         self.assertLess(ratio, 1.5, f"cpu ratio {ratio} exceeds a one-core budget")
 
     def test_the_wall_clock_holds(self):
-        # The container's own deadline was 120 s; the outer timeout is 180 s.
-        self.assertLess(self.elapsed, 180, "the probe ran past its wall clock")
+        for name, elapsed in (("control", self.control_elapsed),
+                              ("overshoot", self.overshoot_elapsed),
+                              ("behaviour", self.behaviour_elapsed)):
+            self.assertLess(elapsed, self.limits.wall_seconds + 60,
+                            f"the {name} run outlived its wall clock")
 
     def test_a_setsid_descendant_is_not_left_running_under_pressure(self):
-        """The escapee must not survive the container's own teardown.
-
-        ``--rm`` removes the container, so the check is that the probe returned
-        while a 60 s sleeping descendant existed: if the container had waited for
-        it, elapsed would approach the wall clock.
-        """
-        observed = self._observed()
+        self.assertEqual(self.behaviour.returncode, 0,
+                         f"behaviour probe failed: {self.behaviour.stderr[-500:]}")
+        observed = self._json(self.behaviour)
+        self.assertIsNotNone(observed)
         self.assertTrue(observed["escaped_child_started"])
-        self.assertLess(self.elapsed, 120,
+        # If the container had waited for the 60 s descendant, it would have
+        # taken far longer than its own work.
+        self.assertLess(self.behaviour_elapsed, 120,
                         "a descendant kept the container alive past its work")
 
 
