@@ -116,7 +116,8 @@ class ProviderWorkflowSecurityTests(unittest.TestCase):
         self.assertIn("scripts/verify_cloudflare_zero_cost_boundary.py", block)
         self.assertIn("CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}", block)
         self.assertIn("CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}", block)
-        self.assertNotIn("continue-on-error", block)
+        if not allow_continue_on_error:
+            self.assertNotIn("continue-on-error", block)
         self.assertNotIn("if: always()", block)
 
     def test_ci_telemetry_publisher_is_main_only_and_staging_only(self):
@@ -153,7 +154,7 @@ class ProviderWorkflowSecurityTests(unittest.TestCase):
 class CloudflareZeroCostEffectWorkflowTests(unittest.TestCase):
     """Every workflow that mutates Cloudflare or invokes Workers AI must fail closed first."""
 
-    def _assert_gate_precedes(self, path, gate, effects):
+    def _assert_gate_precedes(self, path, gate, effects, allow_continue_on_error=False):
         source = (ROOT / path).read_text(encoding="utf-8")
         gate_at = source.index(gate)
         for effect in effects:
@@ -237,7 +238,14 @@ class CloudflareZeroCostEffectWorkflowTests(unittest.TestCase):
             ".github/workflows/issue-comment-ingest.yml",
             "name: Verify Cloudflare zero-cost boundary",
             ["run: python3 scripts/github_comment_ingest.py --post"],
+            allow_continue_on_error=True,
         )
+        source = (ROOT / ".github" / "workflows" / "issue-comment-ingest.yml").read_text(encoding="utf-8")
+        post_at = source.index("name: Plan and enqueue from comment")
+        post_start = source.rfind("      - name:", 0, post_at + len("name: Plan and enqueue from comment"))
+        post_end = source.find("      - name:", post_start + 1)
+        self.assertIn("steps.ingest_zero_cost_preflight.outcome == 'success'", source[post_start:post_end])
+        self.assertIn("steps.ingest_zero_cost_preflight.outputs.zero_cost_eligible == 'true'", source[post_start:post_end])
 
     def test_task_runner_requires_zero_cost_preflight_before_authenticated_post(self):
         self._assert_gate_precedes(
@@ -245,9 +253,23 @@ class CloudflareZeroCostEffectWorkflowTests(unittest.TestCase):
             "name: Verify Cloudflare zero-cost boundary",
             [
                 "name: Verify authenticated POST path before task operations",
-                "name: Run bounded Staging task batch",
+                "name: Process bounded D1 task batch",
             ],
+            allow_continue_on_error=True,
         )
+        source = (ROOT / ".github" / "workflows" / "task-runner.yml").read_text(encoding="utf-8")
+        for name in (
+            "Diagnose public Worker health path",
+            "Verify authenticated POST path before task operations",
+            "Read D1-backed mobile status (read-only)",
+            "Process bounded D1 task batch",
+        ):
+            at = source.index("name: " + name)
+            start = source.rfind("      - name:", 0, at + len("name: " + name))
+            end = source.find("      - name:", start + 1)
+            step = source[start:end]
+            self.assertIn("steps.task_zero_cost_preflight.outcome == 'success'", step)
+            self.assertIn("steps.task_zero_cost_preflight.outputs.zero_cost_eligible == 'true'", step)
 
     def test_workers_ai_image_generation_requires_zero_cost_preflight(self):
         self._assert_gate_precedes(
