@@ -60,4 +60,10 @@ The daily discovery workflow now runs a second benchmark against the current `re
 
 Relevance labels are manually curated from public metadata and are not exhaustive ground truth. Arabic keywords are editorial aliases attached only to labelled candidates; this measures cross-language metadata retrieval with a controlled vocabulary, not automatic translation. The report records per-query label coverage so a changing daily corpus cannot silently look complete when relevant candidates are absent. Reports are uploaded as 30-day workflow artifacts.
 
+The report now separates two evaluation tracks:
+- **Alias-assisted:** editorial Arabic aliases are added to qrels-labelled candidates. This measures retrieval when the controlled vocabulary is available; because the aliases are attached using the relevance labels, these scores are intentionally label-conditioned and must not be interpreted as native Arabic retrieval performance.
+- **Source-native:** the same snapshot and qrels are evaluated with only source-provided metadata fields; no qrels-derived aliases are injected. This is the evidence track for whether Arabic queries can retrieve documents from the metadata as actually collected. A low score can indicate that source metadata is English-only or lacks Arabic terminology, not necessarily a ranking defect.
+
+Both tracks retain per-query label coverage and are reported separately. Never quote alias-assisted metrics without the source-native comparison.
+
 A local exploratory run on discovery snapshot #42317405323 (61 records: 41 GitHub, 10 Crossref, 10 arXiv; 20 queries) showed that strict AND matching was too restrictive. Weighted OR/BM25 materially improved recall and ranking on this small labelled set. These exploratory numbers are not production claims and do not establish D1 FTS5 parity or latency. The next step is to review the first scheduled benchmark artifacts and refine labels from observed misses before changing any production search endpoint.

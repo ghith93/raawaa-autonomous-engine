@@ -124,6 +124,14 @@ class RealCorpusResearchSearchTests(unittest.TestCase):
         finally:
             db.close()
 
+    def test_source_native_track_does_not_inject_qrels_aliases(self):
+        from scripts.benchmark_research_search import build_real_corpus_source_native_from_data
+        documents, queries, coverage = build_real_corpus_source_native_from_data(self.snapshot, self.qrels)
+        agent = next(item for item in documents if item["id"] == "github:acme/agent-runtime")
+        self.assertNotIn("تنسيق الوكلاء", agent["body"])
+        self.assertEqual(len(queries), 3)
+        self.assertEqual(coverage[1]["coverage"], 1.0)
+
     def test_real_corpus_report_is_offline_and_tracks_sources(self):
         from scripts.benchmark_research_search import run_real_corpus_benchmark
         result = run_real_corpus_benchmark(self.snapshot, self.qrels)
@@ -134,4 +142,7 @@ class RealCorpusResearchSearchTests(unittest.TestCase):
         self.assertEqual(result["snapshot"]["source_counts"], {"github": 1, "crossref": 1, "arxiv": 1})
         self.assertEqual(result["snapshot"]["evaluated_queries"], 3)
         self.assertEqual(result["snapshot"]["benchmark_status"], "insufficient_coverage")
+        self.assertEqual(result["methods_track"], "alias_assisted")
         self.assertIn("sqlite_fts5_or_bm25", result["methods"])
+        self.assertIn("sqlite_fts5_or_bm25", result["source_native"]["methods"])
+        self.assertIn("coverage_by_query", result["source_native"])
