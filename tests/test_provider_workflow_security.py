@@ -200,7 +200,7 @@ class CloudflareZeroCostEffectWorkflowTests(unittest.TestCase):
         self.assertLess(source.index(gate), source.index(install))
         self.assertLess(source.index(gate), source.index(probe))
         required_at = source.index(required)
-        required_start = source.rfind("      - name:", 0, required_at)
+        required_start = source.rfind("      - name:", 0, required_at + len(required))
         required_end = source.find("      - name:", required_start + 1)
         required_condition_start = source.rfind("        if:", 0, required_start)
         required_condition = source[required_condition_start:required_start]
@@ -208,7 +208,7 @@ class CloudflareZeroCostEffectWorkflowTests(unittest.TestCase):
         self.assertIn("steps.cloudflare_credentials.outputs.available != 'true'", required_condition)
         self.assertIn("exit 1", required_block)
         gate_at = source.index(gate)
-        gate_start = source.rfind("      - name:", 0, gate_at)
+        gate_start = source.rfind("      - name:", 0, gate_at + len(gate))
         gate_end = source.find("      - name:", gate_start + 1)
         gate_condition_start = source.rfind("        if:", 0, gate_start)
         gate_condition = source[gate_condition_start:gate_start]
