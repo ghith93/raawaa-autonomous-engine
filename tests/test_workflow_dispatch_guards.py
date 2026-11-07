@@ -14,6 +14,16 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class WorkflowDispatchGuardTests(unittest.TestCase):
+    def test_cli_describes_engine_ci_staging_scope(self):
+        import contextlib
+        import io
+        from unittest.mock import patch
+        out = io.StringIO()
+        with patch("sys.argv", ["check_workflow_dispatch_guards.py"]), contextlib.redirect_stdout(out):
+            self.assertEqual(check.main(), 0)
+        self.assertIn("push and scheduled Engine CI runs skip them", out.getvalue())
+        self.assertNotIn("push and scheduled runs are read-only", out.getvalue())
+
     def test_secret_dispatch_job_requires_main_ref(self):
         content = """on:
   workflow_dispatch:

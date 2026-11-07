@@ -377,7 +377,7 @@ def main() -> int:
         return 1
     print("All secret-bearing workflow_dispatch and push/PR jobs are restricted to refs/heads/main.")
     print("No production-class workflow exposes a manual dispatch trigger.")
-    print("Staging D1 writes/deploys require explicit opt-in; push and scheduled runs are read-only.")
+    print("Engine CI Staging-effect jobs require explicit manual opt-in; push and scheduled Engine CI runs skip them.")
     return 0
 
 
