@@ -156,6 +156,7 @@ jobs:
           RAAWAA_ENGINE_PROCESS_SUPERVISOR: enabled
           RAAWAA_ENGINE_LIVE_INFERENCE: disabled
           RAAWAA_ENGINE_STAGING_TOKEN_INSTALLED: ${{ steps.install_staging_token.outcome == 'success' && 'true' || 'false' }}
+          RAAWAA_ENGINE_SUPABASE_FALLBACK_ZERO_COST_VERIFIED: "false"
         run: |
           set -o pipefail
           # The bounded outcome line is captured for the annotation/artifact
