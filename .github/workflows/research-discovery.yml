@@ -9,6 +9,7 @@ on:
       - "config/research_sources.json"
       - "scripts/persist_research_candidates.py"
       - "scripts/verify_research_persistence_schema.py"
+      - "scripts/verify_research_persistence_worker.py"
       - "scripts/publish_research_scan_telemetry.py"
       - "worker/mobile-status.js"
       - "scripts/triage_research_candidates.py"
@@ -119,8 +120,14 @@ jobs:
         run: |
           test -n "$RAAWAA_ENGINE_STAGING_API_TOKEN"
           printf '%s' "$RAAWAA_ENGINE_STAGING_API_TOKEN" | npx --yes wrangler@4.156.1 secret put ENGINE_API_TOKEN --config wrangler.staging.toml
-      - name: Persist public research metadata in isolated Staging Worker
+      - name: Verify Staging Worker exposes the research idempotency schema
+        id: research_worker_schema
         if: steps.install_staging_api_token.outcome == 'success'
+        env:
+          RAAWAA_ENGINE_API_URL: https://raawaa-autonomous-engine-staging.ghith-shikhkhaled.workers.dev
+        run: python scripts/verify_research_persistence_worker.py
+      - name: Persist public research metadata in isolated Staging Worker
+        if: steps.research_worker_schema.outcome == 'success'
         env:
           RAAWAA_ENGINE_API_URL: https://raawaa-autonomous-engine-staging.ghith-shikhkhaled.workers.dev
         run: python scripts/persist_research_candidates.py research-candidates.json
@@ -131,7 +138,7 @@ jobs:
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         run: npx --yes wrangler@4.156.1 secret delete ENGINE_API_TOKEN --config wrangler.staging.toml
       - name: Publish explicit scan and source freshness telemetry to Staging D1
-        if: always() && steps.scan_clock.outcome == 'success' && steps.discover.outcome == 'success' && steps.research_zero_cost_preflight.outputs.zero_cost_eligible == 'true'
+        if: always() && steps.scan_clock.outcome == 'success' && steps.discover.outcome == 'success' && steps.research_zero_cost_preflight.outputs.zero_cost_eligible == 'true' && steps.research_schema.outcome == 'success'
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
