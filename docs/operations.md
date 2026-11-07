@@ -5,7 +5,7 @@
 - **Workers AI image check is a separate bounded exception:** `.github/workflows/raawaa-image-route-check.yml` performs one real 1024×1024, 4-step image inference after the zero-cost preflight succeeds. It is not disabled by the model-gateway default. It must remain gated by verified Workers Free eligibility and its daily free allowance; this workflow is not evidence that general model inference is enabled.
 - **Scheduled runtime evidence:** the five-minute Task Runner and daily supervised Staging schedule are configured separately. Configuration or a successful `workflow_dispatch` is not proof of schedule operation. Keep schedule acceptance marked runtime-unverified until the required two distinct genuine `event=schedule` successes are recorded.
 - **Historical evidence:** account add-on subscriptions returned HTTP 200 with an empty result in run [#42328401696](https://github.com/ghith93/raawaa-autonomous-engine/actions/runs/42328401696). This proves only that no account-level add-ons were returned; it is not proof of Free zone plans. The per-zone subscription checks are required.
-- **PR #685 is not merged.** Remote operations remain blocked unless the complete read-only gate passes. This documentation update does not run a Cloudflare API request, change secrets, perform a migration, or deploy anything.
+- **PR #685 merged:** merge commit `e7f4058bdd588e35bb7cd24961dba47d9cd9682a`; exact-head Engine CI passed on `a46f84cc290d6d69a9fe1e72d61ae8dc74fd4126` before merge. Staging/Production migrations, Worker deployment, authenticated readback, inference, and Pages publishing were skipped in that CI cycle. Remote operations remain blocked unless the read-only gate passes; all-zones Zone Read scope and Billing Read are mandatory.
 
 ---
 
