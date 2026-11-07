@@ -124,7 +124,7 @@ class ZeroCostBoundaryTests(unittest.TestCase):
 
         def opener(request, timeout):
             seen.append((request, timeout))
-            return Response(subscription_payload(records, total_count=2000))
+            return Response(subscription_payload(records, total_count=len(records)))
 
         result = check_boundary("synthetic-account", "synthetic-token", opener=opener)
         self.assertTrue(result["eligible"])
@@ -145,6 +145,28 @@ class ZeroCostBoundaryTests(unittest.TestCase):
         )
         self.assertFalse(result["eligible"])
         self.assertEqual(result["reason"], "incomplete_subscription_inventory")
+
+    def test_total_count_mismatch_fails_closed_instead_of_assuming_complete_inventory(self):
+        records = [{ "id": "sub-free", "state": "Provisioned", "price": 0,
+                     "rate_plan": { "id": "free", "public_name": "Workers Free" }}]
+        result = check_boundary(
+            "account", "token",
+            opener=lambda *_a, **_k: Response(subscription_payload(records, total_count=2000)),
+        )
+        self.assertFalse(result["eligible"])
+        self.assertEqual(result["reason"], "incomplete_subscription_inventory")
+
+    def test_invalid_total_count_fails_closed(self):
+        records = [{ "id": "sub-free", "state": "Provisioned", "price": 0,
+                     "rate_plan": { "id": "free", "public_name": "Workers Free" }}]
+        for value in (None, -1, 1.5, float("nan"), float("inf"), True):
+            with self.subTest(value=value):
+                result = check_boundary(
+                    "account", "token",
+                    opener=lambda *_a, **_k: Response(subscription_payload(records, total_count=value)),
+                )
+                self.assertFalse(result["eligible"])
+                self.assertEqual(result["reason"], "invalid_subscription_count")
 
     def test_missing_subscription_metadata_fails_closed(self):
         class MissingMetadataResponse(Response):
