@@ -63,17 +63,9 @@ class ZeroCostBoundaryTests(unittest.TestCase):
             "rate_plan": {"id": "free", "public_name": "Business Plan"},
         }])["eligible"])
 
-    def test_cancelled_and_expired_subscriptions_are_inactive(self):
+    def test_cancelled_and_expired_subscriptions_do_not_prove_an_active_free_plan(self):
         result = assess_subscriptions([
             {"id": "sub-cancelled", "state": "Cancelled", "rate_plan": {"id": "paid"}},
-            {"id": "sub-expired", "state": "Expired", "rate_plan": {"id": "paid"}},
-            {"id": "sub-failed", "state": "Failed", "rate_plan": {"id": "paid"}},
-        ])
-        self.assertTrue(result["eligible"])
-
-    def test_inactive_only_inventory_does_not_prove_an_active_free_plan(self):
-        result = assess_subscriptions([
-            {"id": "sub-cancelled", "state": "Cancelled", "rate_plan": {"id": "free"}},
             {"id": "sub-expired", "state": "Expired", "rate_plan": {"id": "paid"}},
             {"id": "sub-failed", "state": "Failed", "rate_plan": {"id": "paid"}},
         ])
@@ -141,7 +133,9 @@ class ZeroCostBoundaryTests(unittest.TestCase):
         self.assertEqual(result["reason"], "incomplete_subscription_page")
 
     def test_integer_valued_numeric_pagination_metadata_is_accepted(self):
-        body = page([{"id": "sub-free", "state": "Cancelled"}], number=1.0, total=1.0, per_page=20.0)
+        body = page([{"id": "sub-free", "state": "Provisioned", "price": 0,
+                      "rate_plan": {"id": "free", "public_name": "Workers Free"}}],
+                    number=1.0, total=1.0, per_page=20.0)
         class Response:
             status = 200
             def __enter__(self): return self
