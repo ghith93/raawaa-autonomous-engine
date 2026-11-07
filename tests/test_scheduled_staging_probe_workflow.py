@@ -32,12 +32,28 @@ class ScheduledStagingProbeWorkflowTests(unittest.TestCase):
         self.assertIn('"User-Agent": "RaawaaAutonomousEngine/1.0', self.source)
         self.assertIn("RAAWAA_ENGINE_PROCESS_SUPERVISOR: enabled", self.source)
         self.assertIn("RAAWAA_ENGINE_LIVE_INFERENCE: disabled", self.source)
-        self.assertIn("id-token: write", self.source)
+        self.assertNotIn("id-token: write", self.source)
+        self.assertIn("RAAWAA_ENGINE_SUPABASE_FALLBACK_ZERO_COST_VERIFIED: \"false\"", self.source)
         # The standby heartbeat RPC performs a persistent write; the
         # scheduled workflow must never enable it.
         self.assertNotIn("RAAWAA_ENGINE_FALLBACK_STANDBY_CHECK", self.source)
         self.assertIn("steps.cloudflare_credentials.outputs.available == 'true'", self.source)
         self.assertIn("continue-on-error: true", self.source)
+
+    def test_zero_cost_gate_precedes_all_remote_work_and_disables_unverified_fallback(self):
+        required = "name: Require Cloudflare credentials before any remote scheduled task"
+        gate = "name: Verify Cloudflare zero-cost boundary before scheduled Staging effects"
+        token = "name: Generate an ephemeral Staging-only bearer token"
+        install = "name: Install temporary token on the isolated Staging Worker"
+        probe = "name: Enqueue, claim, and execute exactly one read-only supervised task"
+        self.assertLess(self.source.index(required), self.source.index(gate))
+        self.assertLess(self.source.index(gate), self.source.index(token))
+        self.assertLess(self.source.index(gate), self.source.index(install))
+        self.assertLess(self.source.index(gate), self.source.index(probe))
+        self.assertIn("scripts/verify_cloudflare_zero_cost_boundary.py", self.source)
+        self.assertIn("remote Cloudflare and Supabase fallback execution are both blocked", self.source)
+        self.assertNotIn("id-token: write", self.source)
+        self.assertIn("RAAWAA_ENGINE_SUPABASE_FALLBACK_ZERO_COST_VERIFIED: \"false\"", self.source)
 
     def test_workflow_never_receives_provider_or_production_secrets(self):
         for secret in ("GROQ_API_KEY", "GEMINI_API_KEY", "OPENAI_API_KEY"):
