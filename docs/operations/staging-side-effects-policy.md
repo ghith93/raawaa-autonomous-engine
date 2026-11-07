@@ -47,3 +47,8 @@ If zero-cost eligibility cannot be proven, all Staging side effects skip automat
 ## Verification
 
 `scripts/check_workflow_dispatch_guards.py`, `tests/test_workflow_dispatch_guards.py`, and `tests/test_provider_workflow_security.py` enforce the automatic push/schedule triggers, main-ref restriction and mandatory zero-cost preflight dependencies.
+
+
+## Control Worker deployment boundary — 2026-11-07
+
+The authenticated Control Worker deployment workflow now requires both the existing explicit `[deploy-control-worker]` merge marker and a successful read-only Cloudflare subscription inventory preflight. The preflight runs before D1 migration checks, bearer verification and Worker deployment. Unknown, incomplete or HTTP 400 billing evidence fails closed; it is not treated as a Free-plan proof. No deployment is performed by this guard change.

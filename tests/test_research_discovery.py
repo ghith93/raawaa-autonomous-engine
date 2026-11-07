@@ -121,6 +121,17 @@ class ResearchDiscoveryTests(unittest.TestCase):
         self.assertEqual(len(calls), 1)
         self.assertEqual(len(result["candidates"]), 8)
 
+
+    def test_discovery_workflow_uses_configured_result_cap(self):
+        from pathlib import Path
+        import json
+
+        workflow = Path(".github/workflows/research-discovery.yml").read_text(encoding="utf-8")
+        config = json.loads(Path("config/research_sources.json").read_text(encoding="utf-8"))
+        self.assertIn("python -m engine.cli research-discover > research-candidates.json", workflow)
+        self.assertNotIn("--max-per-query", workflow)
+        self.assertEqual(config["max_results_per_query"], 8)
+
     def test_query_count_is_bounded(self):
         calls = []
         result = discover_repositories({"a": "one", "b": "two", "c": "three"}, {}, max_queries=2, request_fn=lambda q, token: (calls.append(q) or {"items": []}))
