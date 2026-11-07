@@ -200,12 +200,25 @@ narrower claim and is no longer presented as parent-process isolation.
    `SandboxExecutor.containment_report()` returns `unverified` rather than `clean`
    when the census was blind.
 
+   **Lease revocation now stops a running container.** The supervisor already
+   stopped a child whose lease it could no longer confirm — but only when someone
+   handed it a `cancel_check`, and `SandboxExecutor.run` never did. A container
+   therefore kept running for up to its full wall clock after another worker had
+   taken the task over: the work was both unrecordable and possibly duplicated.
+
+   `run` now takes an explicit `SandboxLease` (task store, token, timeout, renewal
+   interval) and refuses to start without one; `lease.task_id` must match the run,
+   and a caller may not supply its own `cancel_check`, because two owners of
+   cancellation is one too many. A revoked or unreachable lease stops the
+   container mid-run and the outcome is classified `cancelled` — verified, and the
+   test fails if the watchdog is unwired.
+
    What remains unproven is the behaviour under real pressure — memory, pids and
-   cpu limits holding while the container is actually saturated — and that the
-   task lease is *revoked* rather than merely expiring. The ledger path
+   cpu limits holding while the container is actually saturated. The ledger path
    (`SqliteDispatchLedger`) makes a retry after a crash replay instead of starting
-   a second container, which is at-most-once for *dispatch*; it is not lease
-   revocation. Item 2 stays open for those two facts.
+   a second container, which is at-most-once for *dispatch*; it is not, by itself,
+   lease revocation — that is the `cancel_check` path above. Item 2 stays open for
+   the pressure fact only.
 
    A caveat worth keeping: the subreaper is a Linux facility and it is what made
    the escape visible. On a host where it is unavailable the supervisor reports

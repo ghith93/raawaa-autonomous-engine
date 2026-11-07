@@ -10,6 +10,8 @@ from __future__ import annotations
 
 import os
 import tempfile
+import threading
+import time
 import unittest
 from pathlib import Path
 
@@ -21,6 +23,7 @@ from engine.process_supervisor import (
     default_registry,
 )
 from engine.sandbox_executor import (
+    SandboxLease,
     KILL_GRACE_SECONDS,
     SANDBOX_OPERATION,
     SandboxExecutor,
@@ -44,6 +47,26 @@ class _StandIn:
 
     def close(self) -> None:
         self._tmp.cleanup()
+
+
+class _LiveStore:
+    """A task store whose lease is valid until it is revoked."""
+
+    def __init__(self):
+        self.heartbeats = 0
+        self.revoked = False
+
+    def heartbeat(self, task_id, lease_token, lease_timeout_seconds=None):
+        if self.revoked:
+            raise RuntimeError("lease revoked by another worker")
+        self.heartbeats += 1
+        return "ok"
+
+
+def _lease(task_id: str = "task-1", *, store: "_LiveStore | None" = None,
+           renew: float = 30.0) -> SandboxLease:
+    return SandboxLease(store=store or _LiveStore(), task_id=task_id,
+                        lease_token="tok-1", renew_interval_seconds=renew)
 
 
 class SandboxExecutorRefusalTests(unittest.TestCase):
@@ -123,7 +146,8 @@ class SandboxExecutorRefusalTests(unittest.TestCase):
     def test_missing_runtime_is_a_configuration_error_not_an_outcome(self):
         executor = SandboxExecutor(release_enabled=True, docker_binary="/nonexistent/docker")
         with self.assertRaises(SandboxExecutorError) as caught:
-            executor.run(self.request(), task_id="t", ref="refs/heads/main")
+            executor.run(self.request(), task_id="t", ref="refs/heads/main",
+                          lease=_lease("t"))
         self.assertIn("not a runnable file", str(caught.exception))
 
 
@@ -174,7 +198,8 @@ class SandboxRunTests(unittest.TestCase):
         )
 
     def test_a_reviewed_run_reaches_the_supervisor_and_succeeds(self):
-        outcome = self.executor.run(self.request(), task_id="task-1", ref="refs/heads/main")
+        outcome = self.executor.run(self.request(), task_id="task-1",
+                                    ref="refs/heads/main", lease=_lease())
         self.assertEqual(outcome.classification, "succeeded")
         self.assertEqual(outcome.exit_code, 0)
         self.assertIn("stand-in-ran", outcome.stdout)
@@ -194,11 +219,91 @@ class SandboxRunTests(unittest.TestCase):
         executor = SandboxExecutor(release_enabled=True, docker_binary=str(failing.binary))
         request = SandboxRequest(image=DIGEST_IMAGE, command=("true",),
                                  source_dir=str(failing.dir))
-        outcome = executor.run(request, task_id="task-2", ref="refs/heads/main")
+        outcome = executor.run(request, task_id="task-2", ref="refs/heads/main",
+                               lease=_lease("task-2"))
         # A container that ran and failed is an outcome, not an exception; the
         # distinction matters because only one of them means "no process existed".
         self.assertEqual(outcome.classification, "failed")
         self.assertEqual(outcome.exit_code, 7)
+
+
+class SandboxLeaseTests(unittest.TestCase):
+    """A revoked lease must stop a *running* container, not wait for it."""
+
+    def setUp(self):
+        # A stand-in that records every stage it reaches, so "stopped early" is
+        # distinguishable from "finished and we ignored the result".
+        self.stages = tempfile.NamedTemporaryFile(delete=False, suffix=".log")
+        self.stages.close()
+        self.addCleanup(os.unlink, self.stages.name)
+        script = (
+            "#!/bin/sh\n"
+            f"echo started >> {self.stages.name}\n"
+            f"sleep 5\n"
+            f"echo finished >> {self.stages.name}\n"
+        )
+        self.stand_in = _StandIn(script)
+        self.addCleanup(self.stand_in.close)
+        self.executor = SandboxExecutor(release_enabled=True,
+                                        docker_binary=str(self.stand_in.binary))
+
+    def _request(self):
+        return SandboxRequest(image=DIGEST_IMAGE, command=("true",),
+                              source_dir=str(self.stand_in.dir),
+                              limits=SandboxLimits(wall_seconds=30))
+
+    def _stages(self):
+        with open(self.stages.name) as stream:
+            return stream.read().split()
+
+    def test_a_revoked_lease_stops_the_container_while_it_runs(self):
+        store = _LiveStore()
+        lease = _lease("t-revoked", store=store, renew=0.05)
+        started = time.monotonic()
+        # Revoke shortly after the container is up, the way another worker
+        # taking the task over would.
+        threading.Timer(0.3, lambda: setattr(store, "revoked", True)).start()
+        outcome = self.executor.run(self._request(), task_id="t-revoked",
+                                    ref="refs/heads/main", lease=lease)
+        elapsed = time.monotonic() - started
+        self.assertEqual(outcome.classification, "cancelled")
+        self.assertLess(elapsed, 4.0, "the container was allowed to run to completion")
+        self.assertIn("started", self._stages())
+        self.assertNotIn("finished", self._stages())
+
+    def test_a_run_without_a_lease_is_refused_before_anything_starts(self):
+        with self.assertRaises(SandboxExecutorError) as caught:
+            self.executor.run(self._request(), task_id="t", ref="refs/heads/main")
+        self.assertIn("SandboxLease", str(caught.exception))
+        self.assertEqual(self._stages(), [], "a container started without a lease")
+
+    def test_a_lease_for_a_different_task_is_refused(self):
+        with self.assertRaises(SandboxExecutorError) as caught:
+            self.executor.run(self._request(), task_id="task-a", ref="refs/heads/main",
+                              lease=_lease("task-b"))
+        self.assertIn("task_id", str(caught.exception))
+
+    def test_the_caller_cannot_supply_its_own_cancel_check(self):
+        """Two owners of cancellation is one too many."""
+        with self.assertRaises(SandboxExecutorError) as caught:
+            self.executor.run(self._request(), task_id="t", ref="refs/heads/main",
+                              lease=_lease("t"), cancel_check=lambda: False)
+        self.assertIn("cancel_check", str(caught.exception))
+
+    def test_a_lease_that_lapses_mid_run_also_stops_the_container(self):
+        """Revocation and expiry must not be the only two paths."""
+        class FlakyStore(_LiveStore):
+            def heartbeat(self, *args, **kwargs):
+                self.heartbeats += 1
+                if self.heartbeats > 2:
+                    raise RuntimeError("task store unreachable")
+                return "ok"
+
+        outcome = self.executor.run(self._request(), task_id="t-flaky",
+                                    ref="refs/heads/main",
+                                    lease=_lease("t-flaky", store=FlakyStore(), renew=0.05))
+        self.assertEqual(outcome.classification, "cancelled")
+        self.assertNotIn("finished", self._stages())
 
 
 class SandboxLedgerTests(unittest.TestCase):
@@ -220,8 +325,10 @@ class SandboxLedgerTests(unittest.TestCase):
         executor = SandboxExecutor(release_enabled=True,
                                    docker_binary=str(self.stand_in.binary),
                                    ledger=ledger)
-        first = executor.run(self._request(), task_id="same-task", ref="refs/heads/main")
-        second = executor.run(self._request(), task_id="same-task", ref="refs/heads/main")
+        first = executor.run(self._request(), task_id="same-task",
+                             ref="refs/heads/main", lease=_lease("same-task"))
+        second = executor.run(self._request(), task_id="same-task",
+                              ref="refs/heads/main", lease=_lease("same-task"))
         self.assertEqual(first.classification, "succeeded")
         self.assertTrue(getattr(second, "replayed", False))
         self.assertEqual(first.dispatch_id, second.dispatch_id)
@@ -230,7 +337,8 @@ class SandboxLedgerTests(unittest.TestCase):
         """The absence of a ledger must not quietly look like at-most-once."""
         executor = SandboxExecutor(release_enabled=True,
                                    docker_binary=str(self.stand_in.binary))
-        outcome = executor.run(self._request(), task_id="t", ref="refs/heads/main")
+        outcome = executor.run(self._request(), task_id="t",
+                               ref="refs/heads/main", lease=_lease("t"))
         self.assertFalse(getattr(outcome, "replayed", False))
         self.assertFalse(executor.has_durable_ledger)
 
