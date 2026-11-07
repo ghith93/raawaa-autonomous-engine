@@ -106,6 +106,7 @@ class ProviderWorkflowSecurityTests(unittest.TestCase):
         job = source[start:end]
         self.assertIn("needs: [test, staging-migrate, staging-worker-verify]", job)
         self.assertIn("github.event_name == 'push'", job)
+        self.assertIn("github.event_name == 'workflow_dispatch' && inputs.enable_staging_operations == true", job)
         self.assertIn("github.ref == 'refs/heads/main'", job)
         self.assertIn("python scripts/publish_staging_ops_telemetry.py", job)
         self.assertIn("CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}", job)
