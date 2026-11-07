@@ -8,6 +8,8 @@ on:
       - "engine/research_discovery.py"
       - "config/research_sources.json"
       - "scripts/persist_research_candidates.py"
+      - "scripts/verify_research_persistence_schema.py"
+      - "scripts/verify_research_persistence_worker.py"
       - "scripts/publish_research_scan_telemetry.py"
       - "worker/mobile-status.js"
       - "scripts/triage_research_candidates.py"
@@ -16,7 +18,6 @@ on:
       - "migrations/**"
   schedule:
     - cron: "31 5 * * *"
-  workflow_dispatch:
   pull_request:
     paths:
       - ".github/workflows/research-discovery.yml"
@@ -34,13 +35,16 @@ permissions:
 
 concurrency:
   group: scheduled-research-discovery-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
   discover:
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 12
+    concurrency:
+      group: d1-staging-worker-verification
+      cancel-in-progress: false
     env:
       GITHUB_TOKEN: ${{ github.token }}
     steps:
@@ -92,21 +96,52 @@ jobs:
           path: capability-gaps.json
           if-no-files-found: error
           retention-days: 30
-      - name: Persist research metadata in isolated Staging D1 only
+      - name: Verify idempotent research schema in isolated Staging D1
+        id: research_schema
         if: steps.research_zero_cost_preflight.outputs.zero_cost_eligible == 'true'
-        env:
-          RAAWAA_ENGINE_API_URL: https://raawaa-autonomous-engine-staging.ghith-shikhkhaled.workers.dev
-          RAAWAA_ENGINE_API_TOKEN: ${{ secrets.ENGINE_STAGING_API_TOKEN }}
-        run: python scripts/persist_research_candidates.py research-candidates.json
-      - name: Publish explicit scan and source freshness telemetry
-        if: always() && steps.scan_clock.outcome == 'success' && steps.discover.outcome == 'success' && steps.research_zero_cost_preflight.outputs.zero_cost_eligible == 'true'
+        continue-on-error: true
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          RAAWAA_ENGINE_API_URL: https://raawaa-autonomous-engine-control.ghith-shikhkhaled.workers.dev
-          RAAWAA_ENGINE_API_TOKEN: ${{ secrets.ENGINE_API_TOKEN }}
-          RAAWAA_ENGINE_CF_ACCESS_CLIENT_ID: ${{ secrets.CF_ACCESS_CLIENT_ID }}
-          RAAWAA_ENGINE_CF_ACCESS_CLIENT_SECRET: ${{ secrets.CF_ACCESS_CLIENT_SECRET }}
+        run: python scripts/verify_research_persistence_schema.py
+      - name: Generate ephemeral Staging research API token
+        id: generate_staging_api_token
+        if: steps.research_zero_cost_preflight.outputs.zero_cost_eligible == 'true' && steps.research_schema.outcome == 'success'
+        run: |
+          STAGING_TOKEN="$(python -c 'import secrets; print(secrets.token_urlsafe(48))')"
+          echo "::add-mask::$STAGING_TOKEN"
+          echo "RAAWAA_ENGINE_STAGING_API_TOKEN=$STAGING_TOKEN" >> "$GITHUB_ENV"
+      - name: Install ephemeral Staging research API token
+        id: install_staging_api_token
+        if: steps.generate_staging_api_token.outcome == 'success'
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          test -n "$RAAWAA_ENGINE_STAGING_API_TOKEN"
+          printf '%s' "$RAAWAA_ENGINE_STAGING_API_TOKEN" | npx --yes wrangler@4.156.1 secret put ENGINE_API_TOKEN --config wrangler.staging.toml
+      - name: Verify Staging Worker exposes the research idempotency schema
+        id: research_worker_schema
+        if: steps.install_staging_api_token.outcome == 'success'
+        env:
+          RAAWAA_ENGINE_API_URL: https://raawaa-autonomous-engine-staging.ghith-shikhkhaled.workers.dev
+        run: python scripts/verify_research_persistence_worker.py
+      - name: Persist public research metadata in isolated Staging Worker
+        if: steps.research_worker_schema.outcome == 'success'
+        env:
+          RAAWAA_ENGINE_API_URL: https://raawaa-autonomous-engine-staging.ghith-shikhkhaled.workers.dev
+        run: python scripts/persist_research_candidates.py research-candidates.json
+      - name: Revoke ephemeral Staging research API token
+        if: always() && steps.install_staging_api_token.outcome == 'success'
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: npx --yes wrangler@4.156.1 secret delete ENGINE_API_TOKEN --config wrangler.staging.toml
+      - name: Publish explicit scan and source freshness telemetry to Staging D1
+        if: always() && steps.scan_clock.outcome == 'success' && steps.discover.outcome == 'success' && steps.research_zero_cost_preflight.outputs.zero_cost_eligible == 'true' && steps.research_schema.outcome == 'success'
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           GITHUB_RUN_ID: ${{ github.run_id }}
           GITHUB_RUN_NUMBER: ${{ github.run_number }}
           GITHUB_RUN_ATTEMPT: ${{ github.run_attempt }}
