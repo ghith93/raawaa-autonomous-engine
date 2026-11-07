@@ -76,7 +76,7 @@ def main() -> int:
     output_path = os.environ.get("GITHUB_OUTPUT")
     if output_path:
         with open(output_path, "a", encoding="utf-8") as stream:
-            stream.write(f"zero_cost_eligible={eligible}\\n")
+            stream.write(f"zero_cost_eligible={eligible}\n")
     print(json.dumps({
         "zero_cost_eligible": result["eligible"],
         "reason": result["reason"],
