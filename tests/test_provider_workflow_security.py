@@ -97,6 +97,28 @@ class ProviderWorkflowSecurityTests(unittest.TestCase):
         self.assertIn("worker_lane=EXECUTION_LANE", script)
         self.assertIn("list_tasks(100, worker_lane=EXECUTION_LANE)", script)
 
+    def test_groq_staging_smoke_requires_verified_cloudflare_zero_cost_before_any_side_effect(self):
+        workflow = ROOT / ".github" / "workflows" / "groq-free-inference-staging-smoke.yml"
+        source = workflow.read_text(encoding="utf-8")
+        gate_name = "name: Verify Cloudflare zero-cost boundary before Groq Staging side effects"
+        token = "name: Generate ephemeral Staging bearer token"
+        deploy = "name: Deploy isolated Staging Worker with one temporary GPT-OSS 20B quota route"
+        d1_write = "name: Enforce zero-USD hard caps in isolated Staging D1"
+        install_token = "name: Install ephemeral Staging API token"
+        inference = "name: Run one bounded Groq Free inference and verify zero spend"
+        gate = source.index(gate_name)
+        self.assertLess(gate, source.index(token))
+        self.assertLess(gate, source.index(deploy))
+        self.assertLess(gate, source.index(d1_write))
+        self.assertLess(gate, source.index(install_token))
+        self.assertLess(gate, source.index(inference))
+        block = source[gate:source.index(token)]
+        self.assertIn("scripts/verify_cloudflare_zero_cost_boundary.py", block)
+        self.assertIn("CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}", block)
+        self.assertIn("CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}", block)
+        self.assertNotIn("continue-on-error", block)
+        self.assertNotIn("if: always()", block)
+
     def test_ci_telemetry_publisher_is_main_only_and_staging_only(self):
         workflow = ROOT / ".github" / "workflows" / "ci.yml"
         source = workflow.read_text(encoding="utf-8")
