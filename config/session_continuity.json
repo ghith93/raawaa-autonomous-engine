@@ -27,13 +27,13 @@
     "config/tool_permissions.json"
   ],
   "watermark": {
-    "last_processed_comment_id": 6694974071,
-    "last_processed_comment_created_at": "2026-11-06T20:38:49Z",
-    "last_processed_comment_url": "https://github.com/ghith93/raawaa-autonomous-engine/issues/464#issuecomment-6694974071",
+    "last_processed_comment_id": 6699025559,
+    "last_processed_comment_created_at": "2026-11-06T23:56:00Z",
+    "last_processed_comment_url": "https://github.com/ghith93/raawaa-autonomous-engine/issues/464#issuecomment-6699025559",
     "last_reviewed_task_comment_id": 6693901805,
-    "last_verified_main_sha": "7818cdfd851f9820e29041093496b68b847d5449",
-    "updated_at_utc": "2026-11-06T20:42:00Z",
-    "summary": "Processed PI-RESOURCE-INTELLIGENCE-2026-11-06-01 (#464 comments 6693901805-6694272932) and independent review 6694974071 + PR #613 review 5806670683 / 6694986319: enforced scoped production_compatible facets, per-connector external evidence facets, expiry-bound 20B inference proof with attempt-1/attempt-2 provenance, public-repo identifier redaction, manifest/Git-derived hygiene scanning, .yml/.yaml workflow guard coverage, and engine-policy vs unverified external billing separation."
+    "last_verified_main_sha": "e55bc11782a633d160869170cd2a9395d1dd319c",
+    "updated_at_utc": "2026-11-07T00:03:34Z",
+    "summary": "PR #619 merged by owner at e55bc11; main CI 42315222600 deployed Staging. Recovery accounting fix follows on active branch; local D1 tested. Cost hard-stop unverified."
   },
   "open_engineering_priorities": [
     "P0: Review and approve a dedicated main-only one-shot Groq Free GPT-OSS 20B Staging dispatch path (with run-scoped idempotency key and revalidated 20B account hard-stop evidence) while keeping 120B disabled/quarantined and xAI Grok blocked.",
