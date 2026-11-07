@@ -49,7 +49,7 @@ class ResearchPersistenceTests(unittest.TestCase):
         self.assertEqual(request.get_header("Authorization"), "Bearer synthetic-test-token")
         self.assertEqual(request.get_header("Cf-access-client-id"), "synthetic-access-id")
         self.assertEqual(request.get_header("Cf-access-client-secret"), "synthetic-access-secret")
-        self.assertEqual(opened.call_args.args[1], 20)
+        self.assertEqual(opened.call_args.kwargs["timeout"], 20)
         self.assertIn("github:org/repo", request.data.decode("utf-8"))
 
     def test_workflow_passes_only_required_engine_credentials_to_persistence_step(self):
@@ -85,7 +85,7 @@ class ResearchPersistenceTests(unittest.TestCase):
         self.assertEqual(request.method, "POST")
         self.assertIn('"batch_id":"github:run:1"', request.data.decode("utf-8"))
         self.assertEqual(request.get_header("Authorization"), "Bearer synthetic-token")
-        self.assertEqual(opened.call_args.kwargs["timeout"], 20)
+        self.assertEqual(opened.call_args.args[1], 20)
 
     def test_authenticated_readback_rejects_redirects(self):
         handler = _RejectRedirects()
