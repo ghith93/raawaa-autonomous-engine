@@ -1,5 +1,8 @@
 import json
+import os
+import tempfile
 import unittest
+from unittest.mock import patch
 from urllib.error import HTTPError
 from urllib.parse import parse_qs, urlparse
 from urllib.request import Request
@@ -8,6 +11,7 @@ from scripts.verify_cloudflare_zero_cost_boundary import (
     _RejectRedirects,
     assess_subscriptions,
     check_boundary,
+    main,
 )
 
 
@@ -108,6 +112,42 @@ class ZeroCostBoundaryTests(unittest.TestCase):
         }))["eligible"])
         self.assertFalse(check_boundary("", "token")["eligible"])
         self.assertFalse(check_boundary("account", "")["eligible"])
+
+    def test_duplicate_or_missing_subscription_ids_fail_closed(self):
+        duplicate_pages = [
+            page([{"id": "same", "state": "Cancelled"}], number=1, total=2),
+            page([{"id": "same", "state": "Expired"}], number=2, total=2),
+        ]
+        class Response:
+            status = 200
+            def __init__(self, body): self.body = body
+            def __enter__(self): return self
+            def __exit__(self, *args): return False
+            def read(self, limit): return json.dumps(self.body).encode()
+        seen = 0
+        def duplicate_opener(request, timeout):
+            nonlocal seen
+            body = duplicate_pages[seen]
+            seen += 1
+            return Response(body)
+        self.assertFalse(check_boundary("account", "token", opener=duplicate_opener)["eligible"])
+        self.assertFalse(assess_subscriptions([{"state": "Cancelled"}])["eligible"])
+
+    def test_main_fails_ci_when_zero_cost_eligibility_is_unknown(self):
+        with tempfile.NamedTemporaryFile(mode="r+", encoding="utf-8") as output:
+            env = {
+                "CLOUDFLARE_ACCOUNT_ID": "synthetic-account",
+                "CLOUDFLARE_API_TOKEN": "synthetic-token",
+                "GITHUB_OUTPUT": output.name,
+            }
+            with patch.dict(os.environ, env, clear=False), patch(
+                "scripts.verify_cloudflare_zero_cost_boundary.check_boundary",
+                return_value={"eligible": False, "reason": "billing_inventory_unavailable_or_incomplete",
+                              "active_paid_subscriptions": None},
+            ):
+                self.assertEqual(main(), 1)
+            output.seek(0)
+            self.assertEqual(output.read(), "zero_cost_eligible=false\\n")
 
     def test_redirects_are_rejected(self):
         handler = _RejectRedirects()
