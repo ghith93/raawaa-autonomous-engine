@@ -22,7 +22,7 @@ from urllib.request import HTTPRedirectHandler, Request, build_opener
 
 USER_AGENT = "RaawaaAutonomousEngine-ZeroCostPreflight/4.0"
 MAX_RESPONSE_BYTES = 1024 * 1024
-MAX_ZONES_TO_VERIFY = 49
+MAX_ZONES_TO_VERIFY = 20
 ZONE_PAGE_SIZE = 50
 FREE_ZONE_PLAN_IDS = {"free"}
 INACTIVE_STATES = {"Cancelled", "Failed", "Expired"}
@@ -176,7 +176,7 @@ def fetch_zone_inventory(account_id: str, token: str, opener=None, timeout: int 
     One 50-record page is requested. Because Cloudflare's total_count metadata
     is explicitly unfiltered (it can describe zones outside this account), it
     is validated for shape but never used as the account-specific result count.
-    A full page is ambiguous and fails closed; only 0-49 returned zones can pass.
+    A full page is ambiguous and fails closed; only 0-20 returned zones can pass.
     """
     if not account_id or not token:
         raise ValueError("billing_credentials_missing")
