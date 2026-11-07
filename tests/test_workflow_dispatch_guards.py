@@ -51,6 +51,17 @@ jobs:
 
 
 
+    def test_engine_ci_has_daily_unattended_regression_schedule(self):
+        workflow = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+        triggers = check.parse_triggers(workflow)
+        self.assertIn("schedule", triggers)
+        self.assertIn('cron: "17 4 * * *"', workflow)
+        self.assertIn("workflow_dispatch", triggers)
+        for job in check.STAGING_EFFECT_JOBS:
+            block = next((content for name, content in job_blocks(workflow) if name == job), "")
+            self.assertNotIn("github.event_name == 'schedule'", block)
+            self.assertNotIn("github.event_name == 'push'", block)
+
     def test_staging_jobs_fail_closed_without_explicit_opt_in(self):
         workflow = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
         unsafe = workflow.replace("inputs.enable_staging_operations == true", "false")
