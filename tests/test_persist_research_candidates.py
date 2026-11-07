@@ -59,20 +59,25 @@ class ResearchPersistenceTests(unittest.TestCase):
         self.assertIn("continue-on-error: true", workflow)
         self.assertIn("python scripts/verify_cloudflare_zero_cost_boundary.py", workflow)
         self.assertIn("steps.research_zero_cost_preflight.outputs.zero_cost_eligible == 'true'", workflow)
-        self.assertIn("if: vars.RAAWAA_ENGINE_RESEARCH_PERSISTENCE == 'enabled' && steps.research_zero_cost_preflight.outputs.zero_cost_eligible == 'true'", workflow)
-        self.assertIn("CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}", workflow)
-        self.assertIn("RAAWAA_ENGINE_API_TOKEN: ${{ secrets.ENGINE_STAGING_API_TOKEN }}", workflow)
-        telemetry = workflow.split("      - name: Publish explicit scan and source freshness telemetry", 1)[1]
+        self.assertIn("scripts/verify_research_persistence_schema.py", workflow)
+        self.assertIn("scripts/verify_research_persistence_worker.py", workflow)
+        self.assertIn("wrangler@4.156.1 secret put ENGINE_API_TOKEN --config wrangler.staging.toml", workflow)
+        self.assertIn("wrangler@4.156.1 secret delete ENGINE_API_TOKEN --config wrangler.staging.toml", workflow)
+        self.assertNotIn("vars.RAAWAA_ENGINE_RESEARCH_PERSISTENCE", workflow)
+        self.assertNotIn("secrets.ENGINE_STAGING_API_TOKEN", workflow)
+        telemetry = workflow.split("      - name: Publish explicit scan and source freshness telemetry to Staging D1", 1)[1]
         self.assertIn("steps.research_zero_cost_preflight.outputs.zero_cost_eligible == 'true'", telemetry)
+        self.assertIn("steps.research_schema.outcome == 'success'", telemetry)
 
-    def test_workflow_persistence_is_staging_only_and_uses_dedicated_token(self):
+    def test_workflow_persistence_is_staging_only_and_uses_ephemeral_token(self):
         root = Path(__file__).resolve().parents[1]
         workflow = (root / ".github" / "workflows" / "research-discovery.yml").read_text(encoding="utf-8")
-        start = workflow.index("      - name: Persist research metadata in isolated Staging D1 only")
+        start = workflow.index("      - name: Persist public research metadata in isolated Staging Worker")
         end = workflow.index("\n      - name:", start + 8)
         step = workflow[start:end]
         self.assertIn("RAAWAA_ENGINE_API_URL: https://raawaa-autonomous-engine-staging.ghith-shikhkhaled.workers.dev", step)
-        self.assertIn("RAAWAA_ENGINE_API_TOKEN: ${{ secrets.ENGINE_STAGING_API_TOKEN }}", step)
+        self.assertNotIn("RAAWAA_ENGINE_API_TOKEN: ${{ secrets.ENGINE_STAGING_API_TOKEN }}", step)
+        self.assertIn("steps.research_worker_schema.outcome == 'success'", step)
         self.assertNotIn("raawaa-autonomous-engine-control", step)
         self.assertNotIn("secrets.ENGINE_API_TOKEN", step)
         self.assertNotIn("CF_ACCESS", step)
