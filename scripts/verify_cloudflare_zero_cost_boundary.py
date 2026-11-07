@@ -45,6 +45,10 @@ def _nonnegative_finite_number(value) -> bool:
 def assess_subscriptions(subscriptions: list) -> dict:
     if not isinstance(subscriptions, list):
         return _invalid("invalid_subscription_list")
+    if not subscriptions:
+        # An empty list proves no subscription records were returned, not that
+        # every metered resource is on an enforceable Free plan. Fail closed.
+        return _invalid("empty_subscription_inventory_unverified")
     paid = 0
     unknown = 0
     seen_ids = set()
