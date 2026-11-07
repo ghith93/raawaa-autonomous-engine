@@ -164,6 +164,27 @@ class ResearchPersistenceTests(unittest.TestCase):
         self.assertEqual(connection.execute("SELECT COUNT(*) FROM research_candidates").fetchone()[0], 3)
         connection.close()
 
+    def test_research_ingest_idempotency_migration_creates_durable_unique_keys(self):
+        root = Path(__file__).resolve().parents[1]
+        connection = sqlite3.connect(":memory:")
+        connection.execute("CREATE TABLE schema_migrations(version TEXT PRIMARY KEY)")
+        connection.executescript((root / "migrations" / "0002_research_candidates.sql").read_text(encoding="utf-8"))
+        connection.executescript((root / "migrations" / "0015_research_ingest_idempotency.sql").read_text(encoding="utf-8"))
+        connection.execute(
+            "INSERT INTO research_ingest_batches(batch_id,payload_sha256,candidate_count,created_at) VALUES(?,?,?,?)",
+            ("github:run:1", "a" * 64, 1, "2026-11-07T00:00:00Z"),
+        )
+        connection.execute(
+            "INSERT INTO research_ingest_events(batch_id,source_key,payload_sha256,created_at) VALUES(?,?,?,?)",
+            ("github:run:1", "github:org/repo", "a" * 64, "2026-11-07T00:00:00Z"),
+        )
+        with self.assertRaises(sqlite3.IntegrityError):
+            connection.execute(
+                "INSERT INTO research_ingest_events(batch_id,source_key,payload_sha256,created_at) VALUES(?,?,?,?)",
+                ("github:run:1", "github:org/repo", "a" * 64, "2026-11-07T00:00:01Z"),
+            )
+        connection.close()
+
     def test_empty_snapshot_does_not_need_credentials_or_network(self):
         result = persist_candidates({"candidates": [], "academic_candidates": []}, environ={})
         self.assertEqual(result, {"discovered": 0, "persisted": 0, "verified": 0, "batches": 0, "replayed_batches": 0, "sources": []})
@@ -210,9 +231,10 @@ class ResearchPersistenceTests(unittest.TestCase):
 
     def test_retries_temporary_worker_deploy_or_migration_errors(self):
         snapshot = {"candidates": [{"full_name": "org/repo"}]}
-        calls, sleeps = [], []
+        calls, sleeps, batch_ids = [], [], []
         def flaky_post(*args):
             calls.append(1)
+            batch_ids.append(args[3])
             if len(calls) < 3:
                 raise ResearchPersistenceError("research persistence endpoint returned HTTP 404")
             return {"accepted_count": 1, "batch_id": args[3], "replayed": False}
@@ -225,6 +247,7 @@ class ResearchPersistenceTests(unittest.TestCase):
         )
         self.assertEqual(result["persisted"], 1)
         self.assertEqual(len(calls), 3)
+        self.assertEqual(len(set(batch_ids)), 1, "all retries must reuse the same idempotency key")
         self.assertEqual(sleeps, [5, 10])
 
     def test_does_not_retry_auth_or_validation_errors(self):
