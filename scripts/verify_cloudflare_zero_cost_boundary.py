@@ -149,9 +149,27 @@ def check_boundary(account_id: str, token: str, opener=None, timeout: int = 15) 
     try:
         subscriptions = fetch_all_subscriptions(account_id, token, opener=opener, timeout=timeout)
         return assess_subscriptions(subscriptions)
+    except json.JSONDecodeError:
+        return _invalid("invalid_billing_json")
+    except UnicodeDecodeError:
+        return _invalid("invalid_billing_encoding")
     except ValueError as exc:
-        return _invalid(str(exc))
-    except (HTTPError, URLError, TimeoutError, OSError, json.JSONDecodeError, UnicodeDecodeError):
+        safe_reasons = {
+            "billing_credentials_missing",
+            "billing_api_unavailable",
+            "billing_response_too_large",
+            "invalid_billing_response",
+            "missing_pagination_metadata",
+            "invalid_pagination_metadata",
+            "incomplete_subscription_page",
+            "subscription_inventory_changed_during_pagination",
+            "missing_or_duplicate_subscription_id",
+            "incomplete_subscription_inventory",
+            "subscription_inventory_page_limit_exceeded",
+        }
+        reason = str(exc)
+        return _invalid(reason if reason in safe_reasons else "billing_inventory_unavailable_or_incomplete")
+    except (HTTPError, URLError, TimeoutError, OSError):
         return _invalid("billing_inventory_unavailable_or_incomplete")
 
 
