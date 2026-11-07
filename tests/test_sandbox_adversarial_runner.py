@@ -169,6 +169,41 @@ class SandboxAdversarialRunnerTests(unittest.TestCase):
             self.assertFalse(report["all_passed"])
             self.assertEqual(report["probes"], {"one": "failed"})
 
+    def test_a_green_step_can_only_mean_every_reviewed_probe_passed(self):
+        """The argument that makes a green run citable despite the ten-annotation cap.
+
+        GitHub shows at most ten annotations per step and the reviewed set is
+        fourteen, so the four criterion-5 results are invisible in the UI. The
+        step is still readable evidence, but only because the script exits 0
+        exclusively through this gate. If any of these conditions were relaxed,
+        a green step would stop meaning "all fourteen passed" and the artifact
+        would become the only thing worth reading -- so this test keeps the
+        inference honest rather than convenient.
+        """
+        class Passing(unittest.TestCase):
+            def test_one(self): pass
+
+        class Skipping(unittest.TestCase):
+            def test_one(self): self.skipTest("nope")
+
+        expected = {Passing("test_one").id()}
+
+        # Green only when every expected test ran and nothing was skipped.
+        clean = runner.run_suite(
+            unittest.TestLoader().loadTestsFromTestCase(Passing), stream=io.StringIO())
+        self.assertTrue(runner.check_result(clean, expected))
+
+        # An empty expectation is a refusal, never a vacuous pass.
+        self.assertFalse(runner.check_result(clean, set()))
+
+        # A skip blocks the green step, so "all ran" is not assumed.
+        skipped = runner.run_suite(
+            unittest.TestLoader().loadTestsFromTestCase(Skipping), stream=io.StringIO())
+        self.assertFalse(runner.check_result(skipped, {Skipping("test_one").id()}))
+
+        # An incomplete run blocks it too: one test expected, none executed.
+        self.assertFalse(runner.check_result(unittest.TestResult(), expected))
+
     def test_only_exact_approved_image_passes_identity_preflight(self):
         approved = runner.APPROVED_IMAGE
         alternatives = (

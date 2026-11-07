@@ -236,9 +236,11 @@ narrower claim and is no longer presented as parent-process isolation.
 The issue's seven acceptance criteria are recorded one by one, with the evidence
 and the gaps named, in
 [`docs/sandbox-440-acceptance-record.md`](sandbox-440-acceptance-record.md).
-It closes #440 as deferred scope rather than as a completed milestone: six of the
-seven are now met by code with tests, and the seventh — resource limits holding
-under real saturation — needs a live dispatch that is not currently authorized.
+All seven are now met: six by code with tests, and criterion 5 (resource limits
+under real saturation) by a green pressure-probe dispatch on 2026-11-07. The
+record also lists the four failed dispatches that preceded it, because the probes
+did not work first time and the record would be misleading if it implied they
+did. The release flag remains `false`.
 
 ## Rollback
 
