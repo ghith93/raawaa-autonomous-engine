@@ -98,7 +98,7 @@ def main() -> int:
     }, sort_keys=True))
     if not result["eligible"]:
         print("Staging operations skipped: zero-cost eligibility was not established.")
-    return 0
+    return 0 if result["eligible"] else 1
 
 
 if __name__ == "__main__":
