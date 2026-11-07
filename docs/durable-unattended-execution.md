@@ -267,10 +267,28 @@ recovery contract is deliberately narrow:
   the fallback store is created only when the Cloudflare primary actually
   fails. The RPC remains available for explicit manual diagnostics and is
   otherwise unused by automation.
-- **Not yet proven:** two distinct real `event=schedule` successes with
-  `backend=cloudflare_staging`, separate durable task/dispatch IDs and
-  temporary-token revocation remain the post-merge acceptance gate. Local
-  D1 and CI evidence do not count.
+- **Status 2026-11-07 — 1 of 2.** Two distinct real `event=schedule` successes
+  with `backend=cloudflare_staging`, separate durable task/dispatch IDs and
+  temporary-token revocation remain the post-merge acceptance gate. Local D1
+  and CI evidence do not count.
+
+  Verified schedule successes of this workflow to date:
+
+  | run | created (UTC) | event | durable IDs | token revoked |
+  | --- | --- | --- | --- | --- |
+  | [42211351856](https://github.com/ghith93/raawaa-autonomous-engine/actions/runs/42211351856) | 2026-11-06T11:35:10Z | `schedule` | task `5c904b06-f542-4939-89ed-d6aa8a19a740`, dispatch `0d8662e21f053141ba08d65c8f530356` | revoke step success |
+  | [42020505385](https://github.com/ghith93/raawaa-autonomous-engine/actions/runs/42020505385) | 2026-11-05T11:37:45Z | `schedule` | — | — (run **failed**) |
+
+  The 2026-11-06 run is only the *first* half: its bounded annotation reports
+  `status=succeeded`, `classification=succeeded`, `provider_calls=0`,
+  `external_writes=0`, `replayed=false`, and the ephemeral-token install and
+  revoke steps both succeeded. The 2026-11-05 run **failed** and is not usable
+  evidence; it is listed only so the count is not mistaken for two.
+
+  One more distinct successful `event=schedule` cycle — a different UTC day's
+  idempotency key, with its own task and dispatch IDs — is still required. A
+  manual `workflow_dispatch` and the watchdog path never count toward this
+  gate, and a green Engine CI run is not a substitute.
 
 ## What is still not proven
 
