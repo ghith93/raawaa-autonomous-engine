@@ -134,4 +134,19 @@ class RealCorpusResearchSearchTests(unittest.TestCase):
         self.assertEqual(result["snapshot"]["source_counts"], {"github": 1, "crossref": 1, "arxiv": 1})
         self.assertEqual(result["snapshot"]["evaluated_queries"], 3)
         self.assertEqual(result["snapshot"]["benchmark_status"], "insufficient_coverage")
-        self.assertIn("sqlite_fts5_or_bm25", result["methods"])
+        self.assertIn("sqlite_fts5_or_bm25", result["tracks"]["source_native"]["methods"])
+        self.assertIn("sqlite_fts5_or_bm25", result["tracks"]["alias_assisted"]["methods"])
+        native_ar = result["tracks"]["source_native"]["methods"]["sqlite_fts5_or_bm25"]["ar"]
+        alias_ar = result["tracks"]["alias_assisted"]["methods"]["sqlite_fts5_or_bm25"]["ar"]
+        self.assertEqual(native_ar["recall_at_20"], 0.0)
+        self.assertEqual(alias_ar["recall_at_20"], 1.0)
+        self.assertIn("label-conditioned", result["tracks"]["alias_assisted"]["description"])
+
+
+    def test_source_native_track_does_not_receive_editorial_aliases(self):
+        native, _, _ = self.build(self.snapshot, self.qrels, include_arabic_aliases=False)
+        alias, _, _ = self.build(self.snapshot, self.qrels, include_arabic_aliases=True)
+        native_agent = next(item for item in native if item["id"] == "github:acme/agent-runtime")
+        alias_agent = next(item for item in alias if item["id"] == "github:acme/agent-runtime")
+        self.assertNotIn("تنسيق الوكلاء", native_agent["body"])
+        self.assertIn("تنسيق الوكلاء", alias_agent["body"])
