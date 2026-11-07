@@ -109,6 +109,9 @@ def assess_subscriptions(subscriptions: list) -> dict:
             return {"eligible": False, "reason": "unknown_subscription_plan", "active_paid_subscriptions": None}
         plan_id = plan["id"].lower()
         plan_name = plan.get("public_name")
+        if plan.get("externally_managed") is True or plan.get("is_contract") is True:
+            unknown += 1
+            continue
         explicitly_free = (
             plan_id in FREE_ZONE_PLAN_IDS
             and price == 0
