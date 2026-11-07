@@ -20,7 +20,7 @@ After the SinglePage correction merged, main run **42328401696** successfully qu
 2. **Zone inventory:** `GET /zones?account.id={account_id}&page=1&per_page=20`. The [List Zones API](https://developers.cloudflare.com/api/resources/zones/methods/list/) documents these pagination/filter parameters. The safety gate supports at most 20 zones per run and fails closed if the inventory is larger or incomplete.
 3. **Each zone's current plan:** `GET /zones/{zone_id}/subscription`. The [Zone Subscription Details API](https://developers.cloudflare.com/api/resources/zones/subresources/subscriptions/methods/get/) returns the current `rate_plan`, price and state. Every zone must have an explicit zero-price `free` or non-external `partners_free` plan, a stable Provisioned/Paid state, and no external/contract-managed plan. Any Pro/Business/Enterprise, nonzero price, trial, awaiting-payment, missing or unknown plan blocks remote operations.
 
-The preflight requires Cloudflare **Billing Read** and **Zone Read** permissions. A missing permission is a closed gate, not a reason to skip the zone check. The read-only billing inventory workflow invokes the same parser so CI and manual inventory cannot drift. It publishes only a boolean, sanitized reason and bounded counts; response bodies, zone names/IDs, account identifiers and secrets are never logged.
+The preflight requires Cloudflare **Billing Read** and **Zone Read across all zones in the account**. A token scoped to selected zones is insufficient: the API may return a complete list of only the zones visible to that token, hiding a paid zone. The owner must configure and verify an all-zones Zone Read scope plus Billing Read. A missing permission or uncertain scope is a closed gate, not a reason to skip the zone check. The read-only billing inventory workflow invokes the same parser so CI and manual inventory cannot drift. It publishes only a boolean, sanitized reason and bounded counts; response bodies, zone names/IDs, account identifiers and secrets are never logged.
 
 Cloudflare documents Workers Free as the default plan and documents the Free/paid distinctions and limits in its current [Workers pricing](https://developers.cloudflare.com/workers/platform/pricing/) and [Workers limits](https://developers.cloudflare.com/workers/platform/limits/) references. The engine must not infer account-specific entitlements from public documentation alone.
 
@@ -40,14 +40,15 @@ If zero-cost eligibility cannot be proven, all Staging side effects skip automat
 
 - Research-candidate persistence remains disabled until its dedicated Staging token is present, idempotency/readback controls are verified, and a separate Staging proof succeeds.
 - Issue-comment task ingestion is separately guarded; it must preserve durable replay/reconciliation for comments skipped while billing is unverified.
-- Groq, Gemini and Workers AI inference routes remain disabled. No paid fallback is permitted.
+- Groq and Gemini inference remain disabled; no paid fallback is permitted.
+- The separate `raawaa-image-route-check` workflow is a bounded Workers AI free-route check, not part of Engine CI. It may generate one 1024×1024 image at four steps only after the zero-cost preflight passes. The route estimates 57.6 neurons per image against the Workers Free 10,000-neuron daily allowance. On Workers Free, exhausted daily allowance must fail the request; never upgrade, switch to a paid plan, or fall back to a paid provider. This is the only currently enabled bounded Workers AI inference path.
 
 ## Boundaries
 
 - No Production D1 migrations or Production Worker deployment.
 - Fixed Staging and Production identifiers are checked before any remote write.
 - Temporary tokens are generated per run and revoked in cleanup steps.
-- Live model inference is not part of Engine CI.
+- Live Groq/Gemini model inference is not part of Engine CI. The separate Workers AI image check is bounded and gated as described above.
 - No owner-operated manual dispatch is needed for routine CI or Task Runner scheduling.
 
 ## Verification
