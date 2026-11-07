@@ -1,5 +1,6 @@
 import sqlite3
 import unittest
+from unittest.mock import patch
 from urllib.error import HTTPError
 from urllib.request import Request
 from pathlib import Path
