@@ -72,7 +72,7 @@ jobs:
             echo "available=true" >> "$GITHUB_OUTPUT"
           else
             echo "available=false" >> "$GITHUB_OUTPUT"
-            echo "Cloudflare credential setup is unavailable; the exact probe may use its independent fallback."
+            echo "Cloudflare credentials are unavailable; the Supabase fallback remains disabled until its own zero-cost eligibility is verified."
           fi
       - name: Require Cloudflare credentials before any remote scheduled task
         if: ${{ steps.cloudflare_credentials.outputs.available != 'true' }}
