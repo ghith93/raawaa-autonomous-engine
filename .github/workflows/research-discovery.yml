@@ -85,15 +85,12 @@ jobs:
           path: capability-gaps.json
           if-no-files-found: error
           retention-days: 30
-      - name: Persist research metadata in D1
+      - name: Persist research metadata in isolated Staging D1 only
         if: vars.RAAWAA_ENGINE_RESEARCH_PERSISTENCE == 'enabled'
         env:
-          RAAWAA_ENGINE_API_URL: https://raawaa-autonomous-engine-control.ghith-shikhkhaled.workers.dev
-          RAAWAA_ENGINE_API_TOKEN: ${{ secrets.ENGINE_API_TOKEN }}
-          RAAWAA_ENGINE_CF_ACCESS_CLIENT_ID: ${{ secrets.CF_ACCESS_CLIENT_ID }}
-          RAAWAA_ENGINE_CF_ACCESS_CLIENT_SECRET: ${{ secrets.CF_ACCESS_CLIENT_SECRET }}
+          RAAWAA_ENGINE_API_URL: https://raawaa-autonomous-engine-staging.ghith-shikhkhaled.workers.dev
+          RAAWAA_ENGINE_API_TOKEN: ${{ secrets.ENGINE_STAGING_API_TOKEN }}
         run: python scripts/persist_research_candidates.py research-candidates.json
-
       - name: Publish explicit scan and source freshness telemetry
         if: always() && steps.scan_clock.outcome == 'success' && steps.discover.outcome == 'success'
         env:
