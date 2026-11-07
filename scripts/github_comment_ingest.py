@@ -231,7 +231,8 @@ def main(argv: list[str] | None = None) -> int:
         printable["task"] = result["task"]
     print(json.dumps(printable, indent=2, ensure_ascii=False))
 
-    notice, summary = report_lines(result, "")
+    # A valid envelope is only a plan until a successful POST receipt exists.
+    notice, summary = report_lines(result, "validated_not_enqueued" if args.post else "dry_run_not_enqueued")
     print(notice)
     summary_path = os.environ.get("GITHUB_STEP_SUMMARY", "")
     if summary_path:

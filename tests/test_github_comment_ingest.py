@@ -152,11 +152,13 @@ class EventPayloadTests(unittest.TestCase):
                 "COMMENT_BODY": "not the event content",
                 "ALLOWED_ACTOR": "ghith93",
                 "ALLOWED_ISSUE": "464",
-            }, clear=False), contextlib.redirect_stdout(stdout):
+            }, clear=False), contextlib.redirect_stdout(stdout), patch.object(ingest, "_post") as mock_post:
                 self.assertEqual(ingest.main(["--today", "2026-11-04"]), 0)
+                mock_post.assert_not_called()
         rendered = json.loads(stdout.getvalue().split("\n::notice", 1)[0])
         self.assertEqual(rendered["task"]["payload"]["envelope"]["id"], "ARENA-EVENT-001")
         self.assertEqual(rendered["comment_id"], 6600000002)
+        self.assertIn("stage=dry_run_not_enqueued", stdout.getvalue())
 
 
 class WorkflowPostureTests(unittest.TestCase):
@@ -196,6 +198,24 @@ class WorkflowPostureTests(unittest.TestCase):
 
     def test_runs_the_ingest_script(self):
         self.assertIn("scripts/github_comment_ingest.py --post", self.text)
+
+    def test_cloudflare_write_is_gated_but_offline_validation_remains(self):
+        preflight = self.text.split("      - name: Verify Cloudflare zero-cost boundary", 1)[1].split("\n      - name:", 1)[0]
+        self.assertIn("id: ingest_zero_cost_preflight", preflight)
+        self.assertIn("continue-on-error: true", preflight)
+        self.assertIn("python scripts/verify_cloudflare_zero_cost_boundary.py", preflight)
+        offline = self.text.split("      - name: Validate comment without enqueue when billing is unverified", 1)[1].split("\n      - name:", 1)[0]
+        self.assertIn("outcome != 'success' ||", offline)
+        self.assertIn("outputs.zero_cost_eligible != 'true'", offline)
+        self.assertIn("run: python3 scripts/github_comment_ingest.py", offline)
+        self.assertNotIn("--post", offline)
+        self.assertNotIn("ENGINE_API_TOKEN", offline)
+        post = self.text.split("      - name: Plan and enqueue from comment", 1)[1]
+        condition = next(line for line in post.splitlines() if line.strip().startswith("if:"))
+        self.assertIn("outcome == 'success' &&", condition)
+        self.assertIn("outputs.zero_cost_eligible == 'true'", condition)
+        self.assertNotIn("||", condition)
+        self.assertIn("scripts/github_comment_ingest.py --post", post)
 
     def test_untrusted_comment_body_is_not_interpolated_into_workflow(self):
         self.assertNotIn("${{ github.event.comment.body }}", self.text)
