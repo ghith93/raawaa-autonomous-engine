@@ -231,6 +231,15 @@ narrower claim and is no longer presented as parent-process isolation.
 4. **`#427` stays disabled.** Nothing in this decision turns execution on, and the
    default posture remains C for anything not clearly ours.
 
+## Status against #440
+
+The issue's seven acceptance criteria are recorded one by one, with the evidence
+and the gaps named, in
+[`docs/sandbox-440-acceptance-record.md`](sandbox-440-acceptance-record.md).
+It closes #440 as deferred scope rather than as a completed milestone: six of the
+seven are now met by code with tests, and the seventh — resource limits holding
+under real saturation — needs a live dispatch that is not currently authorized.
+
 ## Rollback
 
 Delete `engine/sandbox_executor.py`, its test file, and the workflow; nothing in
