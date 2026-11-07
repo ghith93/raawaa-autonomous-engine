@@ -32,7 +32,7 @@ class ZeroCostBoundaryTests(unittest.TestCase):
 
     def test_active_paid_subscription_blocks_staging(self):
         result = assess_subscriptions([{
-            "state": "Paid", "price": 5, "rate_plan": {"id": "workers_paid"},
+            "id": "sub-paid", "state": "Paid", "price": 5, "rate_plan": {"id": "workers_paid"},
         }])
         self.assertFalse(result["eligible"])
         self.assertEqual(result["reason"], "active_paid_subscription_present")
@@ -40,10 +40,10 @@ class ZeroCostBoundaryTests(unittest.TestCase):
 
     def test_only_explicit_free_zero_price_active_subscription_is_eligible(self):
         self.assertTrue(assess_subscriptions([{
-            "state": "Provisioned", "price": 0, "rate_plan": {"id": "free"},
+            "id": "sub-free", "state": "Provisioned", "price": 0, "rate_plan": {"id": "free"},
         }])["eligible"])
         self.assertFalse(assess_subscriptions([{
-            "state": "Provisioned", "price": 0, "rate_plan": {"id": "paid_trial"},
+            "id": "sub-trial", "state": "Provisioned", "price": 0, "rate_plan": {"id": "paid_trial"},
         }])["eligible"])
 
     def test_cancelled_and_expired_subscriptions_are_inactive(self):
@@ -56,13 +56,13 @@ class ZeroCostBoundaryTests(unittest.TestCase):
 
     def test_unknown_state_plan_and_malformed_prices_fail_closed(self):
         bad_records = [
-            {"state": "mystery", "price": 0, "rate_plan": {"id": "free"}},
-            {"state": "Paid", "price": 0},
-            {"state": "Paid", "price": 0, "rate_plan": {}},
-            {"state": "Paid", "price": -1, "rate_plan": {"id": "free"}},
-            {"state": "Paid", "price": float("nan"), "rate_plan": {"id": "free"}},
-            {"state": "Paid", "price": float("inf"), "rate_plan": {"id": "free"}},
-            {"state": "Paid", "price": True, "rate_plan": {"id": "free"}},
+            {"id": "sub-unknown", "state": "mystery", "price": 0, "rate_plan": {"id": "free"}},
+            {"id": "sub-missing-plan", "state": "Paid", "price": 0},
+            {"id": "sub-empty-plan", "state": "Paid", "price": 0, "rate_plan": {}},
+            {"id": "sub-negative", "state": "Paid", "price": -1, "rate_plan": {"id": "free"}},
+            {"id": "sub-nan", "state": "Paid", "price": float("nan"), "rate_plan": {"id": "free"}},
+            {"id": "sub-inf", "state": "Paid", "price": float("inf"), "rate_plan": {"id": "free"}},
+            {"id": "sub-bool", "state": "Paid", "price": True, "rate_plan": {"id": "free"}},
         ]
         for record in bad_records:
             with self.subTest(record=record):
