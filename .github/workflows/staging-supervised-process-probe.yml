@@ -75,6 +75,17 @@ jobs:
             echo "available=false" >> "$GITHUB_OUTPUT"
             echo "Cloudflare credential setup is unavailable; the exact probe may use its independent fallback."
           fi
+      - name: Require Cloudflare credentials before any remote scheduled task
+        if: ${{ steps.cloudflare_credentials.outputs.available != 'true' }}
+        run: |
+          echo "Cloudflare billing eligibility cannot be established; remote Cloudflare and Supabase fallback execution are both blocked."
+          exit 1
+      - name: Verify Cloudflare zero-cost boundary before scheduled Staging effects
+        if: ${{ steps.cloudflare_credentials.outputs.available == 'true' }}
+        env:
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: python scripts/verify_cloudflare_zero_cost_boundary.py
       - name: Install pinned Wrangler CLI without credentials
         continue-on-error: true
         run: npx --yes wrangler@4.156.1 --version
