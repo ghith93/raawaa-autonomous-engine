@@ -52,6 +52,7 @@ from typing import Any
 
 from .process_supervisor import (
     CEILINGS as SUPERVISOR_CEILINGS,
+    LeaseWatchdog,
     OperationRegistry,
     OperationSpec,
     ProcessSupervisor,
@@ -69,6 +70,7 @@ from .sandbox_policy import (
 
 __all__ = [
     "SANDBOX_OPERATION",
+    "SandboxLease",
     "SandboxExecutor",
     "SandboxExecutorError",
     "SandboxPlan",
@@ -82,6 +84,32 @@ SANDBOX_OPERATION = "sandbox_run"
 #: Headroom between the container's internal timeout and the supervisor's
 #: ceiling. Positive on purpose: see the module docstring.
 KILL_GRACE_SECONDS = 30
+
+
+@dataclass(frozen=True)
+class SandboxLease:
+    """The task lease the container runs under, and how often it is confirmed.
+
+    A sandbox that outlives its lease is worse than one that never started: the
+    engine can no longer record what it does, and another worker may already own
+    the task, so the work is both unrecordable and possibly duplicated.
+    ``run`` therefore refuses to start a container without one.
+    """
+
+    store: Any
+    task_id: str
+    lease_token: str
+    lease_timeout_seconds: int = 900
+    renew_interval_seconds: float = 30.0
+
+    def watchdog(self) -> LeaseWatchdog:
+        return LeaseWatchdog(
+            self.store,
+            self.task_id,
+            self.lease_token,
+            renew_interval_seconds=self.renew_interval_seconds,
+            lease_timeout_seconds=self.lease_timeout_seconds,
+        )
 
 
 class SandboxExecutorError(RuntimeError):
@@ -239,22 +267,47 @@ class SandboxExecutor:
             ),
         }
 
-    def run(self, request: SandboxRequest, *, task_id: str, ref: str, **kwargs: Any):
+    def run(self, request: SandboxRequest, *, task_id: str, ref: str,
+            lease: SandboxLease | None = None, **kwargs: Any):
         """Prepare, then hand the exact vector to a supervisor.
 
         Returns the supervisor's :class:`ProcessOutcome` unchanged: re-wrapping it
         would create a second place where "succeeded" is decided.
+
+        ``lease`` is required. Until it was, this method started a container with
+        no ``cancel_check`` at all, so a revoked lease left the task running: the
+        supervisor already stops a child whose lease it can no longer confirm,
+        but nothing had told it to look. A revoked lease now stops the container
+        while it is running, not when it finishes.
         """
+        # ``prepare`` first: the release flag and the reviewed ref are the
+        # refusals a caller most needs to see, and neither starts anything, so
+        # they outrank a missing lease in the order a mistake is reported.
         plan = self.prepare(request, ref=ref)
+        if not isinstance(lease, SandboxLease):
+            raise SandboxExecutorError(
+                "a sandbox run requires an explicit SandboxLease: without one a "
+                "revoked lease cannot stop the container"
+            )
+        if lease.task_id != task_id:
+            # Otherwise the container runs under one identity and the dispatch
+            # ledger records another, and neither is the task the caller meant.
+            raise SandboxExecutorError("lease.task_id must match the run's task_id")
+        if "cancel_check" in kwargs:
+            raise SandboxExecutorError(
+                "cancel_check is owned by the lease; pass a SandboxLease instead"
+            )
         docker = _docker_executable(self._docker_binary)
         registry = sandbox_registry(plan.argv, wall_seconds=plan.wall_seconds, docker=docker)
         supervisor = ProcessSupervisor(operations=registry, ledger=self._ledger)
+        watchdog = lease.watchdog()
         try:
             return supervisor.run_operation(
                 SANDBOX_OPERATION,
                 None,
                 task_id=task_id,
                 wall_seconds=plan.wall_seconds + KILL_GRACE_SECONDS,
+                cancel_check=watchdog.cancel_requested,
                 **kwargs,
             )
         except SupervisorRefusal as exc:
