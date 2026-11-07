@@ -122,6 +122,11 @@ class ZeroCostBoundaryTests(unittest.TestCase):
 
     def test_explicit_zero_price_free_addon_is_allowed(self):
         self.assertTrue(assess_subscriptions([free_addon()])["eligible"])
+        without_optional_name = {
+            "id": "addon-free-no-name", "state": "Provisioned", "price": 0,
+            "rate_plan": {"id": "free"},
+        }
+        self.assertTrue(assess_subscriptions([without_optional_name])["eligible"])
 
     def test_unknown_or_paid_addon_states_fail_closed(self):
         cases = [
