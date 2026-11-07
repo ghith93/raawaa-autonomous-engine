@@ -260,12 +260,26 @@ async function recoverStaleTasks(env, workerLane = null) {
       "UPDATE tasks SET status=?,error=?,updated_at=?,lease_token=NULL,lease_expires_at=NULL WHERE id=? AND status='running' AND lease_token IS ? AND (lease_expires_at IS NULL OR lease_expires_at < ?) AND (? IS NULL OR execution_lane=?)"
     ).bind(status, "Recovered expired worker lease.", nowIso, task.id, task.lease_token, nowIso, workerLane, workerLane));
     statements.push(env.DB.prepare(
-      "INSERT INTO audit_log(task_id,event,details_json,created_at) SELECT id,'task_lease_recovered',?,? FROM tasks WHERE id=? AND status=? AND updated_at=?"
+      "INSERT INTO audit_log(task_id,event,details_json,created_at) SELECT id,'task_lease_recovered',?,? FROM tasks WHERE id=? AND status=? AND updated_at=? AND changes()=1"
     ).bind(JSON.stringify({ new_status: status, attempt: task.attempts, max_attempts: task.max_attempts }), nowIso, task.id, status, nowIso));
   }
-  if (statements.length) await env.DB.batch(statements);
-  const requeued = (stale.results || []).filter(t => t.attempts < t.max_attempts).length;
-  const failed = (stale.results || []).length - requeued;
+  if (!statements.length) return { requeued: 0, failed: 0 };
+  const results = await env.DB.batch(statements);
+  if (!Array.isArray(results) || results.length !== statements.length ||
+      results.some(result => result?.success !== true || !Number.isInteger(result.meta?.changes))) {
+    throw new Error("invalid_recovery_batch_result");
+  }
+  let requeued = 0, failed = 0;
+  for (let i = 0; i < (stale.results || []).length; i++) {
+    const changed = results[i * 2].meta.changes;
+    if ((changed !== 0 && changed !== 1) || results[i * 2 + 1].meta.changes !== changed) {
+      throw new Error("invalid_recovery_change_count");
+    }
+    if (changed === 1) {
+      if (stale.results[i].attempts < stale.results[i].max_attempts) requeued++;
+      else failed++;
+    }
+  }
   return { requeued, failed };
 }
 
@@ -366,6 +380,7 @@ export default {
         !/^\/v1\/workflows\/[A-Za-z][A-Za-z0-9_-]{0,127}$/.test(url.pathname) &&
         !/^\/v1\/tasks\/[A-Za-z0-9_-]+\/invocations$/.test(url.pathname) &&
         !/^\/v1\/tasks\/[A-Za-z0-9_-]+\/process-dispatches$/.test(url.pathname) &&
+        !/^\/v1\/tasks\/[A-Za-z0-9_-]{1,128}\/claim-exact$/.test(url.pathname) &&
         !/^\/v1\/tasks\/[A-Za-z0-9_-]{1,128}\/claim-supervised-probe$/.test(url.pathname) &&
         !/^\/v1\/tasks\/[A-Za-z0-9_-]{1,128}\/recover-supervised-probe$/.test(url.pathname) &&
         url.pathname !== "/v1/research/candidates/review" &&
@@ -616,6 +631,56 @@ export default {
         return json({ task: claim, lease_token: leaseToken, lease_expires_at: expires });
       } catch (error) {
         return json({ error: "storage_unavailable", detail: storageDetail(error) }, 503);
+      }
+    }
+
+    const exactClaim = url.pathname.match(/^\/v1\/tasks\/([A-Za-z0-9_-]{1,128})\/claim-exact$/);
+    if (exactClaim) {
+      if (request.method !== "POST") return json({ error: "method_not_allowed" }, 405);
+      let input;
+      try { input = await readOptionalJson(request); }
+      catch (error) { return json({ error: error.message === "body_too_large" ? "body_too_large" : "invalid_json" }, 400); }
+      if (!input || typeof input !== "object" || Array.isArray(input) ||
+          Object.keys(input).some(key => !["worker_lane", "execution_mode"].includes(key))) {
+        return json({ error: "invalid_claim" }, 400);
+      }
+      const lane = input.worker_lane ?? "general";
+      if (!EXECUTION_LANES.has(lane)) return json({ error: "invalid_worker_lane" }, 400);
+      if (!laneTokenAuthorized(request, env, lane)) return json({ error: "lane_unauthorized" }, 401);
+      if ((input.execution_mode ?? "dry_run") !== "dry_run") return json({ error: "invalid_execution_mode" }, 400);
+      const taskId = exactClaim[1];
+      const specialistType = lane === "general" ? null : Object.keys(SPECIALIST_TASK_LANES).find(type => SPECIALIST_TASK_LANES[type] === lane);
+      const now = new Date(), nowIso = now.toISOString();
+      const expires = new Date(now.getTime() + 900000).toISOString();
+      const token = crypto.randomUUID();
+      try {
+        // D1 batch is transactional: claim, audit and readback succeed together.
+        // The exact path never sweeps unrelated blocked tasks or admits the
+        // separate supervised-probe/Codespace contracts.
+        const update = env.DB.prepare(`UPDATE tasks SET status='running',attempts=attempts+1,
+          execution_mode='dry_run',updated_at=?,lease_token=?,lease_expires_at=?
+          WHERE id=? AND status='pending' AND execution_lane=? AND attempts < max_attempts
+            AND task_type NOT IN (${CODESPACE_TASK_SQL},'supervised_probe')
+            AND (? IS NULL OR task_type=?)
+            AND NOT EXISTS (SELECT 1 FROM task_dependencies d
+              JOIN tasks dependency ON dependency.id=d.dependency_task_id
+              WHERE d.task_id=tasks.id AND (dependency.status <> 'succeeded' OR dependency.execution_mode <> 'dry_run'))`)
+          .bind(nowIso, token, expires, taskId, lane, specialistType, specialistType);
+        const audit = env.DB.prepare(`INSERT INTO audit_log(task_id,event,details_json,created_at)
+          SELECT id,'task_claimed',?,? FROM tasks WHERE id=? AND status='running' AND execution_lane=? AND lease_token=?`)
+          .bind(JSON.stringify({execution_mode: "dry_run", execution_lane: lane, claim_scope: "exact_id", lease_expires_at: expires}), nowIso, taskId, lane, token);
+        const read = env.DB.prepare(`SELECT id,idempotency_key,task_type,title,payload_json,status,attempts,max_attempts,
+          created_at,updated_at,execution_mode,priority,dependencies_json,execution_lane,lease_token,lease_expires_at
+          FROM tasks WHERE id=? AND status='running' AND execution_lane=? AND lease_token=?`)
+          .bind(taskId, lane, token);
+        const results = await env.DB.batch([update, audit, read]);
+        if (!Array.isArray(results) || results.length !== 3 || results.some(result => result?.success !== true) ||
+            !Array.isArray(results[2].results)) throw new Error("invalid_exact_claim_batch_result");
+        const claim = results[2].results[0] || null;
+        if (!claim) return json({task: null});
+        return json({task: claim, lease_token: token, lease_expires_at: expires});
+      } catch (error) {
+        return json({error: "storage_unavailable", detail: storageDetail(error)}, 503);
       }
     }
 
@@ -939,10 +1004,24 @@ export default {
       task_type: taskType.trim(), title: title.trim(), payload_json: payloadJson,
       max_attempts: maxAttempts, priority, dependencies_json: dependenciesJson, execution_lane: executionLane,
     };
-    const matchesTask = task => task &&
-      (task.execution_lane || "general") === normalizedTask.execution_lane &&
-      (!prioritySupplied || task.priority === normalizedTask.priority) &&
-      (!dependenciesSupplied || (task.dependencies_json || "[]") === normalizedTask.dependencies_json);
+    // Object key order is not part of a JSON payload's identity. Arrays remain ordered.
+    const sameJson = (a, b) => {
+      if (a === b) return true;
+      if (!a || !b || typeof a !== "object" || typeof b !== "object") return false;
+      if (Array.isArray(a) !== Array.isArray(b)) return false;
+      const ak = Object.keys(a).sort(), bk = Object.keys(b).sort();
+      return ak.length === bk.length && ak.every((key, i) => key === bk[i] && sameJson(a[key], b[key]));
+    };
+    const matchesTask = task => {
+      if (!task) return false;
+      let storedPayload;
+      try { storedPayload = JSON.parse(task.payload_json); } catch { return false; }
+      return (task.execution_lane || "general") === normalizedTask.execution_lane &&
+        task.task_type === normalizedTask.task_type && task.title === normalizedTask.title &&
+        task.max_attempts === normalizedTask.max_attempts && sameJson(storedPayload, payload) &&
+        (!prioritySupplied || task.priority === normalizedTask.priority) &&
+        (!dependenciesSupplied || (task.dependencies_json || "[]") === normalizedTask.dependencies_json);
+    };
     const readDependencies = async taskId => {
       const rows = await env.DB.prepare(
         "SELECT dependency_task_id FROM task_dependencies WHERE task_id=? ORDER BY dependency_task_id"
