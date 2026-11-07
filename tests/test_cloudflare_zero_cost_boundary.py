@@ -1,5 +1,8 @@
 import json
+import os
+import tempfile
 import unittest
+from unittest.mock import patch
 from urllib.error import HTTPError
 from urllib.request import Request
 
@@ -7,6 +10,7 @@ from scripts.verify_cloudflare_zero_cost_boundary import (
     _RejectRedirects,
     assess_subscriptions,
     check_boundary,
+    main,
 )
 
 
@@ -48,6 +52,36 @@ class ZeroCostBoundaryTests(unittest.TestCase):
                 self.assertFalse(assess_subscriptions(payload)["eligible"])
         self.assertFalse(check_boundary("", "synthetic-token")["eligible"])
         self.assertFalse(check_boundary("account-id", "")["eligible"])
+
+    def test_main_fails_ci_and_writes_false_output_when_boundary_is_unknown(self):
+        with tempfile.NamedTemporaryFile(mode="r+", encoding="utf-8") as output:
+            env = {
+                "CLOUDFLARE_ACCOUNT_ID": "synthetic-account",
+                "CLOUDFLARE_API_TOKEN": "synthetic-token",
+                "GITHUB_OUTPUT": output.name,
+            }
+            with patch.dict(os.environ, env, clear=False), patch(
+                "scripts.verify_cloudflare_zero_cost_boundary.check_boundary",
+                return_value={"eligible": False, "reason": "billing_api_unavailable", "active_paid_subscriptions": None},
+            ):
+                self.assertEqual(main(), 1)
+            output.seek(0)
+            self.assertEqual(output.read(), "zero_cost_eligible=false\n")
+
+    def test_main_succeeds_only_when_boundary_is_eligible(self):
+        with tempfile.NamedTemporaryFile(mode="r+", encoding="utf-8") as output:
+            env = {
+                "CLOUDFLARE_ACCOUNT_ID": "synthetic-account",
+                "CLOUDFLARE_API_TOKEN": "synthetic-token",
+                "GITHUB_OUTPUT": output.name,
+            }
+            with patch.dict(os.environ, env, clear=False), patch(
+                "scripts.verify_cloudflare_zero_cost_boundary.check_boundary",
+                return_value={"eligible": True, "reason": "no_active_paid_subscriptions", "active_paid_subscriptions": 0},
+            ):
+                self.assertEqual(main(), 0)
+            output.seek(0)
+            self.assertEqual(output.read(), "zero_cost_eligible=true\n")
 
     def test_authenticated_subscription_read_is_bounded_and_does_not_follow_redirects(self):
         class Response:
