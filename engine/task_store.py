@@ -203,7 +203,7 @@ class TaskStore:
                         "reason": "dependency_failed_or_blocked", "depends_on": dependency_ids
                     })
             row = db.execute("""SELECT task.* FROM tasks task
-                WHERE task.status='pending' AND task.execution_lane=?
+                WHERE task.status='pending' AND task.execution_lane=? AND task.attempts < task.max_attempts
                 AND NOT EXISTS (
                     SELECT 1 FROM task_dependencies d
                     JOIN tasks dependency ON dependency.id=d.dependency_task_id
@@ -218,7 +218,7 @@ class TaskStore:
             expires = (now + timedelta(seconds=lease_timeout_seconds)).isoformat()
             changed = db.execute("""UPDATE tasks SET status='running',attempts=attempts+1,
                          execution_mode=?,updated_at=?,lease_token=?,lease_expires_at=?
-                         WHERE id=? AND status='pending' AND execution_lane=?""",
+                         WHERE id=? AND status='pending' AND execution_lane=? AND attempts < max_attempts""",
                          (execution_mode, now_iso, token, expires, row["id"], worker_lane)).rowcount
             if changed != 1:
                 return None

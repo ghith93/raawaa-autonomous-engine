@@ -2014,3 +2014,12 @@ test("GET /v1/tasks supports optional status and task_id filters and rejects inv
   assert.deepEqual(await badTaskId.json(), { error: "invalid_task_id" });
 });
 
+
+test("generic claim checks remaining attempts both before and during atomic update", async () => {
+  const DB = dbMock();
+  const response = await worker.fetch(request("/v1/tasks/claim", {method: "POST", body: {execution_mode: "dry_run"}}), {DB, ENGINE_API_TOKEN: TOKEN});
+  assert.equal(response.status, 200);
+  const sql = DB.calls.find(call => call.kind === "first" && call.sql.includes("UPDATE tasks SET status='running'")).sql;
+  assert.match(sql, /candidate\.attempts\s*<\s*candidate\.max_attempts/);
+  assert.match(sql, /AND status='pending' AND attempts\s*<\s*max_attempts/);
+});

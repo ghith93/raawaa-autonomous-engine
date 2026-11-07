@@ -667,7 +667,7 @@ export default {
         const claim = await env.DB.prepare(`
           UPDATE tasks SET status='running', attempts=attempts+1, execution_mode=?, updated_at=?,
             lease_token=?, lease_expires_at=?
-          WHERE id=(SELECT candidate.id FROM tasks candidate WHERE candidate.status='pending' ${taskTypeFilter} ${laneTaskFilter}
+          WHERE id=(SELECT candidate.id FROM tasks candidate WHERE candidate.status='pending' AND candidate.attempts < candidate.max_attempts ${taskTypeFilter} ${laneTaskFilter}
             AND NOT EXISTS (
               SELECT 1 FROM task_dependencies d
               JOIN tasks dependency ON dependency.id=d.dependency_task_id
@@ -675,7 +675,7 @@ export default {
                 AND (dependency.status <> 'succeeded' OR dependency.execution_mode <> ?)
             )
             ORDER BY candidate.priority DESC, candidate.created_at ASC, candidate.id ASC LIMIT 1)
-            AND status='pending' ${taskTypeFilter} ${laneTaskFilter}
+            AND status='pending' AND attempts < max_attempts ${taskTypeFilter} ${laneTaskFilter}
           RETURNING id,idempotency_key,task_type,title,payload_json,status,attempts,
             max_attempts,created_at,updated_at,execution_mode,priority,dependencies_json,execution_lane,lease_token,lease_expires_at
         `).bind(executionMode, nowIso, leaseToken, expires, ...laneBindings, executionMode, ...laneBindings).first();
