@@ -47,6 +47,37 @@ class ResearchSnapshotAuditTests(unittest.TestCase):
                          ["source_snapshot_missing", "ranking_miss", "retrieved"])
         self.assertTrue(all(row["label_review"] == "human_review_required" for row in result))
 
+    def test_query_level_audit_reports_source_and_ranking_misses_separately(self):
+        from scripts.research_snapshot_audit import audit_qrels_retrieval
+
+        snapshot = {
+            "retrieved_at": "2026-11-07T00:00:00Z",
+            "candidates": [
+                {"full_name": "acme/agent-runtime", "description": "agent orchestration workflow engine"},
+                {"full_name": "acme/quiet-project", "description": "garden flowers and irrigation"},
+            ],
+        }
+        qrels = {
+            "arabic_aliases": {},
+            "queries": [{
+                "query_id": "q1-en", "query": "agent orchestration workflow", "language": "en",
+                "capability": "agents",
+                "expected_ids": [
+                    "github:acme/agent-runtime",
+                    "github:acme/quiet-project",
+                    "github:acme/not-in-snapshot",
+                ],
+            }],
+        }
+        report = audit_qrels_retrieval(snapshot, qrels)
+        self.assertEqual(report["network_calls"], 0)
+        self.assertEqual(report["alias_assisted"]["counts"], {
+            "source_snapshot_missing": 1, "ranking_miss": 1, "retrieved": 1,
+        })
+        self.assertEqual(report["source_native"]["counts"], report["alias_assisted"]["counts"])
+        statuses = [row["status"] for row in report["source_native"]["queries"][0]["expected"]]
+        self.assertEqual(statuses, ["retrieved", "ranking_miss", "source_snapshot_missing"])
+
 
 if __name__ == "__main__":
     unittest.main()
