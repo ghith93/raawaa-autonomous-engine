@@ -66,11 +66,17 @@ def assess_subscriptions(subscriptions: list) -> dict:
         plan = item.get("rate_plan")
         if not isinstance(plan, dict) or not isinstance(plan.get("id"), str) or not plan["id"]:
             return _invalid("unknown_subscription_plan")
+        plan_name = plan.get("public_name")
+        is_explicit_free_plan = (
+            plan["id"].lower() == "free"
+            and isinstance(plan_name, str)
+            and "free" in plan_name.lower()
+        )
         if state in {"Trial", "AwaitingPayment"}:
             unknown += 1
         elif state == "Paid" or price > 0:
             paid += 1
-        elif plan["id"].lower() != "free":
+        elif not is_explicit_free_plan:
             unknown += 1
     if paid:
         return {"eligible": False, "reason": "active_paid_subscription_present",
