@@ -203,10 +203,11 @@
     {
       "id": "component:project_knowledge_graph",
       "kind": "component",
-      "status": "graphify_pilot_pending_ci_evidence",
+      "status": "read_only_ci_verified_7day_artifact_not_runtime_consumed",
       "evidence": [
         "docs/research/graphify-code-knowledge-graph-2026-11-07.md",
-        ".graphifyignore"
+        ".graphifyignore",
+        ".github/workflows/research-discovery.yml"
       ]
     },
     {
