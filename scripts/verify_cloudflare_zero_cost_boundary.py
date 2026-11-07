@@ -66,7 +66,9 @@ def assess_subscriptions(subscriptions: list) -> dict:
         plan = item.get("rate_plan")
         if not isinstance(plan, dict) or not isinstance(plan.get("id"), str) or not plan["id"]:
             return _invalid("unknown_subscription_plan")
-        if price > 0:
+        if state in {"Trial", "AwaitingPayment"}:
+            unknown += 1
+        elif state == "Paid" or price > 0:
             paid += 1
         elif plan["id"].lower() != "free":
             unknown += 1
@@ -126,6 +128,9 @@ def fetch_all_subscriptions(account_id: str, token: str, opener=None, timeout: i
             expected_per_page = info["per_page"]
         elif info["total_count"] != expected_total or info["per_page"] != expected_per_page:
             raise ValueError("subscription_inventory_changed_during_pagination")
+        expected_page_count = min(expected_per_page, expected_total - len(collected))
+        if len(records) != expected_page_count:
+            raise ValueError("incomplete_subscription_page")
         seen_ids = {item.get("id") for item in collected if isinstance(item, dict)}
         for item in records:
             subscription_id = item.get("id") if isinstance(item, dict) else None
