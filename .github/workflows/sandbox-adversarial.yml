@@ -80,9 +80,23 @@ jobs:
       - name: Run the escape probes
         env:
           IMAGE: ${{ inputs.image }}
+          # GitHub keeps at most ten annotations per step, and there are fourteen
+          # reviewed probes. On run 42379096458 the four that were dropped were
+          # exactly the four carrying the resource-limit evidence, so the report
+          # file is the authoritative record and the annotations are a convenience.
+          RAAWAA_PROBE_REPORT: probe-report.json
         run: |
           RAAWAA_SANDBOX_LIVE=1 RAAWAA_SANDBOX_IMAGE="$IMAGE" \
             python3 scripts/run_sandbox_adversarial_tests.py
+
+      - name: Publish the full probe report
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: sandbox-probe-report
+          path: probe-report.json
+          if-no-files-found: warn
+          retention-days: 30
 
       - name: Summary
         if: always()

@@ -76,7 +76,8 @@ class SandboxAdversarialRunnerTests(unittest.TestCase):
     def annotations_for(self, case):
         suite = unittest.TestLoader().loadTestsFromTestCase(case)
         result = runner.run_suite(suite, stream=io.StringIO())
-        return runner.result_annotations(result, [case("test_one").id()])
+        lines, _outcomes = runner.result_annotations(result, [case("test_one").id()])
+        return lines
 
     def test_each_reviewed_probe_is_reported_individually(self):
         """A green job must say which proofs ran, readable without the job log."""
@@ -95,8 +96,9 @@ class SandboxAdversarialRunnerTests(unittest.TestCase):
         """A probe that is absent from the result is still reported, as an error."""
         # A bare TestResult records no executions, which is what an aborted run
         # looks like; it must be an error, never a pass.
-        lines = runner.result_annotations(
+        lines, outcomes = runner.result_annotations(
             unittest.TestResult(), ["pkg.Case.test_the_probe_actually_ran"])
+        self.assertEqual(outcomes, {"the_probe_actually_ran": "not_run"})
         self.assertEqual(lines, ["::error title=Sandbox probe the_probe_actually_ran::not_run"])
 
     def test_annotation_text_carries_no_paths_values_or_output(self):
@@ -116,6 +118,56 @@ class SandboxAdversarialRunnerTests(unittest.TestCase):
                      "test_", "test_bad name"):
             with self.subTest(name=name), self.assertRaises(ValueError):
                 runner.result_annotations(unittest.TestResult(), [f"pkg.Case.{name}"])
+
+    def test_the_report_file_carries_every_probe_because_annotations_are_capped(self):
+        """GitHub keeps ten annotations per step; the reviewed set is fourteen.
+
+        On run 42379096458 the four that were dropped were exactly the four
+        carrying the criterion-5 evidence, so the artifact is the record of truth.
+        """
+        import json as _json
+        import os as _os
+        import tempfile as _tempfile
+
+        with _tempfile.TemporaryDirectory() as tmp:
+            report_path = _os.path.join(tmp, "report.json")
+            summary_path = _os.path.join(tmp, "summary.md")
+            previous = _os.environ.get("GITHUB_STEP_SUMMARY")
+            _os.environ["GITHUB_STEP_SUMMARY"] = summary_path
+            try:
+                ok = runner.run_checked(
+                    unittest.TestLoader().loadTestsFromTestCase(self.Passing),
+                    [self.Passing("test_one").id()],
+                    stream=io.StringIO(), report_path=report_path)
+            finally:
+                if previous is None:
+                    _os.environ.pop("GITHUB_STEP_SUMMARY", None)
+                else:
+                    _os.environ["GITHUB_STEP_SUMMARY"] = previous
+            self.assertTrue(ok)
+            report = _json.load(open(report_path, encoding="utf-8"))
+            self.assertEqual(report["probes"], {"one": "passed"})
+            self.assertTrue(report["all_passed"])
+            self.assertEqual(report["counts"], {"expected": 1, "passed": 1})
+            summary = open(summary_path, encoding="utf-8").read()
+            self.assertIn("`one`", summary)
+            self.assertIn("1 of 1 passed", summary)
+
+    def test_a_failed_probe_reaches_the_report_as_not_passing(self):
+        import json as _json
+        import os as _os
+        import tempfile as _tempfile
+
+        with _tempfile.TemporaryDirectory() as tmp:
+            report_path = _os.path.join(tmp, "report.json")
+            ok = runner.run_checked(
+                unittest.TestLoader().loadTestsFromTestCase(self.Failing),
+                [self.Failing("test_one").id()],
+                stream=io.StringIO(), report_path=report_path)
+            self.assertFalse(ok)
+            report = _json.load(open(report_path, encoding="utf-8"))
+            self.assertFalse(report["all_passed"])
+            self.assertEqual(report["probes"], {"one": "failed"})
 
     def test_only_exact_approved_image_passes_identity_preflight(self):
         approved = runner.APPROVED_IMAGE

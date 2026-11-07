@@ -6,6 +6,7 @@ being mistaken for live proof.
 """
 from __future__ import annotations
 
+import json
 import os
 import re
 import shutil
@@ -81,7 +82,8 @@ def run_suite(suite: unittest.TestSuite, *, stream) -> _RecordingResult:
     return runner.run(suite)
 
 
-def result_annotations(result: unittest.TestResult, expected_ids: Iterable[str]) -> list[str]:
+def result_annotations(result: unittest.TestResult,
+                       expected_ids: Iterable[str]) -> tuple[list[str], dict[str, str]]:
     """Render one workflow command per reviewed probe.
 
     The job log is served from GitHub's results blob storage, which is not
@@ -100,6 +102,7 @@ def result_annotations(result: unittest.TestResult, expected_ids: Iterable[str])
     unexpected |= {test.id() for test in result.unexpectedSuccesses}
     executed = getattr(result, "executed_ids", set())
     lines = []
+    outcomes: dict[str, str] = {}
     for test_id in sorted(expected_ids):
         token = test_id.rsplit(".", 1)[-1].removeprefix("test_")
         if not RESULT_TOKEN_RE.match(token):
@@ -115,7 +118,8 @@ def result_annotations(result: unittest.TestResult, expected_ids: Iterable[str])
         else:
             outcome, command = "not_run", "::error"
         lines.append(f"{command} title=Sandbox probe {token}::{outcome}")
-    return lines
+        outcomes[token] = outcome
+    return lines, outcomes
 
 
 def check_result(result: unittest.TestResult, expected_ids: Iterable[str]) -> bool:
@@ -141,7 +145,8 @@ def _test_ids(suite: unittest.TestSuite) -> list[str]:
     return result
 
 
-def run_checked(suite: unittest.TestSuite, expected_ids: Iterable[str], *, stream) -> bool:
+def run_checked(suite: unittest.TestSuite, expected_ids: Iterable[str], *, stream,
+                report_path: str | None = None) -> bool:
     """Refuse a different test set, then run it and publish per-probe outcomes."""
     expected = set(expected_ids)
     observed = _test_ids(suite)
@@ -149,9 +154,38 @@ def run_checked(suite: unittest.TestSuite, expected_ids: Iterable[str], *, strea
         print("Sandbox proof refused: probe suite differs from the reviewed test set.", file=stream)
         return False
     result = run_suite(suite, stream=stream)
-    for line in result_annotations(result, expected):
+    annotations, outcomes = result_annotations(result, expected)
+    for line in annotations:
         print(line)
-    if not check_result(result, expected):
+
+    # GitHub keeps at most ten annotations per step. With fourteen reviewed
+    # probes, the four that came back missing on run 42379096458 were exactly
+    # the four that carry the criterion-5 evidence, so annotations cannot be the
+    # only channel. This file is uploaded as an artifact, where nothing is
+    # truncated, and the step summary carries the same table for a reader who
+    # only looks at the run page.
+    passed = check_result(result, expected)
+    if report_path:
+        report = {
+            "probes": dict(sorted(outcomes.items())),
+            "counts": {"expected": len(expected), "passed": sum(
+                1 for v in outcomes.values() if v == "passed")},
+            "all_passed": passed,
+            "note": "a probe that did not run is reported as not_run, never as passed",
+        }
+        with open(report_path, "w", encoding="utf-8") as handle:
+            json.dump(report, handle, indent=2, sort_keys=True)
+        summary = os.environ.get("GITHUB_STEP_SUMMARY")
+        if summary:
+            with open(summary, "a", encoding="utf-8") as handle:
+                handle.write("\n#### Reviewed probes\n\n")
+                handle.write("| probe | outcome |\n| --- | --- |\n")
+                for token, outcome in sorted(outcomes.items()):
+                    handle.write(f"| `{token}` | {outcome} |\n")
+                handle.write(f"\n{report['counts']['passed']} of "
+                             f"{report['counts']['expected']} passed.\n")
+
+    if not passed:
         print("Sandbox proof refused: probes failed, skipped, or did not all run.", file=stream)
         return False
     return True
@@ -192,7 +226,9 @@ def main(argv: list[str] | None = None) -> int:
                               (SandboxResourceLimitTest, EXPECTED_PRESSURE_METHODS))
         for name in methods
     }
-    return 0 if run_checked(suite, expected, stream=sys.stderr) else 1
+    report_path = os.environ.get("RAAWAA_PROBE_REPORT", "")
+    ok = run_checked(suite, expected, stream=sys.stderr, report_path=report_path or None)
+    return 0 if ok else 1
 
 
 if __name__ == "__main__":
