@@ -27,6 +27,7 @@ class ResearchDiscoveryWorkflowAutomationTests(unittest.TestCase):
             "Verify idempotent research schema in isolated Staging D1",
             "Generate ephemeral Staging research API token",
             "Install ephemeral Staging research API token",
+            "Verify Staging Worker exposes the research idempotency schema",
             "Persist public research metadata in isolated Staging Worker",
             "Revoke ephemeral Staging research API token",
         ]
@@ -37,6 +38,7 @@ class ResearchDiscoveryWorkflowAutomationTests(unittest.TestCase):
         self.assertIn("wrangler@4.156.1 secret delete ENGINE_API_TOKEN --config wrangler.staging.toml", self.content)
         self.assertNotIn("secrets.ENGINE_STAGING_API_TOKEN", self.content)
         self.assertIn("https://raawaa-autonomous-engine-staging.ghith-shikhkhaled.workers.dev", self.content)
+        self.assertIn("scripts/verify_research_persistence_worker.py", self.content)
 
     def test_research_telemetry_is_staging_d1_only_and_uses_no_engine_control_token(self):
         self.assertIn("Publish explicit scan and source freshness telemetry to Staging D1", self.content)
