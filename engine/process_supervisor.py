@@ -124,6 +124,11 @@ CEILINGS = {
     "grace_seconds": 10.0,
     "output_bytes": 131072,
     "arguments": 16,
+    # A container launch is a long, fixed vector of reviewed flags rather than a
+    # probe with a few slots. An operation may raise its own argument cap up to
+    # this hard limit by declaring `max_arguments`; the default stays 16 so every
+    # existing operation keeps exactly the bound it was reviewed with.
+    "max_arguments": 40,
     "operations": 32,
 }
 
@@ -310,6 +315,10 @@ class OperationSpec:
     output_bytes: int = 16384
     working_directory: str | None = None
     purpose: str = ""
+    #: Per-operation argument cap. Defaults to the reviewed global bound; an
+    #: operation that legitimately needs a longer fixed vector declares its own,
+    #: which is capped by ``CEILINGS["max_arguments"]``.
+    max_arguments: int = CEILINGS["arguments"]
 
     def validated(self) -> "OperationSpec":
         if not isinstance(self.name, str) or not _NAME_PATTERN.fullmatch(self.name):
@@ -335,9 +344,15 @@ class OperationSpec:
 
         if not isinstance(self.arguments, tuple):
             raise SupervisorConfigurationError(f"{self.name}: arguments must be a tuple")
-        if len(self.arguments) > CEILINGS["arguments"]:
+        if isinstance(self.max_arguments, bool) or not isinstance(self.max_arguments, int):
+            raise SupervisorConfigurationError(f"{self.name}: max_arguments must be an integer")
+        if not 1 <= self.max_arguments <= CEILINGS["max_arguments"]:
             raise SupervisorConfigurationError(
-                f"{self.name}: at most {CEILINGS['arguments']} arguments are supported"
+                f"{self.name}: max_arguments must be between 1 and {CEILINGS['max_arguments']}"
+            )
+        if len(self.arguments) > self.max_arguments:
+            raise SupervisorConfigurationError(
+                f"{self.name}: at most {self.max_arguments} arguments are supported"
             )
         slot_names: set[str] = set()
         for index, item in enumerate(self.arguments):
@@ -424,7 +439,11 @@ class OperationSpec:
             argv.append(item.check(supplied[item.name]) if isinstance(item, ArgSlot) else item)
         if any(_BAD_TEXT.search(arg) for arg in argv):
             raise SupervisorRefusal("argument vector must not contain NUL or newlines")
-        if len(argv) - 1 > CEILINGS["arguments"]:
+        # build_argv is the last line of defence before a spawn, so it must
+        # enforce the same per-operation bound that validated() accepted.
+        # Checking the global default here instead would make a legitimately
+        # longer reviewed vector validate and then fail at run time.
+        if len(argv) - 1 > self.max_arguments:
             raise SupervisorRefusal("argument vector is longer than the ceiling")
         return tuple(argv)
 
@@ -459,6 +478,16 @@ class OperationRegistry:
         if spec is None:
             raise SupervisorRefusal(f"operation {name!r} is not allowlisted")
         return spec
+
+    def with_operation(self, spec: OperationSpec) -> "OperationRegistry":
+        """Return a new registry with one more operation; this one is unchanged.
+
+        Adding an entry by rebuilding from :meth:`describe` would lose every
+        :class:`ArgSlot` pattern (the description is for humans), so the only
+        faithful way to extend the allowlist in trusted code is to hand over the
+        spec itself.
+        """
+        return OperationRegistry([*self._specs.values(), spec])
 
     def describe(self) -> list[dict[str, Any]]:
         """A JSON-safe description for CLI output. Carries no environment."""
