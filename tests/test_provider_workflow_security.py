@@ -226,11 +226,8 @@ class CloudflareZeroCostEffectWorkflowTests(unittest.TestCase):
     def test_control_worker_deployment_requires_zero_cost_preflight(self):
         self._assert_gate_precedes(
             ".github/workflows/deploy-worker.yml",
-            "name: Verify Cloudflare zero-cost boundary",
-            [
-                "name: Run Staging D1 migrations",
-                "name: Deploy authenticated Control Worker to Staging",
-            ],
+            "name: Verify Cloudflare zero-cost boundary before control Worker deployment",
+            ["name: Deploy authenticated D1 control Worker"],
         )
 
     def test_issue_comment_ingest_requires_zero_cost_preflight_before_post(self):
