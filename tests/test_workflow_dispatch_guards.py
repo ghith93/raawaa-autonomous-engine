@@ -37,6 +37,11 @@ jobs:
 """
         self.assertEqual(len(workflow_violations("deploy.yml", content)), 1)
 
+    def test_main_and_scheduled_ci_runs_are_not_cancelled_by_new_pushes(self):
+        workflow = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+        self.assertIn("cancel-in-progress: ${{ github.event_name == 'pull_request' }}", workflow)
+        self.assertNotIn("cancel-in-progress: true", workflow)
+
     def test_staging_replay_jobs_are_explicitly_main_guarded(self):
         workflow = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
         triggers = check.parse_triggers(workflow)
