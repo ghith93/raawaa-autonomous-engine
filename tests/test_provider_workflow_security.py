@@ -150,11 +150,6 @@ class ProviderWorkflowSecurityTests(unittest.TestCase):
         self.assertIn("python scripts/verify_staging_mobile_status.py", verify)
         self.assertIn("steps.install_staging_token.outcome == 'success'", verify)
 
-if __name__ == "__main__":
-    unittest.main()
-
-
-
 class CloudflareZeroCostEffectWorkflowTests(unittest.TestCase):
     """Every workflow that mutates Cloudflare or invokes Workers AI must fail closed first."""
 
@@ -224,3 +219,6 @@ class CloudflareZeroCostEffectWorkflowTests(unittest.TestCase):
             ["name: Generate one real image through the free route"],
         )
 
+
+if __name__ == "__main__":
+    unittest.main()
