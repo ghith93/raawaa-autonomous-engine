@@ -35,6 +35,13 @@ class ZeroCostBoundaryTests(unittest.TestCase):
         self.assertTrue(result["eligible"])
         self.assertEqual(result["active_paid_subscriptions"], 0)
 
+    def test_active_subscription_with_unknown_price_fails_closed(self):
+        result = assess_subscriptions({"success": True, "result": [
+            {"state": "Provisioned", "product_id": "workers"},
+        ]})
+        self.assertFalse(result["eligible"])
+        self.assertEqual(result["reason"], "active_subscription_price_unknown")
+
     def test_unknown_or_malformed_billing_data_fails_closed(self):
         for payload in ({}, {"success": False, "result": []}, {"success": True, "result": {}}):
             with self.subTest(payload=payload):
