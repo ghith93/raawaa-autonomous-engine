@@ -59,11 +59,42 @@ def _open_request(opener=None):
     return opener or build_opener(_RejectRedirects).open
 
 
-def _read_json(request: Request, opener, timeout: int, unavailable_reason: str) -> dict:
-    with opener(request, timeout=timeout) as response:
-        if response.status != 200:
-            raise ValueError(unavailable_reason)
-        raw = response.read(MAX_RESPONSE_BYTES + 1)
+class EndpointError(Exception):
+    """An HTTP failure attributed to the specific endpoint that produced it.
+
+    Before this existed, every endpoint's HTTP error was caught by one handler
+    and reported as `billing_http_<status>`, so a 404 from the zone endpoints
+    was indistinguishable from a 404 on the billing endpoint - or from a
+    permission problem. The reported reason then pointed at the wrong resource.
+    The endpoint label is a fixed token chosen by the caller, never a URL, so
+    nothing account-specific can leak into the reason.
+    """
+
+    def __init__(self, endpoint: str, status: int):
+        super().__init__(f"{endpoint}_http_{status}")
+        self.endpoint = endpoint
+        self.status = status
+
+
+def _read_json(request: Request, opener, timeout: int, unavailable_reason: str,
+               *, endpoint: str | None = None) -> dict:
+    try:
+        with opener(request, timeout=timeout) as response:
+            if response.status != 200:
+                raise ValueError(unavailable_reason)
+            raw = response.read(MAX_RESPONSE_BYTES + 1)
+    except HTTPError as exc:
+        if endpoint and 400 <= exc.code <= 599:
+            raise EndpointError(endpoint, exc.code) from None
+        raise
+    except URLError:
+        if endpoint:
+            raise EndpointError(endpoint, 0) from None
+        raise
+    except TimeoutError:
+        if endpoint:
+            raise EndpointError(endpoint, 0) from None
+        raise
     if len(raw) > MAX_RESPONSE_BYTES:
         raise ValueError("billing_response_too_large")
     payload = json.loads(raw.decode("utf-8"))
@@ -89,6 +120,14 @@ def assess_subscriptions(subscriptions: list) -> dict:
     """Assess account-level add-ons; an empty list means no add-ons, not no zone plans."""
     if not isinstance(subscriptions, list):
         return {"eligible": False, "reason": "invalid_subscription_list", "active_paid_subscriptions": None}
+    if not subscriptions:
+        # An empty add-on list is not proof of a Free account. It was the live
+        # state of this account on 2026-11-07 (run 42328401696), and #682
+        # recorded the finding. The zone inventory now provides the positive
+        # evidence instead, but it must do so explicitly rather than by
+        # silently treating "no add-ons" as "nothing to check".
+        return {"eligible": False, "reason": "empty_subscription_inventory_unverified",
+                "active_paid_subscriptions": None}
     paid = 0
     unknown = 0
     seen_ids = set()
@@ -147,7 +186,8 @@ def fetch_subscription_inventory(account_id: str, token: str, opener=None, timeo
                  "User-Agent": USER_AGENT},
         method="GET",
     )
-    payload = _read_json(request, open_request, timeout, "billing_api_unavailable")
+    payload = _read_json(request, open_request, timeout, "billing_api_unavailable",
+                         endpoint="billing")
     records = payload.get("result")
     if not isinstance(records, list):
         raise ValueError("invalid_billing_response")
@@ -195,7 +235,8 @@ def fetch_zone_inventory(account_id: str, token: str, opener=None, timeout: int 
                  "User-Agent": USER_AGENT},
         method="GET",
     )
-    payload = _read_json(request, open_request, timeout, "zone_inventory_unavailable")
+    payload = _read_json(request, open_request, timeout, "zone_inventory_unavailable",
+                         endpoint="zone_inventory")
     zones = payload.get("result")
     info = payload.get("result_info")
     if not isinstance(zones, list) or not isinstance(info, dict):
@@ -265,7 +306,8 @@ def fetch_zone_subscription(zone_id: str, token: str, opener=None, timeout: int 
                  "User-Agent": USER_AGENT},
         method="GET",
     )
-    payload = _read_json(request, open_request, timeout, "zone_subscription_unavailable")
+    payload = _read_json(request, open_request, timeout, "zone_subscription_unavailable",
+                         endpoint="zone_subscription")
     result = payload.get("result")
     if not isinstance(result, dict):
         raise ValueError("unknown_zone_plan")
@@ -274,16 +316,25 @@ def fetch_zone_subscription(zone_id: str, token: str, opener=None, timeout: int 
 
 def check_boundary(account_id: str, token: str, opener=None, timeout: int = 15) -> dict:
     zones_checked = 0
+    stage = "addons"
     try:
         if not account_id or not token:
             raise ValueError("billing_credentials_missing")
         open_request = _open_request(opener)
         add_ons = fetch_subscription_inventory(account_id, token, opener=open_request, timeout=timeout)
         add_on_result = assess_subscriptions(add_ons)
-        if not add_on_result["eligible"]:
+        # An empty add-on list is not eligible *by itself* - that is the finding
+        # recorded in #682. It is not a blocker either: an account can hold a
+        # Free plan with no paid add-ons, and the zone inventory is the positive
+        # evidence for that case. So this one reason continues to the zone
+        # check, while every other add-on failure still stops here.
+        if (not add_on_result["eligible"]
+                and add_on_result["reason"] != "empty_subscription_inventory_unverified"):
             return _invalid(add_on_result["reason"])
+        stage = "zone_inventory"
         zones = fetch_zone_inventory(account_id, token, opener=open_request, timeout=min(timeout, 10))
         zones_checked = len(zones)
+        stage = "zone_plans"
         for zone in zones:
             details = fetch_zone_subscription(zone["id"], token, opener=open_request, timeout=min(timeout, 5))
             assessment = assess_zone_subscription(details)
@@ -302,6 +353,8 @@ def check_boundary(account_id: str, token: str, opener=None, timeout: int = 15) 
             "active_paid_zone_plans": 0,
             "zones_checked": zones_checked,
         }
+    except EndpointError as exc:
+        return _invalid(str(exc), zones_checked=zones_checked)
     except json.JSONDecodeError:
         return _invalid("invalid_billing_json", zones_checked=zones_checked)
     except UnicodeDecodeError:
@@ -316,6 +369,11 @@ def check_boundary(account_id: str, token: str, opener=None, timeout: int = 15) 
             "zone_account_mismatch", "zone_subscription_unavailable", "unknown_zone_plan",
             "active_paid_zone_plan", "zone_plan_state_unverified", "zone_plan_external",
             "zone_plan_scope_mismatch",
+            "empty_subscription_inventory_unverified",
+            "zone_inventory_http_error", "zone_inventory_http_0",
+            "zone_subscription_http_error", "zone_subscription_http_0",
+            "zone_inventory_transport_error", "zone_inventory_timeout", "zone_inventory_os_error",
+            "zone_plans_transport_error", "zone_plans_timeout", "zone_plans_os_error",
         }
         reason = str(exc)
         return _invalid(reason if reason in safe_reasons else "billing_inventory_unavailable_or_incomplete",
@@ -325,11 +383,14 @@ def check_boundary(account_id: str, token: str, opener=None, timeout: int = 15) 
             return _invalid(f"billing_http_{exc.code}", zones_checked=zones_checked)
         return _invalid("billing_http_error", zones_checked=zones_checked)
     except URLError:
-        return _invalid("billing_transport_error", zones_checked=zones_checked)
+        return _invalid(f"{stage}_transport_error" if stage != "addons" else "billing_transport_error",
+                        zones_checked=zones_checked)
     except TimeoutError:
-        return _invalid("billing_timeout", zones_checked=zones_checked)
+        return _invalid(f"{stage}_timeout" if stage != "addons" else "billing_timeout",
+                        zones_checked=zones_checked)
     except OSError:
-        return _invalid("billing_os_error", zones_checked=zones_checked)
+        return _invalid(f"{stage}_os_error" if stage != "addons" else "billing_os_error",
+                        zones_checked=zones_checked)
 
 
 def activity_annotation(result: dict) -> str:
@@ -343,9 +404,8 @@ def activity_annotation(result: dict) -> str:
 
 
 def main() -> int:
-    # The List Zones API cannot reveal zones hidden by a token scoped to a
-    # subset. Require an explicit repository-variable attestation before
-    # treating the returned inventory as complete. Missing/false is fail-closed.
+    # List Zones cannot reveal zones hidden by token resource scope. Require
+    # explicit all-zones scope attestation before making any Cloudflare call.
     all_zones_confirmed = (
         os.environ.get("CLOUDFLARE_ZONE_READ_ALL_ZONES_CONFIRMED", "").strip().lower() == "true"
     )
