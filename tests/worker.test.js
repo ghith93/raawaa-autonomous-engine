@@ -1111,9 +1111,51 @@ test("research ingestion is authenticated, batch-idempotent and stores normalize
   assert.match(candidate.sql, /\x27unreviewed\x27/);
 });
 
+test("research ingestion replay does not increment candidate discovery count", async () => {
+  const DB = dbMock({ researchBatchChanges: 0 });
+  const response = await worker.fetch(request("/v1/research/candidates", {
+    method: "POST",
+    body: { batch_id: "same-run:1", candidates: [{
+      source: "github", full_name: "org/repo", url: "https://github.com/org/repo",
+    }] },
+  }), { DB, ENGINE_API_TOKEN: TOKEN });
+  assert.equal(response.status, 200);
+  assert.deepEqual(await response.json(), {
+    accepted_count: 1, sources: ["github"], batch_id: "same-run:1", replayed: true,
+  });
+  const batch = DB.calls.find(x => x.kind === "batch");
+  const candidate = batch.statements.find(x => x.sql.includes("INSERT INTO research_candidates"));
+  assert.match(candidate.sql, /WHERE changes\(\)=1/);
+});
+
+test("research ingestion rejects a reused batch ID with a changed payload", async () => {
+  const DB = dbMock({ researchBatchChanges: 0, researchBatch: { payload_sha256: "f".repeat(64), candidate_count: 1 } });
+  const response = await worker.fetch(request("/v1/research/candidates", {
+    method: "POST",
+    body: { batch_id: "same-run:1", candidates: [{
+      source: "github", full_name: "org/changed", url: "https://github.com/org/changed",
+    }] },
+  }), { DB, ENGINE_API_TOKEN: TOKEN });
+  assert.equal(response.status, 409);
+  assert.deepEqual(await response.json(), { error: "batch_id_payload_conflict" });
+});
+
+test("research exact-key verification returns only requested candidate keys", async () => {
+  const DB = dbMock();
+  const keys = ["github:org/one", "arxiv:2601.01234"];
+  const response = await worker.fetch(request("/v1/research/candidates/verify", {
+    method: "POST", body: { source_keys: keys },
+  }), { DB, ENGINE_API_TOKEN: TOKEN });
+  assert.equal(response.status, 200);
+  assert.deepEqual(await response.json(), { matched_keys: keys });
+  const query = DB.calls.find(x => x.kind === "all" &&
+    x.sql.includes("SELECT source_key FROM research_candidates WHERE source_key IN"));
+  assert.deepEqual(query.values, keys);
+});
+
 test("research ingestion normalizes Crossref DOI and rejects arbitrary URL targets", async () => {
   const DB = dbMock();
-  const response = await worker.fetch(request("/v1/research/candidates", { method: "POST", body: { candidates: [{ source: "crossref", doi: "10.1234/agent-paper", title: "Agent research", url: "https://evil.example/article", authors: ["A Researcher"], license_urls: ["https://creativecommons.org/licenses/by/4.0/"] }] } }), { DB, ENGINE_API_TOKEN: TOKEN });
+  const response = await worker.fetch(request("/v1/research/candidates", { method: "POST", body: { batch_id: "test-batch", candidates: [{ source: "crossref", doi: "10.1234/agent-paper", title: "Agent research", url: "https://evil.example/article", authors: ["A Researcher"], license_urls: ["https://creativecommons.org/licenses/by/4.0/"] }] } }), { DB, ENGINE_API_TOKEN: TOKEN });
   assert.equal(response.status, 201);
   const batch = DB.calls.find(x => x.kind === "batch");
   const statement = batch.statements.find(x => x.sql.includes("INSERT INTO research_candidates"));
@@ -1123,7 +1165,7 @@ test("research ingestion normalizes Crossref DOI and rejects arbitrary URL targe
 
 test("research ingestion stores bounded arXiv metadata without abstracts or full text", async () => {
   const DB = dbMock();
-  const response = await worker.fetch(request("/v1/research/candidates", { method: "POST", body: { candidates: [{
+  const response = await worker.fetch(request("/v1/research/candidates", { method: "POST", body: { batch_id: "test-batch", candidates: [{
     source: "arxiv", arxiv_id: "2601.01234v2", title: "Agent safety research",
     url: "https://arxiv.org/abs/2601.01234v2", authors: ["A Researcher"],
     published: "2026-01-02T00:00:00Z", categories: ["cs.AI"],
@@ -1147,7 +1189,7 @@ test("research ingestion rejects noncanonical arXiv hosts and ports before write
     const DB = dbMock();
     const response = await worker.fetch(request("/v1/research/candidates", {
       method: "POST",
-      body: { candidates: [{
+      body: { batch_id: "test-batch", candidates: [{
         source: "arxiv", arxiv_id: "2601.01234v2", title: "Agent research", url,
       }] },
     }), { DB, ENGINE_API_TOKEN: TOKEN });
@@ -1158,12 +1200,12 @@ test("research ingestion rejects noncanonical arXiv hosts and ports before write
 
 test("research ingestion stores SearXNG HTTPS metadata and rejects IP-literal URLs", async () => {
   const DB = dbMock();
-  const response = await worker.fetch(request("/v1/research/candidates", { method: "POST", body: { candidates: [{
+  const response = await worker.fetch(request("/v1/research/candidates", { method: "POST", body: { batch_id: "test-batch", candidates: [{
     source: "searxng", title: "Agent security", url: "https://docs.example.org/agent-security?ref=search",
     snippet: "Untrusted search snippet", engines: ["brave", "duckduckgo"],
   }] } }), { DB, ENGINE_API_TOKEN: TOKEN });
   assert.equal(response.status, 201);
-  const statement = DB.calls.find(x => x.kind === "batch").statements[0];
+  const statement = DB.calls.find(x => x.kind === "batch").statements.find(x => x.sql.includes("INSERT INTO research_candidates"));
   assert.equal(statement.values[0], "searxng:https://docs.example.org/agent-security?ref=search");
   assert.equal(statement.values[1], "searxng");
   const metadata = JSON.parse(statement.values[4]);
@@ -1172,7 +1214,7 @@ test("research ingestion stores SearXNG HTTPS metadata and rejects IP-literal UR
 
   for (const url of ["https://127.0.0.1/admin", "https://metadata.localhost/admin", "https://[::1]/admin"]) {
     const invalidDB = dbMock();
-    const invalid = await worker.fetch(request("/v1/research/candidates", { method: "POST", body: { candidates: [{
+    const invalid = await worker.fetch(request("/v1/research/candidates", { method: "POST", body: { batch_id: "test-batch", candidates: [{
       source: "searxng", title: "Private target", url,
     }] } }), { DB: invalidDB, ENGINE_API_TOKEN: TOKEN });
     assert.equal(invalid.status, 400, url);
@@ -1182,7 +1224,7 @@ test("research ingestion stores SearXNG HTTPS metadata and rejects IP-literal UR
 
 test("research ingestion rejects invalid repository URL before database writes", async () => {
   const DB = dbMock();
-  const response = await worker.fetch(request("/v1/research/candidates", { method: "POST", body: { candidates: [{ source: "github", full_name: "org/agent", url: "https://evil.example/org/agent" }] } }), { DB, ENGINE_API_TOKEN: TOKEN });
+  const response = await worker.fetch(request("/v1/research/candidates", { method: "POST", body: { batch_id: "test-batch", candidates: [{ source: "github", full_name: "org/agent", url: "https://evil.example/org/agent" }] } }), { DB, ENGINE_API_TOKEN: TOKEN });
   assert.equal(response.status, 400);
   assert.deepEqual(await response.json(), { error: "invalid_candidate" });
   assert.equal(DB.calls.length, 0);
@@ -1211,7 +1253,7 @@ test("research candidate review rejects unsupported state changes", async () => 
 });
 
 test("research ingestion rejects unauthenticated callers", async () => {
-  const response = await worker.fetch(request("/v1/research/candidates", { method: "POST", token: null, body: { candidates: [{ source: "github", full_name: "org/repo", url: "https://github.com/org/repo" }] } }), { DB: dbMock(), ENGINE_API_TOKEN: TOKEN });
+  const response = await worker.fetch(request("/v1/research/candidates", { method: "POST", token: null, body: { batch_id: "test-batch", candidates: [{ source: "github", full_name: "org/repo", url: "https://github.com/org/repo" }] } }), { DB: dbMock(), ENGINE_API_TOKEN: TOKEN });
   assert.equal(response.status, 401);
 });
 
