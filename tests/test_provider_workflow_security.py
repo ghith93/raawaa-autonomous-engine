@@ -202,13 +202,19 @@ class CloudflareZeroCostEffectWorkflowTests(unittest.TestCase):
         required_at = source.index(required)
         required_start = source.rfind("      - name:", 0, required_at)
         required_end = source.find("      - name:", required_start + 1)
+        required_condition_start = source.rfind("        if:", 0, required_start)
+        required_condition = source[required_condition_start:required_start]
         required_block = source[required_start:required_end]
-        self.assertIn("steps.cloudflare_credentials.outputs.available != 'true'", required_block)
+        self.assertIn("steps.cloudflare_credentials.outputs.available != 'true'", required_condition)
+        self.assertIn("exit 1", required_block)
         gate_at = source.index(gate)
         gate_start = source.rfind("      - name:", 0, gate_at)
         gate_end = source.find("      - name:", gate_start + 1)
+        gate_condition_start = source.rfind("        if:", 0, gate_start)
+        gate_condition = source[gate_condition_start:gate_start]
         gate_step = source[gate_start:gate_end]
-        self.assertIn("steps.cloudflare_credentials.outputs.available == 'true'", gate_step)
+        self.assertIn("steps.cloudflare_credentials.outputs.available == 'true'", gate_condition)
+        self.assertIn("scripts/verify_cloudflare_zero_cost_boundary.py", gate_step)
         block = source[source.index(gate):source.index(token)]
         self.assertIn("scripts/verify_cloudflare_zero_cost_boundary.py", block)
         self.assertNotIn("continue-on-error", block)
