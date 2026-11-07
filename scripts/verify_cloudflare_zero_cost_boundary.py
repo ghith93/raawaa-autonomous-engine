@@ -15,6 +15,7 @@ from __future__ import annotations
 import json
 import math
 import os
+import re
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
 from urllib.request import HTTPRedirectHandler, Request, build_opener
@@ -26,6 +27,8 @@ ZONE_PAGE_SIZE = 20
 FREE_ZONE_PLAN_IDS = {"free"}
 INACTIVE_STATES = {"Cancelled", "Failed", "Expired"}
 ACTIVE_STATES = {"Trial", "Provisioned", "Paid", "AwaitingPayment"}
+# Workflow annotations accept only fixed, sanitized reason tokens.
+SAFE_REASON_RE = re.compile(r"^[a-z][a-z0-9_]{0,63}$")
 
 
 class _RejectRedirects(HTTPRedirectHandler):
@@ -178,7 +181,14 @@ def fetch_zone_inventory(account_id: str, token: str, opener=None, timeout: int 
     if not account_id or not token:
         raise ValueError("billing_credentials_missing")
     open_request = _open_request(opener)
-    query = urlencode({"account.id": account_id, "page": 1, "per_page": ZONE_PAGE_SIZE})
+    query = urlencode({
+        "account.id": account_id,
+        "page": 1,
+        "per_page": ZONE_PAGE_SIZE,
+        # List Zones excludes internal zones by default. Include every zone
+        # type so an omitted zone can never be mistaken for a Free account.
+        "type": "full,partial,secondary,internal",
+    })
     request = Request(
         f"https://api.cloudflare.com/client/v4/zones?{query}",
         headers={"Authorization": "Bearer " + token, "Accept": "application/json",
@@ -330,6 +340,16 @@ def check_boundary(account_id: str, token: str, opener=None, timeout: int = 15) 
         return _invalid("billing_os_error", zones_checked=zones_checked)
 
 
+def activity_annotation(result: dict) -> str:
+    """Emit a readable, sanitized check annotation without account data."""
+    reason = result.get("reason")
+    if not isinstance(reason, str) or not SAFE_REASON_RE.fullmatch(reason):
+        raise ValueError("unsafe_zero_cost_reason")
+    eligible = result.get("eligible") is True
+    level = "notice" if eligible else "error"
+    return f"::{level} title=Cloudflare zero-cost preflight::eligible={str(eligible).lower()}; reason={reason}"
+
+
 def main() -> int:
     result = check_boundary(
         os.environ.get("CLOUDFLARE_ACCOUNT_ID", "").strip(),
@@ -348,6 +368,7 @@ def main() -> int:
         "zones_checked": result["zones_checked"],
         "remote_operations": "allowed" if result["eligible"] else "skipped",
     }, sort_keys=True))
+    print(activity_annotation(result))
     if not result["eligible"]:
         print("Remote operations skipped: complete zero-cost eligibility was not established.")
     return 0 if result["eligible"] else 1
