@@ -93,7 +93,7 @@ jobs:
           if-no-files-found: error
           retention-days: 30
       - name: Persist research metadata in isolated Staging D1 only
-        if: steps.research_zero_cost_preflight.outputs.zero_cost_eligible == 'true'
+        if: vars.RAAWAA_ENGINE_RESEARCH_PERSISTENCE == 'enabled' && steps.research_zero_cost_preflight.outputs.zero_cost_eligible == 'true'
         env:
           RAAWAA_ENGINE_API_URL: https://raawaa-autonomous-engine-staging.ghith-shikhkhaled.workers.dev
           RAAWAA_ENGINE_API_TOKEN: ${{ secrets.ENGINE_STAGING_API_TOKEN }}
