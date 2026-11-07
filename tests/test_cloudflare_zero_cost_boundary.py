@@ -34,7 +34,7 @@ def subscription_payload(records, *, result_info=True):
     return payload
 
 
-def zone_payload(zones, *, count=None, total=None, page=1, per_page=20, total_pages=None):
+def zone_payload(zones, *, count=None, total=None, page=1, per_page=50, total_pages=None):
     return {
         "success": True,
         "result": zones,
@@ -201,21 +201,31 @@ class ZeroCostBoundaryTests(unittest.TestCase):
         query = parse_qs(parsed.query)
         self.assertEqual(query["account.id"], [ACCOUNT])
         self.assertEqual(query["page"], ["1"])
-        self.assertEqual(query["per_page"], ["20"])
+        self.assertEqual(query["per_page"], ["50"])
         self.assertEqual(query["type"], ["full,partial,secondary,internal"])
 
-    def test_zone_inventory_must_be_complete_and_within_the_reviewed_bound(self):
+    def test_zone_inventory_requires_count_metadata_and_blocks_a_full_page(self):
+        incomplete = zone_payload([free_zone()])
+        incomplete["result_info"].pop("count")
         with self.assertRaisesRegex(ValueError, "zone_inventory_incomplete"):
             fetch_zone_inventory(
                 ACCOUNT, TOKEN,
-                opener=lambda *_a, **_k: Response(zone_payload([free_zone()], total=2)),
+                opener=lambda *_a, **_k: Response(incomplete),
             )
-        many = [dict(free_zone(), id=f"zone-{i}") for i in range(21)]
+        full_page = [dict(free_zone(), id=f"zone-{i}") for i in range(50)]
         with self.assertRaisesRegex(ValueError, "too_many_zones_to_verify"):
             fetch_zone_inventory(
                 ACCOUNT, TOKEN,
-                opener=lambda *_a, **_k: Response(zone_payload(many, total=21, per_page=50)),
+                opener=lambda *_a, **_k: Response(zone_payload(full_page, total=2000, per_page=50, total_pages=40)),
             )
+
+    def test_zone_inventory_ignores_unfiltered_total_count_metadata(self):
+        zones = [free_zone()]
+        result = fetch_zone_inventory(
+            ACCOUNT, TOKEN,
+            opener=lambda *_a, **_k: Response(zone_payload(zones, total=2000, per_page=50, total_pages=40)),
+        )
+        self.assertEqual(result, zones)
 
     def test_zone_account_mismatch_and_duplicate_ids_fail_closed(self):
         wrong = dict(free_zone(), account={"id": "another-account"})
