@@ -28,6 +28,8 @@ def assess_subscriptions(payload: dict) -> dict:
     subscriptions = payload.get("result")
     if not isinstance(subscriptions, list):
         return {"eligible": False, "reason": "invalid_subscription_list", "active_paid_subscriptions": None}
+    if any(not isinstance(item, dict) for item in subscriptions):
+        return {"eligible": False, "reason": "invalid_subscription_record", "active_paid_subscriptions": None}
     active = [
         item for item in subscriptions
         if isinstance(item, dict) and item.get("state") not in {"Cancelled", "Failed", "Expired"}
