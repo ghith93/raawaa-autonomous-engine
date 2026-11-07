@@ -119,9 +119,32 @@ narrower claim and is no longer presented as parent-process isolation.
 
 ## What is still missing before #427 may merge
 
-1. **The probes must run, and be green, on a real runner.** Everything so far is the
-   contract, not the proof. Until `sandbox-adversarial.yml` produces a green run for
-   a specific image digest, #440's acceptance criteria are *implemented*, not *met*.
+1. ~~**The probes must run, and be green, on a real runner.**~~ **Done on
+   2026-11-07, once.** `sandbox-adversarial.yml` run
+   [42329064427](https://github.com/ghith93/raawaa-autonomous-engine/actions/runs/42329064427)
+   succeeded on `3a9987e` on a standard `ubuntu-24.04` GitHub-hosted runner: the
+   image was refused unless it matched the pinned digest, gVisor `runsc` was
+   installed and registered, the runtime assertion passed, the image was pulled,
+   and all eight reviewed probes passed — including the host-helper positive
+   control and the host-process environment read. Per-probe outcomes are now
+   published as check annotations so this is independently checkable.
+
+   What that run does **and does not** establish, stated precisely:
+
+   - **It does establish** that on this runner, with `--network=none`,
+     `--read-only`, `--cap-drop=ALL`, `no-new-privileges`, a non-root user,
+     `--pids-limit`, `--memory`/`--memory-swap` equal, and `--cpus` set, the
+     boundary behaved as specified for the eight probed properties.
+   - **The network probe's meaning is narrow and worth stating.** It shows the
+     container could not reach the public address while `_require_host_network_control`
+     separately proved the *host running the suite* could reach that same address
+     immediately before the sandbox attempt. Without that control a firewall or
+     offline runner would produce a vacuous "denied". It is still a claim about
+     one address from one container, not a general internet-reachability proof.
+   - **One dispatch is not the acceptance gate for #440.** Resource-limit
+     behaviour under pressure, descendant cleanup with lease/capability
+     revocation, and rejection of PR/fork/unreviewed refs are still unproven
+     (items 2-4 below), and the release flag stays `false`.
 2. **The wall clock is not a Docker flag.** The executor must run the vector under a
    timeout, kill the whole process group, and revoke the task lease. That code is
    the next increment and belongs with the executor, not here.
