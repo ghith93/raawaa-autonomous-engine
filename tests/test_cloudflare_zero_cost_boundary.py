@@ -48,9 +48,9 @@ class ZeroCostBoundaryTests(unittest.TestCase):
 
     def test_cancelled_and_expired_subscriptions_are_inactive(self):
         result = assess_subscriptions([
-            {"state": "Cancelled", "rate_plan": {"id": "paid"}},
-            {"state": "Expired", "rate_plan": {"id": "paid"}},
-            {"state": "Failed", "rate_plan": {"id": "paid"}},
+            {"id": "sub-cancelled", "state": "Cancelled", "rate_plan": {"id": "paid"}},
+            {"id": "sub-expired", "state": "Expired", "rate_plan": {"id": "paid"}},
+            {"id": "sub-failed", "state": "Failed", "rate_plan": {"id": "paid"}},
         ])
         self.assertTrue(result["eligible"])
 
@@ -85,6 +85,7 @@ class ZeroCostBoundaryTests(unittest.TestCase):
             seen.append((request, timeout))
             return Response(responses[len(seen) - 1])
         result = check_boundary("synthetic-account", "synthetic-token", opener=opener)
+        self.assertEqual(result["reason"], "no_active_paid_subscriptions")
         self.assertTrue(result["eligible"])
         self.assertEqual(len(seen), 2)
         self.assertEqual(parse_qs(urlparse(seen[0][0].full_url).query), {"page": ["1"], "per_page": ["50"]})
