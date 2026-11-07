@@ -404,10 +404,19 @@ def activity_annotation(result: dict) -> str:
 
 
 def main() -> int:
-    result = check_boundary(
-        os.environ.get("CLOUDFLARE_ACCOUNT_ID", "").strip(),
-        os.environ.get("CLOUDFLARE_API_TOKEN", "").strip(),
+    # The List Zones API cannot reveal zones hidden by a token scoped to a
+    # subset. Require an explicit repository-variable attestation before
+    # treating the returned inventory as complete. Missing/false is fail-closed.
+    all_zones_confirmed = (
+        os.environ.get("CLOUDFLARE_ZONE_READ_ALL_ZONES_CONFIRMED", "").strip().lower() == "true"
     )
+    if not all_zones_confirmed:
+        result = _invalid("zone_read_all_zones_scope_unconfirmed")
+    else:
+        result = check_boundary(
+            os.environ.get("CLOUDFLARE_ACCOUNT_ID", "").strip(),
+            os.environ.get("CLOUDFLARE_API_TOKEN", "").strip(),
+        )
     eligible = "true" if result["eligible"] else "false"
     output_path = os.environ.get("GITHUB_OUTPUT")
     if output_path:
