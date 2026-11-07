@@ -16,7 +16,7 @@ from urllib.request import HTTPRedirectHandler, Request, build_opener
 
 USER_AGENT = "RaawaaAutonomousEngine-ZeroCostPreflight/2.0"
 MAX_RESPONSE_BYTES = 1024 * 1024
-PER_PAGE = 50
+PER_PAGE = 1000
 MAX_PAGES = 100
 MAX_SUBSCRIPTIONS = PER_PAGE * MAX_PAGES
 ACTIVE_STATES = {"Trial", "Provisioned", "Paid", "AwaitingPayment"}
@@ -115,12 +115,18 @@ def _read_page(account_id: str, token: str, page: int, opener, timeout: int) -> 
     count, current_page = info.get("count"), info.get("page")
     per_page, total = info.get("per_page"), info.get("total_count")
     values = (count, current_page, per_page, total)
-    if any(not isinstance(v, int) or isinstance(v, bool) for v in values):
-        raise ValueError("invalid_pagination_metadata")
-    if current_page != page or per_page < 1 or per_page > PER_PAGE:
-        raise ValueError("invalid_pagination_metadata")
-    if count != len(records) or count > per_page or total < count or total > MAX_SUBSCRIPTIONS:
+    names = ("count", "page", "per_page", "total_count")
+    for name, value in zip(names, values):
+        if not isinstance(value, int) or isinstance(value, bool):
+            raise ValueError("invalid_pagination_" + name)
+    if current_page != page:
+        raise ValueError("pagination_page_mismatch")
+    if per_page < 1 or per_page > PER_PAGE:
+        raise ValueError("invalid_pagination_per_page")
+    if count != len(records) or count > per_page:
         raise ValueError("incomplete_subscription_page")
+    if total < count or total > MAX_SUBSCRIPTIONS:
+        raise ValueError("invalid_pagination_total_count")
     return records, info
 
 
@@ -170,7 +176,11 @@ def check_boundary(account_id: str, token: str, opener=None, timeout: int = 15) 
             "billing_response_too_large",
             "invalid_billing_response",
             "missing_pagination_metadata",
-            "invalid_pagination_metadata",
+            "invalid_pagination_count",
+            "invalid_pagination_page",
+            "invalid_pagination_per_page",
+            "invalid_pagination_total_count",
+            "pagination_page_mismatch",
             "incomplete_subscription_page",
             "subscription_inventory_changed_during_pagination",
             "missing_or_duplicate_subscription_id",
