@@ -27,13 +27,13 @@
     "config/tool_permissions.json"
   ],
   "watermark": {
-    "last_processed_comment_id": 6699947567,
-    "last_processed_comment_created_at": "2026-11-07T00:55:47Z",
-    "last_processed_comment_url": "https://github.com/ghith93/raawaa-autonomous-engine/issues/464#issuecomment-6699947567",
+    "last_processed_comment_id": 6699991112,
+    "last_processed_comment_created_at": "2026-11-07T00:59:31Z",
+    "last_processed_comment_url": "https://github.com/ghith93/raawaa-autonomous-engine/issues/464#issuecomment-6699991112",
     "last_reviewed_task_comment_id": 6693901805,
     "last_verified_main_sha": "389f25b431a190117713533351daee8e5009581d",
-    "updated_at_utc": "2026-11-07T00:58:26Z",
-    "summary": "Offline issue-comment ingest cost preflight gate with dry-run validation; exact billing boundary, watchdog writes, and queue replay after skipped events remain unresolved. No remote writes or secrets accessed."
+    "updated_at_utc": "2026-11-07T01:00:50Z",
+    "summary": "Reviewed autonomous handoff: preserve research persistence opt-in, watchdog dispatch and free-only proof. PR #651 adds offline cost gating for comment enqueue; skipped events need reconciliation before safe activation."
   },
   "open_engineering_priorities": [
     "P0: Review and approve a dedicated main-only one-shot Groq Free GPT-OSS 20B Staging dispatch path (with run-scoped idempotency key and revalidated 20B account hard-stop evidence) while keeping 120B disabled/quarantined and xAI Grok blocked.",
