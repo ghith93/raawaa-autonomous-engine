@@ -39,8 +39,6 @@ jobs:
         with:
           python-version: "3.11"
       - name: Prove local scheduled task lifecycle with fake executor
-        env:
-          RAAWAA_ENGINE_DB: \${{ runner.temp }}/raawaa-local-task-cycle.db
         run: python scripts/run_local_task_cycle.py --run-id "$GITHUB_RUN_ID"
       - name: Validate safe execution policy
         run: python -m engine.cli audit
