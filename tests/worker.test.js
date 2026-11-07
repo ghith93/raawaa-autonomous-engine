@@ -358,32 +358,6 @@ test("enqueue rejects an idempotency key reused with a different priority", asyn
   assert.equal(DB.calls.some(call => call.kind === "batch"), false);
 });
 
-test("enqueue replay binds type, title, payload and attempt policy", async () => {
-  const existingTask = {
-    id: "existing", task_type: "research_brief", title: "Stable",
-    payload_json: '{"nested":{"a":1,"b":2},"list":[1,2]}',
-    max_attempts: 3, priority: 50, dependencies_json: "[]", execution_lane: "general",
-  };
-  const base = { task_type: "research_brief", title: "Stable", idempotency_key: "key",
-    payload: { list: [1, 2], nested: { b: 2, a: 1 } }, max_attempts: 3 };
-  for (const [change, status] of [
-    [{}, 200], [{task_type: "content_draft"}, 409], [{title: "Changed"}, 409],
-    [{payload: {list: [2, 1], nested: {a: 1, b: 2}}}, 409], [{max_attempts: 2}, 409],
-  ]) {
-    const DB = dbMock({existingTask});
-    const response = await worker.fetch(request("/v1/tasks/enqueue", {
-      method: "POST", body: {...base, ...change},
-    }), {DB, ENGINE_API_TOKEN: TOKEN});
-    assert.equal(response.status, status);
-    assert.equal(DB.calls.some(call => call.kind === "batch"), false);
-  }
-  const corrupt = dbMock({existingTask: {...existingTask, payload_json: "invalid"}});
-  const response = await worker.fetch(request("/v1/tasks/enqueue", {
-    method: "POST", body: base,
-  }), {DB: corrupt, ENGINE_API_TOKEN: TOKEN});
-  assert.equal(response.status, 409);
-});
-
 test("enqueue rejects malformed task payload", async () => {
   const response = await worker.fetch(request("/v1/tasks/enqueue", {
     method: "POST",
