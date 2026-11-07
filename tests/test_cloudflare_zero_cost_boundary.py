@@ -138,6 +138,10 @@ class ZeroCostBoundaryTests(unittest.TestCase):
              "rate_plan": {"id": "workers_paid", "public_name": "Workers Paid"}},
             {"id": "unknown", "state": "Provisioned", "price": 0,
              "rate_plan": {"id": "unknown", "public_name": "Unknown Plan"}},
+            {"id": "external", "state": "Provisioned", "price": 0,
+             "rate_plan": {"id": "free", "public_name": "Workers Free", "externally_managed": True}},
+            {"id": "contract", "state": "Provisioned", "price": 0,
+             "rate_plan": {"id": "free", "public_name": "Workers Free", "is_contract": True}},
             {"id": "bad", "state": "Provisioned", "price": float("nan"),
              "rate_plan": {"id": "free", "public_name": "Workers Free"}},
         ]
