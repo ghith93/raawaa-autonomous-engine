@@ -69,7 +69,17 @@ class ZeroCostBoundaryTests(unittest.TestCase):
             {"id": "sub-expired", "state": "Expired", "rate_plan": {"id": "paid"}},
             {"id": "sub-failed", "state": "Failed", "rate_plan": {"id": "paid"}},
         ])
+        self.assertFalse(result["eligible"])
+        self.assertEqual(result["reason"], "inactive_subscription_inventory_unverified")
+
+    def test_inactive_subscriptions_do_not_block_a_separately_verified_active_free_plan(self):
+        result = assess_subscriptions([
+            {"id": "sub-cancelled", "state": "Cancelled"},
+            {"id": "sub-free", "state": "Provisioned", "price": 0,
+             "rate_plan": {"id": "free", "public_name": "Workers Free"}},
+        ])
         self.assertTrue(result["eligible"])
+        self.assertEqual(result["reason"], "active_free_subscription_verified")
 
     def test_unknown_state_plan_and_malformed_prices_fail_closed(self):
         bad_records = [
@@ -90,7 +100,10 @@ class ZeroCostBoundaryTests(unittest.TestCase):
 
     def test_pagination_is_followed_until_the_complete_inventory_is_read(self):
         seen = []
-        first_page = [{"id": f"sub-{index}", "state": "Cancelled"} for index in range(50)]
+        first_page = [{
+            "id": "sub-free", "state": "Provisioned", "price": 0,
+            "rate_plan": {"id": "free", "public_name": "Workers Free"},
+        }] + [{"id": f"sub-{index}", "state": "Cancelled"} for index in range(1, 50)]
         second_page = [{"id": "sub-50", "state": "Expired"}]
         responses = [
             page(first_page, number=1, total=51, per_page=50),
@@ -106,7 +119,7 @@ class ZeroCostBoundaryTests(unittest.TestCase):
             seen.append((request, timeout))
             return Response(responses[len(seen) - 1])
         result = check_boundary("synthetic-account", "synthetic-token", opener=opener)
-        self.assertEqual(result["reason"], "no_active_paid_subscriptions")
+        self.assertEqual(result["reason"], "active_free_subscription_verified")
         self.assertTrue(result["eligible"])
         self.assertEqual(len(seen), 2)
         self.assertEqual(parse_qs(urlparse(seen[0][0].full_url).query), {"page": ["1"], "per_page": ["50"]})
@@ -114,7 +127,7 @@ class ZeroCostBoundaryTests(unittest.TestCase):
         self.assertEqual(seen[0][0].get_header("Authorization"), "Bearer synthetic-token")
 
     def test_integral_numeric_pagination_metadata_accepts_cloudflare_number_schema(self):
-        record = {"id": "sub-cancelled", "state": "Cancelled"}
+        record = {"id": "sub-free", "state": "Provisioned", "price": 0, "rate_plan": {"id": "free", "public_name": "Workers Free"}}
         payload = page([record], number=1, total=1, per_page=50)
         payload["result_info"] = {key: float(value) for key, value in payload["result_info"].items()}
 
