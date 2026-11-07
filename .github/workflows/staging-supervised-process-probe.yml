@@ -20,7 +20,6 @@ jobs:
     if: ${{ github.event_name == 'schedule' && github.ref == 'refs/heads/main' }}
     permissions:
       contents: read
-      id-token: write
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
