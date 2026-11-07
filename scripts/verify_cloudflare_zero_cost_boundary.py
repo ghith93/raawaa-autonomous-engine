@@ -96,9 +96,9 @@ def assess_subscriptions(subscriptions: list) -> dict:
 def _metadata_count(value) -> int:
     if isinstance(value, bool):
         raise ValueError("invalid_subscription_count")
-    if isinstance(value, int):
+    if isinstance(value, int) and value >= 0:
         return value
-    if isinstance(value, float) and math.isfinite(value) and value.is_integer():
+    if isinstance(value, float) and math.isfinite(value) and value.is_integer() and value >= 0:
         return int(value)
     raise ValueError("invalid_subscription_count")
 
