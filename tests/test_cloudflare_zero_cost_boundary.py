@@ -452,7 +452,7 @@ class ZeroCostBoundaryTests(unittest.TestCase):
                     self.assertEqual(main(), 1)
                 check.assert_not_called()
             output.seek(0)
-            self.assertEqual(output.read(), "zero_cost_eligible=false\\n")
+            self.assertEqual(output.read(), "zero_cost_eligible=false\n")
             self.assertIn("zone_read_all_zones_scope_unconfirmed", buffer.getvalue())
 
     def test_http_failures_expose_only_safe_status_codes(self):
