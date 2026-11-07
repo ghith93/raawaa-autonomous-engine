@@ -97,7 +97,7 @@ class ProviderWorkflowSecurityTests(unittest.TestCase):
         self.assertIn("worker_lane=EXECUTION_LANE", script)
         self.assertIn("list_tasks(100, worker_lane=EXECUTION_LANE)", script)
 
-    def test_ci_telemetry_publisher_is_main_only_and_staging_only(self):
+    def test_ci_telemetry_publisher_is_opt_in_only_and_staging_only(self):
         workflow = ROOT / ".github" / "workflows" / "ci.yml"
         source = workflow.read_text(encoding="utf-8")
         marker = "  publish-staging-ops-telemetry:"
@@ -105,7 +105,8 @@ class ProviderWorkflowSecurityTests(unittest.TestCase):
         end = source.index("\n  staging-mobile-status-verify:", start)
         job = source[start:end]
         self.assertIn("needs: [test, staging-migrate, staging-worker-verify]", job)
-        self.assertIn("github.event_name == 'push'", job)
+        self.assertNotIn("github.event_name == 'push'", job)
+        self.assertNotIn("github.event_name == 'schedule'", job)
         self.assertIn("github.event_name == 'workflow_dispatch' && inputs.enable_staging_operations == true", job)
         self.assertIn("github.ref == 'refs/heads/main'", job)
         self.assertIn("python scripts/publish_staging_ops_telemetry.py", job)
