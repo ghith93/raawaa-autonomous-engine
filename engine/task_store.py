@@ -123,12 +123,21 @@ class TaskStore:
         dependencies_json = json.dumps(deps, separators=(",", ":"))
         key, task_id, now = idempotency_key or str(uuid.uuid4()), str(uuid.uuid4()), utc_now()
         with self._connect() as db:
+            db.execute("BEGIN IMMEDIATE")
             existing = db.execute("SELECT * FROM tasks WHERE idempotency_key=?", (key,)).fetchone()
             if existing:
                 existing_deps = [row["dependency_task_id"] for row in db.execute(
                     "SELECT dependency_task_id FROM task_dependencies WHERE task_id=? ORDER BY dependency_task_id",
                     (existing["id"],)).fetchall()]
+                try:
+                    stored_payload = json.dumps(json.loads(existing["payload_json"]), sort_keys=True)
+                except (TypeError, ValueError):
+                    raise ValueError("idempotency key conflicts with an existing task") from None
                 if (existing["execution_lane"] != execution_lane
+                        or existing["task_type"] != task_type
+                        or existing["title"] != title
+                        or stored_payload != payload_json
+                        or existing["max_attempts"] != max_attempts
                         or (priority_supplied and existing["priority"] != priority)
                         or (dependencies_supplied and existing_deps != deps)):
                     raise ValueError("idempotency key conflicts with an existing task")
@@ -217,6 +226,43 @@ class TaskStore:
                         "lease_expires_at": expires, "execution_mode": execution_mode,
                         "priority": row["priority"], "execution_lane": worker_lane})
             return self._task_dict(db.execute("SELECT * FROM tasks WHERE id=?", (row["id"],)).fetchone())
+
+    def claim_exact(self, task_id: str, lease_timeout_seconds: int = 900,
+                    execution_mode: str = "dry_run", worker_lane: str = "general") -> dict[str, Any] | None:
+        """Claim one eligible ID in its lane without sweeping unrelated tasks."""
+        import re
+        if not isinstance(task_id, str) or not re.fullmatch(r"[A-Za-z0-9_-]{1,128}", task_id):
+            raise ValueError("invalid task_id")
+        if not 1 <= lease_timeout_seconds <= 900:
+            raise ValueError("lease_timeout_seconds must be between 1 and 900")
+        if execution_mode != "dry_run":
+            raise ValueError("exact claims are restricted to dry_run")
+        lane_types = {"specialist:researcher": "research_brief", "specialist:reviewer": "code_review",
+                      "specialist:marketer": "content_draft", "specialist:operator": "system_audit",
+                      "specialist:mobile_tester": "mobile_test"}
+        if worker_lane != "general" and worker_lane not in lane_types:
+            raise ValueError("invalid worker_lane")
+        now = datetime.now(timezone.utc)
+        token = str(uuid.uuid4())
+        expires = (now + timedelta(seconds=lease_timeout_seconds)).isoformat()
+        with self._connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            row = db.execute("""UPDATE tasks SET status='running',attempts=attempts+1,
+                execution_mode=?,updated_at=?,lease_token=?,lease_expires_at=?
+                WHERE id=? AND status='pending' AND execution_lane=? AND attempts < max_attempts
+                AND task_type NOT IN ('codespace_inspect','codespace_test','supervised_probe')
+                AND (? IS NULL OR task_type=?)
+                AND NOT EXISTS (SELECT 1 FROM task_dependencies d
+                    JOIN tasks dependency ON dependency.id=d.dependency_task_id
+                    WHERE d.task_id=tasks.id AND (dependency.status <> 'succeeded' OR dependency.execution_mode <> ?))
+                RETURNING *""", (execution_mode, now.isoformat(), token, expires, task_id, worker_lane,
+                                lane_types.get(worker_lane), lane_types.get(worker_lane), execution_mode)).fetchone()
+            if row is None:
+                return None
+            self._audit(db, task_id, "task_claimed", {"attempt": row["attempts"],
+                "lease_expires_at": expires, "execution_mode": execution_mode,
+                "execution_lane": worker_lane, "claim_scope": "exact_id"})
+            return self._task_dict(row)
 
     def heartbeat(self, task_id: str, lease_token: str, lease_timeout_seconds: int = 900,
                   worker_lane: str = "general") -> str:
@@ -310,11 +356,14 @@ class TaskStore:
                 (now, worker_lane, worker_lane)).fetchall()
             for row in rows:
                 status = "pending" if row["attempts"] < row["max_attempts"] else "failed"
-                db.execute("""UPDATE tasks SET status=?,error=?,updated_at=?,lease_token=NULL,
+                changed = db.execute("""UPDATE tasks SET status=?,error=?,updated_at=?,lease_token=NULL,
                     lease_expires_at=NULL WHERE id=? AND status='running' AND lease_token IS ?
+                    AND (lease_expires_at IS NULL OR lease_expires_at < ?)
                     AND (? IS NULL OR execution_lane=?)""",
                     (status, "Recovered expired worker lease.", now, row["id"], row["lease_token"],
-                     worker_lane, worker_lane))
+                     now, worker_lane, worker_lane)).rowcount
+                if changed != 1:
+                    continue
                 self._audit(db, row["id"], "task_lease_recovered",
                             {"new_status": status, "attempt": row["attempts"],
                              "max_attempts": row["max_attempts"]})
