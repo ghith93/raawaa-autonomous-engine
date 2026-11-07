@@ -204,6 +204,8 @@ class CloudflareZeroCostEffectWorkflowTests(unittest.TestCase):
         block = source[source.index(gate):source.index(token)]
         self.assertIn("scripts/verify_cloudflare_zero_cost_boundary.py", block)
         self.assertNotIn("continue-on-error", block)
+        self.assertNotIn("id-token: write", source)
+        self.assertIn('RAAWAA_ENGINE_SUPABASE_FALLBACK_ZERO_COST_VERIFIED: "false"', source)
 
     def test_storefront_production_publish_requires_zero_cost_preflight(self):
         self._assert_gate_precedes(
