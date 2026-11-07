@@ -130,6 +130,30 @@ class ZeroCostBoundaryTests(unittest.TestCase):
         self.assertFalse(result["eligible"])
         self.assertEqual(result["reason"], "incomplete_subscription_page")
 
+    def test_integer_valued_numeric_pagination_metadata_is_accepted(self):
+        body = page([{"id": "sub-free", "state": "Cancelled"}], number=1.0, total=1.0, per_page=20.0)
+        class Response:
+            status = 200
+            def __enter__(self): return self
+            def __exit__(self, *args): return False
+            def read(self, limit): return json.dumps(body).encode()
+        result = check_boundary("account", "token", opener=lambda *_a, **_k: Response())
+        self.assertTrue(result["eligible"])
+
+    def test_fractional_or_nonfinite_pagination_metadata_fails_closed(self):
+        for field, value in (("page", 1.5), ("count", float("nan")), ("per_page", float("inf"))):
+            with self.subTest(field=field):
+                body = page([{"id": "sub-free", "state": "Cancelled"}], total=1)
+                body["result_info"][field] = value
+                class Response:
+                    status = 200
+                    def __enter__(self): return self
+                    def __exit__(self, *args): return False
+                    def read(self, limit): return json.dumps(body).encode()
+                result = check_boundary("account", "token", opener=lambda *_a, **_k: Response())
+                self.assertFalse(result["eligible"])
+                self.assertEqual(result["reason"], "invalid_pagination_" + field)
+
     def test_missing_or_incomplete_pagination_fails_closed(self):
         class Response:
             status = 200
