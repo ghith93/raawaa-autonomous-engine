@@ -57,3 +57,81 @@ class ResearchSearchBenchmarkTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class RealCorpusResearchSearchTests(unittest.TestCase):
+    def setUp(self):
+        from scripts.benchmark_research_search import build_real_corpus_from_data
+        self.build = build_real_corpus_from_data
+        self.snapshot = {
+            "retrieved_at": "2026-11-07T00:00:00Z",
+            "candidates": [{
+                "full_name": "acme/agent-runtime",
+                "description": "Agent orchestration runtime with durable task workflows",
+                "topics": ["multi-agent", "workflow"],
+                "discovered_via": ["agent_frameworks"],
+                "pushed_at": "2026-11-06T00:00:00Z",
+                "language": "Python",
+                "license_spdx": "MIT",
+            }],
+            "academic_candidates": [{
+                "doi": "10.1000/example",
+                "title": "Task assignment in heterogeneous multi-agent teams",
+                "authors": ["A. Author"],
+                "container_title": "Journal of Agents",
+                "published": "2026-01-01",
+            }],
+            "arxiv_candidates": [{
+                "arxiv_id": "2601.00001v1",
+                "title": "Reproducible agent benchmark artifacts",
+                "categories": ["cs.AI"],
+                "published": "2026-01-02",
+            }],
+        }
+        self.qrels = {
+            "arabic_aliases": {
+                "agents": "تنسيق الوكلاء سير العمل",
+                "research": "إعادة إنتاج الأبحاث معايير التحقق",
+            },
+            "queries": [
+                {"query_id": "en-agents", "query": "agent orchestration workflow", "language": "en",
+                 "capability": "agents", "expected_ids": ["github:acme/agent-runtime"]},
+                {"query_id": "ar-agents", "query": "تنسيق الوكلاء", "language": "ar",
+                 "capability": "agents", "expected_ids": ["github:acme/agent-runtime"]},
+                {"query_id": "en-research", "query": "reproducible benchmark", "language": "en",
+                 "capability": "research", "expected_ids": ["arxiv:2601.00001v1"]},
+                {"query_id": "missing", "query": "not present", "language": "en",
+                 "capability": "missing", "expected_ids": ["github:missing/repository"]},
+            ],
+        }
+
+    def test_builds_public_snapshot_and_tracks_label_coverage(self):
+        documents, queries, coverage = self.build(self.snapshot, self.qrels)
+        self.assertEqual(len(documents), 3)
+        self.assertEqual(len(queries), 3)
+        self.assertFalse(coverage[-1]["evaluated"])
+        self.assertEqual(coverage[-1]["coverage"], 0.0)
+        agent = next(item for item in documents if item["id"] == "github:acme/agent-runtime")
+        self.assertIn("تنسيق الوكلاء", agent["body"])
+
+    def test_weighted_or_fts_finds_arabic_aliases(self):
+        from scripts.benchmark_research_search import _create_database, search_fts_or
+        documents, queries, _ = self.build(self.snapshot, self.qrels)
+        db = _create_database(documents)
+        try:
+            arabic = next(case for case in queries if case.query_id == "ar-agents")
+            self.assertEqual(search_fts_or(db, arabic.query, 10), ["github:acme/agent-runtime"])
+        finally:
+            db.close()
+
+    def test_real_corpus_report_is_offline_and_tracks_sources(self):
+        from scripts.benchmark_research_search import run_real_corpus_benchmark
+        result = run_real_corpus_benchmark(self.snapshot, self.qrels)
+        self.assertEqual(result["network_calls"], 0)
+        self.assertEqual(result["remote_writes"], 0)
+        self.assertEqual(result["provider_calls"], 0)
+        self.assertEqual(result["snapshot"]["documents"], 3)
+        self.assertEqual(result["snapshot"]["source_counts"], {"github": 1, "crossref": 1, "arxiv": 1})
+        self.assertEqual(result["snapshot"]["evaluated_queries"], 3)
+        self.assertEqual(result["snapshot"]["benchmark_status"], "insufficient_coverage")
+        self.assertIn("sqlite_fts5_or_bm25", result["methods"])

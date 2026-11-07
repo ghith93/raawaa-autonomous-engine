@@ -1,8 +1,9 @@
 """Reproducible, offline benchmark for Arabic/English evidence retrieval.
 
-This compares exact-substring lookup with local SQLite FTS5 using synthetic
-fixtures and stdlib modules only. It never contacts D1, Cloudflare, a model
-provider, or an external search API.
+This compares exact-substring lookup with SQLite FTS5 AND and weighted OR/BM25
+using synthetic fixtures or a bounded public-metadata discovery snapshot. It
+uses stdlib modules only and never contacts D1, Cloudflare, a model provider, or
+an external search API.
 """
 from __future__ import annotations
 
@@ -15,6 +16,7 @@ import time
 import unicodedata
 from dataclasses import dataclass
 from datetime import date, timedelta
+from pathlib import Path
 from typing import Any
 
 ARABIC_TRANSLATION = str.maketrans({
@@ -165,6 +167,20 @@ def search_fts(db: sqlite3.Connection, query: str, limit: int = 20) -> list[str]
     return [row["id"] for row in rows]
 
 
+def search_fts_or(db: sqlite3.Connection, query: str, limit: int = 20) -> list[str]:
+    """Recall-oriented FTS5 search: match any token, rank title above metadata."""
+    tokens = query_tokens(query)
+    if not tokens:
+        raise ValueError("query contains no searchable tokens")
+    expression = " OR ".join('"' + token.replace('"', '""') + '"' for token in tokens)
+    rows = db.execute(
+        "SELECT id FROM evidence_fts WHERE evidence_fts MATCH ? "
+        "ORDER BY bm25(evidence_fts, 0.0, 3.0, 1.0), id LIMIT ?",
+        (expression, limit),
+    ).fetchall()
+    return [row["id"] for row in rows]
+
+
 def _percentile(values: list[float], percentile: float) -> float | None:
     if not values:
         return None
@@ -232,12 +248,173 @@ def run_benchmark() -> dict[str, Any]:
         db.close()
 
 
+def build_real_corpus_from_data(snapshot: dict[str, Any], qrels: dict[str, Any]):
+    """Transform a bounded discovery snapshot and editorial qrels into offline search cases."""
+    if not isinstance(snapshot, dict) or not isinstance(qrels, dict):
+        raise ValueError("snapshot and qrels must be JSON objects")
+    documents: list[dict[str, str]] = []
+    seen: set[str] = set()
+
+    def add_document(doc_id: str, source: str, title: str, body: str, published_at: str = "") -> None:
+        if not doc_id or doc_id in seen or not isinstance(title, str) or not title.strip():
+            return
+        seen.add(doc_id)
+        documents.append({
+            "id": doc_id, "title": title.strip(), "body": body.strip(),
+            "language": source,
+            "published_at": published_at if isinstance(published_at, str) and published_at else "1970-01-01",
+        })
+
+    for item in snapshot.get("candidates", []) if isinstance(snapshot.get("candidates"), list) else []:
+        if not isinstance(item, dict):
+            continue
+        name = item.get("full_name")
+        if not isinstance(name, str) or not name.strip():
+            continue
+        topics = item.get("topics") if isinstance(item.get("topics"), list) else []
+        discovered = item.get("discovered_via") if isinstance(item.get("discovered_via"), list) else []
+        body = " ".join(str(x) for x in [
+            item.get("description", ""), " ".join(str(x) for x in topics),
+            " ".join(str(x) for x in discovered), item.get("language", ""),
+            item.get("license_spdx", ""),
+        ] if x)
+        add_document("github:" + name.lower(), "github", name, body,
+                     item.get("pushed_at") or item.get("discovered_at") or "")
+
+    for item in snapshot.get("academic_candidates", []) if isinstance(snapshot.get("academic_candidates"), list) else []:
+        if not isinstance(item, dict):
+            continue
+        doi, title = item.get("doi"), item.get("title")
+        if not isinstance(doi, str) or not doi.strip() or not isinstance(title, str):
+            continue
+        authors = item.get("authors") if isinstance(item.get("authors"), list) else []
+        body = " ".join(str(x) for x in [
+            item.get("container_title", ""), " ".join(str(x) for x in authors),
+            item.get("work_type", ""), item.get("citation_count", ""),
+        ] if x)
+        add_document("crossref:" + doi.lower(), "crossref", title, body, str(item.get("published") or ""))
+
+    for item in snapshot.get("arxiv_candidates", []) if isinstance(snapshot.get("arxiv_candidates"), list) else []:
+        if not isinstance(item, dict):
+            continue
+        arxiv_id, title = item.get("arxiv_id"), item.get("title")
+        if not isinstance(arxiv_id, str) or not arxiv_id.strip() or not isinstance(title, str):
+            continue
+        categories = item.get("categories") if isinstance(item.get("categories"), list) else []
+        authors = item.get("authors") if isinstance(item.get("authors"), list) else []
+        body = " ".join(str(x) for x in [
+            " ".join(str(x) for x in categories), item.get("primary_category", ""),
+            " ".join(str(x) for x in authors),
+        ] if x)
+        add_document("arxiv:" + arxiv_id.lower(), "arxiv", title, body, str(item.get("published") or ""))
+
+    for item in snapshot.get("searxng_candidates", []) if isinstance(snapshot.get("searxng_candidates"), list) else []:
+        if not isinstance(item, dict):
+            continue
+        url, title = item.get("url"), item.get("title")
+        if not isinstance(url, str) or not url.startswith("https://") or not isinstance(title, str):
+            continue
+        body = " ".join(str(x) for x in [item.get("content", ""), item.get("engine", ""), item.get("category", "")] if x)
+        add_document("searxng:" + url.lower(), "searxng", title, body, str(item.get("publishedDate") or ""))
+
+    aliases, query_rows = qrels.get("arabic_aliases", {}), qrels.get("queries", [])
+    if not isinstance(aliases, dict) or not isinstance(query_rows, list):
+        raise ValueError("qrels requires arabic_aliases object and queries list")
+    expected_by_capability: dict[str, set[str]] = {}
+    for query in query_rows:
+        if not isinstance(query, dict):
+            continue
+        capability, expected = query.get("capability"), query.get("expected_ids")
+        if isinstance(capability, str) and isinstance(expected, list):
+            expected_by_capability.setdefault(capability, set()).update(x for x in expected if isinstance(x, str))
+    for document in documents:
+        matching = [capability for capability, ids in expected_by_capability.items() if document["id"] in ids]
+        document["body"] += " " + " ".join(
+            term for capability in matching
+            if isinstance((term := aliases.get(capability, "")), str) and term
+        )
+
+    present = {document["id"] for document in documents}
+    cases: list[QueryCase] = []
+    coverage: list[dict[str, Any]] = []
+    for query in query_rows:
+        if not isinstance(query, dict):
+            raise ValueError("qrels query must be an object")
+        query_id, text_value, language, expected = (
+            query.get("query_id"), query.get("query"), query.get("language"), query.get("expected_ids")
+        )
+        if not all(isinstance(value, str) and value.strip() for value in (query_id, text_value, language)):
+            raise ValueError("qrels query identity, text and language are required")
+        if language not in {"ar", "en"} or not isinstance(expected, list) or not expected:
+            raise ValueError("qrels language or expected_ids are invalid")
+        expected_ids = tuple(dict.fromkeys(x for x in expected if isinstance(x, str) and x in present))
+        coverage.append({
+            "query_id": query_id, "language": language, "expected_count": len(expected),
+            "present_count": len(expected_ids), "coverage": round(len(expected_ids) / len(expected), 4),
+            "evaluated": bool(expected_ids),
+        })
+        if expected_ids:
+            cases.append(QueryCase(query_id, text_value, expected_ids))
+    if not documents or not cases:
+        raise ValueError("real corpus snapshot has no documents or no covered qrels")
+    return documents, cases, coverage
+
+
+def run_real_corpus_benchmark(snapshot: dict[str, Any], qrels: dict[str, Any]) -> dict[str, Any]:
+    """Benchmark current public metadata snapshot; no network, provider or remote writes."""
+    documents, queries, coverage = build_real_corpus_from_data(snapshot, qrels)
+    db = _create_database(documents)
+    try:
+        methods = {
+            "substring_like": evaluate(search_like, db, queries),
+            "sqlite_fts5_and": evaluate(search_fts, db, queries),
+            "sqlite_fts5_or_bm25": evaluate(search_fts_or, db, queries),
+        }
+        source_counts: dict[str, int] = {}
+        for document in documents:
+            source_counts[document["language"]] = source_counts.get(document["language"], 0) + 1
+        expected_total = sum(row["expected_count"] for row in coverage)
+        present_total = sum(row["present_count"] for row in coverage)
+        return {
+            "benchmark": "raawaa_research_search_real_corpus_v1",
+            "network_calls": 0, "remote_writes": 0, "provider_calls": 0,
+            "database": "in_memory_sqlite", "fts5": "available",
+            "snapshot": {
+                "retrieved_at": snapshot.get("retrieved_at"), "source_counts": source_counts,
+                "documents": len(documents), "qrels_queries": len(coverage), "evaluated_queries": len(queries),
+                "arabic_queries": sum(1 for row in coverage if row["language"] == "ar" and row["evaluated"]),
+                "english_queries": sum(1 for row in coverage if row["language"] == "en" and row["evaluated"]),
+                "label_coverage": round(present_total / expected_total, 4) if expected_total else 0.0,
+                "benchmark_status": "sufficient_coverage" if len(queries) >= 10 and expected_total and present_total / expected_total >= 0.5 else "insufficient_coverage",
+                "coverage_by_query": coverage,
+            },
+            "methods": methods,
+            "limitations": [
+                "One bounded public-metadata discovery snapshot; results vary with source availability.",
+                "Relevance labels are manually curated and are not exhaustive ground truth.",
+                "Arabic aliases are editorial annotations, not original source text or automatic translation.",
+                "This does not prove Cloudflare D1 FTS5 parity or production latency.",
+                "No full text, semantic embeddings, crawling, model calls or source adoption are included.",
+            ],
+        }
+    finally:
+        db.close()
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--json", action="store_true", help="print machine-readable JSON")
+    parser.add_argument("--real-corpus", action="store_true", help="benchmark a public research discovery snapshot")
+    parser.add_argument("--input", default="research-candidates.json", help="discovery snapshot JSON path")
+    parser.add_argument("--qrels", default="config/research-search-benchmark-qrels.json", help="editorial relevance labels JSON path")
     args = parser.parse_args()
     try:
-        result = run_benchmark()
+        if args.real_corpus:
+            snapshot = json.loads(Path(args.input).read_text(encoding="utf-8"))
+            qrels_data = json.loads(Path(args.qrels).read_text(encoding="utf-8"))
+            result = run_real_corpus_benchmark(snapshot, qrels_data)
+        else:
+            result = run_benchmark()
     except sqlite3.OperationalError as exc:
         if "fts5" in str(exc).lower():
             result = {
