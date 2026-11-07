@@ -121,6 +121,9 @@ class ProviderWorkflowSecurityTests(unittest.TestCase):
             if allow_continue_on_error:
             self.assertIn("continue-on-error: true", block)
         else:
+            if allow_continue_on_error:
+            self.assertIn("continue-on-error: true", block)
+        else:
             self.assertNotIn("continue-on-error", block)
         self.assertNotIn("if: always()", block)
 
