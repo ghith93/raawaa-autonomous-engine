@@ -117,6 +117,26 @@ class TaskStoreTests(unittest.TestCase):
         self.assertFalse(any(event["task_id"] == exhausted["id"] and event["event"] == "task_claimed"
                              for event in self.store.audit_events()))
 
+    def test_capped_task_remains_unclaimed_under_generic_exact_race(self):
+        from concurrent.futures import ThreadPoolExecutor
+        from threading import Barrier
+        exhausted = self.store.enqueue("research_brief", "Exhausted", priority=100, max_attempts=1)
+        available = self.store.enqueue("research_brief", "Available", priority=10)
+        with self.store._connect() as db:
+            db.execute("UPDATE tasks SET attempts=max_attempts WHERE id=?", (exhausted["id"],))
+        barrier = Barrier(2)
+        def race_claim(exact):
+            barrier.wait()
+            if exact:
+                return self.store.claim_exact(exhausted["id"])
+            return self.store.claim_next(execution_mode="dry_run")
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            results = list(pool.map(race_claim, (True, False)))
+        self.assertIsNone(results[0])
+        self.assertEqual(results[1]["id"], available["id"])
+        row = next(t for t in self.store.list_tasks() if t["id"] == exhausted["id"])
+        self.assertEqual((row["status"], row["attempts"], row["lease_token"]), ("pending", 1, None))
+
     def test_worker_processes_safe_task_as_dry_run(self):
         self.store.enqueue("research_brief", "Test task", {"topic": "agent frameworks"})
         result = run_once(self.store)
