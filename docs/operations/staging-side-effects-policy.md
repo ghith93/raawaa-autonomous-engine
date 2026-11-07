@@ -1,35 +1,28 @@
-# Staging lifecycle automation — 2026-11-07
+# Autonomous Staging lifecycle — 2026-11-07
 
-## Default autonomous operation
+## Default operation
 
-Engine CI runs its test suite on pushes, pull requests and daily schedules. Its
-four Staging-effect jobs skip these events, including main pushes. This is a
-statement about Engine CI jobs only: other workflows have their own triggers and
-may have side effects. GitHub Actions does not wake an Arena session.
+- Engine CI runs on pushes, pull requests and daily at 04:17 UTC.
+- Offline policy, Python, Worker, local D1 and local Workflows tests run without a human dispatch.
+- A successful push to `main` automatically starts the Staging lifecycle only after a read-only Cloudflare billing preflight establishes that the account has no active paid subscriptions.
+- The daily schedule runs the test and research-discovery cycles; it does not repeatedly deploy Staging when source code has not changed.
+- Engine CI exposes no `workflow_dispatch` trigger. There is no routine manual start.
 
-## Manual dispatch safety
+## Zero-cost preflight
 
-The Staging lifecycle runs only on a main-ref `workflow_dispatch` with
-`enable_staging_operations=true`; the input defaults to false. When enabled, it
-can apply migrations, deploy the isolated Worker, install temporary capabilities,
-run remote proofs and publish telemetry. Opt-in is not evidence of a zero-cost
-boundary: verify provider billing and all other safety requirements before use.
+The preflight reads the account subscriptions endpoint only. It fails closed if credentials are missing, the endpoint fails, response size/schema/pagination is incomplete, a subscription has an unknown state/price/plan, or any active paid subscription is found. The gate must validate the complete paginated result and finite nonnegative prices. It publishes only a boolean eligibility result and sanitized reason.
+
+Cloudflare documents Workers Free as the default plan and documents that Workers Free request limits and D1 Free daily read/write limits fail closed rather than switching to paid usage. The Staging lifecycle uses only an isolated Worker and its separate D1 database; it does not create a paid service or activate model inference.
 
 ## Boundaries
 
-- No Production D1 migrations or Production Worker deployment are part of this Staging lifecycle.
-- The workflow verifies fixed Staging/Production identifiers before writes.
-- Temporary tokens are generated per run and revoked in `always()` cleanup steps.
-- No paid inference is enabled by these deployment checks; live inference and provider spending remain controlled by separate explicit policy/quota gates.
-- CI failures remain visible and prevent dependent operations.
+- No Production D1 migrations or Production Worker deployment.
+- Fixed Staging and Production identifiers are checked before any remote write.
+- Temporary Staging tokens are generated per run and revoked in cleanup steps.
+- Live model inference is not part of Engine CI. Groq smoke remains a separate bounded, Free-only workflow with its own hard gates.
+- If zero-cost eligibility cannot be proven, all Staging side effects skip automatically; local CI and research discovery continue.
+- No manual dispatch is needed or exposed for the Engine CI Staging lifecycle.
 
 ## Verification
 
-`scripts/check_workflow_dispatch_guards.py`, `tests/test_workflow_dispatch_guards.py`, and `tests/test_provider_workflow_security.py` check the manual opt-in and Engine CI event guards.
-
-
-## Autonomous CI policy — 2026-11-07
-
-Engine CI runs automatically on branch pushes, pull requests, and once daily at 04:17 UTC. These runs execute the full offline test, Worker, local D1, and policy suites without requiring a person to dispatch them.
-
-Staging migrations, Worker deployment, temporary secret installation, telemetry writes, and remote proofs are deliberately excluded from push and scheduled runs. They remain behind the existing explicit manual opt-in as an emergency/diagnostic path only; ordinary autonomous progress does not depend on it. The scheduled research-discovery workflow remains independent and runs daily. No Arena session wake is implied by a GitHub Actions run.
+`scripts/check_workflow_dispatch_guards.py`, `tests/test_workflow_dispatch_guards.py`, and `tests/test_provider_workflow_security.py` enforce the automatic push trigger, no manual dispatch, main-ref restriction and mandatory zero-cost preflight dependency.
