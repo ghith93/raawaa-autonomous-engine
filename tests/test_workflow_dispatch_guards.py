@@ -37,6 +37,17 @@ jobs:
 """
         self.assertEqual(len(workflow_violations("deploy.yml", content)), 1)
 
+    def test_engine_ci_never_cancels_active_runs_and_preflight_is_fail_closed(self):
+        workflow = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+        self.assertIn("cancel-in-progress: false", workflow)
+        self.assertIn("engine-ci-${{ github.ref }}-${{ github.event_name }}", workflow)
+        block = workflow.split("  zero_cost_preflight:", 1)[1].split("\n  staging-migrate:", 1)[0]
+        self.assertIn("continue-on-error: true", block)
+        self.assertIn("zero_cost_eligible:", workflow)
+        for job in check.STAGING_EFFECT_JOBS:
+            job_block = dict(job_blocks(workflow))[job]
+            self.assertIn("needs.zero_cost_preflight.outputs.zero_cost_eligible == 'true'", job_block)
+
     def test_staging_replay_jobs_are_explicitly_main_guarded(self):
         workflow = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
         triggers = check.parse_triggers(workflow)
