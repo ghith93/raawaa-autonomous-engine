@@ -67,3 +67,8 @@ The report now separates two evaluation tracks:
 Both tracks retain per-query label coverage and are reported separately. Never quote alias-assisted metrics without the source-native comparison.
 
 A local exploratory run on discovery snapshot #42317405323 (61 records: 41 GitHub, 10 Crossref, 10 arXiv; 20 queries) showed that strict AND matching was too restrictive. Weighted OR/BM25 materially improved recall and ranking on this small labelled set. These exploratory numbers are not production claims and do not establish D1 FTS5 parity or latency. The next step is to review the first scheduled benchmark artifacts and refine labels from observed misses before changing any production search endpoint.
+
+
+## Discovery coverage adjustment — 2026-11-07
+
+The GitHub discovery workflow retains up to 8 results per query (previously 5) while keeping the same 9 API queries and the API's hard per-page bound of 10. This increases candidate recall without adding request count or a new source. Candidates remain untrusted public metadata, uninstalled and unexecuted. The next benchmark artifact must show whether MCP and model-routing label coverage improves; revert or tune the cap if precision/triage quality degrades.
