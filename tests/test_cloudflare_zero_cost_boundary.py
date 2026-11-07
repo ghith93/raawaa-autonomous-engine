@@ -27,8 +27,10 @@ def page(records, number=1, total=None, per_page=50):
 
 
 class ZeroCostBoundaryTests(unittest.TestCase):
-    def test_empty_complete_subscription_inventory_is_eligible(self):
-        self.assertTrue(assess_subscriptions([])["eligible"])
+    def test_empty_subscription_inventory_is_not_proof_of_zero_cost(self):
+        result = assess_subscriptions([])
+        self.assertFalse(result["eligible"])
+        self.assertEqual(result["reason"], "empty_subscription_inventory_unverified")
 
     def test_active_paid_subscription_blocks_staging(self):
         result = assess_subscriptions([{
