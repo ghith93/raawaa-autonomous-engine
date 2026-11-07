@@ -56,6 +56,10 @@ class ProviderWorkflowSecurityTests(unittest.TestCase):
         start = source.index("  staging-worker-verify:")
         end = source.index("\n  publish-staging-ops-telemetry:", start)
         job = source[start:end]
+        self.assertIn("needs: [test, staging-migrate, zero_cost_preflight]", job)
+        self.assertIn("needs.zero_cost_preflight.outputs.zero_cost_eligible == 'true'", job)
+        self.assertIn("github.event_name == 'push'", job)
+        self.assertIn("github.event_name == 'schedule'", job)
         self.assertIn("Wait for temporary Staging consumer capabilities to propagate", job)
         self.assertIn('("general", "/v1/tasks?limit=1", {})', job)
         self.assertIn('("researcher", "/v1/tasks?limit=1&worker_lane=specialist%3Aresearcher"', job)
@@ -97,17 +101,17 @@ class ProviderWorkflowSecurityTests(unittest.TestCase):
         self.assertIn("worker_lane=EXECUTION_LANE", script)
         self.assertIn("list_tasks(100, worker_lane=EXECUTION_LANE)", script)
 
-    def test_ci_telemetry_publisher_is_opt_in_only_and_staging_only(self):
+    def test_ci_telemetry_publisher_is_automatic_after_zero_cost_preflight(self):
         workflow = ROOT / ".github" / "workflows" / "ci.yml"
         source = workflow.read_text(encoding="utf-8")
         marker = "  publish-staging-ops-telemetry:"
         start = source.index(marker)
         end = source.index("\n  staging-mobile-status-verify:", start)
         job = source[start:end]
-        self.assertIn("needs: [test, staging-migrate, staging-worker-verify]", job)
-        self.assertNotIn("github.event_name == 'push'", job)
-        self.assertNotIn("github.event_name == 'schedule'", job)
-        self.assertIn("github.event_name == 'workflow_dispatch' && inputs.enable_staging_operations == true", job)
+        self.assertIn("needs: [test, staging-migrate, staging-worker-verify, zero_cost_preflight]", job)
+        self.assertIn("github.event_name == 'push'", job)
+        self.assertIn("github.event_name == 'schedule'", job)
+        self.assertIn("needs.zero_cost_preflight.outputs.zero_cost_eligible == 'true'", job)
         self.assertIn("github.ref == 'refs/heads/main'", job)
         self.assertIn("python scripts/publish_staging_ops_telemetry.py", job)
         self.assertIn("CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}", job)
@@ -123,6 +127,9 @@ class ProviderWorkflowSecurityTests(unittest.TestCase):
         verify = workflow.split("  staging-mobile-status-verify:", 1)[1]
         self.assertIn("needs.publish-staging-ops-telemetry.result == 'success'", verify)
         self.assertIn("needs.staging-worker-verify.result == 'success'", verify)
+        self.assertIn("needs.zero_cost_preflight.outputs.zero_cost_eligible == 'true'", verify)
+        self.assertIn("github.event_name == 'push'", verify)
+        self.assertIn("github.event_name == 'schedule'", verify)
         self.assertIn("secret put ENGINE_API_TOKEN", verify)
         self.assertIn("secret delete ENGINE_API_TOKEN", verify)
         self.assertIn("python scripts/verify_staging_mobile_status.py", verify)
