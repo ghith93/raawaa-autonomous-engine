@@ -97,6 +97,28 @@ class ProviderWorkflowSecurityTests(unittest.TestCase):
         self.assertIn("worker_lane=EXECUTION_LANE", script)
         self.assertIn("list_tasks(100, worker_lane=EXECUTION_LANE)", script)
 
+    def test_groq_staging_smoke_requires_verified_cloudflare_zero_cost_before_any_side_effect(self):
+        workflow = ROOT / ".github" / "workflows" / "groq-free-inference-staging-smoke.yml"
+        source = workflow.read_text(encoding="utf-8")
+        gate_name = "name: Verify Cloudflare zero-cost boundary before Groq Staging side effects"
+        token = "name: Generate ephemeral Staging bearer token"
+        deploy = "name: Deploy isolated Staging Worker with one temporary GPT-OSS 20B quota route"
+        d1_write = "name: Enforce zero-USD hard caps in isolated Staging D1"
+        install_token = "name: Install ephemeral Staging API token"
+        inference = "name: Run one bounded Groq Free inference and verify zero spend"
+        gate = source.index(gate_name)
+        self.assertLess(gate, source.index(token))
+        self.assertLess(gate, source.index(deploy))
+        self.assertLess(gate, source.index(d1_write))
+        self.assertLess(gate, source.index(install_token))
+        self.assertLess(gate, source.index(inference))
+        block = source[gate:source.index(token)]
+        self.assertIn("scripts/verify_cloudflare_zero_cost_boundary.py", block)
+        self.assertIn("CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}", block)
+        self.assertIn("CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}", block)
+        self.assertNotIn("continue-on-error", block)
+        self.assertNotIn("if: always()", block)
+
     def test_ci_telemetry_publisher_is_main_only_and_staging_only(self):
         workflow = ROOT / ".github" / "workflows" / "ci.yml"
         source = workflow.read_text(encoding="utf-8")
@@ -127,6 +149,86 @@ class ProviderWorkflowSecurityTests(unittest.TestCase):
         self.assertIn("secret delete ENGINE_API_TOKEN", verify)
         self.assertIn("python scripts/verify_staging_mobile_status.py", verify)
         self.assertIn("steps.install_staging_token.outcome == 'success'", verify)
+
+class CloudflareZeroCostEffectWorkflowTests(unittest.TestCase):
+    """Every workflow that mutates Cloudflare or invokes Workers AI must fail closed first."""
+
+    def _assert_gate_precedes(self, path, gate, effects):
+        source = (ROOT / path).read_text(encoding="utf-8")
+        gate_at = source.index(gate)
+        for effect in effects:
+            with self.subTest(path=path, effect=effect):
+                self.assertLess(gate_at, source.index(effect))
+        block = source[gate_at:source.index(effects[0])]
+        self.assertIn("scripts/verify_cloudflare_zero_cost_boundary.py", block)
+        self.assertIn("CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}", block)
+        self.assertIn("CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}", block)
+        self.assertNotIn("continue-on-error", block)
+        self.assertNotIn("if: always()", block)
+
+    def test_production_d1_migration_requires_zero_cost_preflight(self):
+        self._assert_gate_precedes(
+            ".github/workflows/d1-migrate.yml",
+            "name: Verify Cloudflare zero-cost boundary before Production D1 migration",
+            [
+                "name: Show remote migration status",
+                "name: Apply reviewed migrations to the confirmed D1 database",
+            ],
+        )
+
+    def test_manual_staging_p1_requires_zero_cost_preflight(self):
+        self._assert_gate_precedes(
+            ".github/workflows/staging-p1-task-proof.yml",
+            "name: Verify Cloudflare zero-cost boundary before Staging P1 side effects",
+            [
+                "name: Generate an ephemeral Staging-only bearer token",
+                "name: Install temporary token on the isolated Staging Worker",
+                "name: Enqueue, claim, execute, and read back exactly one harmless task",
+            ],
+        )
+
+    def test_scheduled_probe_requires_cloudflare_free_proof_and_blocks_unverified_supabase_fallback(self):
+        path = ".github/workflows/staging-supervised-process-probe.yml"
+        source = (ROOT / path).read_text(encoding="utf-8")
+        required = "name: Require Cloudflare credentials before any remote scheduled task"
+        gate = "name: Verify Cloudflare zero-cost boundary before scheduled Staging effects"
+        token = "name: Generate an ephemeral Staging-only bearer token"
+        install = "name: Install temporary token on the isolated Staging Worker"
+        probe = "name: Enqueue, claim, and execute exactly one read-only supervised task"
+        self.assertLess(source.index(required), source.index(gate))
+        self.assertLess(source.index(gate), source.index(token))
+        self.assertLess(source.index(gate), source.index(install))
+        self.assertLess(source.index(gate), source.index(probe))
+        required_at = source.index(required)
+        required_start = source.rfind("      - name:", 0, required_at)
+        required_end = source.find("      - name:", required_start + 1)
+        required_block = source[required_start:required_end]
+        self.assertIn("steps.cloudflare_credentials.outputs.available != 'true'", required_block)
+        gate_at = source.index(gate)
+        gate_start = source.rfind("      - name:", 0, gate_at)
+        gate_end = source.find("      - name:", gate_start + 1)
+        gate_step = source[gate_start:gate_end]
+        self.assertIn("steps.cloudflare_credentials.outputs.available == 'true'", gate_step)
+        block = source[source.index(gate):source.index(token)]
+        self.assertIn("scripts/verify_cloudflare_zero_cost_boundary.py", block)
+        self.assertNotIn("continue-on-error", block)
+        self.assertNotIn("id-token: write", source)
+        self.assertIn('RAAWAA_ENGINE_SUPABASE_FALLBACK_ZERO_COST_VERIFIED: "false"', source)
+
+    def test_storefront_production_publish_requires_zero_cost_preflight(self):
+        self._assert_gate_precedes(
+            ".github/workflows/deploy-commerce-storefront.yml",
+            "name: Verify Cloudflare zero-cost boundary before storefront deployment",
+            ["name: Publish Brand-Only Pages URL & Retire Legacy Worker Subdomain"],
+        )
+
+    def test_workers_ai_image_generation_requires_zero_cost_preflight(self):
+        self._assert_gate_precedes(
+            ".github/workflows/raawaa-image-route-check.yml",
+            "name: Verify Cloudflare zero-cost boundary before Workers AI inference",
+            ["name: Generate one real image through the free route"],
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
