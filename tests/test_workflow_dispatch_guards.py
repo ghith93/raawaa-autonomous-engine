@@ -37,6 +37,20 @@ jobs:
 """
         self.assertEqual(len(workflow_violations("deploy.yml", content)), 1)
 
+    def test_main_and_scheduled_ci_runs_are_not_cancelled_by_new_pushes(self):
+        workflow = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+        self.assertIn("cancel-in-progress: ${{ github.event_name == 'pull_request' }}", workflow)
+        self.assertNotIn("cancel-in-progress: true", workflow)
+
+    def test_billing_preflight_failure_blocks_staging_without_failing_offline_ci(self):
+        workflow = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+        block = workflow.split("  zero_cost_preflight:", 1)[1].split("\n  staging-migrate:", 1)[0]
+        self.assertIn("continue-on-error: true", block)
+        self.assertIn("zero_cost_eligible:", workflow)
+        for job in check.STAGING_EFFECT_JOBS:
+            job_block = dict(job_blocks(workflow))[job]
+            self.assertIn("needs.zero_cost_preflight.outputs.zero_cost_eligible == 'true'", job_block)
+
     def test_staging_replay_jobs_are_explicitly_main_guarded(self):
         workflow = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
         triggers = check.parse_triggers(workflow)
