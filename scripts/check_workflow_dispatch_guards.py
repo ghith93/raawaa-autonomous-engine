@@ -269,26 +269,38 @@ STAGING_EFFECT_JOBS: tuple[str, ...] = (
 
 
 def staging_gate_violations(path: str, content: str) -> list[str]:
-    """Require Staging side effects to be opt-in only, never push/schedule driven."""
+    """Require automatic main-push Staging only after a read-only zero-cost preflight."""
     if Path(path).name != "ci.yml":
         return []
     violations: list[str] = []
-    if "      enable_staging_operations:" not in content:
-        violations.append(f"{path}: workflow_dispatch must declare enable_staging_operations")
-    if "        default: false" not in content:
-        violations.append(f"{path}: enable_staging_operations must default to false")
+    if has_manual_dispatch(content):
+        violations.append(f"{path}: Engine CI Staging lifecycle must not expose manual workflow_dispatch")
     blocks = dict(job_blocks(content))
+    preflight = blocks.get("zero_cost_preflight", "")
+    if not preflight:
+        violations.append(f"{path}: read-only zero_cost_preflight job is required")
+    else:
+        if "scripts/verify_cloudflare_zero_cost_boundary.py" not in preflight:
+            violations.append(f"{path}: zero_cost_preflight must verify Cloudflare subscriptions")
+        if "outputs:" not in preflight or "zero_cost_eligible:" not in preflight:
+            violations.append(f"{path}: zero_cost_preflight must publish a bounded eligibility output")
+        if "github.event_name == 'push'" not in preflight or "github.event_name == 'schedule'" not in preflight:
+            violations.append(f"{path}: zero_cost_preflight must run automatically on main push and daily schedule")
     for job_name in STAGING_EFFECT_JOBS:
         block = blocks.get(job_name, "")
         if not block:
             violations.append(f"{path}: required Staging job '{job_name}' is missing")
             continue
-        if "github.event_name == 'push'" in block or "github.event_name == 'schedule'" in block:
-            violations.append(f"{path}: Staging job '{job_name}' must never run automatically on push or schedule")
-        if "github.event_name == 'workflow_dispatch' && inputs.enable_staging_operations == true" not in block:
-            violations.append(f"{path}: Staging job '{job_name}' must require explicit manual opt-in")
+        if "github.event_name == 'push'" not in block or "github.event_name == 'schedule'" not in block:
+            violations.append(f"{path}: Staging job '{job_name}' must run automatically on main push and daily schedule")
+        if "workflow_dispatch" in block:
+            violations.append(f"{path}: Staging job '{job_name}' must not depend on manual dispatch")
         if "github.ref == 'refs/heads/main'" not in block:
             violations.append(f"{path}: Staging job '{job_name}' is not restricted to main")
+        if not any("needs:" in line and "zero_cost_preflight" in line for line in block.splitlines()):
+            violations.append(f"{path}: Staging job '{job_name}' must depend on zero_cost_preflight")
+        if "needs.zero_cost_preflight.outputs.zero_cost_eligible == 'true'" not in block:
+            violations.append(f"{path}: Staging job '{job_name}' lacks the zero-cost eligibility gate")
     return violations
 
 
@@ -377,7 +389,7 @@ def main() -> int:
         return 1
     print("All secret-bearing workflow_dispatch and push/PR jobs are restricted to refs/heads/main.")
     print("No production-class workflow exposes a manual dispatch trigger.")
-    print("Engine CI Staging-effect jobs require explicit manual opt-in; push and scheduled Engine CI runs skip them.")
+    print("Main pushes run Staging automatically only when the read-only zero-cost preflight confirms no active paid subscription; manual dispatch also requires explicit opt-in.")
     return 0
 
 

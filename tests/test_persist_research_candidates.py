@@ -52,6 +52,19 @@ class ResearchPersistenceTests(unittest.TestCase):
         self.assertEqual(opened.call_args.kwargs["timeout"], 20)
         self.assertIn("github:org/repo", request.data.decode("utf-8"))
 
+    def test_research_workflow_automatically_gates_all_staging_writes_on_zero_cost_preflight(self):
+        root = Path(__file__).resolve().parents[1]
+        workflow = (root / ".github" / "workflows" / "research-discovery.yml").read_text(encoding="utf-8")
+        self.assertIn("id: research_zero_cost_preflight", workflow)
+        self.assertIn("continue-on-error: true", workflow)
+        self.assertIn("python scripts/verify_cloudflare_zero_cost_boundary.py", workflow)
+        self.assertIn("steps.research_zero_cost_preflight.outputs.zero_cost_eligible == 'true'", workflow)
+        self.assertNotIn("vars.RAAWAA_ENGINE_RESEARCH_PERSISTENCE", workflow)
+        self.assertIn("CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}", workflow)
+        self.assertIn("RAAWAA_ENGINE_API_TOKEN: ${{ secrets.ENGINE_STAGING_API_TOKEN }}", workflow)
+        telemetry = workflow.split("      - name: Publish explicit scan and source freshness telemetry", 1)[1]
+        self.assertIn("steps.research_zero_cost_preflight.outputs.zero_cost_eligible == 'true'", telemetry)
+
     def test_workflow_persistence_is_staging_only_and_uses_dedicated_token(self):
         root = Path(__file__).resolve().parents[1]
         workflow = (root / ".github" / "workflows" / "research-discovery.yml").read_text(encoding="utf-8")

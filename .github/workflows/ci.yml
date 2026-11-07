@@ -9,17 +9,8 @@ on:
   push:
   pull_request:
     branches: [main]
-  # Autonomous daily regression run; tests only, never Staging writes/deploys.
   schedule:
     - cron: "17 4 * * *"
-  workflow_dispatch:
-    inputs:
-      enable_staging_operations:
-        description: Explicitly authorize Staging D1 migrations, Worker deployment and telemetry writes for this run
-        required: true
-        type: boolean
-        default: false
-
 permissions:
   contents: read
 
@@ -64,10 +55,34 @@ jobs:
         run: npm run test:d1-local
       - name: Run local Cloudflare Workflows runtime smoke test
         run: npm run test:workflow-local
+  zero_cost_preflight:
+    name: Verify zero-cost Cloudflare boundary (read-only)
+    needs: test
+    if: ${{ github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'schedule') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    outputs:
+      zero_cost_eligible: ${{ steps.preflight.outputs.zero_cost_eligible }}
+    steps:
+      - name: Check out the exact tested main revision
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - name: Set up Python
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7
+        with:
+          python-version: "3.12"
+      - name: Verify there are no active paid Cloudflare subscriptions
+        id: preflight
+        env:
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: python scripts/verify_cloudflare_zero_cost_boundary.py
+
   staging-migrate:
     name: Apply reviewed migrations to Staging
-    needs: test
-    if: ${{ github.ref == 'refs/heads/main' && github.event_name == 'workflow_dispatch' && inputs.enable_staging_operations == true }}
+    needs: [test, zero_cost_preflight]
+    if: ${{ github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'schedule') && needs.zero_cost_preflight.outputs.zero_cost_eligible == 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     concurrency:
@@ -130,8 +145,8 @@ jobs:
 
   staging-worker-verify:
     name: Deploy isolated Staging Worker and verify monetary ledger
-    needs: [test, staging-migrate]
-    if: ${{ github.ref == 'refs/heads/main' && github.event_name == 'workflow_dispatch' && inputs.enable_staging_operations == true }}
+    needs: [test, staging-migrate, zero_cost_preflight]
+    if: ${{ github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'schedule') && needs.zero_cost_preflight.outputs.zero_cost_eligible == 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     concurrency:
@@ -307,8 +322,8 @@ jobs:
 
   publish-staging-ops-telemetry:
     name: Publish sanitized CI and inference-gate telemetry to Staging
-    needs: [test, staging-migrate, staging-worker-verify]
-    if: ${{ always() && github.ref == 'refs/heads/main' && github.event_name == 'workflow_dispatch' && inputs.enable_staging_operations == true }}
+    needs: [test, staging-migrate, staging-worker-verify, zero_cost_preflight]
+    if: ${{ always() && github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'schedule') && needs.zero_cost_preflight.outputs.zero_cost_eligible == 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -330,8 +345,8 @@ jobs:
 
   staging-mobile-status-verify:
     name: Verify authenticated Staging mobile status readback
-    needs: [publish-staging-ops-telemetry, staging-worker-verify]
-    if: ${{ always() && github.ref == 'refs/heads/main' && github.event_name == 'workflow_dispatch' && inputs.enable_staging_operations == true && needs.publish-staging-ops-telemetry.result == 'success' && needs.staging-worker-verify.result == 'success' }}
+    needs: [publish-staging-ops-telemetry, staging-worker-verify, zero_cost_preflight]
+    if: ${{ always() && github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'schedule') && needs.zero_cost_preflight.outputs.zero_cost_eligible == 'true' && needs.publish-staging-ops-telemetry.result == 'success' && needs.staging-worker-verify.result == 'success' }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
     concurrency:
