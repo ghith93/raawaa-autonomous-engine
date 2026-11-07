@@ -1936,8 +1936,10 @@ test("schema diagnostics report every table the Worker depends on", async () => 
   assert.ok(body.checked.includes("task_dependencies"), "task_dependencies must be probed");
   assert.ok(body.checked.includes("workflow_runs"), "workflow_runs must be probed");
   assert.ok(body.checked.includes("task_process_dispatches"), "process dispatch ledger must be probed");
+  assert.ok(body.checked.includes("research_ingest_batches"), "research batch idempotency table must be probed");
+  assert.ok(body.checked.includes("research_ingest_events"), "research event idempotency table must be probed");
   assert.ok(body.checked.includes("tasks.execution_lane"), "execution lane migration must be probed");
-  assert.equal(body.checked.length, 9);
+  assert.equal(body.checked.length, 11);
 });
 
 test("schema diagnostics name the table a deploy forgot to migrate", async () => {
@@ -1958,6 +1960,25 @@ test("schema diagnostics name the table a deploy forgot to migrate", async () =>
   assert.equal(body.ok, false);
   assert.deepEqual(body.missing, ["task_dependencies"]);
   assert.ok(body.reasons.task_dependencies.includes("no such table"));
+});
+
+test("schema diagnostics fail closed when research idempotency tables are missing", async () => {
+  const DB = {
+    prepare(sql) {
+      if (sql.includes("FROM research_ingest_events")) {
+        throw new Error("D1_ERROR: no such table: research_ingest_events: SQLITE_ERROR");
+      }
+      return { async all() { return { results: [] }; } };
+    },
+    async batch() { return []; },
+  };
+  const response = await worker.fetch(request("/v1/diagnostics/schema", {
+    method: "GET", token: TOKEN,
+  }), { DB, ENGINE_API_TOKEN: TOKEN });
+  const body = await response.json();
+  assert.equal(response.status, 503);
+  assert.equal(body.ok, false);
+  assert.deepEqual(body.missing, ["research_ingest_events"]);
 });
 
 test("schema diagnostics reject a non-GET method and an unauthenticated caller", async () => {
