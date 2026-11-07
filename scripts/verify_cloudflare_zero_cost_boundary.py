@@ -200,8 +200,13 @@ def fetch_zone_inventory(account_id: str, token: str, opener=None, timeout: int 
     if total < count or total > MAX_ZONES_TO_VERIFY:
         raise ValueError("too_many_zones_to_verify" if total > MAX_ZONES_TO_VERIFY else "zone_inventory_incomplete")
     expected_pages = 0 if total == 0 else math.ceil(total / per_page)
-    if total_pages is not None and total_pages != expected_pages:
-        raise ValueError("zone_inventory_incomplete")
+    if total_pages is not None:
+        allowed_total_pages = {expected_pages}
+        if total == 0:
+            # Cloudflare may encode an empty page set as either 0 or 1 pages.
+            allowed_total_pages.add(1)
+        if total_pages not in allowed_total_pages:
+            raise ValueError("zone_inventory_incomplete")
     if total != len(zones):
         # This one bounded request must contain the entire small account zone list.
         raise ValueError("zone_inventory_incomplete")
