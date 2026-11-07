@@ -329,6 +329,7 @@ class ZeroCostBoundaryTests(unittest.TestCase):
     def test_main_fails_ci_when_zero_cost_eligibility_is_unknown(self):
         with tempfile.NamedTemporaryFile(mode="r+", encoding="utf-8") as output:
             env = {"CLOUDFLARE_ACCOUNT_ID": ACCOUNT, "CLOUDFLARE_API_TOKEN": TOKEN,
+                   "CLOUDFLARE_ZONE_READ_ALL_ZONES_CONFIRMED": "true",
                    "GITHUB_OUTPUT": output.name}
             with patch.dict(os.environ, env, clear=False), patch(
                 "scripts.verify_cloudflare_zero_cost_boundary.check_boundary",
@@ -339,6 +340,28 @@ class ZeroCostBoundaryTests(unittest.TestCase):
                 self.assertEqual(main(), 1)
             output.seek(0)
             self.assertEqual(output.read(), "zero_cost_eligible=false\n")
+
+
+    def test_main_blocks_when_all_zones_token_scope_is_not_attested(self):
+        import contextlib
+        import io
+        with tempfile.NamedTemporaryFile(mode="r+", encoding="utf-8") as output:
+            env = {
+                "CLOUDFLARE_ACCOUNT_ID": ACCOUNT,
+                "CLOUDFLARE_API_TOKEN": TOKEN,
+                "CLOUDFLARE_ZONE_READ_ALL_ZONES_CONFIRMED": "",
+                "GITHUB_OUTPUT": output.name,
+            }
+            with patch.dict(os.environ, env, clear=False), patch(
+                "scripts.verify_cloudflare_zero_cost_boundary.check_boundary"
+            ) as check:
+                buffer = io.StringIO()
+                with contextlib.redirect_stdout(buffer):
+                    self.assertEqual(main(), 1)
+                check.assert_not_called()
+            output.seek(0)
+            self.assertEqual(output.read(), "zero_cost_eligible=false\n")
+            self.assertIn("zone_read_all_zones_scope_unconfirmed", buffer.getvalue())
 
     def test_http_failures_expose_only_safe_status_codes(self):
         for code in (400, 401, 403, 404, 429, 500):
@@ -384,6 +407,7 @@ class ActivityAnnotationTests(unittest.TestCase):
             env = {
                 "CLOUDFLARE_ACCOUNT_ID": "synthetic-account",
                 "CLOUDFLARE_API_TOKEN": "synthetic-token",
+                "CLOUDFLARE_ZONE_READ_ALL_ZONES_CONFIRMED": "true",
                 "GITHUB_OUTPUT": output.name,
             }
             result = {"eligible": False, "reason": "zone_inventory_unavailable",
