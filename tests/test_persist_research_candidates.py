@@ -56,6 +56,7 @@ class ResearchPersistenceTests(unittest.TestCase):
         root = Path(__file__).resolve().parents[1]
         workflow = (root / ".github" / "workflows" / "research-discovery.yml").read_text(encoding="utf-8")
         self.assertIn("id: research_zero_cost_preflight", workflow)
+        self.assertNotIn("\n  workflow_dispatch:\n", workflow)
         self.assertIn("continue-on-error: true", workflow)
         self.assertIn("python scripts/verify_cloudflare_zero_cost_boundary.py", workflow)
         self.assertIn("steps.research_zero_cost_preflight.outputs.zero_cost_eligible == 'true'", workflow)
