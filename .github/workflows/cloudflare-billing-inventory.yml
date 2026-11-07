@@ -138,8 +138,52 @@ jobs:
             exit 1
           fi
 
-      - name: Evaluate complete subscription inventory with fail-closed zero-cost parser
+      - name: Evaluate the zero-cost gate and report which endpoint answered what
+        # This workflow is the diagnosis surface, so the gate's exit code is
+        # recorded rather than failing the run. The run used to report only
+        # "exit code 1" with no readable cause: a merged gate made it fail the
+        # whole job, so the annotations that explain *why* never mattered to a
+        # reviewer reading the run list. The gate itself is unchanged - it still
+        # exits non-zero, and the remote-effect workflows still fail closed on
+        # it. Here the outcome is the artifact.
+        continue-on-error: true
         env:
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-        run: python scripts/verify_cloudflare_zero_cost_boundary.py
+        run: |
+          set +e
+          python scripts/verify_cloudflare_zero_cost_boundary.py
+          gate_exit=$?
+          echo "zero_cost_gate_exit=$gate_exit"
+          # Read-only, one request per endpoint, status codes only. This is what
+          # distinguishes "the endpoint is missing for this token" from "the
+          # account carries a paid plan" - the two were previously
+          # indistinguishable because every endpoint's HTTP error collapsed into
+          # one reason token.
+          python - "$CLOUDFLARE_ACCOUNT_ID" <<'PY'
+          import os, sys
+          from urllib.error import HTTPError, URLError
+          from urllib.request import Request, build_opener
+          account = sys.argv[1]
+          token = os.environ["CLOUDFLARE_API_TOKEN"]
+          endpoints = {
+              "account_subscriptions": f"https://api.cloudflare.com/client/v4/accounts/{account}/subscriptions",
+              "zones": "https://api.cloudflare.com/client/v4/zones?account.id=%s&page=1&per_page=50&type=full,partial,secondary,internal" % account,
+              "spend_policies": f"https://api.cloudflare.com/client/v4/accounts/{account}/billing/spend-policies",
+          }
+          open_request = build_opener().open
+          for name, url in endpoints.items():
+              request = Request(url, headers={"Authorization": "Bearer " + token,
+                                              "Accept": "application/json",
+                                              "User-Agent": "RaawaaAutonomousEngine-ZeroCostPreflight/3.0"},
+                                method="GET")
+              try:
+                  with open_request(request, timeout=15) as response:
+                      print(f"::notice title=Endpoint reachability::{name}=" + str(response.status))
+              except HTTPError as exc:
+                  print(f"::notice title=Endpoint reachability::{name}=" + str(exc.code))
+              except (URLError, OSError, TimeoutError) as exc:
+                  print(f"::notice title=Endpoint reachability::{name}=transport_{type(exc).__name__}")
+          # Status codes only: no URLs, account ids, bodies or credentials.
+          PY
+          echo "Endpoint reachability recorded. The zero-cost gate remains authoritative."

@@ -90,7 +90,14 @@ class Response:
 
 class ZeroCostBoundaryTests(unittest.TestCase):
     def test_empty_addon_inventory_is_allowed_only_after_zone_inventory_is_checked(self):
-        self.assertTrue(assess_subscriptions([])["eligible"])
+        # #682 recorded that an empty add-on list is not proof of a Free
+        # account, so it must not be eligible on its own. This assertion
+        # previously claimed the opposite, which contradicted the documented
+        # finding; the list-level answer is "unknown", and only the zone
+        # inventory can turn that into positive evidence.
+        self.assertFalse(assess_subscriptions([])["eligible"])
+        self.assertEqual(assess_subscriptions([])["reason"],
+                         "empty_subscription_inventory_unverified")
         zones = zone_payload([])
         def opener(request, timeout):
             if "/accounts/" in request.full_url:
@@ -304,7 +311,92 @@ class ZeroCostBoundaryTests(unittest.TestCase):
             raise HTTPError(request.full_url, 403, "private body", {}, None)
         result = check_boundary(ACCOUNT, TOKEN, opener=fail_zone_list)
         self.assertFalse(result["eligible"])
-        self.assertEqual(result["reason"], "billing_http_403")
+        # The failing endpoint names itself. Reporting "billing_http_403" here
+        # pointed at the billing endpoint, which had in fact answered 200.
+        self.assertEqual(result["reason"], "zone_inventory_http_403")
+
+    def test_each_endpoint_names_itself_in_the_failure_reason(self):
+        """A zone-side 404 must not be reported as a billing 404.
+
+        Observed live on 2026-11-07 (run 42329717569): the post-#685 preflight
+        reported `billing_http_404` for three separate workflows. The billing
+        endpoint had answered 200; the 404 came from the zone endpoints. One
+        shared handler for every endpoint made the reason point at the wrong
+        resource, so the reported cause could not be trusted.
+        """
+        free_addon = {
+            "id": "addon-free", "state": "Provisioned", "price": 0,
+            "rate_plan": {"id": "free", "public_name": "Free Plan"},
+        }
+
+        def opener_for(billing, zone_inventory_status, zone_plan_status=200):
+            def opener(request, timeout):
+                url = request.full_url
+                if url.split("?")[0].endswith("/subscriptions"):
+                    if billing != 200:
+                        raise HTTPError(url, billing, "private body", {}, None)
+                    return Response(subscription_payload([free_addon]))
+                if url.split("?")[0].endswith("/zones"):
+                    if zone_inventory_status != 200:
+                        raise HTTPError(url, zone_inventory_status, "private body", {}, None)
+                    return Response(zone_payload([{"id": "zone-1", "name": "example.test",
+                                                   "account": {"id": ACCOUNT}}]))
+                if url.endswith("/subscription"):
+                    if zone_plan_status != 200:
+                        raise HTTPError(url, zone_plan_status, "private body", {}, None)
+                    return Response({"success": True, "result": {
+                        "price": 0, "state": "Provisioned",
+                        "rate_plan": {"id": "free", "public_name": "Free Website Plan"},
+                    }})
+                raise AssertionError("unexpected request " + url)
+            return opener
+
+        cases = {
+            ("billing", 404): "billing_http_404",
+            ("billing", 403): "billing_http_403",
+            ("zone_inventory", 404): "zone_inventory_http_404",
+            ("zone_inventory", 403): "zone_inventory_http_403",
+            ("zone_plan", 404): "zone_subscription_http_404",
+        }
+        for (where, status), expected in cases.items():
+            with self.subTest(where=where, status=status):
+                opener = opener_for(
+                    status if where == "billing" else 200,
+                    status if where == "zone_inventory" else 200,
+                    status if where == "zone_plan" else 200,
+                )
+                result = check_boundary(ACCOUNT, TOKEN, opener=opener)
+                self.assertFalse(result["eligible"])
+                self.assertEqual(result["reason"], expected)
+                # No response body, URL or account id may reach the reason.
+                self.assertNotIn("private", json.dumps(result))
+                self.assertNotIn(ACCOUNT, json.dumps(result))
+
+    def test_empty_addon_list_still_passes_when_every_zone_plan_is_free(self):
+        """The empty-inventory finding must not make a Free account unreachable."""
+        free_addon = {
+            "id": "addon-free", "state": "Provisioned", "price": 0,
+            "rate_plan": {"id": "free", "public_name": "Free Plan"},
+        }
+        for addons in ([], [free_addon]):
+            with self.subTest(addons=len(addons)):
+                def opener(request, timeout):
+                    url = request.full_url
+                    if url.split("?")[0].endswith("/subscriptions"):
+                        return Response(subscription_payload(addons))
+                    if url.split("?")[0].endswith("/zones"):
+                        return Response(zone_payload([{"id": "zone-1", "name": "example.test",
+                                                       "account": {"id": ACCOUNT}}]))
+                    if url.endswith("/subscription"):
+                        return Response({"success": True, "result": {
+                            "price": 0, "state": "Provisioned",
+                            "rate_plan": {"id": "free", "public_name": "Free Website Plan"},
+                        }})
+                    raise AssertionError("unexpected request " + url)
+                result = check_boundary(ACCOUNT, TOKEN, opener=opener)
+                self.assertTrue(result["eligible"], result)
+                self.assertEqual(result["zones_checked"], 1)
+                self.assertEqual(result["active_paid_zone_plans"], 0)
 
     def test_response_size_and_invalid_json_fail_closed(self):
         class OversizedResponse:
