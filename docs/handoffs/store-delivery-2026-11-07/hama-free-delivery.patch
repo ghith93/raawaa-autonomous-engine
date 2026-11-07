@@ -1,0 +1,833 @@
+From eb10ef582e7b3019d687bcd31a845acc2429d2bc Mon Sep 17 00:00:00 2001
+From: raawaa-engine <engine@raawaa.local>
+Date: Sat, 7 Nov 2026 01:33:48 +0000
+Subject: [PATCH] fix(delivery): make Hama free for every payment method, other
+ governorates $2
+
+Owner-approved delivery contract (2026-11-07):
+  Hama governorate  -> free delivery for COD and Sham Cash alike
+  other governorates -> $2 for both payment methods
+Product prices are untouched (13 / 16 / 25).
+
+Root cause: the cart derived free delivery only from
+`payment.methods[].freeDeliveryIn`, so COD in Hama was charged $2 while the
+copy said free, and zone.fee drove every other surface. Free delivery is now
+read from the zone fee itself as well:
+
+- js/config.js: Hama zone fee 2 -> 0, notes/descriptions rewritten; the
+  zero-fee rule is documented at the source so future edits stay coherent.
+- js/cart.js: isFreeDelivery() treats a zero-fee zone as free for every
+  payment method and keeps freeDeliveryIn for per-method exceptions; the
+  payment-method description and the payment card now state both zones, so
+  no surface claims a fee the cart does not charge.
+- order-system/order-core.mjs + order-pricing.js: server-side pricing applies
+  the same rule and returns `freeDelivery`, so a stored order can never
+  disagree with the cart that produced it. order-entry bundle rebuilt.
+- js/campaign.js and scripts/margin_calc.py: same rule in the campaign
+  listing and margin tool.
+- index.html, serum.html, hama.html, docs/HAMA-OPS-KIT-AR.md: remove every
+  claim that Hama COD costs $2 or that free delivery is Sham-Cash-only.
+- New scripts/delivery-contract.test.mjs: four-case regression
+  (Hama/COD $0, Hama/Sham Cash $0, other/COD $2, other/Sham Cash $2) across
+  the browser cart, the WhatsApp message and the server pricing engine, plus
+  a copy guard that fails if any page re-states a Hama fee.
+- Existing price/delivery assertions updated to the same contract.
+
+Verification: npm run gates:offline -> 29 checks + 519 site checks, 238 unit
+tests, 0 failures. No product price, homepage design or ad spend changed; no
+deployment was performed.
+---
+ docs/HAMA-OPS-KIT-AR.md                  |   6 +-
+ hama.html                                |   4 +-
+ index.html                               |   4 +-
+ js/campaign.js                           |   4 +-
+ js/cart.js                               |  34 ++++--
+ js/config.js                             |  19 ++--
+ order-system/edge/order-entry-bundle.mjs |  10 +-
+ order-system/order-core.mjs              |   7 +-
+ order-system/order-core.test.mjs         |  12 ++-
+ order-system/order-http.test.mjs         |   2 +-
+ order-system/order-pricing.js            |   5 +-
+ order-system/order-service.test.mjs      |   2 +-
+ package.json                             |   6 +-
+ scripts/campaign-landing.test.mjs        |   6 +-
+ scripts/cart-offers.test.mjs             |  24 +++--
+ scripts/check-site.mjs                   |   9 +-
+ scripts/delivery-contract.test.mjs       | 129 +++++++++++++++++++++++
+ scripts/margin_calc.py                   |   2 +-
+ scripts/ops-kit.test.mjs                 |   4 +-
+ scripts/order-config-monitor.test.mjs    |   2 +-
+ scripts/order-form-preview.test.mjs      |   4 +-
+ scripts/sales-video-strategy.test.mjs    |   6 +-
+ serum.html                               |  16 +--
+ 23 files changed, 241 insertions(+), 76 deletions(-)
+ create mode 100644 scripts/delivery-contract.test.mjs
+
+diff --git a/docs/HAMA-OPS-KIT-AR.md b/docs/HAMA-OPS-KIT-AR.md
+index 11d3cbf..fa0df1a 100644
+--- a/docs/HAMA-OPS-KIT-AR.md
++++ b/docs/HAMA-OPS-KIT-AR.md
+@@ -2,8 +2,8 @@
+ 
+ > **الأسعار المعتمدة (٤ تشرين الثاني ٢٠٢٦):** 30 مل **$13** · 50 مل **$16** (البطل) · 100 مل **$25**.
+ > المصدر الوحيد `js/config.js`. أي رقم هنا مخالف لهذا السلّم خطأ.
+-> **التكلفة:** ٤$ للوحدة كاملة، توصيل ٢$ داخل حماة (٢$ لباقي المحافظات، يُدفع على الزبونة).
+-> **شام كاش:** −10٪ على المنتج + توصيل مجاني داخل حماة. **العطر:** +2$ للعبوة.
++> **التكلفة:** ٤$ للوحدة كاملة. **التوصيل:** مجاني داخل حماة لكل طرق الدفع، و٢$ لباقي المحافظات لكل طرق الدفع.
++> **شام كاش:** −10٪ على المنتج. **العطر:** +2$ للعبوة.
+ > **ممنوع:** أسعار مشطوبة، ندرة مصطنعة، خصم إضافي، تقييمات غير حقيقية، ادعاء طبي.
+ 
+ هذا الملف يكمّل `HAMA-SALES-KIT-AR.md`: هناك ما يُقال **قبل** الطلب، وهنا ما يُقال **بعد** الطلب،
+@@ -64,7 +64,7 @@
+ | **سيروم رواء 50 مل — الأنسب للاستعمال اليومي** | ضعف كمية 30 مل تقريبًا بفرق ٣ دولارات. السعر المعلن $16 قبل العطر والتوصيل. |
+ | **سيروم رواء 100 مل — أفضل قيمة** | أرخص سعر لكل مل (٠.٢٥$). السعر المعلن $25 قبل العطر والتوصيل. |
+ | **إضافة عطر (اختياري)** | +$2 للعبوة، تُختار من القائمة (فانيلا، ورد، عود، لافندر، إكليل الجبل، ياسمين، إيلانغ إيلانغ، نعناع). |
+-| **حزمة توصيل حماة** | توصيل ٢$ داخل مدينة حماة، ومجاني مع شام كاش. باقي المحافظات ٢$. |
++| **حزمة توصيل حماة** | توصيل مجاني داخل محافظة حماة لكل طرق الدفع. باقي المحافظات ٢$ لكل طرق الدفع. |
+ 
+ **قواعد الكتالوج:**
+ 1. السعر في الكتالوج = السعر في الموقع. إذا تغيّر في `js/config.js` يتغيّر هنا في اليوم نفسه.
+diff --git a/hama.html b/hama.html
+index 7321eda..0a28633 100644
+--- a/hama.html
++++ b/hama.html
+@@ -119,7 +119,7 @@
+           <a class="btn btn-primary" href="https://wa.me/963997310856?text=H12-HAMA" rel="noopener">اطلبي على واتساب</a>
+           <a class="btn btn-ghost" href="#sizes">قارني الأحجام</a>
+         </div>
+-        <p class="hama-note">١٠٠ مل ٢٥$ · توصيل داخل حماة ٢$، ومجاني مع شام كاش.</p>
++        <p class="hama-note">١٠٠ مل ٢٥$ · التوصيل داخل حماة مجاني لكل طرق الدفع.</p>
+       </div>
+       <figure style="margin:0">
+         <img src="assets/img/hama/duo-sizes.jpg" width="928" height="1152"
+@@ -273,7 +273,7 @@
+       </details>
+       <details>
+         <summary>هل التوصيل مجاني؟</summary>
+-        <p>داخل مدينة حماة التوصيل ٢$ لكل الأحجام، ومجاني مع شام كاش. المنطقة والموعد يُنسّقان على واتساب. خارج المدينة يُسعَّر حسب المسافة، وقد يُطلب دفع مسبق.</p>
++        <p>نعم — داخل محافظة حماة التوصيل مجاني لكل الأحجام ولكل طرق الدفع (شام كاش أو الدفع عند الاستلام). المنطقة والموعد يُنسّقان على واتساب. باقي المحافظات عليها رسوم توصيل ٢$ لكل طرق الدفع.</p>
+       </details>
+       <details>
+         <summary>كم يستغرق الوصول؟</summary>
+diff --git a/index.html b/index.html
+index 8361bce..0b769de 100644
+--- a/index.html
++++ b/index.html
+@@ -77,7 +77,7 @@
+   </style>
+ </head>
+ <body>
+-  <aside class="offer-bar" aria-label="عرض شام كاش والتوصيل"><div class="shell"><strong>شام كاش: خصم 10%</strong> وتوصيل مجاني داخل حماة · رسوم باقي المحافظات <bdi>$2</bdi></div></aside>
++  <aside class="offer-bar" aria-label="عرض شام كاش والتوصيل"><div class="shell"><strong>شام كاش: خصم 10%</strong> · التوصيل <strong>مجاني داخل حماة لكل طرق الدفع</strong> · باقي المحافظات <bdi>$2</bdi></div></aside>
+   <header class="site-header"><div class="shell header-inner">
+     <a href="/" class="brand" aria-label="RAWAA | رواء — الصفحة الرئيسية"><img class="brand-logo" src="assets/brand/logo-primary-v2-dark.svg" width="1120" height="420" alt="RAWAA | رواء"></a>
+     <nav><ul class="nav-desktop"><li><a href="#products">الأحجام</a></li><li><a href="#why">لماذا رواء</a></li><li><a href="#order">كيف تطلبين</a></li></ul></nav>
+@@ -117,7 +117,7 @@
+       <ol class="process-list">
+         <li><span class="step">١</span><div><h3>اختاري حجمك</h3><p>30 أو 50 أو 100 مل.</p></div></li>
+         <li><span class="step">٢</span><div><h3>تواصلي معنا</h3><p>أرسلي واتساب. نؤكد خلال دقائق.</p></div></li>
+-        <li><span class="step">٣</span><div><h3>استلمي وادفعي</h3><p>الدفع عند الاستلام أو شام كاش بخصم 10%.</p></div></li>
++        <li><span class="step">٣</span><div><h3>استلمي وادفعي</h3><p>الدفع عند الاستلام أو شام كاش بخصم 10%. التوصيل مجاني داخل حماة لكل طرق الدفع.</p></div></li>
+       </ol></div></section>
+     <section class="cta"><div class="shell"><h2>جاهزة لتجربة رواء؟</h2><p style="color:var(--text-muted);margin:1rem auto 1.8rem;max-width:420px">تواصلي عبر واتساب وسنساعدكِ في اختيار الحجم الأنسب.</p>
+       <div style="display:flex;justify-content:center;gap:.8rem;flex-wrap:wrap"><a href="/serum" class="btn btn-gold" data-discover-serum>اختاري حجمك واطلبي</a><a href="#products" class="btn btn-outline">عودي للأحجام</a></div></div></section>
+diff --git a/js/campaign.js b/js/campaign.js
+index 50b8e51..56ac5a2 100644
+--- a/js/campaign.js
++++ b/js/campaign.js
+@@ -120,7 +120,9 @@
+     config.payment.methods.forEach(function (method) {
+       config.delivery.zones.forEach(function (zone) {
+         var item = document.createElement('li');
+-        var fee = method.freeDeliveryIn && method.freeDeliveryIn.indexOf(zone.id) !== -1 ? 0 : zone.fee;
++        // رسم صفر على المنطقة = مجانية لكل طرق الدفع، وإلا يُطبَّق freeDeliveryIn.
++        var zoneFree = !(zone.fee > 0) || (method.freeDeliveryIn && method.freeDeliveryIn.indexOf(zone.id) !== -1);
++        var fee = zoneFree ? 0 : zone.fee;
+         var discount = method.discountPercent ? ' · خصم ' + method.discountPercent + '% على المنتجات' : ' · بلا خصم';
+         var deliveryText = fee === 0 ? 'توصيل مجاني' : 'توصيل ' + formatMoney(fee);
+         item.textContent = method.label + ' — ' + zone.label + ': ' + deliveryText + discount + '.';
+diff --git a/js/cart.js b/js/cart.js
+index 747ebb7..a5a60a2 100644
+--- a/js/cart.js
++++ b/js/cart.js
+@@ -29,9 +29,18 @@
+     return zones.filter(function (z) { return z.id === selectedZoneId; })[0] || zones[0] || null;
+   }
+ 
+-  /** هل التوصيل مجاني لهذه الطريقة في هذه المنطقة؟ */
++  /**
++   * هل التوصيل مجاني لهذه الطريقة في هذه المنطقة؟
++   * المجانية تُقرأ من مصدرين متوافقين:
++   *   1) رسم المنطقة صفر — مجانية لكل طرق الدفع (قاعدة حماة الحالية).
++   *   2) `freeDeliveryIn` على طريقة الدفع — مجانية لتلك الطريقة وحدها.
++   * بدون المصدر الأول كان الدفع عند الاستلام في حماة يُحسب 2$ في السلة
++   * بينما النص المعلن يقول مجاني؛ الآن الإجمالي ورسالة واتساب والنصوص متطابقة.
++   */
+   function isFreeDelivery(method, zone) {
+-    if (!method || !zone) return false;
++    if (!zone) return false;
++    if (!(zone.fee > 0)) return true;
++    if (!method) return false;
+     return Array.isArray(method.freeDeliveryIn) && method.freeDeliveryIn.indexOf(zone.id) !== -1;
+   }
+ 
+@@ -951,11 +960,14 @@
+       } else {
+         points.push('بلا خصم');
+       }
+-      var z = activeZone();
+-      points.push(isFreeDelivery(method, z)
+-        ? 'توصيل <strong>مجاني</strong> داخل ' + (z ? z.label : 'حماة')
+-        : 'رسوم توصيل <strong>' + money(deliveryFeeFor(method, z)) + '</strong> (' +
+-          (z ? z.label : '') + ') تُضاف إلى الإجمالي');
++      // نذكر المنطقتين صراحةً: الطريقة قد تكون مجانية في منطقة ومدفوعة في أخرى،
++      // وسكوت البطاقة عن المنطقة الأخرى يجعل العرض يبدو مخالفًا للسلة.
++      var zonePoints = zones.map(function (zone) {
++        return isFreeDelivery(method, zone)
++          ? 'توصيل <strong>مجاني</strong> داخل ' + zone.label
++          : 'رسوم توصيل <strong>' + money(deliveryFeeFor(method, zone)) + '</strong> (' + zone.label + ')';
++      });
++      points.push(zonePoints.join(' · ') + ' — تُحسب في السلة بحسب اختيارك');
+       points.push(method.requiresReceipt
+         ? 'إرسال إشعار التحويل على واتساب لتأكيد الدفع'
+         : 'تدفعين المبلغ كاملًا عند استلام الطلب');
+@@ -1065,12 +1077,14 @@
+ 
+     if ((method.discountPercent || 0) > 0) {
+       return isFreeDelivery(method, z)
+-        ? 'خصم ' + method.discountPercent + '% على قيمة المنتجات + توصيل مجاني داخل ' + zoneName + '.'
++        ? 'خصم ' + method.discountPercent + '% على قيمة المنتجات + توصيل مجاني إلى ' + zoneName + '.'
+         : 'خصم ' + method.discountPercent + '% على قيمة المنتجات + توصيل ' +
+           money(deliveryFeeFor(method, z)) + ' إلى ' + zoneName + '.';
+     }
+-    return 'بلا خصم، وتُضاف رسوم التوصيل: ' + money(deliveryFeeFor(method, z)) +
+-      ' إلى ' + zoneName + '.';
++    return isFreeDelivery(method, z)
++      ? 'بلا خصم، والتوصيل مجاني إلى ' + zoneName + '.'
++      : 'بلا خصم، وتُضاف رسوم التوصيل: ' + money(deliveryFeeFor(method, z)) +
++        ' إلى ' + zoneName + '.';
+   }
+ 
+   function renderPaymentMethods() {
+diff --git a/js/config.js b/js/config.js
+index 3ca0614..a18027a 100644
+--- a/js/config.js
++++ b/js/config.js
+@@ -107,15 +107,16 @@
+      * `available: false` تعني أن الخيار معروض للمعلومة دون إمكانية اختياره.
+      */
+     /**
+-     * مناطق التوصيل — الأرقام من صاحب المشروع:
+-     *   حماة (المدينة الأم): 2 دولار
+-     *   باقي المحافظات:      2 دولار
+-     * التوصيل المجاني مع شام كاش يسري داخل حماة فقط.
++     * مناطق التوصيل — تعليمات صاحب المشروع (٧ تشرين الثاني ٢٠٢٦):
++     *   حماة (المدينة الأم): مجاني لكل طرق الدفع (شام كاش والدفع عند الاستلام).
++     *   باقي المحافظات:      2 دولار لكل طرق الدفع.
++     * القاعدة تُطبَّق من رسم المنطقة نفسه (fee: 0) حتى توافق السلة والتقدير
++     * ورسالة واتساب ونص الصفحات؛ لا تُشتق المجانية من طريقة الدفع وحدها.
+      */
+     delivery: {
+       defaultZone: 'hama',
+       zones: [
+-        { id: 'hama', label: 'حماة', fee: 2, freeWithShamCash: true },
++        { id: 'hama', label: 'حماة', fee: 0, freeWithShamCash: true },
+         { id: 'other', label: 'باقي المحافظات', fee: 2, freeWithShamCash: false }
+       ],
+       // قائمة المحافظات لعرضها في الحاسبة — كلها ضمن تسعيرة «باقي المحافظات»
+@@ -123,7 +124,7 @@
+         'دمشق', 'ريف دمشق', 'حلب', 'حمص', 'اللاذقية', 'طرطوس', 'إدلب', 'دير الزور',
+         'الرقة', 'الحسكة', 'السويداء', 'درعا', 'القنيطرة', 'حماة'
+       ],
+-      note: 'التوصيل المجاني مع شام كاش داخل حماة فقط. خارج حماة تُضاف رسوم التوصيل حتى مع شام كاش.'
++      note: 'التوصيل مجاني داخل حماة لكل طرق الدفع. باقي المحافظات: رسوم توصيل 2 دولار لكل طرق الدفع.'
+     },
+ 
+     // ما لا نقدّمه — يبني الثقة ويحمي من الادعاءات
+@@ -139,13 +140,13 @@
+ 
+     payment: {
+       title: 'طريقة الدفع',
+-      freeDeliveryNote: 'التوصيل المجاني مع شام كاش يسري داخل حماة فقط؛ باقي المحافظات عليها رسوم توصيل 2 دولار.',
++      freeDeliveryNote: 'التوصيل مجاني داخل حماة لكل طرق الدفع؛ باقي المحافظات عليها رسوم توصيل 2 دولار لكل طرق الدفع.',
+       methods: [
+         {
+           id: 'shamcash',
+           label: 'شام كاش',
+           short: 'شام كاش',
+-          description: 'خصم 10% على قيمة المنتجات + توصيل مجاني داخل حماة.',
++          description: 'خصم 10% على قيمة المنتجات + توصيل مجاني داخل حماة (وهي مجانية هناك لكل طرق الدفع).',
+           discountPercent: 10,
+           freeDeliveryIn: ['hama'],
+           requiresReceipt: true,
+@@ -159,7 +160,7 @@
+           id: 'cod',
+           label: 'الدفع عند الاستلام',
+           short: 'الدفع عند الاستلام',
+-          description: 'بلا خصم، وتُضاف رسوم التوصيل: 2 دولار داخل حماة، 2 دولار لباقي المحافظات.',
++          description: 'بلا خصم، والتوصيل مجاني داخل حماة، و2 دولار لباقي المحافظات.',
+           discountPercent: 0,
+           freeDeliveryIn: [],
+           requiresReceipt: false,
+diff --git a/order-system/edge/order-entry-bundle.mjs b/order-system/edge/order-entry-bundle.mjs
+index 5e181a8..63da63e 100644
+--- a/order-system/edge/order-entry-bundle.mjs
++++ b/order-system/edge/order-entry-bundle.mjs
+@@ -1,18 +1,18 @@
+-import he from"npm:postgres@3.4.7";(function(e){"use strict";var t=["percent","amount","sizePrice","bundle"],a=["percent","amount","sizePrice"],u=10,o=30,l=/^\d{4}-\d{2}-\d{2}$/;function p(r){return Math.round(Number(r)*100)}function w(r){var n=r?new Date(r):new Date,d=n.getMonth()+1,f=n.getDate();return n.getFullYear()+"-"+(d<10?"0":"")+d+"-"+(f<10?"0":"")+f}function s(r){return typeof r=="string"&&l.test(r)}function i(r){var n=r&&Number(r.maxPercent);return isFinite(n)&&n>0&&n<=100?n:o}function c(r,n,d){if(!r||typeof r!="object")return"not-an-object";if(r.enabled!==!0)return"not-enabled";if(!r.label||typeof r.label!="string")return"missing-label";if(t.indexOf(r.type)===-1)return"unknown-type";var f=Number(r.value);if(!isFinite(f)||f<=0)return"bad-value";if(r.type==="percent"&&f>i(n))return"over-cap";if(r.startsAt&&!s(r.startsAt))return"bad-startsAt";if(r.endsAt&&!s(r.endsAt))return"bad-endsAt";if(r.startsAt&&r.endsAt&&r.endsAt<r.startsAt)return"ends-before-start";if(r.type==="sizePrice"){if(!r.sizeId||!(r.sizeId in d))return"bad-size";if(p(f)>=d[r.sizeId])return"not-a-discount"}if(r.sizeId&&!(r.sizeId in d))return"bad-size";if(r.type==="bundle"){var y=Number(r.qty);if(!isFinite(y)||y!==Math.floor(y)||y<1||y>u)return"bad-qty";var b=r.sizeId?[r.sizeId]:Object.keys(d),A=b.some(function(N){return m(r,d[N],i(n))});if(!A)return"not-a-discount"}return null}function h(r){return p(r.value)/Number(r.qty)}function m(r,n,d){var f=Number(r.qty);if(!isFinite(f)||f<1||!n)return!1;var y=p(r.value);if(y>=n*f)return!1;var b=(typeof d=="number"?d:o)/100;return h(r)>=n*(1-b)-.5}function g(r,n,d){var f=r&&Array.isArray(r.slots)?r.slots:[],y=d||w(),b=[],A=[];return f.forEach(function(N,T){var C=c(N,r,n);if(C||(N.startsAt&&y<N.startsAt?C="not-started":N.endsAt&&y>N.endsAt&&(C="expired")),C){A.push({index:T,id:N&&N.id||null,reason:C});return}b.push(N)}),{today:y,slots:b,skipped:A}}function R(r,n){for(var d=(r||[]).filter(function(b){return b&&b.type!=="bundle"}),f=0;f<d.length;f+=1){var y=d[f];if(n){if(y.sizeId===n)return y}else if(!y.sizeId)return y}return null}function v(r,n,d,f){var y=f?i(f):o;return(r||[]).filter(function(b){return b&&b.type==="bundle"&&(!b.sizeId||b.sizeId===n)&&m(b,d,y)})}function _(r,n,d){for(var f=Math.max(0,Math.floor(Number(r)||0)),y=Math.max(0,Math.round(Number(n)||0)),b=(d||[]).filter(Boolean),A=[0],N=[null],T=1;T<=f;T+=1){A[T]=A[T-1]+y,N[T]=null;for(var C=0;C<b.length;C+=1){var P=Number(b[C].qty);if(!(!isFinite(P)||P<1||P>T)){var F=A[T-P]+p(b[C].value);F<A[T]&&(A[T]=F,N[T]=b[C])}}}for(var L=[],q=0,k=f;k>0;){var U=N[k];if(!U){q+=1,k-=1;continue}for(var $=null,x=0;x<L.length;x+=1)L[x].slot===U&&($=L[x]);$?$.count+=1:L.push({slot:U,count:1}),k-=Number(U.qty)}return{totalCents:A[f],listCents:y*f,cutCents:y*f-A[f],singles:q,sets:L}}function E(r,n){return r?r.type==="sizePrice"?Math.max(0,n-p(r.value)):r.type==="percent"?Math.round(n*Number(r.value)/100):0:0}function S(r,n){var d=E(r,n);return{listCents:n,cents:n-d,cutCents:d,slot:r||null}}function D(r,n){return!r||n<=0?0:r.type==="percent"?Math.round(n*Number(r.value)/100):r.type==="amount"?Math.min(n,p(r.value)):0}function z(r,n){if(!r)return"";if(r.badge)return r.badge;var d=n||"$";return r.type==="percent"?"−"+Number(r.value)+"%":r.type==="amount"?"−"+d+Number(r.value):r.type==="bundle"?I(r,d):"سعر خاص"}function I(r,n){if(!r)return"";var d=n||"$",f=Number(r.qty),y=d+Number(r.value);return f===1?"عبوة بـ "+y:f===2?"عبوتان بـ "+y:f+" عبوات بـ "+y}e.RawaaOffers={TYPES:t,UNIT_TYPES:a,MAX_BUNDLE_QTY:u,bundlesFor:v,bundleQualifies:m,bundleText:I,bestPlan:_,todayISO:w,evaluate:g,pick:R,unitPrice:S,orderCut:D,badge:z,toCents:p}})(typeof window<"u"?window:globalThis);var V=e=>Math.round(e*100),O=globalThis.RawaaOffers||null;function j(e,t){if(!e||typeof e!="object"||!t)throw new Error("INVALID_ORDER");let a=(n,d)=>{if(typeof n!="string")throw new Error("INVALID_CONTACT");let f=n.trim();if(!f||f.length>d||/[\u0000-\u001f\u007f]/.test(f))throw new Error("INVALID_CONTACT");return f},u=a(e.name,80),o=a(e.phone,30);if(!/^\+?[0-9٠-٩ ()-]+$/.test(o)||(o.match(/[0-9٠-٩]/g)||[]).length<7)throw new Error("INVALID_PHONE");let l=a(e.address,200);if(!Array.isArray(e.items)||e.items.length<1||e.items.length>t.products.length)throw new Error("INVALID_ITEMS");let p=new Set,w=O?O.evaluate(t.offers,Object.fromEntries(t.products.map(n=>[n.id,V(n.price)])),O.todayISO()):{slots:[]},s=e.items.map(n=>{if(!n||typeof n.id!="string"||p.has(n.id))throw new Error("INVALID_ITEM");p.add(n.id);let d=t.products.find(A=>A.id===n.id);if(!d||!Number.isInteger(n.qty)||n.qty<1||n.qty>t.cart.maxQuantityPerItem)throw new Error("INVALID_ITEM");let f=V(d.price),y=O?O.unitPrice(O.pick(w.slots,d.id),f):{listCents:f,cents:f,cutCents:0},b=O?O.bestPlan(n.qty,y.cents,O.bundlesFor(w.slots,d.id,f,t.offers)):{totalCents:y.cents*n.qty,cutCents:0};return{id:d.id,size:d.sizeLabel,qty:n.qty,listCents:f,unitCents:y.cents,offerCents:y.cutCents*n.qty+b.cutCents,lineCents:b.totalCents}}),i=e.scent||"",c=e.oil||"";if(typeof i!="string"||i&&!t.customization.scentOptions.some(n=>n.id===i))throw new Error("INVALID_SCENT");if(typeof c!="string"||c&&!t.customization.oilAdditions.some(n=>n.id===c))throw new Error("INVALID_OIL");if(i==="custom"||c==="other")throw new Error("CUSTOM_REQUIRES_CONTACT");let h=t.delivery.zones.find(n=>n.id===e.zone),m=t.payment.methods.find(n=>n.id===e.method&&n.available!==!1);if(!h||!m)throw new Error("INVALID_DELIVERY");let g=s.reduce((n,d)=>n+d.qty,0),R=i&&i!=="unscented"?V(t.customization.scentPrice):0,v=s.reduce((n,d)=>n+d.lineCents,0),_=O?O.pick(w.slots,null):null,E=_?O.orderCut(_,v):0,S=s.reduce((n,d)=>n+d.offerCents,0)+E,D=v-E,z=D+R*g,I=Math.round(D*m.discountPercent/100),r=m.freeDeliveryIn.includes(h.id)?0:V(h.fee);return{name:u,phone:o,address:l,entries:s,scent:i,oil:c,zone:h.id,method:m.id,subtotalCents:z,offerCents:S,discountCents:I,deliveryCents:r,totalCents:z-I+r,oilPricePending:!!c,status:"pending_review"}}async function H({input:e,idempotencyKey:t,config:a,repository:u,notificationRunner:o,marketingConsent:l=!1,recordMarketingOptIn:p}){if(typeof t!="string"||!/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(t))return{ok:!1,code:"INVALID_REQUEST"};let w;try{w=j(e,a)}catch{return{ok:!1,code:"INVALID_REQUEST"}}let s;try{s=await u.insertPending({order:w,idempotencyKey:t})}catch{return{ok:!1,code:"SAVE_UNCERTAIN"}}if(s?.result==="conflict"&&Object.keys(s).length===1)return{ok:!1,code:"INTENT_MISMATCH"};if(!s||typeof s.reference!="string"||!/^RAWAA-[A-Z0-9]{6,30}$/.test(s.reference)||s.result!=="created"&&s.result!=="existing")return{ok:!1,code:"SAVE_UNCERTAIN"};let i;if(l===!0&&(i=s.result==="created"?"not_recorded":"unknown",s.result==="created"&&typeof p=="function"))try{(await p({phone:w.phone}))?.recorded===!0&&(i="recorded")}catch{}if(s.result==="created")try{await o.kick(s.reference)}catch{}return{ok:!0,reference:s.reference,status:"pending_review",...l===!0?{marketingOptInStatus:i}:{}}}function Y({origin:e,config:t,repository:a,notificationRunner:u,verifyChallenge:o,rateLimit:l,recordMarketingOptIn:p}){let w=typeof e=="string"&&/^https:\/\/[^/]+$/.test(e)&&t&&typeof a?.insertPending=="function"&&typeof u?.kick=="function"&&typeof o=="function"&&typeof l=="function",s={"content-type":"application/json; charset=utf-8","cache-control":"no-store, private","x-content-type-options":"nosniff",vary:"Origin"},i=(c,h,m=!1)=>new Response(JSON.stringify(h),{status:c,headers:m?{...s,"access-control-allow-origin":e}:s});return async c=>{if(!w)return i(503,{error:"unavailable"});if(c.headers.get("origin")!==e)return i(403,{error:"forbidden"});if(c.method==="OPTIONS")return new Response(null,{status:204,headers:{"access-control-allow-origin":e,"access-control-allow-methods":"POST, OPTIONS","access-control-allow-headers":"content-type","cache-control":"no-store",vary:"Origin"}});if(c.method!=="POST")return i(405,{error:"method_not_allowed"},!0);if(!/^application\/json(?:\s*;\s*charset=utf-8)?$/i.test(c.headers.get("content-type")||""))return i(415,{error:"invalid_type"},!0);let h=c.headers.get("content-length");if(h&&(!/^\d+$/.test(h)||Number(h)>4096))return i(413,{error:"too_large"},!0);let m;try{if(!c.body)throw new Error("empty");let _=c.body.getReader(),E=[],S=0;for(;;){let I=await _.read();if(I.done)break;if(S+=I.value.byteLength,S>4096)return await _.cancel(),i(413,{error:"too_large"},!0);E.push(I.value)}let D=new Uint8Array(S),z=0;for(let I of E)D.set(I,z),z+=I.length;m=JSON.parse(new TextDecoder("utf-8",{fatal:!0}).decode(D))}catch{return i(400,{error:"invalid_request"},!0)}let g=m?.idempotencyKey;if(m?.consent!==!0||typeof m.challengeToken!="string"||m.challengeToken.length<1||m.challengeToken.length>2048||typeof g!="string"||!/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(g)||!m.order||typeof m.order!="object"||Array.isArray(m.order)||m.marketingConsent!==void 0&&typeof m.marketingConsent!="boolean")return i(400,{error:"invalid_request"},!0);try{let _=await l(c);if(_===!1)return i(429,{error:"try_later"},!0);if(_!==!0)return i(503,{error:"unavailable"},!0);if(await o(m.challengeToken)!==!0)return i(403,{error:"challenge_failed"},!0)}catch{return i(503,{error:"unavailable"},!0)}let R=m.marketingConsent===!0,v=await H({input:m.order,idempotencyKey:g,config:t,repository:a,notificationRunner:u,marketingConsent:R,recordMarketingOptIn:p});return v.ok?i(200,{reference:v.reference,status:"pending_review",...R?{marketingOptInStatus:["recorded","not_recorded","unknown"].includes(v.marketingOptInStatus)?v.marketingOptInStatus:"unknown"}:{}},!0):v.code==="INVALID_REQUEST"?i(400,{error:"invalid_request"},!0):v.code==="INTENT_MISMATCH"?i(409,{error:"intent_mismatch"},!0):i(503,{error:"save_uncertain"},!0)}}function G({secret:e,hostname:t,fetchImpl:a=fetch}){return typeof e!="string"||!e||typeof t!="string"||!/^[a-z0-9.-]+$/.test(t)||typeof a!="function"?async()=>{throw new Error("CHALLENGE_UNAVAILABLE")}:async u=>{if(typeof u!="string"||!u||u.length>2048)return!1;let o;try{let w=await a("https://challenges.cloudflare.com/turnstile/v0/siteverify",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({secret:e,response:u}),redirect:"error",signal:AbortSignal.timeout(5e3)});if(!w.ok)throw new Error;o=await w.json()}catch{throw new Error("CHALLENGE_UNAVAILABLE")}if(o?.success===!0)return o.hostname===t&&o.action==="rawaa_order";let l=o?.["error-codes"],p=new Set(["missing-input-response","invalid-input-response","timeout-or-duplicate"]);if(o?.success===!1&&Array.isArray(l)&&l.length>0&&l.every(w=>p.has(w)))return!1;throw new Error("CHALLENGE_UNAVAILABLE")}}function W(e){return{async listRecent(t=null){return(await e.query(`select o.id as cursor_id,
++import he from"npm:postgres@3.4.7";(function(e){"use strict";var t=["percent","amount","sizePrice","bundle"],a=["percent","amount","sizePrice"],u=10,o=30,l=/^\d{4}-\d{2}-\d{2}$/;function p(r){return Math.round(Number(r)*100)}function h(r){var f=r?new Date(r):new Date,i=f.getMonth()+1,d=f.getDate();return f.getFullYear()+"-"+(i<10?"0":"")+i+"-"+(d<10?"0":"")+d}function s(r){return typeof r=="string"&&l.test(r)}function n(r){var f=r&&Number(r.maxPercent);return isFinite(f)&&f>0&&f<=100?f:o}function c(r,f,i){if(!r||typeof r!="object")return"not-an-object";if(r.enabled!==!0)return"not-enabled";if(!r.label||typeof r.label!="string")return"missing-label";if(t.indexOf(r.type)===-1)return"unknown-type";var d=Number(r.value);if(!isFinite(d)||d<=0)return"bad-value";if(r.type==="percent"&&d>n(f))return"over-cap";if(r.startsAt&&!s(r.startsAt))return"bad-startsAt";if(r.endsAt&&!s(r.endsAt))return"bad-endsAt";if(r.startsAt&&r.endsAt&&r.endsAt<r.startsAt)return"ends-before-start";if(r.type==="sizePrice"){if(!r.sizeId||!(r.sizeId in i))return"bad-size";if(p(d)>=i[r.sizeId])return"not-a-discount"}if(r.sizeId&&!(r.sizeId in i))return"bad-size";if(r.type==="bundle"){var y=Number(r.qty);if(!isFinite(y)||y!==Math.floor(y)||y<1||y>u)return"bad-qty";var v=r.sizeId?[r.sizeId]:Object.keys(i),A=v.some(function(g){return m(r,i[g],n(f))});if(!A)return"not-a-discount"}return null}function w(r){return p(r.value)/Number(r.qty)}function m(r,f,i){var d=Number(r.qty);if(!isFinite(d)||d<1||!f)return!1;var y=p(r.value);if(y>=f*d)return!1;var v=(typeof i=="number"?i:o)/100;return w(r)>=f*(1-v)-.5}function N(r,f,i){var d=r&&Array.isArray(r.slots)?r.slots:[],y=i||h(),v=[],A=[];return d.forEach(function(g,T){var C=c(g,r,f);if(C||(g.startsAt&&y<g.startsAt?C="not-started":g.endsAt&&y>g.endsAt&&(C="expired")),C){A.push({index:T,id:g&&g.id||null,reason:C});return}v.push(g)}),{today:y,slots:v,skipped:A}}function R(r,f){for(var i=(r||[]).filter(function(v){return v&&v.type!=="bundle"}),d=0;d<i.length;d+=1){var y=i[d];if(f){if(y.sizeId===f)return y}else if(!y.sizeId)return y}return null}function b(r,f,i,d){var y=d?n(d):o;return(r||[]).filter(function(v){return v&&v.type==="bundle"&&(!v.sizeId||v.sizeId===f)&&m(v,i,y)})}function _(r,f,i){for(var d=Math.max(0,Math.floor(Number(r)||0)),y=Math.max(0,Math.round(Number(f)||0)),v=(i||[]).filter(Boolean),A=[0],g=[null],T=1;T<=d;T+=1){A[T]=A[T-1]+y,g[T]=null;for(var C=0;C<v.length;C+=1){var P=Number(v[C].qty);if(!(!isFinite(P)||P<1||P>T)){var F=A[T-P]+p(v[C].value);F<A[T]&&(A[T]=F,g[T]=v[C])}}}for(var L=[],q=0,k=d;k>0;){var U=g[k];if(!U){q+=1,k-=1;continue}for(var $=null,x=0;x<L.length;x+=1)L[x].slot===U&&($=L[x]);$?$.count+=1:L.push({slot:U,count:1}),k-=Number(U.qty)}return{totalCents:A[d],listCents:y*d,cutCents:y*d-A[d],singles:q,sets:L}}function E(r,f){return r?r.type==="sizePrice"?Math.max(0,f-p(r.value)):r.type==="percent"?Math.round(f*Number(r.value)/100):0:0}function S(r,f){var i=E(r,f);return{listCents:f,cents:f-i,cutCents:i,slot:r||null}}function D(r,f){return!r||f<=0?0:r.type==="percent"?Math.round(f*Number(r.value)/100):r.type==="amount"?Math.min(f,p(r.value)):0}function z(r,f){if(!r)return"";if(r.badge)return r.badge;var i=f||"$";return r.type==="percent"?"−"+Number(r.value)+"%":r.type==="amount"?"−"+i+Number(r.value):r.type==="bundle"?I(r,i):"سعر خاص"}function I(r,f){if(!r)return"";var i=f||"$",d=Number(r.qty),y=i+Number(r.value);return d===1?"عبوة بـ "+y:d===2?"عبوتان بـ "+y:d+" عبوات بـ "+y}e.RawaaOffers={TYPES:t,UNIT_TYPES:a,MAX_BUNDLE_QTY:u,bundlesFor:b,bundleQualifies:m,bundleText:I,bestPlan:_,todayISO:h,evaluate:N,pick:R,unitPrice:S,orderCut:D,badge:z,toCents:p}})(typeof window<"u"?window:globalThis);var V=e=>Math.round(e*100),O=globalThis.RawaaOffers||null;function j(e,t){if(!e||typeof e!="object"||!t)throw new Error("INVALID_ORDER");let a=(i,d)=>{if(typeof i!="string")throw new Error("INVALID_CONTACT");let y=i.trim();if(!y||y.length>d||/[\u0000-\u001f\u007f]/.test(y))throw new Error("INVALID_CONTACT");return y},u=a(e.name,80),o=a(e.phone,30);if(!/^\+?[0-9٠-٩ ()-]+$/.test(o)||(o.match(/[0-9٠-٩]/g)||[]).length<7)throw new Error("INVALID_PHONE");let l=a(e.address,200);if(!Array.isArray(e.items)||e.items.length<1||e.items.length>t.products.length)throw new Error("INVALID_ITEMS");let p=new Set,h=O?O.evaluate(t.offers,Object.fromEntries(t.products.map(i=>[i.id,V(i.price)])),O.todayISO()):{slots:[]},s=e.items.map(i=>{if(!i||typeof i.id!="string"||p.has(i.id))throw new Error("INVALID_ITEM");p.add(i.id);let d=t.products.find(g=>g.id===i.id);if(!d||!Number.isInteger(i.qty)||i.qty<1||i.qty>t.cart.maxQuantityPerItem)throw new Error("INVALID_ITEM");let y=V(d.price),v=O?O.unitPrice(O.pick(h.slots,d.id),y):{listCents:y,cents:y,cutCents:0},A=O?O.bestPlan(i.qty,v.cents,O.bundlesFor(h.slots,d.id,y,t.offers)):{totalCents:v.cents*i.qty,cutCents:0};return{id:d.id,size:d.sizeLabel,qty:i.qty,listCents:y,unitCents:v.cents,offerCents:v.cutCents*i.qty+A.cutCents,lineCents:A.totalCents}}),n=e.scent||"",c=e.oil||"";if(typeof n!="string"||n&&!t.customization.scentOptions.some(i=>i.id===n))throw new Error("INVALID_SCENT");if(typeof c!="string"||c&&!t.customization.oilAdditions.some(i=>i.id===c))throw new Error("INVALID_OIL");if(n==="custom"||c==="other")throw new Error("CUSTOM_REQUIRES_CONTACT");let w=t.delivery.zones.find(i=>i.id===e.zone),m=t.payment.methods.find(i=>i.id===e.method&&i.available!==!1);if(!w||!m)throw new Error("INVALID_DELIVERY");let N=s.reduce((i,d)=>i+d.qty,0),R=n&&n!=="unscented"?V(t.customization.scentPrice):0,b=s.reduce((i,d)=>i+d.lineCents,0),_=O?O.pick(h.slots,null):null,E=_?O.orderCut(_,b):0,S=s.reduce((i,d)=>i+d.offerCents,0)+E,D=b-E,z=D+R*N,I=Math.round(D*m.discountPercent/100),r=!(w.fee>0)||m.freeDeliveryIn.includes(w.id),f=r?0:V(w.fee);return{name:u,phone:o,address:l,entries:s,scent:n,oil:c,zone:w.id,method:m.id,subtotalCents:z,offerCents:S,discountCents:I,deliveryCents:f,freeDelivery:r,totalCents:z-I+f,oilPricePending:!!c,status:"pending_review"}}async function H({input:e,idempotencyKey:t,config:a,repository:u,notificationRunner:o,marketingConsent:l=!1,recordMarketingOptIn:p}){if(typeof t!="string"||!/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(t))return{ok:!1,code:"INVALID_REQUEST"};let h;try{h=j(e,a)}catch{return{ok:!1,code:"INVALID_REQUEST"}}let s;try{s=await u.insertPending({order:h,idempotencyKey:t})}catch{return{ok:!1,code:"SAVE_UNCERTAIN"}}if(s?.result==="conflict"&&Object.keys(s).length===1)return{ok:!1,code:"INTENT_MISMATCH"};if(!s||typeof s.reference!="string"||!/^RAWAA-[A-Z0-9]{6,30}$/.test(s.reference)||s.result!=="created"&&s.result!=="existing")return{ok:!1,code:"SAVE_UNCERTAIN"};let n;if(l===!0&&(n=s.result==="created"?"not_recorded":"unknown",s.result==="created"&&typeof p=="function"))try{(await p({phone:h.phone}))?.recorded===!0&&(n="recorded")}catch{}if(s.result==="created")try{await o.kick(s.reference)}catch{}return{ok:!0,reference:s.reference,status:"pending_review",...l===!0?{marketingOptInStatus:n}:{}}}function Y({origin:e,config:t,repository:a,notificationRunner:u,verifyChallenge:o,rateLimit:l,recordMarketingOptIn:p}){let h=typeof e=="string"&&/^https:\/\/[^/]+$/.test(e)&&t&&typeof a?.insertPending=="function"&&typeof u?.kick=="function"&&typeof o=="function"&&typeof l=="function",s={"content-type":"application/json; charset=utf-8","cache-control":"no-store, private","x-content-type-options":"nosniff",vary:"Origin"},n=(c,w,m=!1)=>new Response(JSON.stringify(w),{status:c,headers:m?{...s,"access-control-allow-origin":e}:s});return async c=>{if(!h)return n(503,{error:"unavailable"});if(c.headers.get("origin")!==e)return n(403,{error:"forbidden"});if(c.method==="OPTIONS")return new Response(null,{status:204,headers:{"access-control-allow-origin":e,"access-control-allow-methods":"POST, OPTIONS","access-control-allow-headers":"content-type","cache-control":"no-store",vary:"Origin"}});if(c.method!=="POST")return n(405,{error:"method_not_allowed"},!0);if(!/^application\/json(?:\s*;\s*charset=utf-8)?$/i.test(c.headers.get("content-type")||""))return n(415,{error:"invalid_type"},!0);let w=c.headers.get("content-length");if(w&&(!/^\d+$/.test(w)||Number(w)>4096))return n(413,{error:"too_large"},!0);let m;try{if(!c.body)throw new Error("empty");let _=c.body.getReader(),E=[],S=0;for(;;){let I=await _.read();if(I.done)break;if(S+=I.value.byteLength,S>4096)return await _.cancel(),n(413,{error:"too_large"},!0);E.push(I.value)}let D=new Uint8Array(S),z=0;for(let I of E)D.set(I,z),z+=I.length;m=JSON.parse(new TextDecoder("utf-8",{fatal:!0}).decode(D))}catch{return n(400,{error:"invalid_request"},!0)}let N=m?.idempotencyKey;if(m?.consent!==!0||typeof m.challengeToken!="string"||m.challengeToken.length<1||m.challengeToken.length>2048||typeof N!="string"||!/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(N)||!m.order||typeof m.order!="object"||Array.isArray(m.order)||m.marketingConsent!==void 0&&typeof m.marketingConsent!="boolean")return n(400,{error:"invalid_request"},!0);try{let _=await l(c);if(_===!1)return n(429,{error:"try_later"},!0);if(_!==!0)return n(503,{error:"unavailable"},!0);if(await o(m.challengeToken)!==!0)return n(403,{error:"challenge_failed"},!0)}catch{return n(503,{error:"unavailable"},!0)}let R=m.marketingConsent===!0,b=await H({input:m.order,idempotencyKey:N,config:t,repository:a,notificationRunner:u,marketingConsent:R,recordMarketingOptIn:p});return b.ok?n(200,{reference:b.reference,status:"pending_review",...R?{marketingOptInStatus:["recorded","not_recorded","unknown"].includes(b.marketingOptInStatus)?b.marketingOptInStatus:"unknown"}:{}},!0):b.code==="INVALID_REQUEST"?n(400,{error:"invalid_request"},!0):b.code==="INTENT_MISMATCH"?n(409,{error:"intent_mismatch"},!0):n(503,{error:"save_uncertain"},!0)}}function G({secret:e,hostname:t,fetchImpl:a=fetch}){return typeof e!="string"||!e||typeof t!="string"||!/^[a-z0-9.-]+$/.test(t)||typeof a!="function"?async()=>{throw new Error("CHALLENGE_UNAVAILABLE")}:async u=>{if(typeof u!="string"||!u||u.length>2048)return!1;let o;try{let h=await a("https://challenges.cloudflare.com/turnstile/v0/siteverify",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({secret:e,response:u}),redirect:"error",signal:AbortSignal.timeout(5e3)});if(!h.ok)throw new Error;o=await h.json()}catch{throw new Error("CHALLENGE_UNAVAILABLE")}if(o?.success===!0)return o.hostname===t&&o.action==="rawaa_order";let l=o?.["error-codes"],p=new Set(["missing-input-response","invalid-input-response","timeout-or-duplicate"]);if(o?.success===!1&&Array.isArray(l)&&l.length>0&&l.every(h=>p.has(h)))return!1;throw new Error("CHALLENGE_UNAVAILABLE")}}function W(e){return{async listRecent(t=null){return(await e.query(`select o.id as cursor_id,
+         to_char(o.created_at at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"') as cursor_time,
+         o.reference, o.created_at, o.order_status, o.details,
+         q.state as notification_state from rawaa_store.orders o
+         left join rawaa_store.notification_outbox q on q.order_id = o.id
+         where ($1::timestamptz is null or (o.created_at, o.id) < ($1::timestamptz, $2::uuid))
+-        order by o.created_at desc, o.id desc limit 51`,[t?.time??null,t?.id??null])).rows},async insertPending({order:t,idempotencyKey:a}){let u=JSON.stringify(t),o=JSON.stringify({name:t.name,phone:t.phone,address:t.address,entries:t.entries.map(({id:i,qty:c})=>({id:i,qty:c})).sort((i,c)=>i.id.localeCompare(c.id)),scent:t.scent,oil:t.oil,zone:t.zone,method:t.method}),l=await crypto.subtle.digest("SHA-256",new TextEncoder().encode(o)),p=Array.from(new Uint8Array(l),i=>i.toString(16).padStart(2,"0")).join(""),w=crypto.randomUUID(),s=`RAWAA-${crypto.randomUUID().replaceAll("-","").slice(0,24).toUpperCase()}`;return e.transaction(async i=>{if((await i.query(`insert into rawaa_store.orders (id, reference, idempotency_key, request_hash, details)
++        order by o.created_at desc, o.id desc limit 51`,[t?.time??null,t?.id??null])).rows},async insertPending({order:t,idempotencyKey:a}){let u=JSON.stringify(t),o=JSON.stringify({name:t.name,phone:t.phone,address:t.address,entries:t.entries.map(({id:n,qty:c})=>({id:n,qty:c})).sort((n,c)=>n.id.localeCompare(c.id)),scent:t.scent,oil:t.oil,zone:t.zone,method:t.method}),l=await crypto.subtle.digest("SHA-256",new TextEncoder().encode(o)),p=Array.from(new Uint8Array(l),n=>n.toString(16).padStart(2,"0")).join(""),h=crypto.randomUUID(),s=`RAWAA-${crypto.randomUUID().replaceAll("-","").slice(0,24).toUpperCase()}`;return e.transaction(async n=>{if((await n.query(`insert into rawaa_store.orders (id, reference, idempotency_key, request_hash, details)
+            values ($1, $2, $3, $4, $5::jsonb)
+-           on conflict (idempotency_key) do nothing returning reference`,[w,s,a,p,u])).rows.length)return await i.query("insert into rawaa_store.notification_outbox (order_id) values ($1)",[w]),{reference:s,result:"created"};let h=await i.query("select reference, request_hash from rawaa_store.orders where idempotency_key = $1",[a]);if(h.rows.length!==1)throw new Error("IDEMPOTENCY_LOOKUP_FAILED");return h.rows[0].request_hash!==p?{result:"conflict"}:{reference:h.rows[0].reference,result:"existing"}})}}}function K({db:e,identityKey:t,getTrustedIdentity:a,limits:u}){if(typeof e?.query!="function"||typeof t!="string"||t.length<32||typeof a!="function")throw new Error("INVALID_CONFIGURATION");let o=u?.attemptsMax??10,l=u?.windowMinutes??15;if(!Number.isInteger(o)||o<1||o>100||!Number.isInteger(l)||l<1||l>1440)throw new Error("INVALID_CONFIGURATION");let p=new TextEncoder().encode(t),w=crypto.subtle.importKey("raw",p,{name:"HMAC",hash:"SHA-256"},!1,["sign"]);async function s(c){let h=await a(c);if(typeof h!="string"||!h||h.length>128||/[\u0000-\u001f\u007f]/.test(h))throw new Error("UNTRUSTED_IDENTITY");let m=await crypto.subtle.sign("HMAC",await w,new TextEncoder().encode(`rawaa-order-v1:${h}`)),g=Array.from(new Uint8Array(m),v=>v.toString(16).padStart(2,"0")).join("");return(await e.query(`insert into rawaa_store.order_rate_limit (identity_key, attempts, window_end)
++           on conflict (idempotency_key) do nothing returning reference`,[h,s,a,p,u])).rows.length)return await n.query("insert into rawaa_store.notification_outbox (order_id) values ($1)",[h]),{reference:s,result:"created"};let w=await n.query("select reference, request_hash from rawaa_store.orders where idempotency_key = $1",[a]);if(w.rows.length!==1)throw new Error("IDEMPOTENCY_LOOKUP_FAILED");return w.rows[0].request_hash!==p?{result:"conflict"}:{reference:w.rows[0].reference,result:"existing"}})}}}function K({db:e,identityKey:t,getTrustedIdentity:a,limits:u}){if(typeof e?.query!="function"||typeof t!="string"||t.length<32||typeof a!="function")throw new Error("INVALID_CONFIGURATION");let o=u?.attemptsMax??10,l=u?.windowMinutes??15;if(!Number.isInteger(o)||o<1||o>100||!Number.isInteger(l)||l<1||l>1440)throw new Error("INVALID_CONFIGURATION");let p=new TextEncoder().encode(t),h=crypto.subtle.importKey("raw",p,{name:"HMAC",hash:"SHA-256"},!1,["sign"]);async function s(c){let w=await a(c);if(typeof w!="string"||!w||w.length>128||/[\u0000-\u001f\u007f]/.test(w))throw new Error("UNTRUSTED_IDENTITY");let m=await crypto.subtle.sign("HMAC",await h,new TextEncoder().encode(`rawaa-order-v1:${w}`)),N=Array.from(new Uint8Array(m),b=>b.toString(16).padStart(2,"0")).join("");return(await e.query(`insert into rawaa_store.order_rate_limit (identity_key, attempts, window_end)
+       values ($1, 1, now() + make_interval(mins => $3::int))
+       on conflict (identity_key) do update set
+         attempts = case when rawaa_store.order_rate_limit.window_end <= now() then 1 else rawaa_store.order_rate_limit.attempts + 1 end,
+         window_end = case when rawaa_store.order_rate_limit.window_end <= now() then now() + make_interval(mins => $3::int) else rawaa_store.order_rate_limit.window_end end
+       where rawaa_store.order_rate_limit.window_end <= now() or rawaa_store.order_rate_limit.attempts < $2
+-      returning attempts`,[g,o,l])).rows.length===1}async function i(){return{count:(await e.query("delete from rawaa_store.order_rate_limit where identity_key in (select identity_key from rawaa_store.order_rate_limit where window_end < now() - interval '24 hours' order by window_end limit 500) returning 1",[])).rows.length}}return{rateLimit:s,cleanup:i}}var M="rawaa-marketing-opt-in-v2",ne="rawaa:marketing-phone:v1\0",ie=/^\+[1-9]\d{7,14}$/;var oe=e=>typeof e=="string"&&/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(e)&&Number.isFinite(Date.parse(e));function ae(e,t="963"){if(typeof e!="string"||e.length>40||!/^\+?[0-9٠-٩۰-۹ ()-]+$/.test(e.trim()))return null;let a=e.trim().replace(/[٠-٩۰-۹]/g,p=>{let w=p.charCodeAt(0);return String(w>=1776?w-1776:w-1632)}),u=a.startsWith("+"),o=a.replace(/\D/g,""),l;if(u)l="+"+o;else if(o.startsWith("00"))l="+"+o.slice(2);else if(o.startsWith(t))l="+"+o;else if(o.startsWith("0"))l="+"+t+o.slice(1);else return null;return ie.test(l)?l:null}function se(e){return Array.from(new Uint8Array(e),t=>t.toString(16).padStart(2,"0")).join("")}function Q({repository:e,hmacSecret:t,cryptoImpl:a=globalThis.crypto,now:u=Date.now}){if(typeof e?.appendEvent!="function"||typeof e?.latestEvent!="function"||typeof t!="string"||new TextEncoder().encode(t).length<32||typeof a?.subtle?.importKey!="function"||typeof a?.subtle?.sign!="function"||typeof u!="function")throw new Error("INVALID_CONFIGURATION");let o;async function l(s){let i=ae(s);if(!i)return null;o||=a.subtle.importKey("raw",new TextEncoder().encode(t),{name:"HMAC",hash:"SHA-256"},!1,["sign"]);let c=await o,h=new TextEncoder().encode(ne+i);return se(await a.subtle.sign("HMAC",c,h))}function p(){let s=new Date(u());if(!Number.isFinite(s.getTime()))throw new Error("CLOCK_UNAVAILABLE");return s.toISOString()}async function w(s,i,c,h){let m=await l(s);if(!m)return{recorded:!1,reason:"invalid_phone"};let g=p();return await e.appendEvent({phoneKey:m,event:i,consentVersion:c,source:h,occurredAt:g}),{recorded:!0,event:i,occurredAt:g}}return Object.freeze({async recordOptIn({phone:s,explicitConsent:i,consentVersion:c}){if(i!==!0)return{recorded:!1,reason:"no_opt_in"};if(c!==M)return{recorded:!1,reason:"invalid_consent_version"};try{return await w(s,"opt_in",M,"order_form")}catch{return{recorded:!1,reason:"unavailable"}}},async recordWithdrawal({phone:s,ownerAuthorized:i}){if(i!==!0)return{recorded:!1,reason:"unauthorized"};let c=await l(s);if(!c)return{recorded:!1,reason:"invalid_phone"};let h=p();return await e.appendEvent({phoneKey:c,event:"withdrawal",consentVersion:null,source:"owner_withdrawal",occurredAt:h}),{recorded:!0,event:"withdrawal",occurredAt:h}},async canReceiveManualMarketing(s){try{let i=await l(s);if(!i)return!1;let c=await e.latestEvent(i),h=new Date(u()).getTime(),m=oe(c?.occurredAt)?Date.parse(c.occurredAt):NaN;return!!(Number.isFinite(h)&&c&&c.phoneKey===i&&c.event==="opt_in"&&c.consentVersion===M&&c.source==="order_form"&&Number.isFinite(m)&&m<=h&&h-m<7776e6)}catch{return!1}}})}var Z=/^[0-9a-f]{64}$/,ce=/^[A-Za-z0-9._-]{1,120}$/,ue=/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;function B(e){if(typeof e?.query!="function")throw new Error("INVALID_CONFIGURATION");return Object.freeze({async appendEvent(t){if(!t||typeof t!="object"||!Z.test(t.phoneKey)||!["opt_in","withdrawal"].includes(t.event)||t.event==="opt_in"&&(typeof t.consentVersion!="string"||!ce.test(t.consentVersion)||t.source!=="order_form")||t.event==="withdrawal"&&(t.consentVersion!==null||t.source!=="owner_withdrawal")||!ue.test(t.occurredAt)||!Number.isFinite(Date.parse(t.occurredAt)))throw new Error("INVALID_EVENT");let a=await e.query(`insert into rawaa_store.marketing_preference_events
++      returning attempts`,[N,o,l])).rows.length===1}async function n(){return{count:(await e.query("delete from rawaa_store.order_rate_limit where identity_key in (select identity_key from rawaa_store.order_rate_limit where window_end < now() - interval '24 hours' order by window_end limit 500) returning 1",[])).rows.length}}return{rateLimit:s,cleanup:n}}var M="rawaa-marketing-opt-in-v2",ne="rawaa:marketing-phone:v1\0",ie=/^\+[1-9]\d{7,14}$/;var oe=e=>typeof e=="string"&&/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(e)&&Number.isFinite(Date.parse(e));function ae(e,t="963"){if(typeof e!="string"||e.length>40||!/^\+?[0-9٠-٩۰-۹ ()-]+$/.test(e.trim()))return null;let a=e.trim().replace(/[٠-٩۰-۹]/g,p=>{let h=p.charCodeAt(0);return String(h>=1776?h-1776:h-1632)}),u=a.startsWith("+"),o=a.replace(/\D/g,""),l;if(u)l="+"+o;else if(o.startsWith("00"))l="+"+o.slice(2);else if(o.startsWith(t))l="+"+o;else if(o.startsWith("0"))l="+"+t+o.slice(1);else return null;return ie.test(l)?l:null}function se(e){return Array.from(new Uint8Array(e),t=>t.toString(16).padStart(2,"0")).join("")}function Q({repository:e,hmacSecret:t,cryptoImpl:a=globalThis.crypto,now:u=Date.now}){if(typeof e?.appendEvent!="function"||typeof e?.latestEvent!="function"||typeof t!="string"||new TextEncoder().encode(t).length<32||typeof a?.subtle?.importKey!="function"||typeof a?.subtle?.sign!="function"||typeof u!="function")throw new Error("INVALID_CONFIGURATION");let o;async function l(s){let n=ae(s);if(!n)return null;o||=a.subtle.importKey("raw",new TextEncoder().encode(t),{name:"HMAC",hash:"SHA-256"},!1,["sign"]);let c=await o,w=new TextEncoder().encode(ne+n);return se(await a.subtle.sign("HMAC",c,w))}function p(){let s=new Date(u());if(!Number.isFinite(s.getTime()))throw new Error("CLOCK_UNAVAILABLE");return s.toISOString()}async function h(s,n,c,w){let m=await l(s);if(!m)return{recorded:!1,reason:"invalid_phone"};let N=p();return await e.appendEvent({phoneKey:m,event:n,consentVersion:c,source:w,occurredAt:N}),{recorded:!0,event:n,occurredAt:N}}return Object.freeze({async recordOptIn({phone:s,explicitConsent:n,consentVersion:c}){if(n!==!0)return{recorded:!1,reason:"no_opt_in"};if(c!==M)return{recorded:!1,reason:"invalid_consent_version"};try{return await h(s,"opt_in",M,"order_form")}catch{return{recorded:!1,reason:"unavailable"}}},async recordWithdrawal({phone:s,ownerAuthorized:n}){if(n!==!0)return{recorded:!1,reason:"unauthorized"};let c=await l(s);if(!c)return{recorded:!1,reason:"invalid_phone"};let w=p();return await e.appendEvent({phoneKey:c,event:"withdrawal",consentVersion:null,source:"owner_withdrawal",occurredAt:w}),{recorded:!0,event:"withdrawal",occurredAt:w}},async canReceiveManualMarketing(s){try{let n=await l(s);if(!n)return!1;let c=await e.latestEvent(n),w=new Date(u()).getTime(),m=oe(c?.occurredAt)?Date.parse(c.occurredAt):NaN;return!!(Number.isFinite(w)&&c&&c.phoneKey===n&&c.event==="opt_in"&&c.consentVersion===M&&c.source==="order_form"&&Number.isFinite(m)&&m<=w&&w-m<7776e6)}catch{return!1}}})}var Z=/^[0-9a-f]{64}$/,ce=/^[A-Za-z0-9._-]{1,120}$/,ue=/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;function B(e){if(typeof e?.query!="function")throw new Error("INVALID_CONFIGURATION");return Object.freeze({async appendEvent(t){if(!t||typeof t!="object"||!Z.test(t.phoneKey)||!["opt_in","withdrawal"].includes(t.event)||t.event==="opt_in"&&(typeof t.consentVersion!="string"||!ce.test(t.consentVersion)||t.source!=="order_form")||t.event==="withdrawal"&&(t.consentVersion!==null||t.source!=="owner_withdrawal")||!ue.test(t.occurredAt)||!Number.isFinite(Date.parse(t.occurredAt)))throw new Error("INVALID_EVENT");let a=await e.query(`insert into rawaa_store.marketing_preference_events
+           (phone_key, event, consent_version, source, occurred_at)
+          values ($1, $2, $3, $4, $5::timestamptz)
+          returning event_id`,[t.phoneKey,t.event,t.consentVersion,t.source,t.occurredAt]);if(!a||!Array.isArray(a.rows)||a.rows.length!==1||!Number.isInteger(Number(a.rows[0]?.event_id)))throw new Error("PREFERENCE_UNAVAILABLE");return{eventId:Number(a.rows[0].event_id)}},async latestEvent(t){if(typeof t!="string"||!Z.test(t))throw new Error("INVALID_PHONE_KEY");let a=await e.query(`select phone_key as "phoneKey", event, consent_version as "consentVersion", source,
+@@ -20,4 +20,4 @@ import he from"npm:postgres@3.4.7";(function(e){"use strict";var t=["percent","a
+          from rawaa_store.marketing_preference_events
+          where phone_key = $1
+          order by event_id desc
+-         limit 1`,[t]);if(!a||!Array.isArray(a.rows)||a.rows.length>1)throw new Error("PREFERENCE_UNAVAILABLE");return a.rows[0]||null}})}function J({getEnv:e,postgresFactory:t,getTrustedIdentity:a,config:u,fetchImpl:o=fetch}){let l,p,w,s;try{l=e("SUPABASE_DB_URL"),p=e("RAWAA_TURNSTILE_SECRET"),w=e("RAWAA_RATE_LIMIT_HMAC_KEY"),s=e("RAWAA_OWNER_ORIGIN");let _=new URL(s);if(!l||!p||typeof w!="string"||w.length<32||_.protocol!=="https:"||_.origin!==s||_.username||_.password||_.search||_.hash||typeof t!="function"||typeof a!="function"||typeof o!="function"||!u)throw Error()}catch{return()=>new Response('{"error":"unavailable"}',{status:503,headers:{"content-type":"application/json","cache-control":"no-store"}})}let i,c=()=>i||=t(l,{max:1,prepare:!1,idle_timeout:20,connect_timeout:5}),h={async query(_,E){return{rows:Array.from(await c().unsafe(_,E))}},async transaction(_){return c().begin(async E=>_({query:async(S,D)=>({rows:Array.from(await E.unsafe(S,D))})}))}},m=W(h),g=K({db:h,identityKey:w,getTrustedIdentity:a}),R=G({secret:p,hostname:new URL(s).hostname,fetchImpl:o}),v;try{let _=e("RAWAA_MARKETING_HMAC_KEY");if(typeof _=="string"&&_){let E=Q({repository:B(h),hmacSecret:_});v=({phone:S})=>E.recordOptIn({phone:S,explicitConsent:!0,consentVersion:M})}}catch{}return Y({origin:s,config:u,repository:m,rateLimit:g.rateLimit,verifyChallenge:R,recordMarketingOptIn:v,notificationRunner:{async kick(){}}})}var le=new Set(["x-forwarded-for","forwarded","x-original-forwarded-for"]),de=/^[a-z][a-z0-9-]{0,40}$/;function X(e){let t=/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(e);if(!t)return null;let a=[];for(let u=1;u<=4;u++){let o=t[u];if(o.length>1&&o[0]==="0")return null;let l=Number(o);if(l>255)return null;a.push(l)}return a}function fe(e){if(!e||e.length>45||e.includes("%")||e.includes("[")||e.includes("]")||!/^[0-9a-f:.]+$/i.test(e)||e.split("::").length>2)return null;let t=e;if(e.includes(".")){let i=e.lastIndexOf(":");if(i<0)return null;let c=X(e.slice(i+1));if(!c)return null;let h=(c[0]<<8|c[1]).toString(16),m=(c[2]<<8|c[3]).toString(16);t=`${e.slice(0,i+1)}${h}:${m}`}let a=i=>/^[0-9a-f]{1,4}$/i.test(i),u=t.split("::"),o=u[0]===""?[]:u[0].split(":"),l=u.length===2?u[1]===""?[]:u[1].split(":"):[];if(u.length===2&&o.length+l.length>7||u.length===1&&o.length!==8)return null;let p=[...o,...l];if(!p.every(a))return null;let w=8-p.length,s=[...o,...Array(u.length===2?w:0).fill("0"),...l].map(i=>parseInt(i,16));return s.length===8?s:null}function pe(e){return[e[6]>>8,e[6]&255,e[7]>>8,e[7]&255].join(".")}function we(e,t){let a=X(e);if(a)return a.join(".");let u=fe(e);if(!u)return null;if(u.slice(0,5).every(o=>o===0)&&u[5]===65535)return pe(u);if(t>0)for(let o=0;o<8;o++){let l=Math.min(16,Math.max(0,t-o*16)),p=l===16?65535:65535<<16-l&65535;u[o]&=p}return u.map(o=>o.toString(16).padStart(4,"0")).join(":")}function ee({mode:e,header:t,xffTrustedHops:a,ipv6GroupBits:u=0}={}){if(e!=="platform-header"&&e!=="xff-trusted-hop")throw new Error("INVALID_CONFIGURATION");if(typeof t!="string"||!de.test(t))throw new Error("INVALID_CONFIGURATION");let o=t.toLowerCase();if(e==="platform-header"&&le.has(o))throw new Error("INVALID_CONFIGURATION");if(!Number.isInteger(u)||u!==0&&(u<32||u>128))throw new Error("INVALID_CONFIGURATION");if(e==="xff-trusted-hop"&&(!Number.isInteger(a)||a<1||a>8))throw new Error("INVALID_CONFIGURATION");return{async getTrustedIdentity(l){let p=l?.headers?.get(o);if(typeof p!="string")throw new Error("UNTRUSTED_IDENTITY");let w=p.trim();if(e==="xff-trusted-hop"){let i=p.split(",").map(c=>c.trim());if(i.length<a)throw new Error("UNTRUSTED_IDENTITY");w=i[i.length-a]}else if(w.includes(","))throw new Error("UNTRUSTED_IDENTITY");let s=we(w,u);if(!s||s.length>128||/[\u0000-\u001f\u007f]/.test(s))throw new Error("UNTRUSTED_IDENTITY");return s}}}var te="9ec0c1a4d0f5277b8b0a1cde5754f4596cfc47106db98d3a036a2c13fa7e6934",re=JSON.parse('{"brand":{"latinName":"RAWAA","arabicName":"رواء","tagline":"لمعان يُرى، ونعومة تُلمَس","shortDescription":"سيروم شعر جاهز يحتوي على الأرغان والبانثينول، مصنوع على أيدي صيادلة ومختصين.","city":"حماة","country":"سوريا"},"contact":{"whatsappNumber":"963997310856","displayNumber":"0997310856","hoursNote":"نرد على الرسائل خلال ساعات اليوم المعتادة، وغالبًا خلال ساعات قليلة."},"currency":{"code":"USD","symbol":"$","arabicLabel":"دولار أمريكي","position":"prefix"},"products":[{"id":"serum-30","name":"سيروم زيوت رواء","sizeMl":30,"sizeLabel":"30 مل","shortLabel":"30 مل — الحجم التجريبي","note":"مناسب للتعرّف على المنتج أو للسفر.","price":13,"image":{"base":"size-30","avif":["size-30-v6-480.avif","size-30-v6-720.avif","size-30-v6-900.avif"],"webp":["size-30-v6-480.webp","size-30-v6-720.webp","size-30-v6-900.webp"],"widths":[480,720,900],"src":"assets/img/products/size-30-v6-720.jpg","width":1024,"height":1024,"alt":"تصميم عبوة سيروم رواء 30 مل بزجاج كهرماني وملصق عاجي يحمل اسمي RAWAA ورواء"}},{"id":"serum-50","name":"سيروم زيوت رواء","sizeMl":50,"sizeLabel":"50 مل","shortLabel":"50 مل — الأنسب للاستعمال اليومي","note":"حجم مناسب للاستعمال اليومي.","price":16,"badge":"الأنسب للاستعمال اليومي","image":{"base":"size-50","avif":["size-50-v6-480.avif","size-50-v6-720.avif","size-50-v6-900.avif"],"webp":["size-50-v6-480.webp","size-50-v6-720.webp","size-50-v6-900.webp"],"widths":[480,720,900],"src":"assets/img/products/size-50-v6-720.jpg","width":1024,"height":1024,"alt":"تصميم عبوة سيروم رواء 50 مل بزجاج كهرماني وغطاء قطّارة أسود وملصق عاجي"}},{"id":"serum-100","name":"سيروم زيوت رواء","sizeMl":100,"sizeLabel":"100 مل","shortLabel":"100 مل — العبوة الكبيرة","note":"أفضل قيمة لكل ملليلتر على المدى الطويل.","price":25,"badge":"أفضل قيمة","image":{"base":"size-100","avif":["size-100-v6-480.avif","size-100-v6-720.avif","size-100-v6-900.avif"],"webp":["size-100-v6-480.webp","size-100-v6-720.webp","size-100-v6-900.webp"],"widths":[480,720,900],"src":"assets/img/products/size-100-v6-720.jpg","width":1024,"height":1024,"alt":"تصميم عبوة سيروم رواء 100 مل، أكبر أحجام العلامة"}}],"delivery":{"defaultZone":"hama","zones":[{"id":"hama","label":"حماة","fee":2,"freeWithShamCash":true},{"id":"other","label":"باقي المحافظات","fee":2,"freeWithShamCash":false}],"governorates":["دمشق","ريف دمشق","حلب","حمص","اللاذقية","طرطوس","إدلب","دير الزور","الرقة","الحسكة","السويداء","درعا","القنيطرة","حماة"],"note":"التوصيل المجاني مع شام كاش داخل حماة فقط. خارج حماة تُضاف رسوم التوصيل حتى مع شام كاش."},"trust":{"title":"ما لا نقدّمه","items":["لا ادعاء طبي ولا نتيجة مضمونة — المنتج للعناية التجميلية بالشعر.","لا ننشر تقييمات أو شهادات قبل الحصول عليها من زبونات حقيقيات وبإذنهن.","لا نطلب دفعًا مسبقًا إلا بتحويل شام كاش واضح، أو الدفع عند الاستلام.","لا يُفعَّل القياس الإعلاني إلا بعد تهيئته وبموافقتك."]},"payment":{"title":"طريقة الدفع","freeDeliveryNote":"التوصيل المجاني مع شام كاش يسري داخل حماة فقط؛ باقي المحافظات عليها رسوم توصيل 2 دولار.","methods":[{"id":"shamcash","label":"شام كاش","short":"شام كاش","description":"خصم 10% على قيمة المنتجات + توصيل مجاني داخل حماة.","discountPercent":10,"freeDeliveryIn":["hama"],"requiresReceipt":true,"available":true,"confirmNote":"يُرسَل إشعار التحويل على واتساب لتأكيد الدفع قبل تجهيز الطلب.","walletNumber":"","apiNote":"شام كاش أطلقت واجهة برمجية رسمية (shamcash.sy/ar/apiRequest · 2026-05). التفعيل لاحقًا يتيح تأكيد التحويل آليًا بدل اليدوي."},{"id":"cod","label":"الدفع عند الاستلام","short":"الدفع عند الاستلام","description":"بلا خصم، وتُضاف رسوم التوصيل: 2 دولار داخل حماة، 2 دولار لباقي المحافظات.","discountPercent":0,"freeDeliveryIn":[],"requiresReceipt":false,"available":true,"confirmNote":"يُدفع المبلغ كاملًا عند استلام الطلب."}]},"imagery":{"hero":{"base":"trio","avif":["trio-v6-480.avif","trio-v6-720.avif","trio-v6-1080.avif","trio-v6-1195.avif"],"webp":["trio-v6-480.webp","trio-v6-720.webp","trio-v6-1080.webp","trio-v6-1195.webp"],"widths":[480,720,1080,1195],"src":"assets/img/products/trio-v6-1080.jpg","width":1080,"height":810,"alt":"تصميم الأحجام الثلاثة لسيروم زيوت رواء 30 و50 و100 مل"},"trio":{"base":"trio","avif":["trio-v6-480.avif","trio-v6-720.avif","trio-v6-1080.avif","trio-v6-1195.avif"],"webp":["trio-v6-480.webp","trio-v6-720.webp","trio-v6-1080.webp","trio-v6-1195.webp"],"widths":[480,720,1080,1195],"src":"assets/img/products/trio-v6-1080.jpg","width":1080,"height":810,"alt":"الأحجام الثلاثة لسيروم رواء 30 و50 و100 مل بجانب بعضها"},"editorial":{"base":"editorial","avif":["editorial-v5-480.avif","editorial-v5-720.avif","editorial-v5-900.avif"],"webp":["editorial-v5-480.webp","editorial-v5-720.webp","editorial-v5-900.webp"],"widths":[480,720,900],"src":"assets/img/products/editorial-v5-720.jpg","width":720,"height":1029,"alt":"عبوة سيروم رواء بإضاءة جانبية ناعمة"},"detail":{"base":"detail-label","avif":["detail-label-v5-480.avif","detail-label-v5-720.avif","detail-label-v5-900.avif"],"webp":["detail-label-v5-480.webp","detail-label-v5-720.webp","detail-label-v5-900.webp"],"widths":[480,720,900],"src":"assets/img/products/detail-label-v5-720.jpg","width":720,"height":720,"alt":"تفاصيل ملصق عبوة رواء الذي يظهر الاسم والشعار"}},"costing":{"source":"owner-confirmed","unitCostMin":3,"unitCostMax":4,"note":"مؤكَّدة من المالك: 3–4 دولارات لكل عبوة، ثابتة لكل الأحجام."},"marketing":{"facebookPixelId":"","channel":"facebook"},"showPricePerUnit":false,"offers":{"maxPercent":30,"slots":[],"note":"الأسعار الأساسية 13/16/25 تبقى مرجعًا؛ العرض يظهر كسعر قبل/بعد مع شارة، ويُحتسب في السلة ورسالة واتساب. عرض العبوة (bundle) يحسب أفضل تقسيم للكمية تلقائيًا: 3 عبوات مع عرض «عبوتان» = عبوتان + واحدة بسعرها."},"cart":{"maxQuantityPerItem":10,"minQuantityPerItem":1},"routines":{"title":"ثلاث لحظات للعناية بأطراف شعرك","note":"ابدئي بكمية صغيرة على الأطراف؛ تختلف الكمية المناسبة حسب طبيعة الشعر. راجعي تعليمات العبوة.","items":[{"when":"بعد الغسل","title":"على شعر رطب قليلًا","body":"وزّعي كمية صغيرة على الأطراف قبل التمشيط."},{"when":"قبل الخروج","title":"لمسة على الأطراف","body":"ابدئي بكمية صغيرة على الشعر الجاف، من منتصف الطول إلى الأطراف."},{"when":"عند الحاجة","title":"ابدئي بالقليل","body":"زيدي تدريجيًا حسب طبيعة شعرك، واتّبعي تعليمات العبوة."}]},"formula":{"active":"Panthenol","percentagesVerified":false,"status":"awaiting-corrected-formula"},"craft":{"eyebrow":"الصنعة","title":"تركيبة أعدّها صيادلة ومختصون","lead":"سيروم رواء مصنوع على أيدي صيادلة ومختصين. نعمل مع مصنع وصيادلة ومخبر لتطوير منتجات رواء.","points":[{"title":"صنعة مختصين","body":"سيروم رواء مصنوع على أيدي صيادلة ومختصين."},{"title":"شراكة في التطوير","body":"نعمل مع مصنع وصيادلة ومخبر لتطوير منتجات رواء."},{"title":"اختيار بسيط","body":"اختاري الحجم، وأخبرينا إن أردتِ الاستفسار عن العطر أو الإضافات."}],"signature":"العناية تبدأ بالوضوح."},"customization":{"title":"رائحتك أنت","scentPrice":2,"note":"استفسري عن خيارات العطر والإضافات المتوفّرة عبر واتساب.","scentOptions":[{"id":"unscented","label":"بلا عطر","note":"خيار بلا عطر، نؤكد توفّره عند الطلب."},{"id":"vanilla","label":"فانيلا دافئة","note":"رائحة حلوة وهادئة."},{"id":"rose","label":"ورد","note":"أنثوية كلاسيكية، تلائم المناسبات."},{"id":"oud","label":"عود شرقي","note":"رائحة شرقية دافئة."},{"id":"lavender","label":"لافندر"},{"id":"rosemary","label":"إكليل الجبل"},{"id":"jasmine","label":"ياسمين"},{"id":"ylang","label":"إيلانغ إيلانغ"},{"id":"mint","label":"نعناع"},{"id":"custom","label":"عطر آخر — أذكره في واتساب"}],"oilAdditions":[{"id":"argan","label":"أرجان","note":"الأنسب للشعر الجاف والمتقصّف."},{"id":"castor","label":"خروع","note":"غني وثقيل — للأطراف شديدة الجفاف."},{"id":"almond","label":"لوز حلو"},{"id":"jojoba","label":"جوجوبا"},{"id":"coconut","label":"جوز الهند"},{"id":"grapeseed","label":"بذور العنب"},{"id":"other","label":"زيت آخر — أذكره في واتساب"}],"extraOilNote":"توفّر الخيارات وإمكان إضافتها يُؤكَّدان عبر واتساب."},"order":{"confirmationPoints":["تأكيد توفّر الأحجام المطلوبة","تأكيد خيارات العطر أو الزيت إن طُلبت","تأكيد السعر النهائي لهذا الطلب","تأكيد موعد تجهيز العبوة ورسوم التوصيل وموعده","تأكيد تفاصيل الدفع"],"greeting":"مرحبًا رواء،","intro":"أرغب بالاستفسار عن السيروم وطلب الأحجام التالية:"}}');var me=ee({mode:"platform-header",header:"cf-connecting-ip",ipv6GroupBits:64});if(!te)throw new Error("STALE_CONFIG");var ye=J({getEnv:e=>Deno.env.get(e),postgresFactory:he,getTrustedIdentity:me.getTrustedIdentity,config:re});Deno.serve(ye);
++         limit 1`,[t]);if(!a||!Array.isArray(a.rows)||a.rows.length>1)throw new Error("PREFERENCE_UNAVAILABLE");return a.rows[0]||null}})}function J({getEnv:e,postgresFactory:t,getTrustedIdentity:a,config:u,fetchImpl:o=fetch}){let l,p,h,s;try{l=e("SUPABASE_DB_URL"),p=e("RAWAA_TURNSTILE_SECRET"),h=e("RAWAA_RATE_LIMIT_HMAC_KEY"),s=e("RAWAA_OWNER_ORIGIN");let _=new URL(s);if(!l||!p||typeof h!="string"||h.length<32||_.protocol!=="https:"||_.origin!==s||_.username||_.password||_.search||_.hash||typeof t!="function"||typeof a!="function"||typeof o!="function"||!u)throw Error()}catch{return()=>new Response('{"error":"unavailable"}',{status:503,headers:{"content-type":"application/json","cache-control":"no-store"}})}let n,c=()=>n||=t(l,{max:1,prepare:!1,idle_timeout:20,connect_timeout:5}),w={async query(_,E){return{rows:Array.from(await c().unsafe(_,E))}},async transaction(_){return c().begin(async E=>_({query:async(S,D)=>({rows:Array.from(await E.unsafe(S,D))})}))}},m=W(w),N=K({db:w,identityKey:h,getTrustedIdentity:a}),R=G({secret:p,hostname:new URL(s).hostname,fetchImpl:o}),b;try{let _=e("RAWAA_MARKETING_HMAC_KEY");if(typeof _=="string"&&_){let E=Q({repository:B(w),hmacSecret:_});b=({phone:S})=>E.recordOptIn({phone:S,explicitConsent:!0,consentVersion:M})}}catch{}return Y({origin:s,config:u,repository:m,rateLimit:N.rateLimit,verifyChallenge:R,recordMarketingOptIn:b,notificationRunner:{async kick(){}}})}var le=new Set(["x-forwarded-for","forwarded","x-original-forwarded-for"]),de=/^[a-z][a-z0-9-]{0,40}$/;function X(e){let t=/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(e);if(!t)return null;let a=[];for(let u=1;u<=4;u++){let o=t[u];if(o.length>1&&o[0]==="0")return null;let l=Number(o);if(l>255)return null;a.push(l)}return a}function fe(e){if(!e||e.length>45||e.includes("%")||e.includes("[")||e.includes("]")||!/^[0-9a-f:.]+$/i.test(e)||e.split("::").length>2)return null;let t=e;if(e.includes(".")){let n=e.lastIndexOf(":");if(n<0)return null;let c=X(e.slice(n+1));if(!c)return null;let w=(c[0]<<8|c[1]).toString(16),m=(c[2]<<8|c[3]).toString(16);t=`${e.slice(0,n+1)}${w}:${m}`}let a=n=>/^[0-9a-f]{1,4}$/i.test(n),u=t.split("::"),o=u[0]===""?[]:u[0].split(":"),l=u.length===2?u[1]===""?[]:u[1].split(":"):[];if(u.length===2&&o.length+l.length>7||u.length===1&&o.length!==8)return null;let p=[...o,...l];if(!p.every(a))return null;let h=8-p.length,s=[...o,...Array(u.length===2?h:0).fill("0"),...l].map(n=>parseInt(n,16));return s.length===8?s:null}function pe(e){return[e[6]>>8,e[6]&255,e[7]>>8,e[7]&255].join(".")}function we(e,t){let a=X(e);if(a)return a.join(".");let u=fe(e);if(!u)return null;if(u.slice(0,5).every(o=>o===0)&&u[5]===65535)return pe(u);if(t>0)for(let o=0;o<8;o++){let l=Math.min(16,Math.max(0,t-o*16)),p=l===16?65535:65535<<16-l&65535;u[o]&=p}return u.map(o=>o.toString(16).padStart(4,"0")).join(":")}function ee({mode:e,header:t,xffTrustedHops:a,ipv6GroupBits:u=0}={}){if(e!=="platform-header"&&e!=="xff-trusted-hop")throw new Error("INVALID_CONFIGURATION");if(typeof t!="string"||!de.test(t))throw new Error("INVALID_CONFIGURATION");let o=t.toLowerCase();if(e==="platform-header"&&le.has(o))throw new Error("INVALID_CONFIGURATION");if(!Number.isInteger(u)||u!==0&&(u<32||u>128))throw new Error("INVALID_CONFIGURATION");if(e==="xff-trusted-hop"&&(!Number.isInteger(a)||a<1||a>8))throw new Error("INVALID_CONFIGURATION");return{async getTrustedIdentity(l){let p=l?.headers?.get(o);if(typeof p!="string")throw new Error("UNTRUSTED_IDENTITY");let h=p.trim();if(e==="xff-trusted-hop"){let n=p.split(",").map(c=>c.trim());if(n.length<a)throw new Error("UNTRUSTED_IDENTITY");h=n[n.length-a]}else if(h.includes(","))throw new Error("UNTRUSTED_IDENTITY");let s=we(h,u);if(!s||s.length>128||/[\u0000-\u001f\u007f]/.test(s))throw new Error("UNTRUSTED_IDENTITY");return s}}}var te="aaaf0d29f48fd9140799002de656479d833de068dcb56058121ad4cd821510fe",re=JSON.parse('{"brand":{"latinName":"RAWAA","arabicName":"رواء","tagline":"لمعان يُرى، ونعومة تُلمَس","shortDescription":"سيروم شعر جاهز يحتوي على الأرغان والبانثينول، مصنوع على أيدي صيادلة ومختصين.","city":"حماة","country":"سوريا"},"contact":{"whatsappNumber":"963997310856","displayNumber":"0997310856","hoursNote":"نرد على الرسائل خلال ساعات اليوم المعتادة، وغالبًا خلال ساعات قليلة."},"currency":{"code":"USD","symbol":"$","arabicLabel":"دولار أمريكي","position":"prefix"},"products":[{"id":"serum-30","name":"سيروم زيوت رواء","sizeMl":30,"sizeLabel":"30 مل","shortLabel":"30 مل — الحجم التجريبي","note":"مناسب للتعرّف على المنتج أو للسفر.","price":13,"image":{"base":"size-30","avif":["size-30-v6-480.avif","size-30-v6-720.avif","size-30-v6-900.avif"],"webp":["size-30-v6-480.webp","size-30-v6-720.webp","size-30-v6-900.webp"],"widths":[480,720,900],"src":"assets/img/products/size-30-v6-720.jpg","width":1024,"height":1024,"alt":"تصميم عبوة سيروم رواء 30 مل بزجاج كهرماني وملصق عاجي يحمل اسمي RAWAA ورواء"}},{"id":"serum-50","name":"سيروم زيوت رواء","sizeMl":50,"sizeLabel":"50 مل","shortLabel":"50 مل — الأنسب للاستعمال اليومي","note":"حجم مناسب للاستعمال اليومي.","price":16,"badge":"الأنسب للاستعمال اليومي","image":{"base":"size-50","avif":["size-50-v6-480.avif","size-50-v6-720.avif","size-50-v6-900.avif"],"webp":["size-50-v6-480.webp","size-50-v6-720.webp","size-50-v6-900.webp"],"widths":[480,720,900],"src":"assets/img/products/size-50-v6-720.jpg","width":1024,"height":1024,"alt":"تصميم عبوة سيروم رواء 50 مل بزجاج كهرماني وغطاء قطّارة أسود وملصق عاجي"}},{"id":"serum-100","name":"سيروم زيوت رواء","sizeMl":100,"sizeLabel":"100 مل","shortLabel":"100 مل — العبوة الكبيرة","note":"أفضل قيمة لكل ملليلتر على المدى الطويل.","price":25,"badge":"أفضل قيمة","image":{"base":"size-100","avif":["size-100-v6-480.avif","size-100-v6-720.avif","size-100-v6-900.avif"],"webp":["size-100-v6-480.webp","size-100-v6-720.webp","size-100-v6-900.webp"],"widths":[480,720,900],"src":"assets/img/products/size-100-v6-720.jpg","width":1024,"height":1024,"alt":"تصميم عبوة سيروم رواء 100 مل، أكبر أحجام العلامة"}}],"delivery":{"defaultZone":"hama","zones":[{"id":"hama","label":"حماة","fee":0,"freeWithShamCash":true},{"id":"other","label":"باقي المحافظات","fee":2,"freeWithShamCash":false}],"governorates":["دمشق","ريف دمشق","حلب","حمص","اللاذقية","طرطوس","إدلب","دير الزور","الرقة","الحسكة","السويداء","درعا","القنيطرة","حماة"],"note":"التوصيل مجاني داخل حماة لكل طرق الدفع. باقي المحافظات: رسوم توصيل 2 دولار لكل طرق الدفع."},"trust":{"title":"ما لا نقدّمه","items":["لا ادعاء طبي ولا نتيجة مضمونة — المنتج للعناية التجميلية بالشعر.","لا ننشر تقييمات أو شهادات قبل الحصول عليها من زبونات حقيقيات وبإذنهن.","لا نطلب دفعًا مسبقًا إلا بتحويل شام كاش واضح، أو الدفع عند الاستلام.","لا يُفعَّل القياس الإعلاني إلا بعد تهيئته وبموافقتك."]},"payment":{"title":"طريقة الدفع","freeDeliveryNote":"التوصيل مجاني داخل حماة لكل طرق الدفع؛ باقي المحافظات عليها رسوم توصيل 2 دولار لكل طرق الدفع.","methods":[{"id":"shamcash","label":"شام كاش","short":"شام كاش","description":"خصم 10% على قيمة المنتجات + توصيل مجاني داخل حماة (وهي مجانية هناك لكل طرق الدفع).","discountPercent":10,"freeDeliveryIn":["hama"],"requiresReceipt":true,"available":true,"confirmNote":"يُرسَل إشعار التحويل على واتساب لتأكيد الدفع قبل تجهيز الطلب.","walletNumber":"","apiNote":"شام كاش أطلقت واجهة برمجية رسمية (shamcash.sy/ar/apiRequest · 2026-05). التفعيل لاحقًا يتيح تأكيد التحويل آليًا بدل اليدوي."},{"id":"cod","label":"الدفع عند الاستلام","short":"الدفع عند الاستلام","description":"بلا خصم، والتوصيل مجاني داخل حماة، و2 دولار لباقي المحافظات.","discountPercent":0,"freeDeliveryIn":[],"requiresReceipt":false,"available":true,"confirmNote":"يُدفع المبلغ كاملًا عند استلام الطلب."}]},"imagery":{"hero":{"base":"trio","avif":["trio-v6-480.avif","trio-v6-720.avif","trio-v6-1080.avif","trio-v6-1195.avif"],"webp":["trio-v6-480.webp","trio-v6-720.webp","trio-v6-1080.webp","trio-v6-1195.webp"],"widths":[480,720,1080,1195],"src":"assets/img/products/trio-v6-1080.jpg","width":1080,"height":810,"alt":"تصميم الأحجام الثلاثة لسيروم زيوت رواء 30 و50 و100 مل"},"trio":{"base":"trio","avif":["trio-v6-480.avif","trio-v6-720.avif","trio-v6-1080.avif","trio-v6-1195.avif"],"webp":["trio-v6-480.webp","trio-v6-720.webp","trio-v6-1080.webp","trio-v6-1195.webp"],"widths":[480,720,1080,1195],"src":"assets/img/products/trio-v6-1080.jpg","width":1080,"height":810,"alt":"الأحجام الثلاثة لسيروم رواء 30 و50 و100 مل بجانب بعضها"},"editorial":{"base":"editorial","avif":["editorial-v5-480.avif","editorial-v5-720.avif","editorial-v5-900.avif"],"webp":["editorial-v5-480.webp","editorial-v5-720.webp","editorial-v5-900.webp"],"widths":[480,720,900],"src":"assets/img/products/editorial-v5-720.jpg","width":720,"height":1029,"alt":"عبوة سيروم رواء بإضاءة جانبية ناعمة"},"detail":{"base":"detail-label","avif":["detail-label-v5-480.avif","detail-label-v5-720.avif","detail-label-v5-900.avif"],"webp":["detail-label-v5-480.webp","detail-label-v5-720.webp","detail-label-v5-900.webp"],"widths":[480,720,900],"src":"assets/img/products/detail-label-v5-720.jpg","width":720,"height":720,"alt":"تفاصيل ملصق عبوة رواء الذي يظهر الاسم والشعار"}},"costing":{"source":"owner-confirmed","unitCostMin":3,"unitCostMax":4,"note":"مؤكَّدة من المالك: 3–4 دولارات لكل عبوة، ثابتة لكل الأحجام."},"marketing":{"facebookPixelId":"","channel":"facebook"},"showPricePerUnit":false,"offers":{"maxPercent":30,"slots":[],"note":"الأسعار الأساسية 13/16/25 تبقى مرجعًا؛ العرض يظهر كسعر قبل/بعد مع شارة، ويُحتسب في السلة ورسالة واتساب. عرض العبوة (bundle) يحسب أفضل تقسيم للكمية تلقائيًا: 3 عبوات مع عرض «عبوتان» = عبوتان + واحدة بسعرها."},"cart":{"maxQuantityPerItem":10,"minQuantityPerItem":1},"routines":{"title":"ثلاث لحظات للعناية بأطراف شعرك","note":"ابدئي بكمية صغيرة على الأطراف؛ تختلف الكمية المناسبة حسب طبيعة الشعر. راجعي تعليمات العبوة.","items":[{"when":"بعد الغسل","title":"على شعر رطب قليلًا","body":"وزّعي كمية صغيرة على الأطراف قبل التمشيط."},{"when":"قبل الخروج","title":"لمسة على الأطراف","body":"ابدئي بكمية صغيرة على الشعر الجاف، من منتصف الطول إلى الأطراف."},{"when":"عند الحاجة","title":"ابدئي بالقليل","body":"زيدي تدريجيًا حسب طبيعة شعرك، واتّبعي تعليمات العبوة."}]},"formula":{"active":"Panthenol","percentagesVerified":false,"status":"awaiting-corrected-formula"},"craft":{"eyebrow":"الصنعة","title":"تركيبة أعدّها صيادلة ومختصون","lead":"سيروم رواء مصنوع على أيدي صيادلة ومختصين. نعمل مع مصنع وصيادلة ومخبر لتطوير منتجات رواء.","points":[{"title":"صنعة مختصين","body":"سيروم رواء مصنوع على أيدي صيادلة ومختصين."},{"title":"شراكة في التطوير","body":"نعمل مع مصنع وصيادلة ومخبر لتطوير منتجات رواء."},{"title":"اختيار بسيط","body":"اختاري الحجم، وأخبرينا إن أردتِ الاستفسار عن العطر أو الإضافات."}],"signature":"العناية تبدأ بالوضوح."},"customization":{"title":"رائحتك أنت","scentPrice":2,"note":"استفسري عن خيارات العطر والإضافات المتوفّرة عبر واتساب.","scentOptions":[{"id":"unscented","label":"بلا عطر","note":"خيار بلا عطر، نؤكد توفّره عند الطلب."},{"id":"vanilla","label":"فانيلا دافئة","note":"رائحة حلوة وهادئة."},{"id":"rose","label":"ورد","note":"أنثوية كلاسيكية، تلائم المناسبات."},{"id":"oud","label":"عود شرقي","note":"رائحة شرقية دافئة."},{"id":"lavender","label":"لافندر"},{"id":"rosemary","label":"إكليل الجبل"},{"id":"jasmine","label":"ياسمين"},{"id":"ylang","label":"إيلانغ إيلانغ"},{"id":"mint","label":"نعناع"},{"id":"custom","label":"عطر آخر — أذكره في واتساب"}],"oilAdditions":[{"id":"argan","label":"أرجان","note":"الأنسب للشعر الجاف والمتقصّف."},{"id":"castor","label":"خروع","note":"غني وثقيل — للأطراف شديدة الجفاف."},{"id":"almond","label":"لوز حلو"},{"id":"jojoba","label":"جوجوبا"},{"id":"coconut","label":"جوز الهند"},{"id":"grapeseed","label":"بذور العنب"},{"id":"other","label":"زيت آخر — أذكره في واتساب"}],"extraOilNote":"توفّر الخيارات وإمكان إضافتها يُؤكَّدان عبر واتساب."},"order":{"confirmationPoints":["تأكيد توفّر الأحجام المطلوبة","تأكيد خيارات العطر أو الزيت إن طُلبت","تأكيد السعر النهائي لهذا الطلب","تأكيد موعد تجهيز العبوة ورسوم التوصيل وموعده","تأكيد تفاصيل الدفع"],"greeting":"مرحبًا رواء،","intro":"أرغب بالاستفسار عن السيروم وطلب الأحجام التالية:"}}');var me=ee({mode:"platform-header",header:"cf-connecting-ip",ipv6GroupBits:64});if(!te)throw new Error("STALE_CONFIG");var ye=J({getEnv:e=>Deno.env.get(e),postgresFactory:he,getTrustedIdentity:me.getTrustedIdentity,config:re});Deno.serve(ye);
+diff --git a/order-system/order-core.mjs b/order-system/order-core.mjs
+index c0ab324..8a60e44 100644
+--- a/order-system/order-core.mjs
++++ b/order-system/order-core.mjs
+@@ -63,9 +63,12 @@ export function prepareOrder(input, config) {
+   const discountedProductCents = productCents - generalCut;
+   const subtotalCents = discountedProductCents + scentCents * quantity;
+   const discountCents = Math.round(discountedProductCents * method.discountPercent / 100);
+-  const deliveryCents = method.freeDeliveryIn.includes(zone.id) ? 0 : cents(zone.fee);
++  // نفس قاعدة المتصفح: منطقة برسم صفر مجانية لكل طرق الدفع، وإلا يُطبَّق freeDeliveryIn.
++  const freeDelivery = !(zone.fee > 0) || method.freeDeliveryIn.includes(zone.id);
++  const deliveryCents = freeDelivery ? 0 : cents(zone.fee);
+   return { name, phone, address, entries, scent, oil, zone: zone.id, method: method.id,
+-    subtotalCents, offerCents, discountCents, deliveryCents, totalCents: subtotalCents - discountCents + deliveryCents,
++    subtotalCents, offerCents, discountCents, deliveryCents, freeDelivery,
++    totalCents: subtotalCents - discountCents + deliveryCents,
+     oilPricePending: Boolean(oil), status: 'pending_review' };
+ }
+ 
+diff --git a/order-system/order-core.test.mjs b/order-system/order-core.test.mjs
+index 6dfcd92..f0117fa 100644
+--- a/order-system/order-core.test.mjs
++++ b/order-system/order-core.test.mjs
+@@ -23,7 +23,8 @@ test('uses trusted configuration and calculates fragrance and sham cash in cents
+ });
+ 
+ test('both delivery methods and zones use store rules', () => {
+-  const expected = { 'hama:shamcash': 1440, 'hama:cod': 1800, 'other:shamcash': 1640, 'other:cod': 1800 };
++  // حماة مجانية لكل طرق الدفع (fee: 0)؛ باقي المحافظات 2$ لكل طرق الدفع.
++  const expected = { 'hama:shamcash': 1440, 'hama:cod': 1600, 'other:shamcash': 1640, 'other:cod': 1800 };
+   for (const [choice, total] of Object.entries(expected)) {
+     const [zone, method] = choice.split(':');
+     assert.equal(prepareOrder({ ...base, zone, method }, cfg).totalCents, total);
+@@ -32,8 +33,9 @@ test('both delivery methods and zones use store rules', () => {
+ 
+ test('multiple sizes charge fragrance for each unit and unscented is free', () => {
+   const items = [{ id: 'serum-30', qty: 2 }, { id: 'serum-100', qty: 1 }];
+-  assert.equal(prepareOrder({ ...base, items, scent: 'rose', method: 'cod' }, cfg).totalCents, 5900);
+-  assert.equal(prepareOrder({ ...base, items, scent: 'unscented', method: 'cod' }, cfg).totalCents, 5300);
++  // 13×2 + 25 + عطر 2$×3 = 57$، وتوصيل حماة مجاني.
++  assert.equal(prepareOrder({ ...base, items, scent: 'rose', method: 'cod' }, cfg).totalCents, 5700);
++  assert.equal(prepareOrder({ ...base, items, scent: 'unscented', method: 'cod' }, cfg).totalCents, 5100);
+ });
+ 
+ test('fails closed on malformed contact, products, quantities, options and delivery', () => {
+@@ -107,11 +109,11 @@ test('bundle offer: the server charges the package price, not qty × unit', () =
+   const order = prepareOrder({ ...base, items: [{ id: 'serum-50', qty: 2 }], method: 'cod' }, withBundle);
+   assert.equal(order.offerCents, 200);       // 32 − 30
+   assert.equal(order.subtotalCents, 3000);
+-  assert.equal(order.totalCents, 3200);      // + توصيل حماة 2$
++  assert.equal(order.totalCents, 3000);      // + توصيل حماة المجاني
+   // 3 عبوات = عبوتان + واحدة بسعرها
+   const three = prepareOrder({ ...base, items: [{ id: 'serum-50', qty: 3 }], method: 'cod' }, withBundle);
+   assert.equal(three.subtotalCents, 4600);
+-  assert.equal(three.totalCents, 4800);
++  assert.equal(three.totalCents, 4600);
+ });
+ 
+ test('scent surcharge is never discounted by the payment method', () => {
+diff --git a/order-system/order-http.test.mjs b/order-system/order-http.test.mjs
+index 197a595..1f9e734 100644
+--- a/order-system/order-http.test.mjs
++++ b/order-system/order-http.test.mjs
+@@ -10,7 +10,7 @@ const order={ name:'تجربة', phone:'0991234567', address:'حماة', items:[
+ const payload={order,idempotencyKey:key,challengeToken:'fake-token',consent:true};
+ const request=(body=payload,extra={})=>new Request('https://edge.example/orders',{method:'POST',headers:{origin,'content-type':'application/json',...extra},body:JSON.stringify(body)});
+ let calls=[];
+-const deps={origin,config,repository:{async insertPending({order: saved}) {calls.push('saved'); assert.equal(saved.totalCents,1500); return {result:'created',reference:'RAWAA-TEST123'};}},notificationRunner:{async kick(){calls.push('notify');}},verifyChallenge:async()=>{calls.push('challenge');return true;},rateLimit:async()=>{calls.push('limit');return true;}};
++const deps={origin,config,repository:{async insertPending({order: saved}) {calls.push('saved'); assert.equal(saved.totalCents,1300); return {result:'created',reference:'RAWAA-TEST123'};}},notificationRunner:{async kick(){calls.push('notify');}},verifyChallenge:async()=>{calls.push('challenge');return true;},rateLimit:async()=>{calls.push('limit');return true;}};
+ test('only saves consented, challenge-validated order and never trusts the client total',async()=>{
+   calls=[]; const response=await createOrderHandler(deps)(request());
+   assert.equal(response.status,200); assert.match(response.headers.get('cache-control'),/no-store/);
+diff --git a/order-system/order-pricing.js b/order-system/order-pricing.js
+index c84ea51..f117c9c 100644
+--- a/order-system/order-pricing.js
++++ b/order-system/order-pricing.js
+@@ -77,7 +77,10 @@
+     const discountedProductCents = productCents - generalCut;
+     const subtotalCents = discountedProductCents + scentCents * quantity;
+     const discountCents = Math.round(discountedProductCents * method.discountPercent / 100);
+-    const deliveryCents = method.freeDeliveryIn.includes(zone.id) ? 0 : cents(zone.fee);
++    // Same rule as the browser cart: a zero-fee zone is free for every payment
++    // method; otherwise the method's freeDeliveryIn list decides.
++    const freeDelivery = !(zone.fee > 0) || method.freeDeliveryIn.includes(zone.id);
++    const deliveryCents = freeDelivery ? 0 : cents(zone.fee);
+ 
+     return {
+       entries,
+diff --git a/order-system/order-service.test.mjs b/order-system/order-service.test.mjs
+index 15647b4..a90c09c 100644
+--- a/order-system/order-service.test.mjs
++++ b/order-system/order-service.test.mjs
+@@ -11,7 +11,7 @@ const idempotencyKey = 'e231547a-1e5e-4c4d-af55-f06686a30341';
+ 
+ test('saves a recalculated order before requesting a notification', async () => {
+   const events = [];
+-  const repository = { async insertPending({ order }) { events.push('saved'); assert.equal(order.totalCents, 1800); return { reference: 'RAWAA-TEST123', result: 'created' }; } };
++  const repository = { async insertPending({ order }) { events.push('saved'); assert.equal(order.totalCents, 1600); return { reference: 'RAWAA-TEST123', result: 'created' }; } };
+   const notificationRunner = { async kick(ref) { events.push('notify:' + ref); } };
+   assert.deepEqual(await submitOrder({ input, idempotencyKey, config, repository, notificationRunner }), { ok: true, reference: 'RAWAA-TEST123', status: 'pending_review' });
+   assert.deepEqual(events, ['saved', 'notify:RAWAA-TEST123']);
+diff --git a/package.json b/package.json
+index 9dc43cd..3694cef 100644
+--- a/package.json
++++ b/package.json
+@@ -19,15 +19,15 @@
+     "check": "node scripts/check-site.mjs",
+     "lint": "eslint js/*.js sw.js",
+     "html": "html-validate index.html serum.html campaign.html hama.html privacy.html 404.html setup.html check.html owner/index.html",
+-    "gates": "node scripts/ref-audit.mjs && node scripts/perf-static.mjs && node scripts/check-site.mjs && node --test order-system/*.test.mjs scripts/workflow-runner-policy.test.mjs scripts/workflow-dependency-policy.test.mjs scripts/workflow-action-pinning.test.mjs scripts/outbox-scheduler-workflow.test.mjs scripts/offers.test.mjs scripts/cart-offers.test.mjs scripts/service-worker-offline.test.mjs scripts/pwa-install.test.mjs scripts/campaign-landing.test.mjs scripts/marketing-studio.test.mjs scripts/order-form-preview.test.mjs scripts/sales-video-strategy.test.mjs scripts/ops-kit.test.mjs scripts/brand-identity.test.mjs && eslint js/*.js sw.js && html-validate index.html serum.html campaign.html hama.html privacy.html 404.html setup.html check.html owner/index.html && python3 scripts/browser-test.py && python3 scripts/serum-browser-test.py && python3 scripts/campaign-browser-test.py && python3 scripts/axe-audit.py && node scripts/perf-budget.mjs && node scripts/asset-audit.mjs",
++    "gates": "node scripts/ref-audit.mjs && node scripts/perf-static.mjs && node scripts/check-site.mjs && node --test order-system/*.test.mjs scripts/workflow-runner-policy.test.mjs scripts/workflow-dependency-policy.test.mjs scripts/workflow-action-pinning.test.mjs scripts/outbox-scheduler-workflow.test.mjs scripts/offers.test.mjs scripts/cart-offers.test.mjs scripts/delivery-contract.test.mjs scripts/service-worker-offline.test.mjs scripts/pwa-install.test.mjs scripts/campaign-landing.test.mjs scripts/marketing-studio.test.mjs scripts/order-form-preview.test.mjs scripts/sales-video-strategy.test.mjs scripts/ops-kit.test.mjs scripts/brand-identity.test.mjs && eslint js/*.js sw.js && html-validate index.html serum.html campaign.html hama.html privacy.html 404.html setup.html check.html owner/index.html && python3 scripts/browser-test.py && python3 scripts/serum-browser-test.py && python3 scripts/campaign-browser-test.py && python3 scripts/axe-audit.py && node scripts/perf-budget.mjs && node scripts/asset-audit.mjs",
+     "pack": "repomix",
+     "verify": "npm run gates && npm run build",
+     "perf": "node scripts/perf-budget.mjs",
+     "assets": "node scripts/asset-audit.mjs",
+     "refs": "node scripts/ref-audit.mjs",
+     "perf:static": "node scripts/perf-static.mjs",
+-    "gates:offline": "node scripts/ref-audit.mjs && node scripts/perf-static.mjs && node scripts/check-site.mjs && node --test scripts/perf-budget.test.mjs scripts/workflow-runner-policy.test.mjs scripts/workflow-dependency-policy.test.mjs scripts/workflow-action-pinning.test.mjs scripts/outbox-scheduler-workflow.test.mjs order-system/*.test.mjs scripts/offers.test.mjs scripts/cart-offers.test.mjs scripts/service-worker-offline.test.mjs scripts/pwa-install.test.mjs scripts/campaign-landing.test.mjs scripts/marketing-studio.test.mjs scripts/order-form-preview.test.mjs scripts/sales-video-strategy.test.mjs scripts/ops-kit.test.mjs scripts/brand-identity.test.mjs && eslint js/*.js sw.js && html-validate index.html serum.html campaign.html hama.html privacy.html 404.html setup.html check.html owner/index.html",
+-    "test:offers": "node --test scripts/offers.test.mjs scripts/cart-offers.test.mjs",
++    "gates:offline": "node scripts/ref-audit.mjs && node scripts/perf-static.mjs && node scripts/check-site.mjs && node --test scripts/perf-budget.test.mjs scripts/workflow-runner-policy.test.mjs scripts/workflow-dependency-policy.test.mjs scripts/workflow-action-pinning.test.mjs scripts/outbox-scheduler-workflow.test.mjs order-system/*.test.mjs scripts/offers.test.mjs scripts/cart-offers.test.mjs scripts/delivery-contract.test.mjs scripts/service-worker-offline.test.mjs scripts/pwa-install.test.mjs scripts/campaign-landing.test.mjs scripts/marketing-studio.test.mjs scripts/order-form-preview.test.mjs scripts/sales-video-strategy.test.mjs scripts/ops-kit.test.mjs scripts/brand-identity.test.mjs && eslint js/*.js sw.js && html-validate index.html serum.html campaign.html hama.html privacy.html 404.html setup.html check.html owner/index.html",
++    "test:offers": "node --test scripts/offers.test.mjs scripts/cart-offers.test.mjs scripts/delivery-contract.test.mjs",
+     "test:marketing": "node --test scripts/marketing-studio.test.mjs scripts/sales-video-strategy.test.mjs scripts/ops-kit.test.mjs scripts/brand-identity.test.mjs order-system/marketing-preferences.test.mjs order-system/marketing-preference-api.test.mjs order-system/marketing-preference-repository.test.mjs order-system/edge-marketing-preferences-runtime.test.mjs order-system/order-service-marketing.test.mjs order-system/order-http-marketing.test.mjs order-system/customer-order-marketing.test.mjs order-system/customer-checkout-marketing.test.mjs order-system/edge-order-marketing-runtime.test.mjs order-system/order-marketing-lifecycle.test.mjs order-system/order-entry-bundle-integration.test.mjs order-system/migrations.test.mjs",
+     "test:marketing:supabase-local": "bash scripts/test-marketing-supabase-local.sh",
+     "test:order-preview": "node --test scripts/order-form-preview.test.mjs order-system/order-core.test.mjs",
+diff --git a/scripts/campaign-landing.test.mjs b/scripts/campaign-landing.test.mjs
+index cdf67ed..5ede3fd 100644
+--- a/scripts/campaign-landing.test.mjs
++++ b/scripts/campaign-landing.test.mjs
+@@ -65,7 +65,11 @@ test('delivery examples and WhatsApp address use owner config without sending or
+   assert.match(delivery, /الدفع عند الاستلام/);
+   // الرسوم تُشتق من الإعدادات: لا رقم مثبّت يتقادم عند تغيير المالك للرسوم.
+   const fees = new Set(RAWAA_CONFIG.delivery.zones.map(zone => zone.fee));
+-  for (const fee of fees) assert.ok(delivery.includes('$' + fee), `missing configured delivery fee $${fee}`);
++  for (const fee of fees) {
++    // منطقة برسم صفر تُعرض «توصيل مجاني» لا «$0»؛ كل رسم > 0 يجب أن يظهر حرفيًا.
++    const shown = fee > 0 ? delivery.includes('$' + fee) : /توصيل مجاني/.test(delivery);
++    assert.ok(shown, `missing configured delivery fee $${fee}`);
++  }
+ 
+   const wa = document.querySelector('[data-campaign-whatsapp]');
+   const url = new URL(wa.href);
+diff --git a/scripts/cart-offers.test.mjs b/scripts/cart-offers.test.mjs
+index 863098e..1ee7d98 100644
+--- a/scripts/cart-offers.test.mjs
++++ b/scripts/cart-offers.test.mjs
+@@ -77,8 +77,9 @@ test('بلا عروض: الأسعار كما هي 13 / 16 / 25', async () => {
+   const totals = api.totals();
+   assert.equal(totals.subtotal, 16);
+   assert.equal(totals.offer, 0);
+-  assert.equal(totals.delivery, 2, 'الدفع عند الاستلام داخل حماة = 2$');
+-  assert.equal(totals.amount, 18);
++  assert.equal(totals.freeDelivery, true, 'حماة مجانية لكل طرق الدفع');
++  assert.equal(totals.delivery, 0, 'الدفع عند الاستلام داخل حماة = 0$');
++  assert.equal(totals.amount, 16);
+   assert.equal(w.document.querySelector('[data-row-offer]').hidden, true);
+ });
+ 
+@@ -101,7 +102,7 @@ test('عرض 10% على 50 مل يظهر قبل/بعد ويُحتسب في ال
+   assert.equal(totals.subtotal, 16, 'قيمة المنتجات تبقى السعر المعلن');
+   assert.equal(totals.offer, 1.6, 'قيمة العرض ظاهرة كخصم مستقل');
+   assert.equal(totals.net, 14.4);
+-  assert.equal(totals.amount, 16.4, '14.40 + 2$ توصيل حماة');
++  assert.equal(totals.amount, 14.4, '14.40 + توصيل حماة المجاني');
+ 
+   const row = doc.querySelector('[data-row-offer]');
+   assert.equal(row.hidden, false);
+@@ -113,7 +114,8 @@ test('عرض 10% على 50 مل يظهر قبل/بعد ويُحتسب في ال
+   assert.match(msg, /بدل \$16/);
+   assert.match(msg, /خصم عرض «عرض نصف»: − \$1\.60/);
+   assert.match(msg, /قيمة المنتجات: \$16/);
+-  assert.match(msg, /المجموع المرجعي: \$16\.40/);
++  assert.match(msg, /المجموع المرجعي: \$14\.40/);
++  assert.match(msg, /التوصيل: مجاني/);
+ });
+ 
+ test('العرض المقيَّد بحجم لا يمسّ بقية الأحجام', async () => {
+@@ -122,11 +124,11 @@ test('العرض المقيَّد بحجم لا يمسّ بقية الأحجام
+   api.setMethod('cod', true);
+   api.addToCart('serum-30');
+   api.addToCart('serum-30');
+-  assert.equal(api.totals().amount, 28);   // 13×2 + 2 توصيل
++  assert.equal(api.totals().amount, 26);   // 13×2 + توصيل حماة المجاني
+   api.addToCart('serum-50');
+   assert.equal(api.totals().offer, 1.6);
+   assert.equal(api.totals().net, 40.4);    // 13 + 13 + 14.40
+-  assert.equal(api.totals().amount, 42.4);
++  assert.equal(api.totals().amount, 40.4);
+ });
+ 
+ test('تراكم العرض مع شام كاش: العرض أولًا ثم 10% ثم التوصيل', async () => {
+@@ -152,7 +154,7 @@ test('عرض منتهٍ لا يُطبَّق ويبقى السعر الأصلي',
+   api.addToCart('serum-100');
+   api.setMethod('cod', true);
+   assert.equal(api.totals().offer, 0);
+-  assert.equal(api.totals().amount, 27);   // 25 + 2 توصيل
++  assert.equal(api.totals().amount, 25);   // 25 + توصيل حماة المجاني
+   assert.equal(w.document.querySelector('[data-row-offer]').hidden, true);
+ });
+ 
+@@ -163,7 +165,7 @@ test('نسبة فوق السقف تُهمَل ولا تغيّر السعر', asy
+   api.addToCart('serum-100');
+   api.setMethod('cod', true);
+   assert.equal(api.totals().offer, 0);
+-  assert.equal(api.totals().amount, 27);
++  assert.equal(api.totals().amount, 25);
+ });
+ 
+ test('سعر خاص لحجم يُعرض ويُحتسب كسعر جديد', async () => {
+@@ -203,13 +205,13 @@ test('عرض عبوتين: الشارة على بطاقة الحجم والكم
+   const api = w.__RAWAA_TEST__;
+   api.setMethod('cod', true);
+   api.addToCart('serum-50');
+-  assert.equal(api.totals().amount, 18, 'عبوة واحدة تبقى 16 + 2 توصيل');
++  assert.equal(api.totals().amount, 16, 'عبوة واحدة تبقى 16 + توصيل حماة المجاني');
+   api.addToCart('serum-50');
+   const two = api.totals();
+   assert.equal(two.subtotal, 32);
+   assert.equal(two.offer, 2);
+   assert.equal(two.net, 30);
+-  assert.equal(two.amount, 32, '30 + 2 توصيل حماة');
++  assert.equal(two.amount, 30, '30 + توصيل حماة المجاني');
+ 
+   assert.equal(doc.querySelector('[data-row-offer]').hidden, false);
+   assert.equal(doc.querySelector('[data-cart-offer]').textContent, '− $2');
+@@ -229,7 +231,7 @@ test('ثلاث عبوات مع عرض «عبوتان»: عبوتان + واحد
+   const t = api.totals();
+   assert.equal(t.offer, 2);
+   assert.equal(t.net, 46, '30 + 16');
+-  assert.equal(t.amount, 48);
++  assert.equal(t.amount, 46, '46 + توصيل حماة المجاني');
+ });
+ 
+ test('ثلاث عبوات مع عرض «3 بـ 66$»: 66$ لا 75$، ثم شام كاش', async () => {
+diff --git a/scripts/check-site.mjs b/scripts/check-site.mjs
+index 793fe5c..9f6ef21 100644
+--- a/scripts/check-site.mjs
++++ b/scripts/check-site.mjs
+@@ -1152,8 +1152,9 @@ async function checkProductPage(config) {
+   ok(['ritual-v5-480.avif', 'ritual-v5-480.webp', 'ritual-v5-720.jpg'].every(f => worker.includes(f)) &&
+     worker.includes('const visual = url.pathname.match') && worker.includes('ritual-v5|trio-v6|size-'), 'بدائل صور المشاهد والأحجام محفوظة بلا إنترنت لكل صيغة');
+   ok(landing.includes('السيروم جاهز') && landing.includes('العبوة تُجهَّز عند الطلب') && landing.includes('موعد'), 'جاهزية السيروم وتجهيز العبوة وموعدها المعلّق مذكورة في مسار الشراء');
+-  ok(landing.includes('class="serum-size-guide"') && landing.includes('لكل ملليلتر') && landing.includes('$2') &&
+-    !landing.includes('$4') && landing.includes('حماة فقط'), 'مقارنة الأحجام والرسوم قرب زر الشراء');
++  ok(landing.includes('class="serum-size-guide"') && landing.includes('لكل ملليلتر') &&
++    landing.includes('مجاني داخل محافظة حماة لكل طرق الدفع') && landing.includes('$2') &&
++    !landing.includes('$4'), 'مقارنة الأحجام والرسوم قرب زر الشراء');
+   for (const [label, page] of [['المنتج', visible]]) {
+     ok(!page.includes('data-unit-comparison') && !page.includes('قارني تكلفة كل 10 مل'), `${label}: إزالة مقارنة تكلفة 10 مل`);
+     ok(page.includes('الأسعار بلا عطر') && page.includes('إضافة العطر $2 للعبوة'), `${label}: توضيح سعر العطر`);
+@@ -1190,7 +1191,9 @@ async function checkProductPage(config) {
+   ok(!/\d\s*[%٪]|[٠-٩]\s*[%٪]/.test(ingredients), 'لا نسب تركيبة غير مصححة');
+   ok(/تصميم عبوة/.test(visible) && /تصميم مقترح/.test(visible), 'الصورة موصوفة كتصميم للعبوة لا كصورة فوتوغرافية');
+   ok(!/الأكثر اختيارًا|الأكثر طلبًا|التصنيع حسب الطلب|كيراتين/.test(visible), 'لا شعبية أو مدة تصنيع أو تركيبة متناقضة');
+-  ok(visible.includes('توصيل مجاني داخل حماة فقط') && visible.includes('$2') && !visible.includes('$4'), 'قيود ورسوم التوصيل واضحة');
++  // القاعدة المعتمدة: حماة مجانية لكل طرق الدفع، وباقي المحافظات $2. لا نص يقيّدها بشام كاش.
++  ok(visible.includes('التوصيل مجاني داخل محافظة حماة لكل طرق الدفع') && visible.includes('$2') &&
++    !visible.includes('$4') && !/توصيل مجاني داخل حماة فقط/.test(visible), 'قيود ورسوم التوصيل واضحة');
+   ok(/data-estimate-interface[^>]*hidden/.test(visible) && visible.includes('data-estimate-fallback') && visible.includes('تقدير عبوة واحدة مع التوصيل'), 'التقدير الرقمي مخفي دون JavaScript وله بديل ومحدّد بعبوة واحدة');
+   ok(['data-estimate-zone', 'data-estimate-method', 'data-estimate-total', 'data-estimate-discount', 'data-estimate-delivery'].every(hook => visible.includes(hook)), 'خيارات وتفاصيل التقدير موجودة');
+   const cartLogic = await read('js/cart.js');
+diff --git a/scripts/delivery-contract.test.mjs b/scripts/delivery-contract.test.mjs
+new file mode 100644
+index 0000000..199b489
+--- /dev/null
++++ b/scripts/delivery-contract.test.mjs
+@@ -0,0 +1,129 @@
++/**
++ * عقد التوصيل المعتمد من المالك (٧ تشرين الثاني ٢٠٢٦) — اختبار الانحدار الرباعي.
++ *
++ * القاعدة:
++ *   حماة:       0$ لكل طرق الدفع (شام كاش والدفع عند الاستلام).
++ *   باقي المحافظات: 2$ لكل طرق الدفع.
++ *
++ * الاختبار يتحقق من ثلاث طبقات تعرض الرقم للزبونة، لأن أي انحراف بينها يعني
++ * سلة تعرض مبلغًا ورسالة واتساب تعرض غيره:
++ *   1) السلة في المتصفح (`js/cart.js`) كما تُحمّل فعليًا في `serum.html`.
++ *   2) محرّك التسعير الخادمي (`order-system/order-core.mjs`).
++ *   3) نصوص الصفحات وعدّة التشغيل — لا يجوز أن تعلن 2$ داخل حماة بعد اليوم.
++ *
++ * التشغيل: node --test scripts/delivery-contract.test.mjs
++ */
++import { test } from 'node:test';
++import assert from 'node:assert/strict';
++import { readFile } from 'node:fs/promises';
++import vm from 'node:vm';
++import { JSDOM } from 'jsdom';
++import { prepareOrder } from '../order-system/order-core.mjs';
++
++const root = new URL('../', import.meta.url);
++const read = (file) => readFile(new URL(file, root), 'utf8');
++
++const configJs = await read('js/config.js');
++const cartJs = await read('js/cart.js');
++const offersJs = await read('js/offers.js');
++
++// نقرأ الإعدادات من المصدر نفسه لا من نسخة مكرّرة في الاختبار.
++const sandbox = { window: {} };
++vm.runInNewContext(configJs, sandbox);
++const config = sandbox.window.RAWAA_CONFIG;
++
++/** سلة حقيقية في jsdom بنفس ترتيب تحميل الصفحة. */
++async function bootCart() {
++  const page = (await read('serum.html')).replace(/<script[\s\S]*?<\/script>/g, '');
++  const dom = new JSDOM(page, {
++    url: 'https://raawaa-store.pages.dev/serum',
++    runScripts: 'outside-only',
++    pretendToBeVisual: true
++  });
++  const { window } = dom;
++  window.matchMedia = window.matchMedia || (() => ({
++    matches: false, addEventListener() {}, removeEventListener() {}, addListener() {}, removeListener() {}
++  }));
++  window.IntersectionObserver = window.IntersectionObserver || class {
++    observe() {} unobserve() {} disconnect() {}
++  };
++  window.scrollTo = () => {};
++  await new Promise((resolve) => setTimeout(resolve, 0));
++  window.eval(configJs);
++  window.eval(offersJs);
++  window.eval(cartJs);
++  return window;
++}
++
++const CASES = [
++  { zone: 'hama', method: 'cod', delivery: 0, label: 'حماة / الدفع عند الاستلام' },
++  { zone: 'hama', method: 'shamcash', delivery: 0, label: 'حماة / شام كاش' },
++  { zone: 'other', method: 'cod', delivery: 2, label: 'باقي المحافظات / الدفع عند الاستلام' },
++  { zone: 'other', method: 'shamcash', delivery: 2, label: 'باقي المحافظات / شام كاش' }
++];
++
++test('الإعدادات تعرّف حماة برسم صفر وباقي المحافظات برسم 2$', () => {
++  const fee = (id) => config.delivery.zones.find((zone) => zone.id === id).fee;
++  assert.equal(fee('hama'), 0, 'حماة مستثناة من الرسوم');
++  assert.equal(fee('other'), 2, 'باقي المحافظات 2$');
++});
++
++test('السلة تحسب الحالات الأربع بمبلغ التوصيل المعتمد لكل طريقة دفع', async () => {
++  const w = await bootCart();
++  const api = w.__RAWAA_TEST__;
++  const product = config.products.find((item) => item.id === 'serum-50');
++  api.addToCart('serum-50');
++
++  for (const { zone, method, delivery, label } of CASES) {
++    api.setZone(zone, true);
++    api.setMethod(method, true);
++    const totals = api.totals();
++    assert.equal(totals.delivery, delivery, `${label}: رسم التوصيل`);
++    assert.equal(totals.freeDelivery, delivery === 0, `${label}: علم المجانية`);
++
++    const discount = method === 'shamcash' ? product.price * 0.1 : 0;
++    const expected = Number((product.price - discount + delivery).toFixed(2));
++    assert.equal(totals.amount, expected, `${label}: الإجمالي`);
++
++    // رسالة واتساب يجب أن تعلن المبلغ نفسه الذي تراه الزبونة في السلة.
++    const message = api.buildOrderMessage();
++    assert.match(message, new RegExp('المجموع المرجعي: \\$' + String(expected).replace(/\.0$/, '')), `${label}: رسالة واتساب`);
++    if (delivery === 0) assert.match(message, /التوصيل: مجاني/, `${label}: نص المجانية`);
++    else assert.match(message, /رسوم التوصيل: \$2/, `${label}: نص الرسوم`);
++  }
++  w.close();
++});
++
++test('المحرّك الخادمي يوافق السلة في الحالات الأربع', () => {
++  const base = {
++    name: 'زبونة تجريبية',
++    phone: '0991234567',
++    address: 'حماة',
++    items: [{ id: 'serum-50', qty: 1 }]
++  };
++  for (const { zone, method, delivery, label } of CASES) {
++    const order = prepareOrder({ ...base, zone, method }, config);
++    assert.equal(order.zone, zone);
++    assert.equal(order.method, method);
++    assert.equal(order.deliveryCents, delivery * 100, `${label}: رسم التوصيل خادميًا`);
++    const discount = method === 'shamcash' ? Math.round(1600 * 0.1) : 0;
++    assert.equal(order.totalCents, 1600 - discount + delivery * 100, `${label}: الإجمالي خادميًا`);
++  }
++});
++
++test('نصوص الصفحات لا تعلن رسومًا داخل حماة بعد اعتماد التوصيل المجاني', async () => {
++  for (const file of ['index.html', 'serum.html', 'hama.html']) {
++    const html = await read(file);
++    // نبحث عن أي عبارة تربط حماة برسم 2$ صريحًا.
++    const claims = [
++      /توصيل(?:[^<>]{0,40})حماة[^<>]{0,20}(?:\$2|٢\$)/g,
++      /حماة[^<>]{0,30}(?:\$2|٢\$)[^<>]{0,20}توصيل/g,
++      /الدفع عند الاستلام[^<>]{0,20}(?:\$2|٢\$)[^<>]{0,10}حماة/g
++    ];
++    for (const pattern of claims) {
++      const found = html.match(pattern) || [];
++      assert.deepEqual(found, [], `${file}: نص يخالف قاعدة التوصيل المجاني داخل حماة → ${found.join(' | ')}`);
++    }
++    assert.match(html, /(?:توصيل|التوصيل)[^<>]{0,40}(?:مجاني|مجانًا)/, `${file}: يجب أن تذكر الصفحة التوصيل المجاني`);
++  }
++});
+diff --git a/scripts/margin_calc.py b/scripts/margin_calc.py
+index 17c95ab..d11c579 100644
+--- a/scripts/margin_calc.py
++++ b/scripts/margin_calc.py
+@@ -47,7 +47,7 @@ def unit_cost(ml):
+ def margin(price, method, zone, ml):
+     discount = price * method.get("discountPercent", 0) / 100
+     net = price - discount
+-    free = zone["id"] in (method.get("freeDeliveryIn") or [])
++    free = zone.get("fee", 0) <= 0 or zone["id"] in (method.get("freeDeliveryIn") or [])
+     delivery = 0 if free else zone["fee"]
+     cost = unit_cost(ml)
+     return net, delivery, cost, net - delivery - cost
+diff --git a/scripts/ops-kit.test.mjs b/scripts/ops-kit.test.mjs
+index f906fd4..18e0938 100644
+--- a/scripts/ops-kit.test.mjs
++++ b/scripts/ops-kit.test.mjs
+@@ -33,9 +33,9 @@ test('رسوم التوصيل في عدّة التشغيل تطابق إعداد
+   const hamaZone = config.match(/id:\s*'hama',[^}]*fee:\s*(\d+(?:\.\d+)?)/s);
+   assert.ok(hamaZone, 'تعرفة حماة موجودة في config.js');
+   assert.ok(otherZone, 'تعرفة باقي المحافظات موجودة في config.js');
+-  assert.equal(Number(hamaZone[1]), 2);
++  assert.equal(Number(hamaZone[1]), 0, 'حماة مجانية لكل طرق الدفع');
+   assert.equal(Number(otherZone[1]), 2);
+-  assert.match(doc, /توصيل ٢\$ داخل حماة \(٢\$ لباقي المحافظات/);
++  assert.match(doc, /مجاني داخل حماة لكل طرق الدفع، و٢\$ لباقي المحافظات/);
+   assert.doesNotMatch(doc, /باقي المحافظات ٤\$/);
+ });
+ 
+diff --git a/scripts/order-config-monitor.test.mjs b/scripts/order-config-monitor.test.mjs
+index 80680fd..7611afa 100644
+--- a/scripts/order-config-monitor.test.mjs
++++ b/scripts/order-config-monitor.test.mjs
+@@ -11,7 +11,7 @@ test('reads size and price as a pair, phone and both delivery zones', () => {
+     ['serum-100', 100, 25], ['serum-30', 30, 13], ['serum-50', 50, 16]
+   ]);
+   assert.deepEqual(result.zones.map(z => [z.id, z.fee, z.freeWithShamCash]), [
+-    ['hama', 2, true], ['other', 2, false]
++    ['hama', 0, true], ['other', 2, false]
+   ]);
+   assert.match(result.phone, /^\d+$/);
+   assert.equal(result.defaultZone, 'hama');
+diff --git a/scripts/order-form-preview.test.mjs b/scripts/order-form-preview.test.mjs
+index d6baa0f..5e2bae0 100644
+--- a/scripts/order-form-preview.test.mjs
++++ b/scripts/order-form-preview.test.mjs
+@@ -98,7 +98,7 @@ test('local form validation discards synthetic fields and never calls network or
+   assert.equal(api.validPhone('0991234567'), true);
+   assert.equal(api.validPhone('٠٩٩١٢٣٤٥٦٧'), true);
+   assert.equal(api.validPhone('letters-only'), false);
+-  assert.equal(ids['estimate-total'].textContent, '$11.70');
++  assert.equal(ids['estimate-total'].textContent, '$11.70');   // 13 − 10% + توصيل حماة المجاني
+   assert.equal(api.formatAmount(2340, config), '$23.40');
+   assert.equal(api.formatAmount(123400, config), '$1,234');
+   ids.quantity.value = '2';
+@@ -109,7 +109,7 @@ test('local form validation discards synthetic fields and never calls network or
+   ids['scent-option'].value = 'vanilla';
+   ids['payment-method'].listeners.change();
+   assert.equal(ids['estimate-scent'].textContent, '$4');
+-  assert.equal(ids['estimate-total'].textContent, '$32');
++  assert.equal(ids['estimate-total'].textContent, '$30');   // 26 + عطر 4$ + توصيل حماة المجاني
+   ids['oil-option'].value = 'argan';
+   ids['oil-option'].listeners.change();
+   assert.match(ids['estimate-note'].textContent, /لا يشمل الإجمالي إضافة الزيت/);
+diff --git a/scripts/sales-video-strategy.test.mjs b/scripts/sales-video-strategy.test.mjs
+index f294e0a..ebc84e8 100644
+--- a/scripts/sales-video-strategy.test.mjs
++++ b/scripts/sales-video-strategy.test.mjs
+@@ -27,10 +27,12 @@ test('video payment examples recalculate from the store config', () => {
+   const hama = config.delivery.zones.find(zone => zone.id === 'hama');
+   const other = config.delivery.zones.find(zone => zone.id === 'other');
+   const shamDiscounted = product.price * (1 - shamCash.discountPercent / 100);
++  // حماة مجانية لكل طرق الدفع في الإعدادات الحالية (fee: 0)، وباقي المحافظات تدفع رسمها.
++  const hamaDelivery = (hama.fee > 0 && !hama.freeWithShamCash) ? hama.fee : 0;
+   const totals = [
+-    shamDiscounted + (hama.freeWithShamCash ? 0 : hama.fee),
++    shamDiscounted + hamaDelivery,
+     shamDiscounted + other.fee,
+-    product.price + hama.fee,
++    product.price + hamaDelivery,
+     product.price + other.fee
+   ];
+   // لا أرقام مثبّتة هنا: الرسوم والخصم ملك المالك في js/config.js.
+diff --git a/serum.html b/serum.html
+index 51613c8..3649974 100644
+--- a/serum.html
++++ b/serum.html
+@@ -90,8 +90,8 @@
+ <aside class="topbar" aria-label="تنبيه الطلب">
+   <!-- رسالتان: قصيرة على الهاتف (سطر واحد بلا التفاف)، كاملة على الشاشات الواسعة.
+        السبب: السطر الكامل يلتف ثلاثة أسطر على 390px فيدفع الهيرو كله للأسفل. -->
+-  <p class="topbar-short">شام كاش: خصم 10% · توصيل حماة مجانًا</p>
+-  <p class="topbar-full">شام كاش: خصم 10% وتوصيل مجاني داخل حماة · الدفع عند الاستلام: <bdi>$2</bdi> حماة و<bdi>$2</bdi> باقي المحافظات</p>
++  <p class="topbar-short">شام كاش: خصم 10% · التوصيل مجاني داخل حماة</p>
++  <p class="topbar-full">شام كاش: خصم 10% · التوصيل مجاني داخل حماة لكل طرق الدفع · باقي المحافظات <bdi>$2</bdi> لكل طرق الدفع</p>
+ </aside>
+ 
+ <header class="site-header" id="site-header" aria-label="ترويسة الموقع">
+@@ -245,9 +245,9 @@
+           </div>
+         </section>
+         <ul class="serum-trust">
+-          <li>شام كاش: خصم 10% على المنتجات وتوصيل مجاني داخل حماة فقط.</li>
+-          <li>باقي المحافظات: التوصيل <bdi>$2</bdi> لأي طريقة دفع.</li>
+-          <li>عند الاستلام: بلا خصم؛ توصيل حماة <bdi>$2</bdi>.</li>
++          <li>شام كاش: خصم 10% على المنتجات، والتوصيل مجاني داخل حماة.</li>
++          <li>التوصيل داخل حماة مجاني لكل طرق الدفع، وباقي المحافظات <bdi>$2</bdi> لأي طريقة دفع.</li>
++          <li>عند الاستلام: بلا خصم؛ التوصيل داخل حماة مجاني.</li>
+         </ul>
+         <details class="serum-size-guide">
+           <summary>كيف أختار الحجم؟</summary>
+@@ -256,7 +256,7 @@
+             <li><strong>50 مل:</strong> الأنسب للاستعمال اليومي.</li>
+             <li><strong>100 مل:</strong> أفضل قيمة لكل ملليلتر.</li>
+           </ul>
+-          <p>نؤكّد توفّر الحجم معك عند الطلب.</p>
++          <p>التوصيل مجاني داخل محافظة حماة لكل طرق الدفع، وباقي المحافظات <bdi>$2</bdi>. باقي تفاصيل التوفّر تُؤكَّد معك عند الطلب.</p>
+         </details>
+         <p class="serum-order-note">اختاري الحجم وراجعي السلة، ثم افتحي واتساب لإرسال استفسارك. السعر والتوفّر والتوصيل تُؤكّد قبل الشحن.</p>
+         <p class="serum-credentials">بالأرغان والبانثينول · صنعه صيادلة ومختصون</p>
+@@ -370,8 +370,8 @@
+   <div class="shell serum-delivery-inner">
+     <div><p class="eyebrow">تفاصيل واضحة قبل الطلب</p><h2 id="payment-title">الدفع والتوصيل</h2></div>
+     <div>
+-      <p><strong>شام كاش:</strong> خصم 10% على المنتجات وتوصيل مجاني داخل حماة فقط. رسوم التوصيل لباقي المحافظات <bdi>$2</bdi>.</p>
+-      <p><strong>الدفع عند الاستلام:</strong> دون خصم، والتوصيل <bdi>$2</bdi> داخل حماة و<bdi>$2</bdi> لباقي المحافظات.</p>
++      <p><strong>شام كاش:</strong> خصم 10% على المنتجات. التوصيل مجاني داخل حماة لكل طرق الدفع، وباقي المحافظات <bdi>$2</bdi>.</p>
++      <p><strong>الدفع عند الاستلام:</strong> دون خصم، والتوصيل مجاني داخل حماة و<bdi>$2</bdi> لباقي المحافظات.</p>
+       <p>تُؤكّد طريقة الدفع والتوفّر والسعر النهائي وموعد التوصيل في المحادثة.</p>
+     </div>
+   </div>
+-- 
+2.39.5
+
