@@ -114,6 +114,36 @@ helper and asserts the result is `marker_readable` **and** that the isolation
 assertion rejects it. A probe that always answered "unreadable" would pass every
 unit test while proving nothing; that end-to-end case is what prevents it.
 
+### What this probe can and cannot conclude
+
+A passing read of `marker_readable`/`unreadable` is a statement about **one PID's
+`/proc/<pid>/environ`, reached from inside the container**. It is worth being
+explicit about which mechanism is doing the work, because two different things
+can make that read fail and only one of them is containment:
+
+- **PID namespace separation.** Inside a fresh PID namespace the helper's host
+  PID does not exist under the same number, so the read misses. This is genuine
+  isolation, and it is what gVisor plus a private PID namespace should produce.
+- **Same-uid, no namespace, but `/proc` restricted or the PID simply not
+  visible.** On an ordinary host the read *succeeds* because the process is the
+  same uid; that is exactly the Codespaces finding this section exists to
+  prevent from recurring. A run in which the read fails for this second reason
+  is not evidence of a namespace boundary.
+
+The probe deliberately does not try to distinguish these two by inspection — it
+reports one typed status and the run treats only `unreadable`/`missing` as a
+pass. The claim this document makes is therefore **narrow and stated as such**:
+
+> the eight reviewed probes passed on one ephemeral runner with the reviewed
+> flags, and the supported host-process environment read was not readable from
+> inside the sandbox.
+
+It is **not** a claim that the whole host process table was enumerated and found
+unreachable. No probe in this suite enumerates other PIDs; such an enumeration
+would itself require the visibility the sandbox is supposed to remove. Treating
+"we read one entry and it failed" as "the host process table is hidden" would be
+an unsupported inference, and this document does not make it.
+
 The self-environment control (`RAAWAA_PROBE_SECRET`) is kept as a separate,
 narrower claim and is no longer presented as parent-process isolation.
 
@@ -145,9 +175,21 @@ narrower claim and is no longer presented as parent-process isolation.
      behaviour under pressure, descendant cleanup with lease/capability
      revocation, and rejection of PR/fork/unreviewed refs are still unproven
      (items 2-4 below), and the release flag stays `false`.
-2. **The wall clock is not a Docker flag.** The executor must run the vector under a
-   timeout, kill the whole process group, and revoke the task lease. That code is
-   the next increment and belongs with the executor, not here.
+2. ~~**The wall clock is not a Docker flag.**~~ **Partly addressed.**
+   `engine/sandbox_executor.py` now owns this: `prepare()` refuses a request whose
+   `wall_seconds` leaves less than `KILL_GRACE_SECONDS` (30) of headroom inside
+   `ProcessSupervisor`'s ceiling, so the container's own deadline fires *before*
+   the supervisor's and the overrun is observable rather than a silent group kill.
+   `run()` hands the literal vector to the supervisor, which already puts the
+   child in its own session and terminates then force-kills the whole group,
+   recording `descendants_killed`.
+
+   What remains unproven is the behaviour under real pressure: that a *grandchild*
+   spawned inside the container is actually reaped, and that the task lease is
+   revoked rather than merely expired. The ledger path (`SqliteDispatchLedger`)
+   makes a retry after a crash replay instead of starting a second container, which
+   is at-most-once for *dispatch*; it is not lease revocation. Item 2 stays open
+   for those two facts.
 3. **Disk is bounded by the tmpfs sizes only.** A task that writes to its scratch
    path is capped; anything larger needs a filesystem quota, which is not part of
    this contract yet.
@@ -156,6 +198,11 @@ narrower claim and is no longer presented as parent-process isolation.
 
 ## Rollback
 
-Delete the two new files and the workflow; nothing else imports the module, no
-migration, deployment, secret or provider state is involved. Execution stays off
-either way, so the rollback has no operational surface.
+Delete `engine/sandbox_executor.py`, its test file, and the workflow; nothing in
+production imports the module, and no migration, deployment, secret or provider
+state is involved. `engine/process_supervisor.py` gained
+`OperationRegistry.with_operation()`, `CEILINGS["max_arguments"]` and a
+per-operation `max_arguments` whose default (16) is unchanged, so removing the
+executor leaves the supervisor behaving exactly as before for every existing
+operation. Execution stays off either way, so the rollback has no operational
+surface.
