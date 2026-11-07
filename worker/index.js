@@ -260,12 +260,26 @@ async function recoverStaleTasks(env, workerLane = null) {
       "UPDATE tasks SET status=?,error=?,updated_at=?,lease_token=NULL,lease_expires_at=NULL WHERE id=? AND status='running' AND lease_token IS ? AND (lease_expires_at IS NULL OR lease_expires_at < ?) AND (? IS NULL OR execution_lane=?)"
     ).bind(status, "Recovered expired worker lease.", nowIso, task.id, task.lease_token, nowIso, workerLane, workerLane));
     statements.push(env.DB.prepare(
-      "INSERT INTO audit_log(task_id,event,details_json,created_at) SELECT id,'task_lease_recovered',?,? FROM tasks WHERE id=? AND status=? AND updated_at=?"
+      "INSERT INTO audit_log(task_id,event,details_json,created_at) SELECT id,'task_lease_recovered',?,? FROM tasks WHERE id=? AND status=? AND updated_at=? AND changes()=1"
     ).bind(JSON.stringify({ new_status: status, attempt: task.attempts, max_attempts: task.max_attempts }), nowIso, task.id, status, nowIso));
   }
-  if (statements.length) await env.DB.batch(statements);
-  const requeued = (stale.results || []).filter(t => t.attempts < t.max_attempts).length;
-  const failed = (stale.results || []).length - requeued;
+  if (!statements.length) return { requeued: 0, failed: 0 };
+  const results = await env.DB.batch(statements);
+  if (!Array.isArray(results) || results.length !== statements.length ||
+      results.some(result => result?.success !== true || !Number.isInteger(result.meta?.changes))) {
+    throw new Error("invalid_recovery_batch_result");
+  }
+  let requeued = 0, failed = 0;
+  for (let i = 0; i < (stale.results || []).length; i++) {
+    const changed = results[i * 2].meta.changes;
+    if ((changed !== 0 && changed !== 1) || results[i * 2 + 1].meta.changes !== changed) {
+      throw new Error("invalid_recovery_change_count");
+    }
+    if (changed === 1) {
+      if (stale.results[i].attempts < stale.results[i].max_attempts) requeued++;
+      else failed++;
+    }
+  }
   return { requeued, failed };
 }
 
