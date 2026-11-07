@@ -66,3 +66,13 @@ Use the connected Activepieces GitHub action `trigger_workflow_dispatch` with re
 - The workflow now uses immutable action references, validates dispatch inputs without interpolating untrusted values into shell source, checks the exact run context, and emits only allowlisted reconciliation metadata. The run-scoped value is a correlation identifier, not a durable deduplication ledger.
 - Do not dispatch this audit workflow as a substitute for the separate one-shot Staging inference workflow. Provider inference remains disabled by default and the USD 0 ceiling/paid-fallback prohibition remain authoritative.
 - Runtime-004 remains 1/2; only a second distinct successful scheduled Staging probe can close that acceptance item.
+
+## Autonomous operation update — 2026-11-07 (post-PR #642)
+
+- PR #633 provides daily Engine CI at 04:17 UTC; the Engine CI workflow no longer exposes manual dispatch. Main pushes and the daily schedule run the Staging lifecycle only after a complete read-only Cloudflare subscription preflight proves the account is Free-only. Unknown, incomplete or paid subscription inventory skips all Staging side effects.
+- PR #641 adds durable research-ingest idempotency (migration 0015_research_ingest_idempotency) and exact-key readback in batches of at most 25 keys.
+- PR #642 merged the no-manual zero-cost Staging gate. Main push and daily schedule automatically run migrations, isolated Worker verification, ephemeral-token operations and sanitized Staging telemetry only after the preflight passes. Exact-head CI and main-push CI must be checked before claiming remote deployment evidence.
+- The existing Worker Cron watchdog is active: the Task Runner status read on run #42309282601 reported watchdog_ready=ready, no missing settings, and a current */15 * * * * Worker Cron heartbeat. Watchdog dispatch run #42318764304 (2026-11-07 00:31:42 UTC) completed successfully; it processed 0 tasks because the queue was idle, with 0 pending and 0 running tasks. This is automatic recovery, not a user-initiated manual dispatch.
+- The research-discovery workflow is being changed to remove its manual trigger, use the shared zero-cost preflight, verify Staging migration and Worker schema, create/revoke a per-run token, and persist public candidates/telemetry to Staging only. Until its PR merges and the scheduled run proves it, treat this as an implementation candidate, not an active deployed capability.
+- Model routes remain disabled by default; the one-shot Groq inference workflow is not part of routine CI or the research loop.
+
