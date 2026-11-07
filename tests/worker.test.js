@@ -1111,6 +1111,23 @@ test("research ingestion is authenticated, batch-idempotent and stores normalize
   assert.match(candidate.sql, /\x27unreviewed\x27/);
 });
 
+test("research ingestion rejects duplicate normalized source keys before any D1 write", async () => {
+  const DB = dbMock();
+  const response = await worker.fetch(request("/v1/research/candidates", {
+    method: "POST",
+    body: {
+      batch_id: "duplicate-source-batch",
+      candidates: [
+        { source: "github", full_name: "org/repo", url: "https://github.com/org/repo", description: "first" },
+        { source: "github", full_name: "org/repo", url: "https://github.com/org/repo", description: "second" },
+      ],
+    },
+  }), { DB, ENGINE_API_TOKEN: TOKEN });
+  assert.equal(response.status, 400);
+  assert.deepEqual(await response.json(), { error: "duplicate_source_keys" });
+  assert.equal(DB.calls.length, 0);
+});
+
 test("research ingestion replay does not increment candidate discovery count", async () => {
   const DB = dbMock({ researchBatchChanges: 0 });
   const response = await worker.fetch(request("/v1/research/candidates", {

@@ -230,6 +230,8 @@ async function ingestResearchCandidates(request, env) {
   if (!Array.isArray(input?.candidates) || input.candidates.length < 1 || input.candidates.length > 25) return json({ error: "invalid_candidates" }, 400);
   const normalized = input.candidates.map(normalizeResearchCandidate);
   if (normalized.some(item => item === null)) return json({ error: "invalid_candidate" }, 400);
+  const sourceKeys = normalized.map(item => item.source_key);
+  if (new Set(sourceKeys).size !== sourceKeys.length) return json({ error: "duplicate_source_keys" }, 400);
   const payloadHash = await researchPayloadHash(normalized);
   const sources = [...new Set(normalized.map(item => item.source))];
   const now = new Date().toISOString();
