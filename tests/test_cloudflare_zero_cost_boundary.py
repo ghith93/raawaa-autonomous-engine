@@ -9,6 +9,7 @@ from urllib.request import Request
 
 from scripts.verify_cloudflare_zero_cost_boundary import (
     _RejectRedirects,
+    activity_annotation,
     assess_subscriptions,
     check_boundary,
     fetch_subscription_inventory,
@@ -279,6 +280,47 @@ class ZeroCostBoundaryTests(unittest.TestCase):
                 self.assertEqual(result["reason"], f"billing_http_{code}")
                 self.assertNotIn("private", json.dumps(result))
                 self.assertNotIn("synthetic", json.dumps(result))
+
+    def test_activity_annotation_publishes_only_a_fixed_reason_token(self):
+        """Step logs live in GitHub's results blob store and are not always
+        retrievable, so the reason must also be readable from the check API."""
+        text = activity_annotation({"eligible": False, "reason": "billing_http_400"})
+        self.assertTrue(text.startswith("::error title=Cloudflare zero-cost preflight::"))
+        self.assertIn("eligible=false", text)
+        self.assertIn("reason=billing_http_400", text)
+        self.assertEqual(len(text.splitlines()), 1)
+        allowed = activity_annotation({"eligible": True, "reason": "no_active_paid_subscriptions"})
+        self.assertIn("::notice", allowed)
+        self.assertIn("eligible=true", allowed)
+
+    def test_activity_annotation_refuses_anything_that_is_not_a_safe_token(self):
+        for reason in ("", "Billing HTTP 400", "reason\n::error::injected",
+                       "::warning::injected", "a" * 65, None, 400):
+            with self.subTest(reason=reason), self.assertRaises(ValueError):
+                activity_annotation({"eligible": False, "reason": reason})
+
+    def test_main_emits_the_outcome_annotation_on_the_variable_paths(self):
+        import contextlib
+        import io
+        with tempfile.NamedTemporaryFile(mode="r+", encoding="utf-8") as output:
+            env = {"CLOUDFLARE_ACCOUNT_ID": "synthetic-account",
+                   "CLOUDFLARE_API_TOKEN": "synthetic-token",
+                   "GITHUB_OUTPUT": output.name}
+            for eligible, reason, command in (
+                (False, "billing_http_400", "::error"),
+                (True, "no_active_paid_subscriptions", "::notice"),
+            ):
+                with self.subTest(reason=reason), patch.dict(os.environ, env, clear=False), patch(
+                    "scripts.verify_cloudflare_zero_cost_boundary.check_boundary",
+                    return_value={"eligible": eligible, "reason": reason,
+                                  "active_paid_subscriptions": 0 if eligible else None},
+                ):
+                    buffer = io.StringIO()
+                    with contextlib.redirect_stdout(buffer):
+                        code = main()
+                    self.assertEqual(code, 0 if eligible else 1)
+                    self.assertIn(f"{command} title=Cloudflare zero-cost preflight::", buffer.getvalue())
+                    self.assertNotIn("synthetic", buffer.getvalue())
 
     def test_redirects_are_rejected(self):
         handler = _RejectRedirects()
