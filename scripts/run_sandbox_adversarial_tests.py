@@ -28,6 +28,18 @@ EXPECTED_METHODS = frozenset({
     "test_credentials_and_the_docker_socket_are_not_accessible",
     "test_the_root_filesystem_cannot_be_written",
 })
+
+#: Criterion 5 of #440: the limits must hold when the task pushes on them. Kept
+#: in a separate reviewed set because a configured flag is not evidence and this
+#: is the only group that can produce evidence for it.
+EXPECTED_PRESSURE_METHODS = frozenset({
+    "test_the_pressure_probe_actually_ran",
+    "test_memory_cannot_exceed_the_limit",
+    "test_the_process_count_is_bounded",
+    "test_cpu_is_bounded_to_one_core",
+    "test_the_wall_clock_holds",
+    "test_a_setsid_descendant_is_not_left_running_under_pressure",
+})
 # Exact linux/amd64 manifest observed in Docker Hub's official Python metadata.
 # Changing this identity requires a reviewed provenance update and fresh proof.
 APPROVED_IMAGE = (
@@ -157,11 +169,25 @@ def main(argv: list[str] | None = None) -> int:
     if os.environ.get("RAAWAA_SANDBOX_LIVE") != "1" or shutil.which("docker") is None:
         print("Sandbox proof refused: live opt-in and docker are required.", file=sys.stderr)
         return 1
-    from tests.adversarial.test_sandbox_escape import SandboxEscapeTest
+    from tests.adversarial.test_sandbox_escape import (
+        SandboxEscapeTest,
+        SandboxResourceLimitTest,
+    )
 
-    suite = unittest.TestLoader().loadTestsFromTestCase(SandboxEscapeTest)
-    expected = {f"{SandboxEscapeTest.__module__}.{SandboxEscapeTest.__qualname__}.{name}"
-                for name in EXPECTED_METHODS}
+    loader = unittest.TestLoader()
+    # Both reviewed groups run in one pass, and the refusal in ``run_checked``
+    # still applies: a suite that differs from the reviewed set is refused rather
+    # than reported on.
+    suite = unittest.TestSuite([
+        loader.loadTestsFromTestCase(SandboxEscapeTest),
+        loader.loadTestsFromTestCase(SandboxResourceLimitTest),
+    ])
+    expected = {
+        f"{case.__module__}.{case.__qualname__}.{name}"
+        for case, methods in ((SandboxEscapeTest, EXPECTED_METHODS),
+                              (SandboxResourceLimitTest, EXPECTED_PRESSURE_METHODS))
+        for name in methods
+    }
     return 0 if run_checked(suite, expected, stream=sys.stderr) else 1
 
 

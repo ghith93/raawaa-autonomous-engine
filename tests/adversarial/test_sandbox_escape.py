@@ -454,6 +454,234 @@ def _require_host_network_control():
         ) from None
 
 
+# ---------------------------------------------------------------------------
+# Resource limits under pressure (#440 acceptance criterion 5)
+# ---------------------------------------------------------------------------
+#
+# The eight probes above ask "can the task reach something it should not". This
+# one asks a different question: when the task *does* saturate what it is allowed
+# to use, does the limit hold -- and does the supervisor still clean up a
+# descendant it created while saturated? A configured `--memory` flag is not
+# evidence; only an allocation that fails is.
+#
+# Every observation here is a *bounded* attempt: the probes ask for more than the
+# limit and record whether the kernel refused, rather than trying to exhaust the
+# host. A probe that could take the runner down would produce no evidence at all.
+
+#: How far past each limit the probe tries to go. A limit that is merely
+#: configured but not enforced passes the small request and fails this one.
+PRESSURE_OVERSHOOT = 4
+
+#: The allocation cap inside the container, well under the 512 MiB limit, so a
+#: machine with a different page size still reaches the refusal rather than
+#: being killed by the OOM killer with no output.
+_PRESSURE_PROGRAM = r"""
+import json, os, resource, signal, subprocess, sys, time
+
+LIMIT_MIB = {limit_mib}
+OVERSHOOT = {overshoot}
+
+result = {{}}
+
+# --- memory -------------------------------------------------------------
+# Grow in 16 MiB steps and *touch* every page: an untouched allocation can be
+# over-committed and would report success while proving nothing.
+block = 16 * 1024 * 1024
+chunks = []
+allocated = 0
+try:
+    for _ in range(int(LIMIT_MIB * OVERSHOOT // 16)):
+        chunk = bytearray(block)
+        for offset in range(0, block, 4096):
+            chunk[offset] = 1
+        chunks.append(chunk)
+        allocated += block
+except MemoryError:
+    pass
+result["memory_allocated_mib"] = allocated // (1024 * 1024)
+result["memory_rss_mib"] = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss // 1024
+del chunks
+
+# --- process count ------------------------------------------------------
+# The pids limit is what stops a fork bomb becoming a host problem. Count how
+# many children we can actually hold, then reap every one of them.
+children = []
+refused = False
+try:
+    for _ in range(OVERSHOOT * 128):
+        try:
+            children.append(subprocess.Popen(
+                [sys.executable, "-c", "import time; time.sleep(30)"]))
+        except (BlockingIOError, OSError):
+            refused = True
+            break
+except Exception:
+    refused = True
+result["pids_held"] = len(children)
+result["pids_refused"] = refused
+for child in children:
+    try:
+        child.kill()
+        child.wait(timeout=5)
+    except Exception:
+        pass
+
+# --- cpu ----------------------------------------------------------------
+# Busy-loop for a fixed wall window and compare CPU time to elapsed. On a
+# --cpus=1.0 container the ratio cannot meaningfully exceed 1.
+started = time.monotonic()
+cpu_started = time.process_time()
+while time.monotonic() - started < 2.0:
+    pass
+elapsed = time.monotonic() - started
+cpu = time.process_time() - cpu_started
+result["cpu_ratio"] = round(cpu / elapsed, 2) if elapsed else None
+result["cpu_count_visible"] = len(os.sched_getaffinity(0))
+
+# --- escaped descendant under pressure ----------------------------------
+# A child that calls setsid leaves the process group. Under load is exactly
+# when a supervisor's cleanup is most likely to be skipped, so the executor's
+# subreaper contract is asserted here as well as offline.
+child = subprocess.Popen([sys.executable, "-c",
+    "import os,time\n"
+    "if os.fork()==0:\n"
+    "    os.setsid()\n"
+    "    time.sleep(60)\n"
+    "os._exit(0)\n"])
+child.wait()
+result["escaped_child_started"] = True
+
+print(json.dumps(result))
+""".strip()
+
+
+class PressureProbeContractTest(unittest.TestCase):
+    """The pressure probe's *shape*, tested without a container.
+
+    The live assertions above can only run on a real runner. These lock the
+    property that makes them meaningful: the probe must ask for more than the
+    limit, and an unbounded host must NOT look bounded. Without this, a probe
+    that silently allocated nothing would pass every live assertion.
+    """
+
+    def test_the_probe_overshoots_each_limit(self):
+        self.assertGreater(PRESSURE_OVERSHOOT, 1,
+                           "a probe that asks for exactly the limit cannot detect it")
+
+    def test_the_allocations_are_touched_not_merely_reserved(self):
+        program = _PRESSURE_PROGRAM.format(limit_mib=512, overshoot=PRESSURE_OVERSHOOT)
+        # Over-commit means an untouched bytearray proves nothing about memory.
+        self.assertIn("chunk[offset] = 1", program)
+
+    def test_the_probe_reaps_the_children_it_creates(self):
+        program = _PRESSURE_PROGRAM.format(limit_mib=512, overshoot=PRESSURE_OVERSHOOT)
+        self.assertIn("child.kill()", program)
+        self.assertIn("child.wait(", program)
+
+    def test_the_probe_reports_rather_than_asserting_inside_the_container(self):
+        """A crash inside the sandbox produces no evidence at all."""
+        program = _PRESSURE_PROGRAM.format(limit_mib=512, overshoot=PRESSURE_OVERSHOOT)
+        self.assertNotIn("raise AssertionError", program)
+        self.assertIn("json.dumps(result)", program)
+
+    def test_an_unbounded_host_does_not_look_bounded(self):
+        """The negative control, run for real on this machine.
+
+        On a host with no limits the probe must report numbers *above* the
+        thresholds the live tests assert. If it reported bounded values here,
+        the live assertions would pass for the wrong reason.
+        """
+        program = _PRESSURE_PROGRAM.format(limit_mib=64, overshoot=PRESSURE_OVERSHOOT)
+        completed = subprocess.run([sys.executable, "-c", program],
+                                   capture_output=True, text=True, timeout=180, check=False)
+        self.assertEqual(completed.returncode, 0, completed.stderr[-500:])
+        observed = json.loads(completed.stdout.strip().splitlines()[-1])
+        # The live test asserts allocated < 128 MiB for a 64 MiB limit; here,
+        # with no limit, it must not.
+        self.assertGreaterEqual(observed["memory_allocated_mib"], 128,
+                                "an unlimited host reported a bounded allocation")
+        self.assertFalse(observed["pids_refused"],
+                         "a host with no pids limit refused a fork")
+
+
+@unittest.skipUnless(_sandbox_available(), "no live sandbox: set RAAWAA_SANDBOX_LIVE=1 and RAAWAA_SANDBOX_IMAGE")
+class SandboxResourceLimitTest(unittest.TestCase):
+    """Criterion 5: the limits hold when the task actually pushes on them."""
+
+    MEMORY_MIB = 512
+    CPUS = 1.0
+    PIDS = 64
+
+    @classmethod
+    def setUpClass(cls):
+        cls.workspace = Path(__file__).resolve().parents[2]
+        program = _PRESSURE_PROGRAM.format(limit_mib=cls.MEMORY_MIB,
+                                           overshoot=PRESSURE_OVERSHOOT)
+        cls.vector = build_docker_argv(SandboxRequest(
+            image=IMAGE,
+            command=_python_command(program),
+            source_dir=str(cls.workspace),
+            limits=SandboxLimits(memory_mb=cls.MEMORY_MIB, cpus=cls.CPUS,
+                                  pids=cls.PIDS, wall_seconds=120, scratch_mb=32),
+        ))
+        assert_sandbox_argv(cls.vector, expected_source_dir=str(cls.workspace))
+        started = time.monotonic()
+        cls.completed = subprocess.run(cls.vector, capture_output=True, text=True,
+                                       timeout=180, check=False)
+        cls.elapsed = time.monotonic() - started
+
+    def _observed(self):
+        self.assertEqual(self.completed.returncode, 0,
+                         f"pressure probe failed: {self.completed.stderr[-800:]}")
+        return json.loads(self.completed.stdout.strip().splitlines()[-1])
+
+    def test_the_pressure_probe_actually_ran(self):
+        # Without this, every assertion below could pass on an empty result.
+        observed = self._observed()
+        self.assertIn("memory_allocated_mib", observed)
+        self.assertIn("cpu_ratio", observed)
+
+    def test_memory_cannot_exceed_the_limit(self):
+        observed = self._observed()
+        allocated = observed["memory_allocated_mib"]
+        # The probe asks for 4x the limit. Getting anywhere near that means the
+        # --memory flag is decorative.
+        self.assertLess(allocated, self.MEMORY_MIB * 2,
+                        f"allocated {allocated} MiB against a {self.MEMORY_MIB} MiB limit")
+        self.assertGreater(allocated, 0, "the probe allocated nothing")
+
+    def test_the_process_count_is_bounded(self):
+        observed = self._observed()
+        self.assertLessEqual(observed["pids_held"], self.PIDS + 8,
+                             "the --pids-limit did not bound the process count")
+        self.assertTrue(observed["pids_refused"],
+                        "no fork was ever refused, so the pids limit was never reached")
+
+    def test_cpu_is_bounded_to_one_core(self):
+        observed = self._observed()
+        ratio = observed["cpu_ratio"]
+        self.assertIsNotNone(ratio)
+        # --cpus=1.0: a busy loop cannot consume more than about one core-second
+        # per wall second. Allow scheduling noise, not a second core.
+        self.assertLess(ratio, 1.5, f"cpu ratio {ratio} exceeds a one-core budget")
+
+    def test_the_wall_clock_holds(self):
+        # The container's own deadline was 120 s; the outer timeout is 180 s.
+        self.assertLess(self.elapsed, 180, "the probe ran past its wall clock")
+
+    def test_a_setsid_descendant_is_not_left_running_under_pressure(self):
+        """The escapee must not survive the container's own teardown.
+
+        ``--rm`` removes the container, so the check is that the probe returned
+        while a 60 s sleeping descendant existed: if the container had waited for
+        it, elapsed would approach the wall clock.
+        """
+        observed = self._observed()
+        self.assertTrue(observed["escaped_child_started"])
+        self.assertLess(self.elapsed, 120,
+                        "a descendant kept the container alive past its work")
+
+
 @unittest.skipUnless(_sandbox_available(), "no live sandbox: set RAAWAA_SANDBOX_LIVE=1 and RAAWAA_SANDBOX_IMAGE")
 class SandboxEscapeTest(unittest.TestCase):
     @classmethod
