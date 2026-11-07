@@ -109,3 +109,30 @@ Corrected exact-PR-head run: [42312433741](https://github.com/ghith93/raawaa-aut
 ## 9. Combined code + agent topology graph
 
 The static map is now merged into Graphify output. `scripts/merge_project_agent_map.py` adds agent/component/gap/provider nodes, explicit topology edges, and evidence links to AST file nodes or path-only references for docs excluded by `--code-only`. The merge is idempotent and tested. The resulting graph is one navigable view of code structure plus declared roles and their evidence; it does not claim roles are live agents and does not copy live D1 tasks.
+
+
+## 8. Successful full-engine graph build — 2026-11-07
+
+The corrected workflow completed successfully on current-at-the-time main `42f7fc1c64bd421b0858c23b60ca59f54c78719e` in [research workflow #42325873471](https://github.com/ghith93/raawaa-autonomous-engine/actions/runs/42325873471).
+
+Exact job evidence:
+- `graphifyy[sql]==0.9.103` installed successfully from the pinned OSS package.
+- Graphify scanned **352 code files**. The repository's credential/sensitive ignore rules remained active.
+- The code graph contained **5,631 nodes, 12,524 edges and 271 communities** before the project overlay.
+- The deterministic project/agent overlay added **33 project nodes, 31 declared edges and 57 evidence links** (10 evidence-reference nodes).
+- Final combined graph: **5,674 nodes and 12,612 links**. The graph schema, source paths, HTML and report checks passed.
+- The combined graph artifact was uploaded as `project-knowledge-graph-42325873471` with a **7-day** retention period.
+
+This upgrades the pilot from “pending CI evidence” to **read-only CI-verified**. It does not mean the graph is a live agent memory, a running agent topology, or a replacement for the D1 task DAG. The manifest still labels agent roles as `declared_only` where appropriate; provider routes remain disabled. Graphify MCP/agent-facing query serving and graph-aware task planning are not yet enabled.
+
+## 9. Next integration experiment (not yet implemented)
+
+Before allowing graph data to influence execution, add a deterministic read-only query layer that:
+1. Accepts a bounded query (node ID, path, symbol, or relation) and returns a small evidence-backed neighborhood.
+2. Filters out ignored/sensitive paths and never returns environment values or secret material.
+3. Includes source path and relation provenance for every result.
+4. Is tested against fixed architecture questions, with raw repository search as the baseline.
+5. Produces suggestions only; it cannot create tasks, claim work, or authorize tools.
+6. Is benchmarked for recall, precision, latency and artifact size before any agent runtime integration.
+
+Only after this read-only retrieval layer proves useful should it be connected to the researcher/planner as context. The existing task store remains the sole source of truth for live task dependencies and execution state.
