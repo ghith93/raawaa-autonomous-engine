@@ -20,7 +20,14 @@ class CloudflareZoneScopeAttestationWorkflowTests(unittest.TestCase):
         for relative in GATED_WORKFLOWS:
             with self.subTest(workflow=relative):
                 source = (ROOT / relative).read_text(encoding="utf-8")
-                gate = source.index("run: python scripts/verify_cloudflare_zero_cost_boundary.py")
+                # Locate the step that *invokes* the gate, not a literal
+                # single-line `run:`. A step may wrap the invocation in a
+                # multi-line shell block (for example to record the exit code
+                # and per-endpoint status), and that must not let the
+                # attestation requirement escape the check.
+                # Match the invocation, not the `paths:` trigger at the top of
+                # the file, which mentions the same filename.
+                gate = source.index("python scripts/verify_cloudflare_zero_cost_boundary.py")
                 start = source.rfind("      - name:", 0, gate)
                 end = source.find("      - name:", gate)
                 block = source[start:] if end < 0 else source[start:end]
