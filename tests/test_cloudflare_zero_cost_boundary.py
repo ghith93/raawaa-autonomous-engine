@@ -377,6 +377,29 @@ class ActivityAnnotationTests(unittest.TestCase):
             with self.subTest(reason=reason), self.assertRaises(ValueError):
                 activity_annotation({"eligible": False, "reason": reason})
 
+    def test_main_fails_closed_without_all_zone_scope_attestation(self):
+        import contextlib
+        import io
+        with tempfile.NamedTemporaryFile(mode="r+", encoding="utf-8") as output:
+            env = {
+                "CLOUDFLARE_ACCOUNT_ID": "synthetic-account",
+                "CLOUDFLARE_API_TOKEN": "synthetic-token",
+                "CLOUDFLARE_ZONE_READ_SCOPE_ATTESTATION": "selected_zones",
+                "GITHUB_OUTPUT": output.name,
+            }
+            with patch.dict(os.environ, env, clear=True), patch(
+                "scripts.verify_cloudflare_zero_cost_boundary.check_boundary"
+            ) as check:
+                buffer = io.StringIO()
+                with contextlib.redirect_stdout(buffer):
+                    self.assertEqual(main(), 1)
+            check.assert_not_called()
+            emitted = buffer.getvalue()
+            self.assertIn("reason=zone_scope_not_attested", emitted)
+            self.assertIn("zero_cost_eligible=false", emitted)
+            self.assertNotIn("synthetic-account", emitted)
+            self.assertNotIn("synthetic-token", emitted)
+
     def test_main_publishes_sanitized_annotation_without_response_data(self):
         import contextlib
         import io
@@ -384,6 +407,7 @@ class ActivityAnnotationTests(unittest.TestCase):
             env = {
                 "CLOUDFLARE_ACCOUNT_ID": "synthetic-account",
                 "CLOUDFLARE_API_TOKEN": "synthetic-token",
+                "CLOUDFLARE_ZONE_READ_SCOPE_ATTESTATION": "all_account_zones",
                 "GITHUB_OUTPUT": output.name,
             }
             result = {"eligible": False, "reason": "zone_inventory_unavailable",
