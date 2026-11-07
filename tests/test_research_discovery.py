@@ -104,6 +104,23 @@ class ResearchDiscoveryTests(unittest.TestCase):
         self.assertEqual(len(calls), 1)
         self.assertEqual(bounded["queries_attempted"], 1)
 
+    def test_eight_results_per_query_improves_bounded_candidate_coverage(self):
+        calls = []
+        items = [
+            {"full_name": f"example/project-{i}", "html_url": f"https://github.com/example/project-{i}",
+             "description": "metadata only", "topics": [], "stargazers_count": i,
+             "pushed_at": "2026-11-01T00:00:00Z", "language": "Python", "license": {"spdx_id": "MIT"}}
+            for i in range(10)
+        ]
+        result = discover_repositories(
+            {"mcp_registry": "MCP server registry"},
+            {},
+            max_per_query=8,
+            request_fn=lambda query, token: (calls.append(query) or {"items": items}),
+        )
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(len(result["candidates"]), 8)
+
     def test_query_count_is_bounded(self):
         calls = []
         result = discover_repositories({"a": "one", "b": "two", "c": "three"}, {}, max_queries=2, request_fn=lambda q, token: (calls.append(q) or {"items": []}))
