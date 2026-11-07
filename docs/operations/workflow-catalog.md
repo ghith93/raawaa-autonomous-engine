@@ -66,3 +66,10 @@ Use the connected Activepieces GitHub action `trigger_workflow_dispatch` with re
 - The workflow now uses immutable action references, validates dispatch inputs without interpolating untrusted values into shell source, checks the exact run context, and emits only allowlisted reconciliation metadata. The run-scoped value is a correlation identifier, not a durable deduplication ledger.
 - Do not dispatch this audit workflow as a substitute for the separate one-shot Staging inference workflow. Provider inference remains disabled by default and the USD 0 ceiling/paid-fallback prohibition remain authoritative.
 - Runtime-004 remains 1/2; only a second distinct successful scheduled Staging probe can close that acceptance item.
+
+## Follow-up after PR #643 and #644 — 2026-11-07
+
+- PR #643 merged: generic task claims now enforce attempts < max_attempts in both selection and conditional update; an at-cap pending task is not falsely claimed or audited.
+- PR #644 merged: duplicate normalized research source keys are rejected before any D1 batch is constructed, preventing accepted_count from overstating unique persisted candidates.
+- PR #641 remains the base for durable research persistence; this follow-up automates its use only after billing, migration and Worker schema checks, with per-run ephemeral Staging credentials.
+- The current Task Runner watchdog status is ready; latest inspected automatic dispatch #42318764304 succeeded with an idle queue (0 pending / 0 running). Do not confuse a successful idle poll with actual task processing.
