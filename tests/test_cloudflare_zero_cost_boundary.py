@@ -4,7 +4,7 @@ import tempfile
 import unittest
 from unittest.mock import patch
 from urllib.error import HTTPError
-from urllib.parse import parse_qs, urlparse
+from urllib.parse import urlparse
 from urllib.request import Request
 
 from scripts.verify_cloudflare_zero_cost_boundary import (
@@ -89,48 +89,90 @@ class ZeroCostBoundaryTests(unittest.TestCase):
                 self.assertFalse(assess_subscriptions([record])["eligible"])
         self.assertFalse(assess_subscriptions([None])["eligible"])
 
-    def test_pagination_is_followed_until_the_complete_inventory_is_read(self):
+    def test_subscription_endpoint_uses_one_documented_request_without_query_params(self):
         seen = []
-        first_page = [{"id": f"sub-{index}", "state": "Cancelled"} for index in range(50)]
-        second_page = [{"id": "sub-50", "state": "Provisioned", "price": 0,
-                        "rate_plan": {"id": "free", "public_name": "Workers Free"}}]
-        responses = [
-            page(first_page, number=1, total=51, per_page=50),
-            page(second_page, number=2, total=51, per_page=50),
+        records = [
+            {"id": f"sub-{index}", "state": "Cancelled"}
+            for index in range(50)
         ]
+        records.append({
+            "id": "sub-free", "state": "Provisioned", "price": 0,
+            "rate_plan": {"id": "free", "public_name": "Workers Free"},
+        })
+        body = page(records, number=1, total=51, per_page=1000)
+
         class Response:
             status = 200
-            def __init__(self, body): self.body = body
             def __enter__(self): return self
             def __exit__(self, *args): return False
-            def read(self, limit): return json.dumps(self.body).encode()
+            def read(self, limit): return json.dumps(body).encode()
+
         def opener(request, timeout):
             seen.append((request, timeout))
-            return Response(responses[len(seen) - 1])
+            return Response()
+
         result = check_boundary("synthetic-account", "synthetic-token", opener=opener)
-        self.assertEqual(result["reason"], "no_active_paid_subscriptions")
         self.assertTrue(result["eligible"])
-        self.assertEqual(len(seen), 2)
-        self.assertEqual(parse_qs(urlparse(seen[0][0].full_url).query), {"page": ["1"], "per_page": ["1000"]})
-        self.assertEqual(parse_qs(urlparse(seen[1][0].full_url).query), {"page": ["2"], "per_page": ["1000"]})
+        self.assertEqual(len(seen), 1)
+        self.assertEqual(urlparse(seen[0][0].full_url).query, "")
+        self.assertTrue(seen[0][0].full_url.endswith("/accounts/synthetic-account/subscriptions"))
         self.assertEqual(seen[0][0].get_header("Authorization"), "Bearer synthetic-token")
 
-    def test_partial_nonfinal_page_fails_closed(self):
-        partial = page(
-            [{"id": f"sub-{index}", "state": "Cancelled"} for index in range(49)],
-            number=1, total=51, per_page=50,
-        )
+    def test_subscription_inventory_metadata_must_prove_full_single_page(self):
+        for info in (
+            {"count": 1, "page": 1, "per_page": 20, "total_count": 2},
+            {"count": 0, "page": 1, "per_page": 20, "total_count": 1},
+            {"count": 1, "page": 2, "per_page": 20, "total_count": 1},
+            {"count": 1, "page": 1, "per_page": 0, "total_count": 1},
+            {"count": 1, "page": 1, "per_page": 20},
+        ):
+            with self.subTest(info=info):
+                body = {
+                    "success": True,
+                    "result": [{
+                        "id": "sub-free", "state": "Provisioned", "price": 0,
+                        "rate_plan": {"id": "free", "public_name": "Workers Free"},
+                    }],
+                    "result_info": info,
+                }
+
+                class Response:
+                    status = 200
+                    def __enter__(self): return self
+                    def __exit__(self, *args): return False
+                    def read(self, limit): return json.dumps(body).encode()
+
+                result = check_boundary(
+                    "synthetic-account", "synthetic-token",
+                    opener=lambda *_a, **_k: Response(),
+                )
+                self.assertFalse(result["eligible"])
+                self.assertIn(result["reason"], {
+                    "invalid_subscription_inventory_metadata",
+                    "subscription_inventory_page_mismatch",
+                    "incomplete_subscription_inventory",
+                })
+
+    def test_single_page_contract_accepts_missing_optional_result_info(self):
+        body = {
+            "success": True,
+            "result": [{
+                "id": "sub-free", "state": "Provisioned", "price": 0,
+                "rate_plan": {"id": "free", "public_name": "Workers Free"},
+            }],
+        }
+
         class Response:
             status = 200
             def __enter__(self): return self
             def __exit__(self, *args): return False
-            def read(self, limit): return json.dumps(partial).encode()
+            def read(self, limit): return json.dumps(body).encode()
+
         result = check_boundary(
             "synthetic-account", "synthetic-token",
-            opener=lambda request, timeout: Response(),
+            opener=lambda *_a, **_k: Response(),
         )
-        self.assertFalse(result["eligible"])
-        self.assertEqual(result["reason"], "incomplete_subscription_page")
+        self.assertTrue(result["eligible"])
 
     def test_integer_valued_numeric_pagination_metadata_is_accepted(self):
         body = page([{"id": "sub-free", "state": "Provisioned", "price": 0,
@@ -158,31 +200,31 @@ class ZeroCostBoundaryTests(unittest.TestCase):
                 self.assertFalse(result["eligible"])
                 self.assertEqual(result["reason"], "invalid_pagination_" + field)
 
-    def test_missing_or_incomplete_pagination_fails_closed(self):
+    def test_missing_or_incomplete_inventory_fails_closed_without_leaking_response(self):
         class Response:
             status = 200
             def __init__(self, body): self.body = body
             def __enter__(self): return self
             def __exit__(self, *args): return False
             def read(self, limit): return json.dumps(self.body).encode()
-        incomplete = page([{"id": "sub-1", "state": "Cancelled"}], number=1, total=2, per_page=1)
-        calls = 0
-        def opener(request, timeout):
-            nonlocal calls
-            calls += 1
-            if calls == 1:
-                return Response(incomplete)
-            raise HTTPError(request.full_url, 500, "synthetic", {}, None)
-        self.assertFalse(check_boundary("account", "token", opener=opener)["eligible"])
-        self.assertFalse(check_boundary("account", "token", opener=lambda *_a, **_k: Response({
-            "success": True, "result": [],
-        }))["eligible"])
-        class InvalidJsonResponse:
-            status = 200
-            def __enter__(self): return self
-            def __exit__(self, *args): return False
-            def read(self, limit): return b'{"private_account_detail":"must-not-leak"'
-        invalid_json = check_boundary("account", "token", opener=lambda *_a, **_k: InvalidJsonResponse())
+
+        incomplete = page([{"id": "sub-cancelled", "state": "Cancelled"}], total=2)
+        self.assertFalse(check_boundary(
+            "account", "token",
+            opener=lambda *_a, **_k: Response(incomplete),
+        )["eligible"])
+        self.assertFalse(check_boundary(
+            "account", "token",
+            opener=lambda *_a, **_k: Response({"success": True, "result": []}),
+        )["eligible"])
+        invalid_json = check_boundary(
+            "account", "token",
+            opener=lambda *_a, **_k: type("InvalidJsonResponse", (), {
+                "status": 200, "__enter__": lambda self: self,
+                "__exit__": lambda self, *args: False,
+                "read": lambda self, limit: b'{"private_account_detail":"must-not-leak"',
+            })(),
+        )
         self.assertFalse(invalid_json["eligible"])
         self.assertEqual(invalid_json["reason"], "invalid_billing_json")
         self.assertNotIn("private_account_detail", json.dumps(invalid_json))
@@ -190,25 +232,28 @@ class ZeroCostBoundaryTests(unittest.TestCase):
         self.assertFalse(check_boundary("account", "")["eligible"])
 
     def test_duplicate_or_missing_subscription_ids_fail_closed(self):
-        duplicate_pages = [
-            page([{"id": "same", "state": "Cancelled"}], number=1, total=2, per_page=1),
-            page([{"id": "same", "state": "Expired"}], number=2, total=2, per_page=1),
+        duplicate_records = [
+            {"id": "same", "state": "Cancelled"},
+            {"id": "same", "state": "Expired"},
         ]
+
         class Response:
             status = 200
             def __init__(self, body): self.body = body
             def __enter__(self): return self
             def __exit__(self, *args): return False
             def read(self, limit): return json.dumps(self.body).encode()
-        seen = 0
-        def duplicate_opener(request, timeout):
-            nonlocal seen
-            body = duplicate_pages[seen]
-            seen += 1
-            return Response(body)
-        self.assertFalse(check_boundary("account", "token", opener=duplicate_opener)["eligible"])
-        missing_id_page = page([{"state": "Cancelled"}], number=1, total=1, per_page=1)
-        self.assertFalse(check_boundary("account", "token", opener=lambda *_a, **_k: Response(missing_id_page))["eligible"])
+
+        duplicate_body = {"success": True, "result": duplicate_records}
+        self.assertFalse(check_boundary(
+            "account", "token",
+            opener=lambda *_a, **_k: Response(duplicate_body),
+        )["eligible"])
+        missing_id_body = {"success": True, "result": [{"state": "Cancelled"}]}
+        self.assertFalse(check_boundary(
+            "account", "token",
+            opener=lambda *_a, **_k: Response(missing_id_body),
+        )["eligible"])
 
     def test_main_fails_ci_when_zero_cost_eligibility_is_unknown(self):
         with tempfile.NamedTemporaryFile(mode="r+", encoding="utf-8") as output:
