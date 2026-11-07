@@ -37,7 +37,21 @@ jobs:
         uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7
         with:
           python-version: "3.11"
+      - name: Verify Cloudflare zero-cost boundary
+        id: ingest_zero_cost_preflight
+        continue-on-error: true
+        env:
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: python scripts/verify_cloudflare_zero_cost_boundary.py
+      - name: Validate comment without enqueue when billing is unverified
+        if: steps.ingest_zero_cost_preflight.outcome != 'success' || steps.ingest_zero_cost_preflight.outputs.zero_cost_eligible != 'true'
+        env:
+          ALLOWED_ACTOR: ghith93
+          ALLOWED_ISSUE: "464"
+        run: python3 scripts/github_comment_ingest.py
       - name: Plan and enqueue from comment
+        if: steps.ingest_zero_cost_preflight.outcome == 'success' && steps.ingest_zero_cost_preflight.outputs.zero_cost_eligible == 'true'
         # Read the untrusted comment body from GitHub's runner-provided event
         # file inside the script; never interpolate it into workflow YAML/env.
         env:
