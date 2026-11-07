@@ -109,8 +109,3 @@ Corrected exact-PR-head run: [42312433741](https://github.com/ghith93/raawaa-aut
 ## 9. Combined code + agent topology graph
 
 The static map is now merged into Graphify output. `scripts/merge_project_agent_map.py` adds agent/component/gap/provider nodes, explicit topology edges, and evidence links to AST file nodes or path-only references for docs excluded by `--code-only`. The merge is idempotent and tested. The resulting graph is one navigable view of code structure plus declared roles and their evidence; it does not claim roles are live agents and does not copy live D1 tasks.
-
-
-## 10. Corrected process-supervision inventory
-
-A source audit after inspecting the generated graph corrected the initial capability map: process supervision is not wholly absent. `engine/process_supervisor.py` implements bounded allowlisted child processes, process-group termination, output redaction/limits, durable dispatch ledger and lease fencing. `engine/supervised_task.py` connects it to the existing Task Store and D1/SQLite ledger for `supervised_probe` tasks. It is default-off and exposes only two fixed read-only local probes. The separate `engine/sandbox_policy.py` builds gVisor constraints but is not wired into that path. So do not build a second process manager: extend the existing one with a reviewed agent-operation registry and connect it to the sandbox before any repository code or general CLI can run. The separate reviewer runtime remains absent.
