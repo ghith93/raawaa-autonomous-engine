@@ -74,7 +74,7 @@ All repository facts above were inspected on 2026-11-07. Recheck upstream versio
 - The first extraction produced **5,297 nodes, 11,848 edges and 256 communities** from 335 code files. Four sensitive/credential-related paths were excluded by ignore rules; one sensitive workflow file was also skipped by Graphify's own safety filter.
 - The job then failed because `extract --code-only` writes the graph JSON first and the report/HTML generation requires the documented `--cluster-only` pass. It also reported 18 SQL files skipped because the optional SQL grammar was absent.
 - Corrective change on this PR: install the pinned `graphifyy[sql]==0.9.103` extra, run `python -m graphify cluster-only . --no-label` (the CLI subcommand, with community LLM labeling explicitly disabled), and validate graph/report/HTML plus relative source paths before upload.
-- This is a genuine first pilot result, not yet a passing end-to-end graph artifact. Re-run exact-head CI after the corrective commit and do not merge until the graph job and full Engine CI pass.
+- This first attempt did not yet produce a passing end-to-end artifact. The later successful main-push run and exact current evidence are recorded in Sections 9–10; this historical note explains why the pinned SQL extra and explicit clustering pass were added.
 
 ## 8. Existing six-hour development loop and fallback reality
 
@@ -102,10 +102,29 @@ Corrected exact-PR-head run: [42312433741](https://github.com/ghith93/raawaa-aut
 - Full Engine CI run [42312433515](https://github.com/ghith93/raawaa-autonomous-engine/actions/runs/42312433515) passed: Python tests, Cloudflare Worker tests, Workflows tests, local D1 integration smoke test and local Workflows runtime smoke test. Staging migration/deploy/telemetry jobs were explicitly skipped.
 - This proves the bounded local graph build and artifact pipeline. It does **not** prove that agents are dynamically connected to this graph, that the graph is a live task orchestrator, or that R&D candidate promotion/fallback is implemented.
 
-**Decision:** Graphify passes the technical pilot acceptance gate and can be retained as a read-only code-topology artifact generator. Keep it non-blocking and independent of runtime. Do not merge to main until the repository owner/operator verifies the downstream main-push Staging workflow side effects are compatible with the active #577 zero-write/deploy boundary.
+**Decision:** Graphify passed the technical pilot acceptance gate and is merged on main as a read-only code-topology artifact generator. Keep it non-blocking and independent of runtime. The current main-push run and its zero-write Staging outcome are recorded in Section 10.
 
 
 
 ## 9. Combined code + agent topology graph
 
 The static map is now merged into Graphify output. `scripts/merge_project_agent_map.py` adds agent/component/gap/provider nodes, explicit topology edges, and evidence links to AST file nodes or path-only references for docs excluded by `--code-only`. The merge is idempotent and tested. The resulting graph is one navigable view of code structure plus declared roles and their evidence; it does not claim roles are live agents and does not copy live D1 tasks.
+
+
+## 10. Current main-push verification — 2026-11-07
+
+Latest verified graph run: [Scheduled Open-Source Research Discovery #42324928734](https://github.com/ghith93/raawaa-autonomous-engine/actions/runs/42324928734), on main `f92b4745c00616252923f5fefd645ff211cf3807`. Both `knowledge_graph` and `discover` jobs succeeded.
+
+- Graphify OSS was pinned to `graphifyy[sql]==0.9.103`; extraction ran with `--code-only`, clustering with `--no-label`, and no model/provider call was made.
+- Graphify parsed 352 code files and produced 5,630 code-graph nodes and 12,522 code-graph edges across 267 communities. The explicit project/agent overlay adds 33 project-map nodes, 31 topology edges, 57 evidence links and 10 path-reference nodes: final graph 5,673 nodes and 12,610 links.
+- Reported extraction mix: 92% extracted, 8% inferred, 0% ambiguous; 972 inferred edges at average confidence 0.88. Inferred edges remain candidates for review, not ground truth.
+- The project map contains 8 agent-role declarations (6 enabled roles marked `declared_only`, 2 disabled roles), components, provider candidates and explicit capability gaps. It does not prove live agent processes.
+- Extraction skipped 110 non-code files (108 documentation files and 2 images) by design; 4 credential/sensitive paths were excluded by ignore rules and one sensitive workflow file was skipped by Graphify's safety filter. Ten evidence nodes are path-only references; documentation is not semantically indexed.
+- Artifact `project-knowledge-graph-42324928734`: 902,842 bytes. [Download from the workflow run](https://github.com/ghith93/raawaa-autonomous-engine/actions/runs/42324928734/artifacts/13554133440).
+- The discovery job's read-only billing preflight returned `billing_http_400`, `zero_cost_eligible=false`; Staging D1 persistence and telemetry were skipped. No remote task or production write was performed.
+
+### Manual usefulness assessment
+
+The graph answers code-orientation questions (module/function dependencies, high-connectivity symbols, declared role-to-component relationships and recorded capability gaps). It does not answer live queue/lease state, current task ownership, semantic questions over the 108 documentation files, or whether a declared role has an active process. Those remain sourced from the Task Store, source documents and runtime evidence respectively.
+
+Acceptance for the next phase: evaluate a small fixed question set against both Graphify and raw repository search; normalize the duplicate independent-reviewer gap labels; add a bounded documentation index only if deterministic, zero-cost and secret-safe; and build a read-only bridge to Task Store state without duplicating its source of truth. No graph database or new orchestrator is justified yet.
