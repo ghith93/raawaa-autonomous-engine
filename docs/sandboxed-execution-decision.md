@@ -83,6 +83,40 @@ marker. `tests/adversarial/test_probe_harness.py` (17 offline tests) pins that
 harness contract, and `tests/test_sandbox_adversarial_workflow.py` pins that the
 workflow never interpolates its dispatch input into a shell script.
 
+## Environment isolation is proved against a real host process
+
+The finding above is specific: the Codespaces bridge exposed
+`/proc/<ppid>/environ` to repository code. A probe that scans *its own*
+environment, or a marker patched into the test process with `patch.dict`, cannot
+show whether that exposure was removed — it only shows what the sandbox does with
+an environment it already owns. Two earlier revisions of the harness made that
+mistake, and both would have produced a green run without evidence.
+
+The live suite therefore proves it in three linked steps:
+
+1. **A real helper process.** `_start_host_helper` execs a separate process with
+   the marker in its *initial* `env` (via `subprocess.Popen(env=…)`), not patched in
+   afterwards, and waits until `/proc/<pid>/environ` exists.
+2. **A host positive control.** `_helper_environ_visible_on_host` reads that exact
+   PID's `/proc` entry on the host and requires the `NAME=value` pair to be present.
+   If the marker never reached exec time, or the PID is wrong, the run fails before
+   the sandbox result is interpreted — otherwise "unreadable" would be meaningless.
+3. **A typed sandbox read attempt.** The probe reads only that PID's
+   `/proc/<pid>/environ` and reports one of five statuses: `marker_readable` (leak),
+   `unreadable` or `missing` (isolated), `marker_absent`, or `inconclusive`. Only
+   `unreadable`/`missing` pass, and `marker_absent` deliberately does **not**: a read
+   that succeeds but finds nothing may have hit a different process on a recycled
+   PID. The marker value is never echoed into logs.
+
+Because same-uid access makes the read *succeed* on an ordinary host, the offline
+test `ParentEnvironmentEndToEndTest` runs the real generated probe against a real
+helper and asserts the result is `marker_readable` **and** that the isolation
+assertion rejects it. A probe that always answered "unreadable" would pass every
+unit test while proving nothing; that end-to-end case is what prevents it.
+
+The self-environment control (`RAAWAA_PROBE_SECRET`) is kept as a separate,
+narrower claim and is no longer presented as parent-process isolation.
+
 ## What is still missing before #427 may merge
 
 1. **The probes must run, and be green, on a real runner.** Everything so far is the

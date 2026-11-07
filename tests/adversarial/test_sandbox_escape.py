@@ -22,6 +22,19 @@ looks at the canary. Without that control, a wrong or mistyped canary path retur
 ``denied:FileNotFoundError`` and the "file outside the mount is unreadable" test
 passes while proving nothing.
 
+Environment isolation is proved the same way, not by patching this process. A
+marker patched into the *test process* only shows what the sandbox does with its
+own environment; it never shows whether the sandbox can read the environment of
+another host process. So ``_start_host_helper`` execs a real helper process with
+the marker in its **initial exec environment**, ``_helper_environ_visible_on_host``
+proves on the host that the marker really is in that helper's
+``/proc/<pid>/environ`` (positive control), and the sandbox probe then tries to
+read only that exact PID's ``/proc`` file. The probe emits a typed status, never
+environment contents: ``marker_readable`` (leak), ``unreadable``/``missing``
+(isolated, but only meaningful after the host control passed), or
+``inconclusive``. A helper that died or a host control that failed fails the run
+rather than reading as containment.
+
 The host canary has the same problem in a different form. A canary under a ``0700``
 home directory is unreadable because of Unix permissions, not because of the
 sandbox. ``_canary_base_dir`` therefore picks a world-traversable directory outside
@@ -30,20 +43,30 @@ and verifies both, and the marker carries a per-run nonce so a stale file cannot
 stand in for this run. The offline half of this contract is tested in
 ``test_probe_harness.py``.
 """
+import base64
 import json
 import os
 import shutil
+import socket
 import subprocess
+import sys
 import tempfile
+import time
 import unittest
 import uuid
 from pathlib import Path
+from unittest.mock import patch
 
 from engine.sandbox_policy import SandboxLimits, SandboxRequest, assert_sandbox_argv, build_docker_argv
 
 LIVE = os.environ.get("RAAWAA_SANDBOX_LIVE") == "1"
 IMAGE = os.environ.get("RAAWAA_SANDBOX_IMAGE", "")
 SECRET_MARKER = "raawaa-probe-secret-do-not-leak"
+# Name and value of the synthetic marker placed in the helper process's *initial*
+# exec environment. The name is harmless and carries a per-run nonce so a stale
+# helper from an earlier run cannot stand in for this one.
+HELPER_ENV_NAME = "RAAWAA_HOST_HELPER_MARKER"
+HELPER_ENV_PREFIX = "raawaa-host-helper-env-isolation"
 CANARY_MARKER_PREFIX = "raawaa-host-filesystem-canary-must-not-be-readable"
 
 # A file the read-only mount guarantees, used as the positive control.
@@ -54,17 +77,22 @@ CONTROL_EXPECTED = "raawaa-autonomous-engine"
 REQUIRED_KEYS = (
     "control",
     "host_canary",
+    "secret_marker_present",
     "network",
-    "root_write",
-    "exists:/var/run/docker.sock",
-    "exists:/root/.ssh",
+    "root_readonly",
+    "var_tmp_readonly",
+    "var_tmp_world_writable",
+    "root_write_errno",
+    "path:/var/run/docker.sock",
+    "path:/root/.ssh",
+    "parent_environ",
 )
 
 # Each probe prints a single JSON object. Anything the probe could not even attempt
 # is reported as an error string, so the assertion below can tell "denied" from
 # "never ran".
 PROBE_TEMPLATE = r"""
-import json, os, socket
+import json, os, socket, stat
 
 
 def read(path):
@@ -80,26 +108,172 @@ result = {}
 # probe's file access is broken and every other denial below is meaningless.
 result["control"] = read(__CONTROL_PATH__)
 result["host_canary"] = read(__HOST_CANARY_PATH__)
-try:
-    result["own_environ"] = "|".join(sorted(os.environ))[:400]
-except OSError as exc:
-    result["own_environ_error"] = type(exc).__name__
-for path in ("/var/run/docker.sock", "/root/.ssh", "/home", "/etc/shadow"):
-    result["exists:" + path] = os.path.exists(path)
+# Report a boolean only; never print environment names or values. Checking
+# values, not just names, makes a synthetic inherited secret observable.
+result["secret_marker_present"] = any(__SECRET_MARKER__ in value for value in os.environ.values())
+
+
+def parent_environ_state(pid, marker_name, marker_value):
+    # Try to read one exact host process's environment; report a status only.
+    # A missing PID, a non-numeric PID and an unreadable file are different
+    # facts. Collapsing them into "denied" would let a broken path name pass.
+    try:
+        pid_number = int(pid)
+    except (TypeError, ValueError):
+        return "inconclusive"
+    if pid_number <= 0:
+        return "inconclusive"
+    try:
+        with open("/proc/%d/environ" % pid_number, "rb") as handle:
+            raw = handle.read(65536)
+    except FileNotFoundError:
+        return "missing"
+    except PermissionError:
+        return "unreadable"
+    except OSError:
+        return "inconclusive"
+    if not raw:
+        return "inconclusive"
+    # Match the name and value together so an unrelated variable with a similar
+    # name cannot be counted as either a leak or an isolation proof.
+    needle = (marker_name + "=" + marker_value).encode("utf-8")
+    return "marker_readable" if needle in raw else "marker_absent"
+
+
+result["parent_environ"] = parent_environ_state(
+    __PARENT_PID__, __HELPER_ENV_NAME__, __HELPER_ENV_VALUE__)
+def path_state(path):
+    # exists() collapses PermissionError into False: that is not absence.
+    try:
+        os.lstat(path)
+        return "present"
+    except FileNotFoundError:
+        return "missing"
+    except PermissionError:
+        return "inaccessible"
+    except OSError as exc:
+        return "error:" + type(exc).__name__
+
+for path in ("/var/run/docker.sock", "/root/.ssh"):
+    result["path:" + path] = path_state(path)
 try:
     sock = socket.create_connection(("1.1.1.1", 80), timeout=3)
     sock.close()
     result["network"] = "connected"
 except OSError as exc:
     result["network"] = "denied:" + type(exc).__name__
+# /var/tmp is not one of the contract's writable tmpfs mounts. Test a
+# directory writable by an unprivileged user if the root mount were writable;
+# permission-denied or a missing path must never stand in for read-only.
 try:
-    with open("/escaped", "w") as handle:
-        handle.write("x")
-    result["root_write"] = "succeeded"
-except OSError as exc:
-    result["root_write"] = "denied:" + type(exc).__name__
+    result["root_readonly"] = bool(os.statvfs("/").f_flag & os.ST_RDONLY)
+    result["var_tmp_readonly"] = bool(os.statvfs("/var/tmp").f_flag & os.ST_RDONLY)
+    mode = os.lstat("/var/tmp").st_mode
+    result["var_tmp_world_writable"] = stat.S_ISDIR(mode) and mode & 0o003 == 0o003
+    target = "/var/tmp/raawaa-rootfs-proof-" + str(os.getpid())
+    try:
+        fd = os.open(target, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+    except OSError as exc:
+        result["root_write_errno"] = exc.errno
+    else:
+        os.close(fd)
+        try:
+            os.unlink(target)
+        finally:
+            result["root_write_errno"] = 0
+except OSError:
+    # Missing or inaccessible prerequisites make the result inconclusive.
+    result.setdefault("root_readonly", None)
+    result.setdefault("var_tmp_readonly", None)
+    result.setdefault("var_tmp_world_writable", None)
+    result.setdefault("root_write_errno", None)
 print(json.dumps(result))
 """
+
+
+# The helper is a real, separate process: it sleeps so the harness can inspect it
+# and the sandbox can attempt to read its /proc entry while it is alive.
+_HELPER_PROGRAM = "import time\ntime.sleep(600)\n"
+
+
+def _start_host_helper(marker_name, marker_value, timeout=10.0):
+    """Exec a helper process carrying the marker in its initial environment.
+
+    ``subprocess.Popen`` passes ``env`` at exec time, so the marker is genuinely
+    part of that process's initial environment rather than something patched in
+    afterwards. Returns the ``Popen`` object; the caller must terminate it.
+    """
+    environment = {
+        "PATH": os.environ.get("PATH", "/usr/local/bin:/usr/bin:/bin"),
+        marker_name: marker_value,
+    }
+    process = subprocess.Popen(
+        [sys.executable, "-c", _HELPER_PROGRAM],
+        env=environment,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+    # Wait for exec to complete so /proc/<pid>/environ exists for the control.
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if Path(f"/proc/{process.pid}/environ").exists():
+            return process
+        if process.poll() is not None:
+            raise RuntimeError(f"host helper exited early with code {process.returncode}")
+        time.sleep(0.02)
+    process.kill()
+    raise RuntimeError("host helper did not start within the timeout")
+
+
+def _helper_environ_visible_on_host(pid, marker_name, marker_value):
+    """Host-side positive control: the marker must really be in that PID's environ.
+
+    Without this, a sandbox "unreadable" result could be explained by a marker
+    that was never there, and the isolation test would pass while proving nothing.
+    """
+    try:
+        raw = Path(f"/proc/{pid}/environ").read_bytes()
+    except OSError as exc:
+        raise AssertionError(
+            f"host cannot read the helper environment ({type(exc).__name__}); "
+            "the sandbox isolation probe would be meaningless"
+        ) from None
+    needle = f"{marker_name}={marker_value}".encode("utf-8")
+    if needle not in raw:
+        # Report only that the control failed; never echo environment contents.
+        raise AssertionError("host positive control failed: the helper environment lacks the marker")
+
+
+def _stop_helper(process, timeout=10.0):
+    """Terminate the host helper and reap it; never leave a sleeper behind."""
+    if process.poll() is None:
+        process.terminate()
+        try:
+            process.wait(timeout=timeout)
+        except subprocess.TimeoutExpired:
+            process.kill()
+            process.wait(timeout=timeout)
+
+
+def _assert_parent_environ_isolated(output):
+    """Sandbox must not be able to read the live host helper's environment.
+
+    ``marker_absent`` is *not* containment: a different process could answer for
+    the same PID, or the read could land on a recycled PID. Only an explicit
+    denial (``unreadable``) or a genuinely gone process (``missing``) counts, and
+    both are meaningful only after the host positive control has passed.
+    """
+    status = output.get("parent_environ")
+    if status == "marker_readable":
+        raise AssertionError("sandbox read a host process environment: isolation failed")
+    if status in ("unreadable", "missing"):
+        return
+    if status == "marker_absent":
+        raise AssertionError(
+            "parent_environ=marker_absent is not an isolation proof; the read may "
+            "have hit a different process"
+        )
+    raise AssertionError(f"parent_environ status is not usable evidence: {status!r}")
 
 
 def _sandbox_available():
@@ -156,15 +330,41 @@ def _create_canary(base):
     return canary, marker
 
 
-def _probe_program(canary_path, control_path=CONTROL_PATH):
-    """Substitute exact, repr-quoted paths into the probe template."""
-    for sentinel in ("__HOST_CANARY_PATH__", "__CONTROL_PATH__"):
+def _probe_program(canary_path, control_path=CONTROL_PATH, parent_pid=None,
+                   helper_env_name=HELPER_ENV_NAME, helper_env_value=""):
+    """Substitute exact, repr-quoted values into the probe template.
+
+    ``parent_pid`` must be the PID of the live host helper. It is never defaulted
+    to a plausible number: an empty PID makes the probe report ``inconclusive``,
+    which fails the isolation assertion instead of producing a false pass.
+    """
+    sentinels = {
+        "__HOST_CANARY_PATH__": repr(str(canary_path)),
+        "__CONTROL_PATH__": repr(str(control_path)),
+        "__SECRET_MARKER__": repr(SECRET_MARKER),
+        "__PARENT_PID__": repr("" if parent_pid is None else str(int(parent_pid))),
+        "__HELPER_ENV_NAME__": repr(helper_env_name),
+        "__HELPER_ENV_VALUE__": repr(helper_env_value),
+    }
+    for sentinel in sentinels:
         if sentinel not in PROBE_TEMPLATE:
             # An edit that drops the placeholder would silently produce a probe
             # that reads nothing, and "read nothing" must never look like "denied".
             raise RuntimeError(f"probe template has lost its {sentinel} placeholder")
-    program = PROBE_TEMPLATE.replace("__HOST_CANARY_PATH__", repr(str(canary_path)))
-    return program.replace("__CONTROL_PATH__", repr(str(control_path)))
+    program = PROBE_TEMPLATE
+    for sentinel, value in sentinels.items():
+        program = program.replace(sentinel, value)
+    return program
+
+
+def _python_command(program):
+    """Encode a multiline probe into one newline-free Docker argument.
+
+    The sandbox argv policy rejects newlines in every argument; passing the raw
+    multiline template would otherwise fail before the container could start.
+    """
+    encoded = base64.b64encode(program.encode("utf-8")).decode("ascii")
+    return ("python3", "-c", f"exec(__import__('base64').b64decode({encoded!r}))")
 
 
 def _parse_probe_output(completed):
@@ -192,6 +392,17 @@ def _assert_probe_usable(output):
     missing = [key for key in REQUIRED_KEYS if key not in output]
     if missing:
         raise AssertionError(f"probe output is missing {missing}; a missing key must not read as containment")
+    for key in ("secret_marker_present", "root_readonly", "var_tmp_readonly", "var_tmp_world_writable"):
+        if type(output[key]) is not bool:
+            raise AssertionError(f"probe output {key} must be a boolean")
+    if type(output["root_write_errno"]) is not int:
+        raise AssertionError("probe output root_write_errno must be an integer")
+    for key in ("path:/var/run/docker.sock", "path:/root/.ssh"):
+        if output[key] not in ("present", "missing", "inaccessible"):
+            raise AssertionError(f"probe output {key} is not a recognised path state")
+    if output["parent_environ"] not in (
+            "marker_readable", "marker_absent", "unreadable", "missing", "inconclusive"):
+        raise AssertionError(f"probe output parent_environ is not a recognised state: {output['parent_environ']!r}")
     control = str(output["control"])
     if control.startswith("denied:"):
         raise AssertionError(
@@ -202,6 +413,45 @@ def _assert_probe_usable(output):
         raise AssertionError(
             f"positive control read {control[:80]!r}, which does not contain {CONTROL_EXPECTED!r}"
         )
+
+
+def _assert_secret_not_in_environ(output):
+    """A missing/non-boolean result is not evidence of secret isolation."""
+    if type(output.get("secret_marker_present")) is not bool:
+        raise AssertionError("probe must explicitly report secret_marker_present as a boolean")
+    if output["secret_marker_present"]:
+        raise AssertionError("synthetic host secret was present in the sandbox environment")
+
+
+def _assert_paths_not_accessible(output):
+    """Missing and permission-denied are distinct; neither proves host mounts absent."""
+    for path in ("/var/run/docker.sock", "/root/.ssh"):
+        state = output.get("path:" + path)
+        if state not in ("missing", "inaccessible"):
+            raise AssertionError(f"sensitive path is present or unobservable: {path} ({state!r})")
+
+
+def _assert_root_read_only(output):
+    """Require EROFS on a normally writable location, not mere EACCES."""
+    import errno
+
+    if (output.get("root_readonly") is not True
+            or output.get("var_tmp_readonly") is not True
+            or output.get("var_tmp_world_writable") is not True
+            or type(output.get("root_write_errno")) is not int
+            or output["root_write_errno"] != errno.EROFS):
+        raise AssertionError("root read-only proof is inconclusive or failed")
+
+
+def _require_host_network_control():
+    """Prove the host can reach the same address before interpreting denial."""
+    try:
+        with socket.create_connection(("1.1.1.1", 80), timeout=3):
+            pass
+    except OSError as exc:
+        raise AssertionError(
+            f"host network positive control failed ({type(exc).__name__}); egress result is inconclusive"
+        ) from None
 
 
 @unittest.skipUnless(_sandbox_available(), "no live sandbox: set RAAWAA_SANDBOX_LIVE=1 and RAAWAA_SANDBOX_IMAGE")
@@ -215,10 +465,23 @@ class SandboxEscapeTest(unittest.TestCase):
         cls.addClassCleanup(shutil.rmtree, cls.host_canary.parent, True)
         if cls.host_canary.resolve().is_relative_to(cls.workspace):
             raise RuntimeError("host canary must be outside the mounted workspace")
-        os.environ["RAAWAA_PROBE_SECRET"] = SECRET_MARKER
+        environment_patch = patch.dict(os.environ, {"RAAWAA_PROBE_SECRET": SECRET_MARKER})
+        environment_patch.start()
+        cls.addClassCleanup(environment_patch.stop)
+        # A separate exec'd host process carrying the marker, so the sandbox probe
+        # attempts a *parent/bridge* environment read rather than its own.
+        cls.helper_marker = f"{HELPER_ENV_PREFIX}-{uuid.uuid4().hex}"
+        cls.helper = _start_host_helper(HELPER_ENV_NAME, cls.helper_marker)
+        # Registered immediately so a failure below cannot leave a sleeping process.
+        cls.addClassCleanup(_stop_helper, cls.helper)
+        _helper_environ_visible_on_host(cls.helper.pid, HELPER_ENV_NAME, cls.helper_marker)
         cls.vector = build_docker_argv(SandboxRequest(
             image=IMAGE,
-            command=("python3", "-c", _probe_program(cls.host_canary)),
+            command=_python_command(_probe_program(
+                cls.host_canary,
+                parent_pid=cls.helper.pid,
+                helper_env_value=cls.helper_marker,
+            )),
             source_dir=str(cls.workspace),
             limits=SandboxLimits(memory_mb=512, cpus=1.0, pids=64, wall_seconds=90, scratch_mb=32),
         ))
@@ -245,26 +508,58 @@ class SandboxEscapeTest(unittest.TestCase):
         canary = str(output["host_canary"])
         self.assertTrue(canary.startswith("denied:"), canary[:200])
         self.assertNotIn(self.canary_marker, canary)
-        self.assertNotIn(SECRET_MARKER, str(output.get("own_environ", "")))
+        _assert_secret_not_in_environ(output)
+
+    def test_synthetic_environment_canary_detection(self):
+        # Negative control within the same sandbox contract. The harmless test
+        # marker is inserted by the child itself, not via a Docker --env flag.
+        # It demonstrates that this exact image and generated program detect a
+        # marker value, without revealing any environment data in output.
+        program = ("import os\nos.environ['RAAWAA_SYNTHETIC_CONTROL'] = "
+                   + repr(SECRET_MARKER) + "\n" + _probe_program(self.host_canary))
+        vector = build_docker_argv(SandboxRequest(
+            image=IMAGE, command=_python_command(program), source_dir=str(self.workspace),
+            limits=SandboxLimits(memory_mb=512, cpus=1.0, pids=64, wall_seconds=90, scratch_mb=32),
+        ))
+        assert_sandbox_argv(vector, expected_source_dir=str(self.workspace))
+        completed = subprocess.run(vector, capture_output=True, text=True, timeout=120, check=False)
+        self.assertEqual(completed.returncode, 0, completed.stderr[-800:])
+        output = _parse_probe_output(completed)
+        _assert_probe_usable(output)
+        self.assertIs(output["secret_marker_present"], True)
+        self.assertNotIn(SECRET_MARKER, completed.stdout)
+        with self.assertRaisesRegex(AssertionError, "synthetic host secret"):
+            _assert_secret_not_in_environ(output)
+
+    def test_the_host_helper_is_a_real_process_with_the_marker(self):
+        # The host-side positive control in its own right: if this fails, the
+        # isolation assertion below would be vacuous.
+        self.assertIsNone(self.helper.poll(), "host helper must still be alive")
+        _helper_environ_visible_on_host(self.helper.pid, HELPER_ENV_NAME, self.helper_marker)
+
+    def test_the_sandbox_cannot_read_a_host_process_environment(self):
+        output = self._observed()
+        # Interpret the sandbox result only after the host control passes again.
+        _helper_environ_visible_on_host(self.helper.pid, HELPER_ENV_NAME, self.helper_marker)
+        _assert_parent_environ_isolated(output)
+        self.assertNotIn(self.helper_marker, json.dumps(output),
+                         "the helper marker must never be echoed back by the probe")
 
     def test_the_public_network_is_unreachable(self):
         output = self._observed()
+        _require_host_network_control()
         self.assertTrue(
             str(output.get("network", "")).startswith("denied"),
             output.get("network"),
         )
 
-    def test_credentials_and_the_docker_socket_are_absent(self):
+    def test_credentials_and_the_docker_socket_are_not_accessible(self):
         output = self._observed()
-        for path in ("/var/run/docker.sock", "/root/.ssh"):
-            self.assertFalse(output["exists:" + path], path)
+        _assert_paths_not_accessible(output)
 
     def test_the_root_filesystem_cannot_be_written(self):
         output = self._observed()
-        self.assertTrue(
-            str(output.get("root_write", "")).startswith("denied"),
-            output.get("root_write"),
-        )
+        _assert_root_read_only(output)
 
 
 if __name__ == "__main__":
