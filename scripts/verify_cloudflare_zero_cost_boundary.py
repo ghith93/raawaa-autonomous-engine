@@ -16,7 +16,7 @@ from urllib.request import HTTPRedirectHandler, Request, build_opener
 
 USER_AGENT = "RaawaaAutonomousEngine-ZeroCostPreflight/2.0"
 MAX_RESPONSE_BYTES = 1024 * 1024
-PER_PAGE = 50
+PER_PAGE = 1000
 MAX_PAGES = 100
 MAX_SUBSCRIPTIONS = PER_PAGE * MAX_PAGES
 ACTIVE_STATES = {"Trial", "Provisioned", "Paid", "AwaitingPayment"}
@@ -51,6 +51,7 @@ def assess_subscriptions(subscriptions: list) -> dict:
         return _invalid("empty_subscription_inventory_unverified")
     paid = 0
     unknown = 0
+    active_free = 0
     seen_ids = set()
     for item in subscriptions:
         if not isinstance(item, dict):
@@ -82,11 +83,15 @@ def assess_subscriptions(subscriptions: list) -> dict:
             paid += 1
         elif not is_explicit_free_plan:
             unknown += 1
+        else:
+            active_free += 1
     if paid:
         return {"eligible": False, "reason": "active_paid_subscription_present",
                 "active_paid_subscriptions": paid}
     if unknown:
         return _invalid("active_zero_price_nonfree_plan")
+    if not active_free:
+        return _invalid("no_active_free_plan_verified")
     return {"eligible": True, "reason": "no_active_paid_subscriptions",
             "active_paid_subscriptions": 0}
 
@@ -112,15 +117,28 @@ def _read_page(account_id: str, token: str, page: int, opener, timeout: int) -> 
     info = payload.get("result_info")
     if not isinstance(records, list) or not isinstance(info, dict):
         raise ValueError("missing_pagination_metadata")
-    count, current_page = info.get("count"), info.get("page")
-    per_page, total = info.get("per_page"), info.get("total_count")
-    values = (count, current_page, per_page, total)
-    if any(not isinstance(v, int) or isinstance(v, bool) for v in values):
-        raise ValueError("invalid_pagination_metadata")
-    if current_page != page or per_page < 1 or per_page > PER_PAGE:
-        raise ValueError("invalid_pagination_metadata")
-    if count != len(records) or count > per_page or total < count or total > MAX_SUBSCRIPTIONS:
+    def pagination_integer(name: str) -> int:
+        value = info.get(name)
+        if isinstance(value, bool):
+            raise ValueError("invalid_pagination_" + name)
+        if isinstance(value, int):
+            return value
+        if isinstance(value, float) and math.isfinite(value) and value.is_integer():
+            return int(value)
+        raise ValueError("invalid_pagination_" + name)
+
+    count = pagination_integer("count")
+    current_page = pagination_integer("page")
+    per_page = pagination_integer("per_page")
+    total = pagination_integer("total_count")
+    if current_page != page:
+        raise ValueError("pagination_page_mismatch")
+    if per_page < 1 or per_page > PER_PAGE:
+        raise ValueError("invalid_pagination_per_page")
+    if count != len(records) or count > per_page:
         raise ValueError("incomplete_subscription_page")
+    if total < count or total > MAX_SUBSCRIPTIONS:
+        raise ValueError("invalid_pagination_total_count")
     return records, info
 
 
@@ -170,7 +188,11 @@ def check_boundary(account_id: str, token: str, opener=None, timeout: int = 15) 
             "billing_response_too_large",
             "invalid_billing_response",
             "missing_pagination_metadata",
-            "invalid_pagination_metadata",
+            "invalid_pagination_count",
+            "invalid_pagination_page",
+            "invalid_pagination_per_page",
+            "invalid_pagination_total_count",
+            "pagination_page_mismatch",
             "incomplete_subscription_page",
             "subscription_inventory_changed_during_pagination",
             "missing_or_duplicate_subscription_id",
@@ -201,7 +223,7 @@ def main() -> int:
     }, sort_keys=True))
     if not result["eligible"]:
         print("Staging operations skipped: zero-cost eligibility was not established.")
-    return 0
+    return 0 if result["eligible"] else 1
 
 
 if __name__ == "__main__":

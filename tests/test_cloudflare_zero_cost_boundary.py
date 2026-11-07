@@ -15,7 +15,7 @@ from scripts.verify_cloudflare_zero_cost_boundary import (
 )
 
 
-def page(records, number=1, total=None, per_page=50):
+def page(records, number=1, total=None, per_page=1000):
     return {
         "success": True,
         "result": records,
@@ -63,13 +63,14 @@ class ZeroCostBoundaryTests(unittest.TestCase):
             "rate_plan": {"id": "free", "public_name": "Business Plan"},
         }])["eligible"])
 
-    def test_cancelled_and_expired_subscriptions_are_inactive(self):
+    def test_cancelled_and_expired_subscriptions_do_not_prove_an_active_free_plan(self):
         result = assess_subscriptions([
             {"id": "sub-cancelled", "state": "Cancelled", "rate_plan": {"id": "paid"}},
             {"id": "sub-expired", "state": "Expired", "rate_plan": {"id": "paid"}},
             {"id": "sub-failed", "state": "Failed", "rate_plan": {"id": "paid"}},
         ])
-        self.assertTrue(result["eligible"])
+        self.assertFalse(result["eligible"])
+        self.assertEqual(result["reason"], "no_active_free_plan_verified")
 
     def test_unknown_state_plan_and_malformed_prices_fail_closed(self):
         bad_records = [
@@ -91,7 +92,8 @@ class ZeroCostBoundaryTests(unittest.TestCase):
     def test_pagination_is_followed_until_the_complete_inventory_is_read(self):
         seen = []
         first_page = [{"id": f"sub-{index}", "state": "Cancelled"} for index in range(50)]
-        second_page = [{"id": "sub-50", "state": "Expired"}]
+        second_page = [{"id": "sub-50", "state": "Provisioned", "price": 0,
+                        "rate_plan": {"id": "free", "public_name": "Workers Free"}}]
         responses = [
             page(first_page, number=1, total=51, per_page=50),
             page(second_page, number=2, total=51, per_page=50),
@@ -109,8 +111,8 @@ class ZeroCostBoundaryTests(unittest.TestCase):
         self.assertEqual(result["reason"], "no_active_paid_subscriptions")
         self.assertTrue(result["eligible"])
         self.assertEqual(len(seen), 2)
-        self.assertEqual(parse_qs(urlparse(seen[0][0].full_url).query), {"page": ["1"], "per_page": ["50"]})
-        self.assertEqual(parse_qs(urlparse(seen[1][0].full_url).query), {"page": ["2"], "per_page": ["50"]})
+        self.assertEqual(parse_qs(urlparse(seen[0][0].full_url).query), {"page": ["1"], "per_page": ["1000"]})
+        self.assertEqual(parse_qs(urlparse(seen[1][0].full_url).query), {"page": ["2"], "per_page": ["1000"]})
         self.assertEqual(seen[0][0].get_header("Authorization"), "Bearer synthetic-token")
 
     def test_partial_nonfinal_page_fails_closed(self):
@@ -129,6 +131,32 @@ class ZeroCostBoundaryTests(unittest.TestCase):
         )
         self.assertFalse(result["eligible"])
         self.assertEqual(result["reason"], "incomplete_subscription_page")
+
+    def test_integer_valued_numeric_pagination_metadata_is_accepted(self):
+        body = page([{"id": "sub-free", "state": "Provisioned", "price": 0,
+                      "rate_plan": {"id": "free", "public_name": "Workers Free"}}],
+                    number=1.0, total=1.0, per_page=20.0)
+        class Response:
+            status = 200
+            def __enter__(self): return self
+            def __exit__(self, *args): return False
+            def read(self, limit): return json.dumps(body).encode()
+        result = check_boundary("account", "token", opener=lambda *_a, **_k: Response())
+        self.assertTrue(result["eligible"])
+
+    def test_fractional_or_nonfinite_pagination_metadata_fails_closed(self):
+        for field, value in (("page", 1.5), ("count", float("nan")), ("per_page", float("inf"))):
+            with self.subTest(field=field):
+                body = page([{"id": "sub-free", "state": "Cancelled"}], total=1)
+                body["result_info"][field] = value
+                class Response:
+                    status = 200
+                    def __enter__(self): return self
+                    def __exit__(self, *args): return False
+                    def read(self, limit): return json.dumps(body).encode()
+                result = check_boundary("account", "token", opener=lambda *_a, **_k: Response())
+                self.assertFalse(result["eligible"])
+                self.assertEqual(result["reason"], "invalid_pagination_" + field)
 
     def test_missing_or_incomplete_pagination_fails_closed(self):
         class Response:
@@ -182,7 +210,7 @@ class ZeroCostBoundaryTests(unittest.TestCase):
         missing_id_page = page([{"state": "Cancelled"}], number=1, total=1, per_page=1)
         self.assertFalse(check_boundary("account", "token", opener=lambda *_a, **_k: Response(missing_id_page))["eligible"])
 
-    def test_main_succeeds_but_blocks_remote_jobs_when_zero_cost_eligibility_is_unknown(self):
+    def test_main_fails_ci_when_zero_cost_eligibility_is_unknown(self):
         with tempfile.NamedTemporaryFile(mode="r+", encoding="utf-8") as output:
             env = {
                 "CLOUDFLARE_ACCOUNT_ID": "synthetic-account",
@@ -194,7 +222,7 @@ class ZeroCostBoundaryTests(unittest.TestCase):
                 return_value={"eligible": False, "reason": "billing_inventory_unavailable_or_incomplete",
                               "active_paid_subscriptions": None},
             ):
-                self.assertEqual(main(), 0)
+                self.assertEqual(main(), 1)
             output.seek(0)
             self.assertEqual(output.read(), "zero_cost_eligible=false\n")
 
