@@ -290,6 +290,28 @@ recovery contract is deliberately narrow:
   manual `workflow_dispatch` and the watchdog path never count toward this
   gate, and a green Engine CI run is not a substitute.
 
+- **The second half is blocked by the same owner action as the rest of the
+  gate (2026-11-07).** The workflow now runs `scripts/verify_cloudflare_zero_cost_boundary.py`
+  before touching Staging, and that step is not `continue-on-error`: it exits
+  non-zero, so the scheduled job stops before generating a token or enqueuing a
+  task. Both historical runs listed above **predate** that step — run
+  `42211351856` has nine steps and no boundary check, run `42020505385` has a
+  credential *validation* step with the same shape — so neither proves the
+  current workflow shape can succeed on the scheduled path.
+
+  Since the boundary currently reports `zone_read_all_zones_scope_unconfirmed`
+  (the absent `CLOUDFLARE_ZONE_READ_ALL_ZONES_CONFIRMED` repository variable),
+  the daily `47 3 * * *` slot will report that same blocker rather than
+  advancing the count. That is the gate working as designed, not a regression in
+  the probe: a scheduled failure here must not be read as "the cron is broken"
+  or as evidence against Runtime-004's probe implementation, and it must not be
+  worked around by removing or bypassing the check.
+
+  Consequence for sequencing: Runtime-004's remaining acceptance evidence cannot
+  be produced until the zero-cost attestation question is resolved. Setting the
+  variable to make the probe pass, without first confirming the token's Zone Read
+  scope covers every zone, would trade an honest blocker for a false allow.
+
 ## What is still not proven
 
 1. **No Cron-triggered/unattended process run.** The verified Staging test was
