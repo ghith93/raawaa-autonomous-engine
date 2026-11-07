@@ -15,6 +15,7 @@ from __future__ import annotations
 import json
 import math
 import os
+import re
 from urllib.error import HTTPError, URLError
 from urllib.request import HTTPRedirectHandler, Request, build_opener
 
@@ -25,6 +26,10 @@ MAX_SUBSCRIPTIONS = 100_000
 ACTIVE_STATES = {"Trial", "Provisioned", "Paid", "AwaitingPayment"}
 INACTIVE_STATES = {"Cancelled", "Failed", "Expired"}
 ALL_STATES = ACTIVE_STATES | INACTIVE_STATES
+# Every reason this module can emit is a fixed lowercase token. The pattern is
+# asserted before it is ever placed in a workflow command, so a future reason
+# string cannot inject extra annotations or log lines.
+SAFE_REASON_RE = re.compile(r"^[a-z][a-z0-9_]{0,63}$")
 
 
 class _RejectRedirects(HTTPRedirectHandler):
@@ -211,6 +216,24 @@ def check_boundary(account_id: str, token: str, opener=None, timeout: int = 15) 
         return _invalid("billing_os_error")
 
 
+def activity_annotation(result: dict) -> str:
+    """Render the outcome as a workflow command carrying only a fixed token.
+
+    The reason code is what distinguishes "the account is ineligible" from
+    "our request was wrong", and step logs are not always retrievable (they are
+    served from GitHub's results blob storage). A check annotation is readable
+    through the API, so the sanitized reason is published there too. No
+    response body, account identifier, URL or credential is included.
+    """
+    reason = result.get("reason")
+    if not isinstance(reason, str) or not SAFE_REASON_RE.match(reason):
+        raise ValueError("unsafe_zero_cost_reason")
+    eligible = bool(result.get("eligible"))
+    if eligible:
+        return f"::notice title=Cloudflare zero-cost preflight::eligible=true; reason={reason}"
+    return f"::error title=Cloudflare zero-cost preflight::eligible=false; reason={reason}"
+
+
 def main() -> int:
     result = check_boundary(
         os.environ.get("CLOUDFLARE_ACCOUNT_ID", "").strip(),
@@ -227,6 +250,7 @@ def main() -> int:
         "active_paid_subscriptions": result["active_paid_subscriptions"],
         "staging_operations": "allowed" if result["eligible"] else "skipped",
     }, sort_keys=True))
+    print(activity_annotation(result))
     if not result["eligible"]:
         print("Staging operations skipped: zero-cost eligibility was not established.")
     return 0 if result["eligible"] else 1
