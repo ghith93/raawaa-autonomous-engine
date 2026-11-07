@@ -38,6 +38,16 @@ jobs:
         run: python -m engine.cli audit
       - name: Run Python unit tests
         run: python -m unittest discover -s tests -v
+      - name: Run offline Arabic/English research search benchmark
+        run: |
+          python scripts/benchmark_research_search.py --json | tee /tmp/research-search-benchmark.json
+          {
+            echo "### Offline research search benchmark"
+            echo
+            echo "Synthetic fixture and in-memory SQLite only; no network, model, D1, or external writes."
+            echo
+            cat /tmp/research-search-benchmark.json
+          } >> "$GITHUB_STEP_SUMMARY"
       - name: Compile remote Staging verification harness
         run: python -m py_compile scripts/verify_staging_monetary_ledger.py scripts/run_staging_d1_claim_contention.py scripts/run_staging_lane_isolation.py scripts/run_specialist_lanes.py
       - name: Set up Node.js
