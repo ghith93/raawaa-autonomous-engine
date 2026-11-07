@@ -61,7 +61,7 @@ jobs:
         id: discover
         env:
           RAAWAA_SEARXNG_BASE_URL: ${{ vars.RAAWAA_SEARXNG_BASE_URL }}
-        run: python -m engine.cli research-discover --max-per-query 5 > research-candidates.json
+        run: python -m engine.cli research-discover > research-candidates.json
       - name: Rank candidates for manual review
         run: python scripts/triage_research_candidates.py research-candidates.json > research-triage.json
       - name: Benchmark Arabic and English search on the current public snapshot
