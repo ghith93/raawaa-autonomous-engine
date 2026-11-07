@@ -9,6 +9,7 @@ from scripts.persist_research_candidates import (
     load_candidates,
     persist_candidates,
     _RejectRedirects,
+    _get,
 )
 
 
@@ -20,6 +21,38 @@ class ResearchPersistenceTests(unittest.TestCase):
             handler.redirect_request(
                 request, None, 307, "Temporary Redirect", {},
                 "https://evil.example/collect",
+            )
+
+    def test_authenticated_readback_uses_redirect_rejecting_transport(self):
+        class Response:
+            status = 200
+            def __enter__(self): return self
+            def __exit__(self, *args): return False
+            def read(self, limit):
+                return b'{"candidates":[{"source_key":"github:org/repo"}]}'
+
+        with patch("scripts.persist_research_candidates._open_without_redirects", return_value=Response()) as opened:
+            result = _get(
+                "https://engine.example",
+                "synthetic-test-token",
+                "synthetic-access-id",
+                "synthetic-access-secret",
+            )
+        self.assertEqual(result["candidates"][0]["source_key"], "github:org/repo")
+        request = opened.call_args.args[0]
+        self.assertEqual(request.full_url, "https://engine.example/v1/research/candidates?status=all&limit=100&keys_only=true")
+        self.assertEqual(request.get_header("Authorization"), "Bearer synthetic-test-token")
+        self.assertEqual(request.get_header("Cf-access-client-id"), "synthetic-access-id")
+        self.assertEqual(request.get_header("Cf-access-client-secret"), "synthetic-access-secret")
+        self.assertEqual(opened.call_args.kwargs["timeout"], 20)
+
+    def test_authenticated_readback_rejects_redirects(self):
+        handler = _RejectRedirects()
+        request = Request("https://engine.example/v1/research/candidates?status=all")
+        with self.assertRaises(HTTPError):
+            handler.redirect_request(
+                request, None, 302, "Found", {},
+                "https://redirect-attacker.example/collect",
             )
 
     def test_load_candidates_merges_sources_and_deduplicates(self):
