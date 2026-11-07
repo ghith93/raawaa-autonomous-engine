@@ -64,6 +64,13 @@ jobs:
         run: python scripts/triage_research_candidates.py research-candidates.json > research-triage.json
       - name: Analyze capability gaps from repository baseline
         run: python scripts/analyze_capability_gaps.py research-triage.json . > capability-gaps.json
+      - name: Verify zero-cost boundary before Staging research writes
+        id: research_zero_cost_preflight
+        continue-on-error: true
+        env:
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: python scripts/verify_cloudflare_zero_cost_boundary.py
       - name: Upload bounded research snapshot
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
@@ -86,13 +93,13 @@ jobs:
           if-no-files-found: error
           retention-days: 30
       - name: Persist research metadata in isolated Staging D1 only
-        if: vars.RAAWAA_ENGINE_RESEARCH_PERSISTENCE == 'enabled'
+        if: steps.research_zero_cost_preflight.outputs.zero_cost_eligible == 'true'
         env:
           RAAWAA_ENGINE_API_URL: https://raawaa-autonomous-engine-staging.ghith-shikhkhaled.workers.dev
           RAAWAA_ENGINE_API_TOKEN: ${{ secrets.ENGINE_STAGING_API_TOKEN }}
         run: python scripts/persist_research_candidates.py research-candidates.json
       - name: Publish explicit scan and source freshness telemetry
-        if: always() && steps.scan_clock.outcome == 'success' && steps.discover.outcome == 'success'
+        if: always() && steps.scan_clock.outcome == 'success' && steps.discover.outcome == 'success' && steps.research_zero_cost_preflight.outputs.zero_cost_eligible == 'true'
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
