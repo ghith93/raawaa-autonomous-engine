@@ -219,6 +219,12 @@ class ZeroCostBoundaryTests(unittest.TestCase):
 
     def test_explicit_zero_price_free_zone_plan_is_eligible(self):
         self.assertTrue(assess_zone_subscription(free_zone_subscription())["eligible"])
+        partner = free_zone_subscription()
+        partner["rate_plan"] = {
+            "id": "partners_free", "public_name": "Partner Free Plan",
+            "scope": "zone", "externally_managed": False, "is_contract": False,
+        }
+        self.assertTrue(assess_zone_subscription(partner)["eligible"])
 
     def test_paid_unknown_trial_external_or_malformed_zone_plan_blocks(self):
         cases = [
