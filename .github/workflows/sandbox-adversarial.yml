@@ -2,8 +2,9 @@ name: Sandbox adversarial proof
 
 # #440 asks for evidence that a real boundary exists around repository task code,
 # and explicitly says a green ordinary CI run is not that evidence. This is the
-# workflow that can produce it: an ephemeral VM, gVisor installed on it, and five
-# probes that try to escape and report what they saw.
+# workflow that can produce partial evidence: an ephemeral VM, gVisor installed on it,
+# and eight checks that try to escape, validate synthetic negative controls, or
+# prove the sandbox cannot read a live host helper process's environment.
 #
 # Manual dispatch on purpose. It pulls an image and downloads gVisor, so it is not
 # something to run on every push, and the image must be named by digest — a tag
@@ -13,7 +14,7 @@ on:
   workflow_dispatch:
     inputs:
       image:
-        description: "Image to sandbox, pinned by digest (repo@sha256:<64 hex>)"
+        description: "Approved official Python linux/amd64 image (see decision record)"
         required: true
         type: string
       confirm:
@@ -36,18 +37,16 @@ jobs:
     steps:
       - name: Check out reviewed main
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
 
       - name: Set up Python
         uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7
 
-      - name: Refuse anything but a digest-pinned image
+      - name: Refuse any image other than the reviewed immutable manifest
         env:
-          IMAGE: ${{ inputs.image }}
-        run: |
-          printf '%s' "$IMAGE" | grep -Eq '^[a-z0-9][a-z0-9._/-]*@sha256:[0-9a-f]{64}$' || {
-            echo "::error::image must be pinned by digest, got: $IMAGE"
-            exit 1
-          }
+          RAAWAA_SANDBOX_IMAGE: ${{ inputs.image }}
+        run: python3 scripts/run_sandbox_adversarial_tests.py --check-image
 
       - name: Install gVisor and register it as a Docker runtime
         # The signed apt repository is used rather than a downloaded binary so that
@@ -83,7 +82,7 @@ jobs:
           IMAGE: ${{ inputs.image }}
         run: |
           RAAWAA_SANDBOX_LIVE=1 RAAWAA_SANDBOX_IMAGE="$IMAGE" \
-            python3 -m unittest tests.adversarial.test_sandbox_escape -v
+            python3 scripts/run_sandbox_adversarial_tests.py
 
       - name: Summary
         if: always()
@@ -102,7 +101,8 @@ jobs:
             echo ""
             printf -- '- image: `%s`\n' "$SAFE_IMAGE"
             echo "- runtime: runsc (gVisor), network none, read-only rootfs, cap-drop ALL, non-root"
-            echo "- probes: host canary outside the mount, positive control read, docker socket, /root/.ssh, egress, root write"
+            echo "- probes: host canary outside the mount, synthetic environment canary, positive controls for read and host egress, sensitive path accessibility, sandbox egress, root write"
             echo ""
             echo "A skipped or partially run probe is reported as a failure, never as containment."
+            echo "Passing these probes alone does not satisfy all issue #440 acceptance criteria."
           } >> "$GITHUB_STEP_SUMMARY"
