@@ -39,6 +39,9 @@ jobs:
 
     def test_staging_replay_jobs_are_explicitly_main_guarded(self):
         workflow = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+        triggers = check.parse_triggers(workflow)
+        self.assertIn("schedule", triggers)
+        self.assertNotIn("workflow_dispatch", triggers)
         for job in ("staging-migrate", "staging-worker-verify",
                     "publish-staging-ops-telemetry", "staging-mobile-status-verify"):
             block = next((content for name, content in job_blocks(workflow) if name == job), "")
